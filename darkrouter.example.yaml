@@ -19,8 +19,19 @@ providers:
       - openai/gpt-oss-120b
 
 policy:
+  cooldown:
+    trip_after: 3
+    max: 15m
   timeout:
     connect: 10s
     first_byte: 60s
     total: 10m
     idle: 120s
+
+log:
+  retention: 720h
+
+capture:
+  bodies: false
+  max_bytes: 256000
+  retention: 72h

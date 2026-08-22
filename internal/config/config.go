@@ -7,6 +7,8 @@ type Config struct {
 	Server    ServerConfig     `yaml:"server"`
 	Providers []ProviderConfig `yaml:"providers"`
 	Policy    PolicyConfig     `yaml:"policy"`
+	Log       LogConfig        `yaml:"log"`
+	Capture   CaptureConfig    `yaml:"capture"`
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
 	// /healthz rather than rejecting the document.
@@ -36,7 +38,29 @@ type ProviderConfig struct {
 }
 
 type PolicyConfig struct {
-	Timeout TimeoutConfig `yaml:"timeout"`
+	Cooldown CooldownConfig `yaml:"cooldown"`
+	Timeout  TimeoutConfig  `yaml:"timeout"`
+}
+
+// CooldownConfig governs the circuit breaker. TripAfter counts consecutive
+// failures rather than a rate, because a rate needs a window that a homelab's
+// traffic never fills. It is a pointer so that an explicit 0 can be rejected
+// rather than silently replaced by the default.
+type CooldownConfig struct {
+	TripAfter *int          `yaml:"trip_after"`
+	Max       time.Duration `yaml:"max"`
+}
+
+type LogConfig struct {
+	Retention time.Duration `yaml:"retention"`
+}
+
+// CaptureConfig controls request and response body capture, off by default
+// because bodies carry whatever the user sent.
+type CaptureConfig struct {
+	Bodies    bool          `yaml:"bodies"`
+	MaxBytes  int64         `yaml:"max_bytes"`
+	Retention time.Duration `yaml:"retention"`
 }
 
 type TimeoutConfig struct {
