@@ -33,6 +33,7 @@ const (
 type Adapter interface {
 	Kind() string
 	BuildRequest(ctx context.Context, t *Target, req *ir.Request) (*http.Request, error)
+	// ParseResponse takes ownership of resp.Body and always closes it.
 	ParseResponse(resp *http.Response) (*ir.Response, error)
 	ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error]
 	Classify(resp *http.Response, err error) Outcome

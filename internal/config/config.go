@@ -48,4 +48,13 @@ type TimeoutConfig struct {
 
 // RestartOnly names the fields a hot reload cannot apply. A reload changing one
 // is accepted with a warning rather than rejected or silently ignored.
-var RestartOnly = []string{"server.proxy_listen", "server.admin_listen", "server.max_body_bytes"}
+//
+// max_body_bytes is deliberately absent: the executor reads it from a fresh
+// per-request snapshot, so it does hot-reload. connect and first_byte are
+// listed because they configure a shared http.Transport built once at startup.
+var RestartOnly = []string{
+	"server.proxy_listen",
+	"server.admin_listen",
+	"policy.timeout.connect",
+	"policy.timeout.first_byte",
+}

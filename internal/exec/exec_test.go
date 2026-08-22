@@ -1,12 +1,15 @@
 package exec
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -120,5 +123,83 @@ func TestHandleSetsRequestHeaderOnErrorPath(t *testing.T) {
 	rec := post(t, e, `{"model":"nope","messages":[]}`)
 	if rec.Header().Get("X-Darkrouter-Request") == "" {
 		t.Fatal("expected a request id header on the error path")
+	}
+}
+
+// Phase 1 spec §9 requires a client-disconnect-mid-stream case, asserting the
+// cancel cause identifies the inbound context rather than a Darkrouter deadline.
+func TestHandleClientDisconnectMidStreamIsNotAProviderFault(t *testing.T) {
+	released := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-released // hold the stream open until the client has gone
+	}))
+	defer up.Close()
+	defer close(released)
+
+	e := newExecutor(t, up.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","stream":true,"messages":[]}`)).WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Handle(httptest.NewRecorder(), r, openaiedge.New())
+	}()
+
+	cancel() // the client hangs up
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Handle did not return after the client disconnected")
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("inbound context error = %v", ctx.Err())
+	}
+}
+
+func TestHandleSurvivesMalformedSSE(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: not json at all\n\ndata: [DONE]\n\n"))
+	}))
+	defer up.Close()
+
+	e := newExecutor(t, up.URL)
+	rec := post(t, e, `{"model":"m","stream":true,"messages":[]}`)
+	// An unparseable chunk is skipped, not fatal; the stream still terminates.
+	if !strings.HasSuffix(rec.Body.String(), "data: [DONE]\n\n") {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+}
+
+func TestHandleSetsAttemptsHeaderOnEarlyErrorPath(t *testing.T) {
+	e := newExecutor(t, "https://unused.example/v1")
+	rec := post(t, e, `{"model":"nope","messages":[]}`)
+	if got := rec.Header().Get("X-Darkrouter-Attempts"); got != "0" {
+		t.Fatalf("attempts header = %q, want \"0\" when no attempt was made", got)
+	}
+}
+
+func TestHandleStreamChunksCarryModel(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"cc-1\",\"model\":\"up-m\",\"choices\":" +
+			"[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer up.Close()
+
+	e := newExecutor(t, up.URL)
+	rec := post(t, e, `{"model":"m","stream":true,"messages":[]}`)
+	if !strings.Contains(rec.Body.String(), `"model":"up-m"`) {
+		t.Fatalf("chunks must carry the model, got:\n%s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"cc-1"`) {
+		t.Fatalf("chunks must carry the upstream id, got:\n%s", rec.Body.String())
 	}
 }
