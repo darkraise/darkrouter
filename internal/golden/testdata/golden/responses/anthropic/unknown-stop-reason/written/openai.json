@@ -1,0 +1,24 @@
+{
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "done",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 0,
+    "id": "msg_3",
+    "model": "target-model",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 1,
+      "prompt_tokens": 3,
+      "total_tokens": 4
+    }
+  },
+  "status": 200
+}

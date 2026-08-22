@@ -1,0 +1,33 @@
+{
+  "ID": "msg_3",
+  "Model": "target-model",
+  "Content": [
+    {
+      "Type": "text",
+      "Text": "done",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "end_turn",
+  "Usage": {
+    "InputTokens": 3,
+    "OutputTokens": 1,
+    "CacheReadTokens": 0,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": [
+    {
+      "Field": "stop_reason",
+      "Target": "anthropic",
+      "Reason": "unrecognized value something_new_2027; reported as end_turn"
+    }
+  ],
+  "Extra": null
+}

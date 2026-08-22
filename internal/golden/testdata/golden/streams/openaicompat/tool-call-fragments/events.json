@@ -1,0 +1,178 @@
+[
+  {
+    "Type": "message_start",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "chatcmpl-3",
+    "Model": "target-model",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_start",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "Looking",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_start",
+    "Index": 1000,
+    "Delta": {
+      "Type": "tool_use",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "call_a",
+      "ToolName": "lookup"
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 1000,
+    "Delta": {
+      "Type": "tool_use",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "call_a",
+      "ToolName": "lookup"
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 1000,
+    "Delta": {
+      "Type": "tool_use",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "{\"city\":",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 1000,
+    "Delta": {
+      "Type": "tool_use",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "\"Oslo\"}",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_stop",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_stop",
+    "Index": 1000,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "message_stop",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "tool_use",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "message_delta",
+    "Index": 0,
+    "Delta": null,
+    "Usage": {
+      "InputTokens": 18,
+      "OutputTokens": 12,
+      "CacheReadTokens": 0,
+      "CacheWriteTokens": 0,
+      "ReasoningTokens": 0,
+      "Estimated": false
+    },
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  }
+]

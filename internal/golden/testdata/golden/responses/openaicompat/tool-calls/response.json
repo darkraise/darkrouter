@@ -1,0 +1,6 @@
+{"id":"chatcmpl-2","model":"target-model","choices":[
+  {"index":0,"message":{"role":"assistant","content":null,"tool_calls":[
+    {"id":"call_a","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Oslo\"}"}},
+    {"id":"call_b","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Bergen\"}"}}]},
+   "finish_reason":"tool_calls"}],
+ "usage":{"prompt_tokens":20,"completion_tokens":15}}

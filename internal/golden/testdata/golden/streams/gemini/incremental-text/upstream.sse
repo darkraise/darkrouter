@@ -1,0 +1,6 @@
+data: {"responseId":"r-2","modelVersion":"target-model","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Hel"}]}}]}
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"lo"}]}}]}
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"city":"Oslo"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4}}
+

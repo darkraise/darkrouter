@@ -1,0 +1,42 @@
+{
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "index": 0,
+        "message": {
+          "content": null,
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "\"{\\\"city\\\":\\\"Oslo\\\"}\"",
+                "name": "lookup"
+              },
+              "id": "call_a",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "\"{\\\"city\\\":\\\"Bergen\\\"}\"",
+                "name": "lookup"
+              },
+              "id": "call_b",
+              "type": "function"
+            }
+          ]
+        }
+      }
+    ],
+    "created": 0,
+    "id": "chatcmpl-2",
+    "model": "target-model",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 15,
+      "prompt_tokens": 20,
+      "total_tokens": 35
+    }
+  },
+  "status": 200
+}

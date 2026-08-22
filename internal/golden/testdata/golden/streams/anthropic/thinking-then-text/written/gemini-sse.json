@@ -1,0 +1,81 @@
+[
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "91 = 7 * 13",
+                "thought": true
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "",
+                "thought": true,
+                "thoughtSignature": "ErUBCkYIBRgCIkA="
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "No."
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [],
+            "role": "model"
+          },
+          "finishReason": "STOP",
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model",
+      "usageMetadata": {
+        "cachedContentTokenCount": 8,
+        "candidatesTokenCount": 9,
+        "promptTokenCount": 21,
+        "thoughtsTokenCount": 0,
+        "totalTokenCount": 30
+      }
+    }
+  }
+]

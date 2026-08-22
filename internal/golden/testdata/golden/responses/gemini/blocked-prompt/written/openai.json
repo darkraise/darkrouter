@@ -1,0 +1,10 @@
+{
+  "body": {
+    "error": {
+      "code": "SAFETY",
+      "message": "the prompt was blocked: SAFETY",
+      "type": "content_filter"
+    }
+  },
+  "status": 400
+}

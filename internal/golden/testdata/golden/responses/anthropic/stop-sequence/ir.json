@@ -1,0 +1,41 @@
+{
+  "ID": "msg_2",
+  "Model": "target-model",
+  "Content": [
+    {
+      "Type": "thinking",
+      "Text": "",
+      "Media": null,
+      "Thinking": {
+        "Text": "counting",
+        "Signature": "ErUBCkYIBRgCIkA=",
+        "Data": ""
+      },
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    },
+    {
+      "Type": "text",
+      "Text": "one two three",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "stop_sequence",
+  "Usage": {
+    "InputTokens": 9,
+    "OutputTokens": 5,
+    "CacheReadTokens": 3,
+    "CacheWriteTokens": 7,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}
