@@ -130,3 +130,17 @@ func TestProxyTokenAcceptsBothForms(t *testing.T) {
 		t.Errorf("both = %q; x-api-key is Anthropic's own form and wins", got)
 	}
 }
+
+func TestWriteCountUsesInputTokens(t *testing.T) {
+	rec := httptest.NewRecorder()
+	if err := New().WriteCount(rec, 2095); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["input_tokens"].(float64) != 2095 {
+		t.Errorf("body = %v", got)
+	}
+}

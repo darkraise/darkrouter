@@ -30,3 +30,9 @@ type Dialect interface {
 	WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
+
+// CountWriter is implemented by a dialect with a token-counting endpoint.
+type CountWriter interface {
+	Dialect
+	WriteCount(w http.ResponseWriter, tokens int) error
+}

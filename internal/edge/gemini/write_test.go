@@ -152,3 +152,17 @@ func TestNewForReadsTheAltParameter(t *testing.T) {
 		t.Error("alt=sse selects the event-stream form")
 	}
 }
+
+func TestWriteCountUsesTotalTokens(t *testing.T) {
+	rec := httptest.NewRecorder()
+	if err := New().WriteCount(rec, 31); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["totalTokens"].(float64) != 31 {
+		t.Errorf("body = %v", got)
+	}
+}

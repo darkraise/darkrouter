@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/darkraise/darkrouter/internal/edge"
+
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -122,3 +124,12 @@ func WriteError(w http.ResponseWriter, e *ir.Error) error {
 		"error": map[string]any{"code": status, "message": e.Message, "status": name},
 	})
 }
+
+// WriteCount answers :countTokens. totalBillableCharacters is omitted: it is
+// deprecated for text models and Darkrouter has no honest value for it.
+func (d *Dialect) WriteCount(w http.ResponseWriter, tokens int) error {
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(map[string]any{"totalTokens": tokens})
+}
+
+var _ edge.CountWriter = (*Dialect)(nil)
