@@ -62,3 +62,61 @@ func TestParseSurface(t *testing.T) {
 		}
 	}
 }
+
+func TestToolResultTextConcatenatesTextBlocks(t *testing.T) {
+	tr := &ToolResult{
+		ToolUseID: "call_1",
+		Content: []ContentBlock{
+			{Type: BlockText, Text: "42"},
+			{Type: BlockImage, Media: &Media{MIME: "image/png", Data: "AAAA"}},
+			{Type: BlockText, Text: " degrees"},
+		},
+	}
+	if got := tr.Text(); got != "42 degrees" {
+		t.Errorf("Text() = %q, want %q", got, "42 degrees")
+	}
+}
+
+func TestToolResultTextOnNilIsEmpty(t *testing.T) {
+	var tr *ToolResult
+	if got := tr.Text(); got != "" {
+		t.Errorf("Text() = %q, want empty", got)
+	}
+}
+
+func TestWarningStringNamesFieldTargetAndReason(t *testing.T) {
+	w := Warning{Field: "cache_control", Target: "gemini", Reason: "no equivalent"}
+	if got := w.String(); got != "cache_control -> gemini: no equivalent" {
+		t.Errorf("String() = %q", got)
+	}
+}
+
+func TestStreamEventCarriesWarnings(t *testing.T) {
+	ev := StreamEvent{
+		Type: EventMessageStop,
+		Warnings: []Warning{{
+			Field: "finishReason", Target: "gemini", Reason: "unrecognized value",
+		}},
+	}
+	if len(ev.Warnings) != 1 || ev.Warnings[0].Field != "finishReason" {
+		t.Errorf("warnings = %+v", ev.Warnings)
+	}
+}
+
+func TestNeedsFindsVisionInsideAToolResult(t *testing.T) {
+	r := &Request{Messages: []Message{{
+		Role: RoleTool,
+		Content: []ContentBlock{{
+			Type: BlockToolResult,
+			ToolResult: &ToolResult{
+				ToolUseID: "call_1",
+				Content: []ContentBlock{
+					{Type: BlockImage, Media: &Media{MIME: "image/png", Data: "AAAA"}},
+				},
+			},
+		}},
+	}}}
+	if !r.Needs().Vision {
+		t.Error("Needs().Vision = false; an image inside a tool result still needs vision")
+	}
+}
