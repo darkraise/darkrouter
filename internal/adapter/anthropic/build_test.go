@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -16,13 +18,24 @@ import (
 // thing under test.
 func built(t *testing.T, req *ir.Request) (*http.Request, map[string]any, []ir.Warning) {
 	t.Helper()
-	return builtFor(t, "claude-sonnet-4-5", req)
+	return builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, req)
 }
 
 func builtFor(t *testing.T, model string, req *ir.Request) (*http.Request, map[string]any, []ir.Warning) {
 	t.Helper()
+	return builtWith(t, model, adapter.ModelInfo{}, req)
+}
+
+// builtWith is builtFor with the catalog's view of the model supplied.
+//
+// From phase 6 the request shape is decided by these traits rather than by the
+// model name, so a test that exercises per-generation behavior has to say which
+// generation it means. catalog_traits_test.go in internal/catalog is what
+// asserts the shipped preset produces these same values for these same names.
+func builtWith(t *testing.T, model string, info adapter.ModelInfo, req *ir.Request) (*http.Request, map[string]any, []ir.Warning) {
+	t.Helper()
 	hr, warns, err := BuildRequest(context.Background(),
-		&adapter.Target{BaseURL: "https://api.anthropic.com/v1", APIKey: "sk-ant", Model: model}, req)
+		&adapter.Target{BaseURL: "https://api.anthropic.com/v1", APIKey: "sk-ant", Model: model, Info: info}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +134,7 @@ func TestBuildRequestKeepsSystemAsBlocksWithCacheControl(t *testing.T) {
 
 func TestBuildRequestClampsThinkingBelowMaxTokens(t *testing.T) {
 	n := 2000
-	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
 		MaxTokens: &n,
 		Reasoning: &ir.Reasoning{Budget: 30000},
@@ -140,7 +153,7 @@ func TestBuildRequestClampsThinkingBelowMaxTokens(t *testing.T) {
 
 func TestBuildRequestDisablesThinkingBelowTheMinimumBudget(t *testing.T) {
 	n := 900
-	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
 		MaxTokens: &n,
 		Reasoning: &ir.Reasoning{Budget: 30000},
@@ -154,7 +167,7 @@ func TestBuildRequestDisablesThinkingBelowTheMinimumBudget(t *testing.T) {
 }
 
 func TestBuildRequestUsesAdaptiveThinkingOnNewerModels(t *testing.T) {
-	_, body, _ := builtFor(t, "claude-opus-4-7", &ir.Request{
+	_, body, _ := builtWith(t, "claude-opus-4-7", adapter.ModelInfo{Adaptive: true, TraitsKnown: true}, &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
 		Reasoning: &ir.Reasoning{Budget: 16000},
 	})
@@ -172,7 +185,7 @@ func TestBuildRequestUsesAdaptiveThinkingOnNewerModels(t *testing.T) {
 
 func TestBuildRequestUsesManualThinkingOnOlderModels(t *testing.T) {
 	n := 32000
-	_, body, _ := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, _ := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
 		MaxTokens: &n,
 		Reasoning: &ir.Reasoning{Effort: "medium"},
@@ -187,7 +200,7 @@ func TestBuildRequestUsesManualThinkingOnOlderModels(t *testing.T) {
 }
 
 func TestBuildRequestRoundTripsAnInboundThinkingType(t *testing.T) {
-	_, body, _ := builtFor(t, "claude-opus-4-7", &ir.Request{
+	_, body, _ := builtWith(t, "claude-opus-4-7", adapter.ModelInfo{Adaptive: true, TraitsKnown: true}, &ir.Request{
 		Messages: []ir.Message{userMsg("hi")},
 		Metadata: map[string]string{"anthropic_thinking_type": "disabled"},
 	})
@@ -198,7 +211,7 @@ func TestBuildRequestRoundTripsAnInboundThinkingType(t *testing.T) {
 }
 
 func TestBuildRequestOmitsThinkingWhenDisabledOnAnOlderModel(t *testing.T) {
-	_, body, _ := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, _ := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages: []ir.Message{userMsg("hi")},
 		Metadata: map[string]string{"anthropic_thinking_type": "disabled"},
 	})
@@ -210,7 +223,7 @@ func TestBuildRequestOmitsThinkingWhenDisabledOnAnOlderModel(t *testing.T) {
 func TestBuildRequestDropsSamplingWhenThinkingIsOn(t *testing.T) {
 	temp, wide, narrow := 0.7, 0.5, 0.97
 	k := 40
-	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages:    []ir.Message{userMsg("hi")},
 		Temperature: &temp,
 		TopK:        &k,
@@ -230,7 +243,7 @@ func TestBuildRequestDropsSamplingWhenThinkingIsOn(t *testing.T) {
 		t.Errorf("warnings = %+v", warns)
 	}
 
-	_, body2, _ := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body2, _ := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
 		TopP:      &narrow,
 		Reasoning: &ir.Reasoning{Budget: 1024},
@@ -243,7 +256,7 @@ func TestBuildRequestDropsSamplingWhenThinkingIsOn(t *testing.T) {
 func TestBuildRequestDropsAllSamplingOnTheNewestGeneration(t *testing.T) {
 	temp, top := 0.7, 0.97
 	k := 40
-	_, body, warns := builtFor(t, "claude-opus-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-opus-5", adapter.ModelInfo{Adaptive: true, TraitsKnown: true}, &ir.Request{
 		Messages:    []ir.Message{userMsg("hi")},
 		Temperature: &temp, TopP: &top, TopK: &k,
 	})
@@ -258,7 +271,7 @@ func TestBuildRequestDropsAllSamplingOnTheNewestGeneration(t *testing.T) {
 }
 
 func TestBuildRequestDropsThinkingForAForcedToolChoice(t *testing.T) {
-	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages:   []ir.Message{userMsg("hi")},
 		Tools:      []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}},
 		ToolChoice: &ir.ToolChoice{Mode: "any"},
@@ -277,7 +290,7 @@ func TestBuildRequestDropsThinkingForAForcedToolChoice(t *testing.T) {
 }
 
 func TestBuildRequestDropsAPrefillWhenThinkingIsOn(t *testing.T) {
-	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages: []ir.Message{
 			userMsg("return JSON"),
 			{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}},
@@ -294,7 +307,7 @@ func TestBuildRequestDropsAPrefillWhenThinkingIsOn(t *testing.T) {
 
 func TestBuildRequestKeepsAPrefillWithoutThinking(t *testing.T) {
 	n := 512
-	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		MaxTokens: &n,
 		Messages: []ir.Message{
 			userMsg("return JSON"),
@@ -364,5 +377,79 @@ func TestBuildRequestEmitsStructuredOutputAndWarnsOnSafety(t *testing.T) {
 	}
 	if !hasWarning(warns, "safety") {
 		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestTraitsComeFromTheTargetNotTheName(t *testing.T) {
+	// The case the name heuristic got wrong: a proxied model whose name says
+	// nothing, whose catalog entry says everything.
+	_, body, warns := builtWith(t, "default",
+		adapter.ModelInfo{Adaptive: true, TraitsKnown: true, MaxOutputTokens: 64_000},
+		&ir.Request{
+			Messages:  []ir.Message{userMsg("hi")},
+			Reasoning: &ir.Reasoning{Effort: "high"},
+		})
+
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("no thinking block: %v", body)
+	}
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking type = %v, want adaptive", thinking["type"])
+	}
+	// A known model must not carry the unrecognized-name warning.
+	for _, w := range warns {
+		if strings.Contains(w.Reason, "unrecognized") {
+			t.Errorf("warned about a model the catalog knows: %v", w)
+		}
+	}
+}
+
+func TestUnknownTraitsStayPermissiveAndWarn(t *testing.T) {
+	// The behavior for an unknown model is unchanged from phase 4: the request
+	// is shaped by what the client asked for, and the guess is warned about.
+	_, _, warns := builtFor(t, "who-knows", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Budget: 8192},
+	})
+	var warned bool
+	for _, w := range warns {
+		if w.Field == "model" && strings.Contains(w.Reason, "unrecognized") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Error("an unrecognized model produced no warning")
+	}
+}
+
+func TestTheNameHeuristicIsGone(t *testing.T) {
+	// A real Anthropic model name with an empty Info must be treated as
+	// unknown. If the table were still consulted this would come back adaptive.
+	_, body, warns := builtFor(t, "claude-opus-4-5-20251101", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Effort: "high"},
+	})
+	// The permissive fallback prefers the manual shape when a budget is
+	// derivable, and warns that the shape was guessed.
+	var warned bool
+	for _, w := range warns {
+		if w.Field == "model" && strings.Contains(w.Reason, "unrecognized") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("a bare target did not warn; the name table is still being consulted: %v", body)
+	}
+
+	// And structurally: the table and its lookup are deleted, not bypassed.
+	src, err := os.ReadFile("build.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"func traitsFor", "var generations"} {
+		if strings.Contains(string(src), gone) {
+			t.Errorf("%s is still in build.go; the heuristic was not removed", gone)
+		}
 	}
 }
