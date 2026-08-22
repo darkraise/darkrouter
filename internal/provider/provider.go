@@ -13,10 +13,15 @@ import (
 )
 
 type Provider struct {
-	ID       string
-	Kind     string
-	BaseURL  string
-	APIKey   string
+	ID      string
+	Kind    string
+	BaseURL string
+	APIKey  string
+	// KeyID identifies the credential row the APIKey came from. The circuit
+	// breaker is keyed on (provider_id, key_id, model), so health recorded in
+	// phase 2 stays valid once phase 3 starts choosing among credentials.
+	// YAMLSource leaves it empty: config credentials have no row.
+	KeyID    string
 	Priority int
 	Models   []string
 }
