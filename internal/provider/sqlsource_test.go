@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -72,8 +73,11 @@ func TestSQLSourceLoadsProvidersWithDecryptedCredentials(t *testing.T) {
 		t.Fatalf("got %d providers, want 1", len(ps))
 	}
 	p := ps[0]
-	if p.ID != "groq" || p.APIKey != "sk-groq" || p.KeyID != keyID {
+	if p.ID != "groq" {
 		t.Errorf("provider = %+v", p)
+	}
+	if len(p.Credentials) != 1 || p.Credentials[0].ID != keyID || p.Credentials[0].Secret != "sk-groq" {
+		t.Errorf("credentials = %+v", p.Credentials)
 	}
 	if p.Priority != 10 || p.BaseURL != "https://groq.example/v1" {
 		t.Errorf("provider = %+v", p)
@@ -206,14 +210,23 @@ func TestSQLSourceLoadsEveryEnabledCredential(t *testing.T) {
 	if len(creds) != 2 {
 		t.Fatalf("got %d credentials, want 2", len(creds))
 	}
-	// Ordered by id, which for ULIDs is insertion order. Credential rotation
-	// depends on a total, deterministic order.
-	if creds[0].ID != first || creds[1].ID != second {
-		t.Errorf("credential order = %s, %s; want %s, %s",
-			creds[0].ID, creds[1].ID, first, second)
+	// Ordered by id, which is total and deterministic. It is NOT insertion
+	// order: two ULIDs minted in the same millisecond share a timestamp prefix
+	// and are separated only by their random component. Credential rotation
+	// needs determinism, which id order gives; it does not need recency, which
+	// the least-recently-used ordering supplies separately.
+	if !sort.SliceIsSorted(creds, func(i, j int) bool { return creds[i].ID < creds[j].ID }) {
+		t.Errorf("credentials are not in id order: %+v", creds)
 	}
-	if creds[1].Secret != "sk-second" {
-		t.Errorf("secret = %q", creds[1].Secret)
+	byID := map[string]string{}
+	for _, c := range creds {
+		byID[c.ID] = c.Secret
+	}
+	if byID[first] != "sk-groq" {
+		t.Errorf("first credential secret = %q", byID[first])
+	}
+	if byID[second] != "sk-second" {
+		t.Errorf("second credential secret = %q", byID[second])
 	}
 }
 
@@ -234,20 +247,5 @@ func TestSQLSourceExcludesDisabledCredentials(t *testing.T) {
 	ps, _ := src.Providers(ctx)
 	if len(ps[0].Credentials) != 1 || ps[0].Credentials[0].ID != enabled {
 		t.Errorf("credentials = %+v, want only the enabled one", ps[0].Credentials)
-	}
-}
-
-// The phase 2 fields stay populated until the attempt loop stops reading them.
-func TestSQLSourceStillPopulatesTheSingleCredentialFields(t *testing.T) {
-	db, key := newTestDB(t)
-	first := seed(t, db, key, "groq", 0, true, "m")
-
-	src := NewSQLSource(db, key)
-	if err := src.Reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	ps, _ := src.Providers(context.Background())
-	if ps[0].KeyID != first || ps[0].APIKey != "sk-groq" {
-		t.Errorf("legacy fields = %s/%s", ps[0].KeyID, ps[0].APIKey)
 	}
 }
