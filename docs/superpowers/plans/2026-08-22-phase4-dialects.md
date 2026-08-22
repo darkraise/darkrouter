@@ -2972,6 +2972,22 @@ func parseContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 	}
 ```
 
+The existing `image_url` arm also needs a data-URI split, which the golden suite
+in Task 33 is what surfaces. Leaving a `data:` URI in `Media.URL` makes Anthropic
+emit `source.type: "url"` for base64 content — which it rejects — and makes
+Gemini try to *fetch* `data:`, dropping the image entirely. Replace that arm's
+body with:
+
+```go
+			// A data URI is inline content, not an address.
+			if mime, data := splitDataURI(p.ImageURL.URL); data != p.ImageURL.URL {
+				out = append(out, ir.ContentBlock{Type: ir.BlockImage,
+					Media: &ir.Media{MIME: mime, Data: data}})
+				continue
+			}
+			out = append(out, ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{URL: p.ImageURL.URL}})
+```
+
 Extend `parseContent`'s switch with the media arms:
 
 ```go
