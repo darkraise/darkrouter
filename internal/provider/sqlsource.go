@@ -66,8 +66,8 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("provider %q: %w", r.id, err)
 		}
-		chosen, ok := firstEnabled(creds)
-		if !ok {
+		enabled := enabledOnly(creds)
+		if len(enabled) == 0 {
 			// A provider with no usable credential cannot serve. Skipping it
 			// here is what stops every request against it failing at the
 			// transport layer instead.
@@ -79,8 +79,10 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 		}
 		out = append(out, Provider{
 			ID: r.id, Kind: r.kind, BaseURL: r.baseURL,
-			APIKey: chosen.Secret, KeyID: chosen.ID,
-			Priority: r.priority, Models: models,
+			Credentials: enabled,
+			APIKey:      enabled[0].Secret,
+			KeyID:       enabled[0].ID,
+			Priority:    r.priority, Models: models,
 		})
 	}
 
@@ -111,15 +113,18 @@ func (s *SQLSource) models(ctx context.Context, providerID string) ([]string, er
 	return out, rows.Err()
 }
 
-func firstEnabled(creds []store.Credential) (store.Credential, bool) {
-	// Credentials arrive ordered by id, which for ULIDs is insertion order.
-	// Phase 3 replaces this with a loop over all of them.
+// enabledOnly keeps the enabled credentials in id order. ULID ids sort by
+// insertion time, which gives credential rotation a total and deterministic
+// order to start from.
+func enabledOnly(creds []store.Credential) []Credential {
+	out := make([]Credential, 0, len(creds))
 	for _, c := range creds {
-		if c.Enabled {
-			return c, true
+		if !c.Enabled {
+			continue
 		}
+		out = append(out, Credential{ID: c.ID, Secret: c.Secret, Enabled: true})
 	}
-	return store.Credential{}, false
+	return out
 }
 
 // Providers returns the cached set. The slice is never mutated after Reload
@@ -149,8 +154,10 @@ func revisionOf(ps []Provider) uint64 {
 	for _, p := range sorted {
 		_, _ = h.Write([]byte(p.ID))
 		_, _ = h.Write([]byte(p.BaseURL))
-		_, _ = h.Write([]byte(p.KeyID))
 		_, _ = h.Write([]byte(strconv.Itoa(p.Priority)))
+		for _, c := range p.Credentials {
+			_, _ = h.Write([]byte(c.ID))
+		}
 		for _, m := range p.Models {
 			_, _ = h.Write([]byte(m))
 		}
