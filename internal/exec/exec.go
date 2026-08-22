@@ -17,6 +17,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -277,6 +278,17 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	attemptStart := time.Now()
 	resp, doErr := e.client.Do(hr)
 	outcome := e.classify(r.Context(), ctx, resp, doErr)
+
+	// Some OpenAI-compatible providers report an unknown model as a 400 with an
+	// identifying error code. Classifying that as Fatal would make failover die
+	// on the first provider in a chain that does not carry the model. The 64 KiB
+	// bound matters: an error body is small, and reading an unbounded one from a
+	// misbehaving provider is the hazard max_body_bytes exists to prevent.
+	if outcome == adapter.OutcomeFatal && resp != nil && resp.StatusCode == 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		outcome = openaicompat.ClassifyBody(resp, body, doErr)
+	}
 
 	statusCode := 0
 	if resp != nil {
