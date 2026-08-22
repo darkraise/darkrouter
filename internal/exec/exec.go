@@ -17,7 +17,6 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
-	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -58,20 +57,20 @@ type Deps struct {
 }
 
 type Executor struct {
-	store  *config.Store
-	src    provider.Source
-	ad     adapter.Adapter
-	client *http.Client
-	deps   Deps
+	store    *config.Store
+	src      provider.Source
+	adapters map[string]adapter.Adapter
+	client   *http.Client
+	deps     Deps
 }
 
 // New builds the executor. Transport-level timeouts (connect, first_byte) are
 // read once here because a shared Transport cannot vary them per request; both
 // are documented restart-only. The total timeout is read per request.
-func New(store *config.Store, src provider.Source, ad adapter.Adapter, deps Deps) *Executor {
+func New(store *config.Store, src provider.Source, adapters map[string]adapter.Adapter, deps Deps) *Executor {
 	t := store.Current().Policy.Timeout
 	return &Executor{
-		store: store, src: src, ad: ad, deps: deps,
+		store: store, src: src, adapters: adapters, deps: deps,
 		client: &http.Client{
 			// Go follows redirects by default, silently turning a redirected
 			// POST into a body-less GET.
@@ -89,6 +88,15 @@ func New(store *config.Store, src provider.Source, ad adapter.Adapter, deps Deps
 			},
 		},
 	}
+}
+
+// adapterFor resolves a candidate's provider kind. A miss is a routing fact
+// rather than an error: a SQLite row may name a kind whose adapter arrives in a
+// later phase, and failing the chain there would be harder to diagnose than
+// stepping over it with a reason on the record.
+func (e *Executor) adapterFor(kind string) (adapter.Adapter, bool) {
+	ad, ok := e.adapters[kind]
+	return ad, ok
 }
 
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
@@ -210,6 +218,13 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 			continue
 		}
 
+		ad, ok := e.adapterFor(c.Kind)
+		if !ok {
+			rec.Skips = append(rec.Skips, traceSkipOf(c, "no_adapter"))
+			i++
+			continue
+		}
+
 		// At attempt start, not on success: a credential that always fails must
 		// not keep a stale timestamp and sort first forever.
 		if e.deps.Fleet != nil {
@@ -217,7 +232,7 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 		}
 
 		attempts++
-		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts)
+		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts, ad)
 		if aerr != nil {
 			lastErr = aerr
 		}
@@ -255,7 +270,7 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 // be the last attempt.
 func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialect,
 	cfg *config.Config, req *ir.Request, c router.Candidate, p provider.Provider,
-	bud budget, rec *store.RequestRecord, seq int) (adapter.Outcome, int, *ir.Error) {
+	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter) (adapter.Outcome, int, *ir.Error) {
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
@@ -268,7 +283,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	defer timer.Stop()
 
 	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model}
-	hr, warns, err := e.ad.BuildRequest(ctx, tgt, req)
+	hr, warns, err := ad.BuildRequest(ctx, tgt, req)
 	if err != nil {
 		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
 	}
@@ -278,17 +293,19 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 
 	attemptStart := time.Now()
 	resp, doErr := e.client.Do(hr)
-	outcome := e.classify(r.Context(), ctx, resp, doErr)
+	outcome := e.classify(ad, r.Context(), ctx, resp, doErr)
 
 	// Some OpenAI-compatible providers report an unknown model as a 400 with an
 	// identifying error code. Classifying that as Fatal would make failover die
 	// on the first provider in a chain that does not carry the model. The 64 KiB
 	// bound matters: an error body is small, and reading an unbounded one from a
 	// misbehaving provider is the hazard max_body_bytes exists to prevent.
-	if outcome == adapter.OutcomeFatal && resp != nil && resp.StatusCode == 400 {
+	if bc, ok := ad.(adapter.BodyClassifier); ok &&
+		outcome == adapter.OutcomeFatal && resp != nil && resp.StatusCode == 400 {
+
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		resp.Body = io.NopCloser(bytes.NewReader(body))
-		outcome = openaicompat.ClassifyBody(resp, body, doErr)
+		outcome = bc.ClassifyBody(resp, body, doErr)
 	}
 
 	statusCode := 0
@@ -306,10 +323,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	}
 
 	if req.Stream {
-		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq, timer, warns)
+		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq, timer, warns, ad)
 	}
 
-	out, perr := e.ad.ParseResponse(resp)
+	out, perr := ad.ParseResponse(resp)
 	if perr != nil {
 		// A 2xx that cannot be read is a provider fault, so it rejoins the
 		// outcome path rather than going around it.
@@ -345,7 +362,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	cfg *config.Config, c router.Candidate, resp *http.Response, statusCode int,
 	rec *store.RequestRecord, seq int, timer *time.Timer,
-	warns []ir.Warning) (adapter.Outcome, int, *ir.Error) {
+	warns []ir.Warning, ad adapter.Adapter) (adapter.Outcome, int, *ir.Error) {
 
 	defer resp.Body.Close()
 
@@ -353,7 +370,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	// request rendering produced.
 	var streamWarns []ir.Warning
 
-	next, stop := iter.Pull2(e.ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes))
+	next, stop := iter.Pull2(ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes))
 	defer stop()
 
 	buf := newPreCommitBuffer(cfg.Server.SSE.MaxPrecommitBytes)
@@ -474,9 +491,11 @@ var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
 // The deadline is checked first. Both cancel the same derived context, and if
 // the client also disappears in that instant, checking the disconnect first
 // would silently reclassify a genuine provider timeout as a client hang-up.
-func (e *Executor) classify(inbound, upstream context.Context, resp *http.Response, err error) adapter.Outcome {
+func (e *Executor) classify(ad adapter.Adapter, inbound, upstream context.Context,
+	resp *http.Response, err error) adapter.Outcome {
+
 	if err == nil {
-		return e.ad.Classify(resp, nil)
+		return ad.Classify(resp, nil)
 	}
 	if errors.Is(context.Cause(upstream), errDarkrouterTimeout) {
 		return adapter.OutcomeRetryableProvider
@@ -484,7 +503,7 @@ func (e *Executor) classify(inbound, upstream context.Context, resp *http.Respon
 	if errors.Is(inbound.Err(), context.Canceled) {
 		return adapter.OutcomeClientCancelled
 	}
-	return e.ad.Classify(resp, err)
+	return ad.Classify(resp, err)
 }
 
 func (e *Executor) log(rec *store.RequestRecord) {

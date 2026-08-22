@@ -51,7 +51,8 @@ func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Dur
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), openaicompat.New(), deps)
+	return New(cfgStore, provider.NewYAMLSource(cfgStore),
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, deps)
 }
 
 func post(t *testing.T, e *Executor, body string) *httptest.ResponseRecorder {
@@ -530,5 +531,46 @@ func TestWarningStringsFlattensForTheRecord(t *testing.T) {
 	}
 	if warningStrings(nil) != nil {
 		t.Error("warningStrings(nil) must stay nil so the record encodes []")
+	}
+}
+
+func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream must not be called for an unknown kind")
+	}))
+	defer up.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "darkrouter.yaml")
+	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
+		"  - id: fake\n    kind: martian\n    base_url: " + up.URL +
+		"\n    api_key: ${K}\n    models: [m]\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec captureLogger
+	e := New(cfgStore, provider.NewYAMLSource(cfgStore),
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: &rec})
+
+	w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	if w.Code != 502 {
+		t.Fatalf("code = %d, want 502", w.Code)
+	}
+	got := rec.only(t)
+	if len(got.Attempts) != 0 {
+		t.Errorf("attempts = %d, want 0", len(got.Attempts))
+	}
+	found := false
+	for _, s := range got.Skips {
+		if strings.HasSuffix(s, ":no_adapter") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("skips = %v, want one ending in :no_adapter", got.Skips)
 	}
 }
