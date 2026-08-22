@@ -1,0 +1,18 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "Say nothing.",
+      "role": "user"
+    },
+    {
+      "content": null,
+      "role": "assistant"
+    },
+    {
+      "content": "Now say something.",
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

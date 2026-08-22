@@ -1,0 +1,10 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "Return JSON only.",
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

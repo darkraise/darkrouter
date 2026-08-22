@@ -1,0 +1,18 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Compare these."
+        },
+        {
+          "inlineData": {
+            "data": "iVBORw==",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

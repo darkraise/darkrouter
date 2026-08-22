@@ -1,0 +1,4 @@
+[
+  "messages[].assistant.thinking -\u003e openaicompat: assistant turns carry text and tool calls only",
+  "messages[].assistant.redacted_thinking -\u003e openaicompat: assistant turns carry text and tool calls only"
+]

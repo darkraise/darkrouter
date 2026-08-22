@@ -1,0 +1,39 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Is 91 prime?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "91 = 7 * 13",
+          "thought": true,
+          "thoughtSignature": "CtEBAdHtim8="
+        },
+        {
+          "text": "No."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "Show the factors."
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "thinkingConfig": {
+      "includeThoughts": true,
+      "thinkingBudget": 8000
+    }
+  }
+}

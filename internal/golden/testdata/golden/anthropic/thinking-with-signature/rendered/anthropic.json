@@ -1,0 +1,42 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Is 91 prime?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "signature": "ErUBCkYIBRgCIkA=",
+          "thinking": "91 = 7 * 13",
+          "type": "thinking"
+        },
+        {
+          "data": "EroBCkYIBRgCK",
+          "type": "redacted_thinking"
+        },
+        {
+          "text": "No.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "Show the factors.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}
