@@ -247,6 +247,43 @@ func renderContent(blocks []ir.ContentBlock, target string) (any, []ir.Warning) 
 			parts = append(parts, map[string]any{
 				"type": "image_url", "image_url": map[string]any{"url": url},
 			})
+		case ir.BlockDocument:
+			if blk.Media == nil {
+				continue
+			}
+			file := map[string]any{}
+			switch {
+			case blk.Media.FileID != "":
+				file["file_id"] = blk.Media.FileID
+			case blk.Media.Data != "":
+				file["filename"] = documentFilename(blk.Media.MIME)
+				file["file_data"] = "data:" + blk.Media.MIME + ";base64," + blk.Media.Data
+			default:
+				warns = append(warns, ir.Warning{
+					Field: "messages[].document", Target: target,
+					Reason: "document carried neither data nor a file id",
+				})
+				continue
+			}
+			parts = append(parts, map[string]any{"type": "file", "file": file})
+
+		case ir.BlockAudio:
+			if blk.Media == nil {
+				continue
+			}
+			format, ok := audioFormat(blk.Media.MIME)
+			if !ok || blk.Media.Data == "" {
+				warns = append(warns, ir.Warning{
+					Field: "messages[].audio", Target: target,
+					Reason: "OpenAI input_audio accepts inline wav or mp3 only",
+				})
+				continue
+			}
+			parts = append(parts, map[string]any{
+				"type":        "input_audio",
+				"input_audio": map[string]any{"data": blk.Media.Data, "format": format},
+			})
+
 		default:
 			warns = append(warns, ir.Warning{
 				Field: "messages[]." + string(blk.Type), Target: target,
@@ -255,4 +292,34 @@ func renderContent(blocks []ir.ContentBlock, target string) (any, []ir.Warning) 
 		}
 	}
 	return parts, warns
+}
+
+// audioFormat maps a MIME type onto OpenAI's short format name. The API takes
+// only these two, so anything else is a drop rather than a guess.
+func audioFormat(mime string) (string, bool) {
+	switch mime {
+	case "audio/wav", "audio/x-wav", "audio/wave":
+		return "wav", true
+	case "audio/mp3", "audio/mpeg":
+		return "mp3", true
+	default:
+		return "", false
+	}
+}
+
+// documentFilename supplies the name OpenAI requires alongside inline file
+// data. The extension is what several providers sniff to decide how to parse it.
+func documentFilename(mime string) string {
+	switch mime {
+	case "application/pdf":
+		return "document.pdf"
+	case "text/plain":
+		return "document.txt"
+	case "text/markdown":
+		return "document.md"
+	case "text/csv":
+		return "document.csv"
+	default:
+		return "document"
+	}
 }
