@@ -15,10 +15,14 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/edge"
+	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -65,6 +69,8 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		ex: exec.New(cfgStore, src, map[string]adapter.Adapter{
 			"openaicompat": openaicompat.New(),
+			"anthropic":    anthropicadapter.New(),
+			"gemini":       geminiadapter.New(),
 		}, exec.Deps{
 			Log: logw, Health: breaker, Fleet: breaker,
 		}),
@@ -75,12 +81,64 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 func (s *Server) ProxyHandler() http.Handler {
 	mux := http.NewServeMux()
+
 	oa := openaiedge.New()
 	mux.HandleFunc("POST /v1/chat/completions", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
 		s.ex.Handle(w, r, oa)
 	}))
 	mux.HandleFunc("GET /v1/models", s.authed(oa, s.handleModels))
+
+	an := anthropicedge.New()
+	mux.HandleFunc("POST /v1/messages", s.authed(an, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, an)
+	}))
+
+	// One pattern for every Gemini method. A net/http wildcard occupies a whole
+	// path segment, so "{model}:generateContent" is not a legal pattern and the
+	// suffix is dispatched here instead.
+	gm := geminiedge.New()
+	mux.HandleFunc("POST /v1beta/models/{model}", s.authed(gm, s.handleGemini))
+	mux.HandleFunc("GET /v1beta/models", s.authed(gm, s.handleGeminiModels))
+
 	return mux
+}
+
+// handleGemini dispatches on the method suffix the path segment carries.
+func (s *Server) handleGemini(w http.ResponseWriter, r *http.Request) {
+	_, method := geminiedge.ExtractModel(r.PathValue("model"))
+	switch method {
+	case "generateContent", "streamGenerateContent":
+		// NewFor rather than New: ?alt=sse selects the streaming wire form, and
+		// WriteStream cannot see the request that chose it.
+		s.ex.Handle(w, r, geminiedge.NewFor(r))
+	default:
+		_ = geminiedge.New().WriteError(w, &ir.Error{
+			Type: ir.ErrNotFound, Message: "unsupported method: " + method,
+		})
+	}
+}
+
+func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
+	ps, err := s.src.Providers(r.Context())
+	if err != nil {
+		_ = geminiedge.New().WriteError(w, &ir.Error{
+			Type: ir.ErrDarkrouter, Message: "could not list providers",
+		})
+		return
+	}
+	seen := map[string]bool{}
+	var models []string
+	for _, p := range ps {
+		for _, m := range p.Models {
+			if seen[m] {
+				continue
+			}
+			seen[m] = true
+			models = append(models, m)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(geminiedge.ListModels(models))
 }
 
 // authed enforces the optional proxy token in the route's own dialect. The
