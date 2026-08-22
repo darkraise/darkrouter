@@ -6,7 +6,9 @@ package exec
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,7 +16,6 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
-	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -28,7 +29,11 @@ type Executor struct {
 	client *http.Client
 }
 
+// New builds the executor. Transport-level timeouts (connect, first_byte) are
+// read once here because a shared Transport cannot vary them per request; both
+// are documented restart-only. The total timeout is read per request.
 func New(store *config.Store, src provider.Source, ad adapter.Adapter) *Executor {
+	t := store.Current().Policy.Timeout
 	return &Executor{
 		store: store, src: src, ad: ad,
 		client: &http.Client{
@@ -37,6 +42,15 @@ func New(store *config.Store, src provider.Source, ad adapter.Adapter) *Executor
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: t.Connect}).DialContext,
+				ResponseHeaderTimeout: t.FirstByte,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+			},
 		},
 	}
 }
@@ -44,7 +58,11 @@ func New(store *config.Store, src provider.Source, ad adapter.Adapter) *Executor
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
 	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 	reqID := ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String()
+
+	// Written up front so every error path carries them, per master design §10.
+	// The count is overwritten once an attempt has actually been made.
 	w.Header().Set("X-Darkrouter-Request", reqID)
+	w.Header().Set("X-Darkrouter-Attempts", "0")
 
 	req, _, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
 	if err != nil {
@@ -71,8 +89,10 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	// Phase 2 needs the cause to tell a disconnect from a Darkrouter deadline.
 	ctx, cancel := context.WithCancelCause(r.Context())
 	defer cancel(nil)
+	// Phase 1 applies the total budget to the whole request. Phase 3 replaces
+	// this with commit semantics plus policy.timeout.idle for committed streams.
 	ctx, cancelTimeout := context.WithTimeoutCause(ctx, cfg.Policy.Timeout.Total,
-		fmt.Errorf("darkrouter: total timeout exceeded"))
+		errDarkrouterTimeout)
 	defer cancelTimeout()
 
 	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: p.APIKey, Model: req.Model}
@@ -83,7 +103,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	}
 
 	resp, doErr := e.client.Do(hr)
-	outcome := openaicompat.ClassifyWithContext(resp, doErr, r.Context())
+	outcome := e.classify(r.Context(), resp, doErr)
 
 	w.Header().Set("X-Darkrouter-Provider", p.ID)
 	w.Header().Set("X-Darkrouter-Model", req.Model)
@@ -105,11 +125,26 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 
 	out, err := e.ad.ParseResponse(resp)
 	if err != nil {
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrAPI, Message: err.Error()})
+		// Design §8.2: a read or parse failure on a 2xx is a provider fault, so
+		// it goes through the outcome path rather than around it. Phase 3 then
+		// retries it by adding a loop, not by restructuring this branch.
+		_ = d.WriteError(w, errorFor(adapter.OutcomeRetryableProvider, err))
 		return
 	}
-	out.ID = reqID
 	_ = d.WriteResponse(w, out)
+}
+
+var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
+
+// classify asks the adapter, then overrides for the one case no adapter can see:
+// a cancellation whose origin is the inbound request rather than the upstream.
+// Keeping this in exec is what lets the executor stay adapter-agnostic, which
+// Phase 3 needs once more than one adapter exists.
+func (e *Executor) classify(inbound context.Context, resp *http.Response, err error) adapter.Outcome {
+	if err != nil && errors.Is(err, context.Canceled) && errors.Is(inbound.Err(), context.Canceled) {
+		return adapter.OutcomeClientCancelled
+	}
+	return e.ad.Classify(resp, err)
 }
 
 func errorFor(o adapter.Outcome, err error) *ir.Error {

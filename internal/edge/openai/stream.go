@@ -11,9 +11,12 @@ import (
 	"github.com/darkraise/darkrouter/internal/sse"
 )
 
-func chunk(model string, delta map[string]any, finish any) map[string]any {
+func chunk(id, model string, delta map[string]any, finish any) map[string]any {
+	if id == "" {
+		id = "chatcmpl-darkrouter"
+	}
 	return map[string]any{
-		"id":      "chatcmpl-darkrouter",
+		"id":      id,
 		"object":  "chat.completion.chunk",
 		"created": time.Now().Unix(),
 		"model":   model,
@@ -39,7 +42,9 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		return s.Send("", string(b))
 	}
 
-	var model string
+	// id and model arrive on message_start; without capturing them every chunk
+	// would report an empty model, which clients surface to users.
+	var id, model string
 	var sendErr error
 	for ev, err := range events {
 		if err != nil {
@@ -56,17 +61,18 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		case ir.EventPing, ir.EventBlockStart, ir.EventBlockStop:
 			continue
 		case ir.EventMessageStart:
-			sendErr = send(chunk(model, map[string]any{"role": "assistant"}, nil))
+			id, model = ev.ID, ev.Model
+			sendErr = send(chunk(id, model, map[string]any{"role": "assistant"}, nil))
 		case ir.EventContentDelta:
 			if ev.Delta == nil || ev.Delta.Type != ir.BlockText {
 				continue
 			}
-			sendErr = send(chunk(model, map[string]any{"content": ev.Delta.Text}, nil))
+			sendErr = send(chunk(id, model, map[string]any{"content": ev.Delta.Text}, nil))
 		case ir.EventMessageDelta:
 			if ev.Usage == nil {
 				continue
 			}
-			c := chunk(model, map[string]any{}, nil)
+			c := chunk(id, model, map[string]any{}, nil)
 			c["usage"] = map[string]any{
 				"prompt_tokens":     ev.Usage.InputTokens,
 				"completion_tokens": ev.Usage.OutputTokens,
@@ -74,7 +80,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			}
 			sendErr = send(c)
 		case ir.EventMessageStop:
-			sendErr = send(chunk(model, map[string]any{}, finishReason(ev.StopReason)))
+			sendErr = send(chunk(id, model, map[string]any{}, finishReason(ev.StopReason)))
 		}
 		if sendErr != nil {
 			return sendErr

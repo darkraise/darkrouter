@@ -205,6 +205,12 @@ type StreamEvent struct {
 	Usage      *Usage
 	StopReason StopReason
 	Err        *Error
+
+	// ID and Model are carried on EventMessageStart only. Without them an edge
+	// dialect has no way to learn either, and every streamed chunk would report
+	// an empty model.
+	ID    string
+	Model string
 }
 
 // Needs reports the capabilities a target must have to serve this request.

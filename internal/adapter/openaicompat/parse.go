@@ -88,6 +88,8 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 }
 
 type wireChunk struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
 	Choices []struct {
 		Delta struct {
 			Role      string `json:"role"`
@@ -171,7 +173,9 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			}
 			if !started {
 				started = true
-				if !yield(ir.StreamEvent{Type: ir.EventMessageStart}, nil) {
+				if !yield(ir.StreamEvent{
+					Type: ir.EventMessageStart, ID: c.ID, Model: c.Model,
+				}, nil) {
 					return
 				}
 			}

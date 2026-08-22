@@ -43,6 +43,16 @@ func (s *Store) LastError() error {
 	return nil
 }
 
+// RecordError surfaces a failure that happened outside Reload — notably a
+// watcher that could not start, which would otherwise leave hot reload silently
+// dead for the process lifetime.
+func (s *Store) RecordError(err error) {
+	if err == nil {
+		return
+	}
+	s.lastErr.Store(&err)
+}
+
 // Reload parses and validates the file in full, swapping only on success.
 // A file that fails validation is rejected wholesale and the previous
 // configuration stays live: a broken edit must never take the gateway down.
@@ -70,8 +80,11 @@ func restartOnlyWarnings(prev, next *Config) []string {
 	if prev.Server.AdminListen != next.Server.AdminListen {
 		out = append(out, "server.admin_listen changed; takes effect on restart")
 	}
-	if prev.Server.MaxBodyBytes != next.Server.MaxBodyBytes {
-		out = append(out, "server.max_body_bytes changed; takes effect on restart")
+	if prev.Policy.Timeout.Connect != next.Policy.Timeout.Connect {
+		out = append(out, "policy.timeout.connect changed; takes effect on restart")
+	}
+	if prev.Policy.Timeout.FirstByte != next.Policy.Timeout.FirstByte {
+		out = append(out, "policy.timeout.first_byte changed; takes effect on restart")
 	}
 	return out
 }
