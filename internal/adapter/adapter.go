@@ -48,3 +48,12 @@ type Adapter interface {
 type BodyClassifier interface {
 	ClassifyBody(resp *http.Response, body []byte, err error) Outcome
 }
+
+// TokenCounter is implemented by an adapter whose upstream offers a native
+// token count. OpenAI has no such endpoint, so this is optional rather than a
+// method on Adapter that two thirds of implementations would stub out.
+type TokenCounter interface {
+	BuildCountRequest(ctx context.Context, t *Target, req *ir.Request) (*http.Request, error)
+	// ParseCountResponse takes ownership of resp.Body and always closes it.
+	ParseCountResponse(resp *http.Response) (int, error)
+}
