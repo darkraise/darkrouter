@@ -98,3 +98,15 @@ func TestParseRejectsMalformedJSON(t *testing.T) {
 		t.Fatal("expected a parse error")
 	}
 }
+
+func TestParseRequestReportsTheLLMSurfaceTyped(t *testing.T) {
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	_, pt, err := ParseRequest(r, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt.Surface != ir.SurfaceLLM {
+		t.Errorf("Surface = %q, want %q", pt.Surface, ir.SurfaceLLM)
+	}
+}
