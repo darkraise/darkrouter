@@ -1,0 +1,27 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "one"
+        },
+        {
+          "text": "two"
+        },
+        {
+          "text": "three"
+        },
+        {
+          "text": "four"
+        },
+        {
+          "text": "five"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  }
+}

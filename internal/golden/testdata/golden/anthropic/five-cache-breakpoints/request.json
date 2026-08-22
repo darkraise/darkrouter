@@ -1,0 +1,6 @@
+{"model":"target-model","max_tokens":1024,"messages":[{"role":"user","content":[
+  {"type":"text","text":"one","cache_control":{"type":"ephemeral","ttl":"5m"}},
+  {"type":"text","text":"two","cache_control":{"type":"ephemeral","ttl":"5m"}},
+  {"type":"text","text":"three","cache_control":{"type":"ephemeral","ttl":"5m"}},
+  {"type":"text","text":"four","cache_control":{"type":"ephemeral","ttl":"5m"}},
+  {"type":"text","text":"five","cache_control":{"type":"ephemeral","ttl":"5m"}}]}]}

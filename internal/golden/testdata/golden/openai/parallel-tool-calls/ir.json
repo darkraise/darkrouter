@@ -1,0 +1,160 @@
+{
+  "Model": "target-model",
+  "System": null,
+  "Messages": [
+    {
+      "Role": "user",
+      "Content": [
+        {
+          "Type": "text",
+          "Text": "Weather in Oslo and Bergen?",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    },
+    {
+      "Role": "assistant",
+      "Content": [
+        {
+          "Type": "tool_use",
+          "Text": "",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": {
+            "ID": "call_a",
+            "Name": "lookup",
+            "Input": {
+              "city": "Oslo"
+            }
+          },
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        },
+        {
+          "Type": "tool_use",
+          "Text": "",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": {
+            "ID": "call_b",
+            "Name": "lookup",
+            "Input": {
+              "city": "Bergen"
+            }
+          },
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    },
+    {
+      "Role": "tool",
+      "Content": [
+        {
+          "Type": "tool_result",
+          "Text": "",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": {
+            "ToolUseID": "call_a",
+            "Content": [
+              {
+                "Type": "text",
+                "Text": "clear",
+                "Media": null,
+                "Thinking": null,
+                "ToolUse": null,
+                "ToolResult": null,
+                "CacheControl": null,
+                "Extra": null
+              }
+            ],
+            "IsError": false
+          },
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    },
+    {
+      "Role": "tool",
+      "Content": [
+        {
+          "Type": "tool_result",
+          "Text": "",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": {
+            "ToolUseID": "call_b",
+            "Content": [
+              {
+                "Type": "text",
+                "Text": "rain",
+                "Media": null,
+                "Thinking": null,
+                "ToolUse": null,
+                "ToolResult": null,
+                "CacheControl": null,
+                "Extra": null
+              }
+            ],
+            "IsError": false
+          },
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    },
+    {
+      "Role": "user",
+      "Content": [
+        {
+          "Type": "text",
+          "Text": "And tomorrow?",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    }
+  ],
+  "Tools": [
+    {
+      "Name": "lookup",
+      "Description": "weather",
+      "Schema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "ToolChoice": null,
+  "ParallelToolCalls": null,
+  "MaxTokens": null,
+  "Temperature": null,
+  "TopP": null,
+  "TopK": null,
+  "StopSequences": null,
+  "Stream": false,
+  "Reasoning": null,
+  "ResponseFormat": null,
+  "Safety": null,
+  "Metadata": null,
+  "Extra": null
+}

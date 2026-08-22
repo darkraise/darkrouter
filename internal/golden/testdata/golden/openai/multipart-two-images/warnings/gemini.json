@@ -1,0 +1,3 @@
+[
+  "messages[].image -\u003e gemini: could not inline the URL: Get \"https://example.invalid/second.png\": golden: the suite makes no outbound requests"
+]

@@ -1,0 +1,3 @@
+[
+  "messages[].tool_result.image -\u003e openaicompat: tool messages are text-only; moved into a following user message"
+]

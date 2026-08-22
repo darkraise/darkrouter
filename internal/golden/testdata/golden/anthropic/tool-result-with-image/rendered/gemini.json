@@ -1,0 +1,44 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "functionCall": {
+            "args": {
+              "url": "https://x.invalid"
+            },
+            "id": "call_a",
+            "name": "screenshot"
+          }
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_a",
+            "name": "screenshot",
+            "response": {
+              "result": "captured"
+            }
+          }
+        },
+        {
+          "inlineData": {
+            "data": "iVBORw==",
+            "mimeType": "image/png"
+          }
+        },
+        {
+          "text": "What is on screen?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  }
+}

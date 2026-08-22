@@ -1,0 +1,42 @@
+{
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Is 91 prime?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "signature": "CtEBAdHtim8=",
+          "thinking": "91 = 7 * 13",
+          "type": "thinking"
+        },
+        {
+          "text": "No.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "Show the factors.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "target-model",
+  "thinking": {
+    "budget_tokens": 4095,
+    "type": "enabled"
+  }
+}

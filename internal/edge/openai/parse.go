@@ -198,6 +198,14 @@ func parseContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 			if p.ImageURL == nil {
 				continue
 			}
+			// A data URI is inline content, not an address. Leaving it in URL
+			// makes Anthropic emit source.type "url" for base64 and makes
+			// Gemini try to fetch "data:", dropping the image entirely.
+			if mime, data := splitDataURI(p.ImageURL.URL); data != p.ImageURL.URL {
+				out = append(out, ir.ContentBlock{Type: ir.BlockImage,
+					Media: &ir.Media{MIME: mime, Data: data}})
+				continue
+			}
 			out = append(out, ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{URL: p.ImageURL.URL}})
 		case "input_audio":
 			if p.InputAudio == nil {

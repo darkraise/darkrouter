@@ -237,3 +237,24 @@ func TestParseRequestReadsResponseFormatAndFlags(t *testing.T) {
 		t.Errorf("metadata = %v", req.Metadata)
 	}
 }
+
+func TestParseRequestSplitsADataURIImage(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw=="}}]}]}`)
+	m := req.Messages[0].Content[0].Media
+	if m.Data != "iVBORw==" || m.MIME != "image/png" {
+		t.Errorf("media = %+v; a data URI is inline content, not an address", m)
+	}
+	if m.URL != "" {
+		t.Errorf("media = %+v; leaving it in URL makes Gemini try to fetch \"data:\"", m)
+	}
+}
+
+func TestParseRequestKeepsAPublicImageURL(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"https://x.example/a.png"}}]}]}`)
+	m := req.Messages[0].Content[0].Media
+	if m.URL != "https://x.example/a.png" || m.Data != "" {
+		t.Errorf("media = %+v", m)
+	}
+}
