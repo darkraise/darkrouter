@@ -1,0 +1,10 @@
+{
+  "body": {
+    "error": {
+      "message": "the prompt was blocked: SAFETY",
+      "type": "invalid_request_error"
+    },
+    "type": "error"
+  },
+  "status": 400
+}

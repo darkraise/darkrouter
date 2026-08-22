@@ -1,0 +1,27 @@
+{
+  "ID": "chatcmpl-1",
+  "Model": "target-model",
+  "Content": [
+    {
+      "Type": "text",
+      "Text": "Answer: 42",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "end_turn",
+  "Usage": {
+    "InputTokens": 11,
+    "OutputTokens": 4,
+    "CacheReadTokens": 8,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 3,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}

@@ -224,3 +224,22 @@ func (refuseTransport) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 var errOffline = errors.New("golden: the suite makes no outbound requests")
+
+func recorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }
+
+// compareRecorded pins the status code alongside the body, because §14 makes
+// the status part of the contract — Claude Code retries a 529 and gives up on
+// a 400.
+func compareRecorded(t *testing.T, path string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var body any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("%s: response is not JSON: %v\n%s", path, err, rec.Body.String())
+	}
+	compareJSON(t, path, map[string]any{
+		"status": rec.Code,
+		"body":   normalize(body),
+	})
+}
+
+func errorsAs(err error, target **ir.Error) bool { return errors.As(err, target) }

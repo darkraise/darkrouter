@@ -1,0 +1,39 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "functionCall": {
+                "args": "{\"city\":\"Oslo\"}",
+                "id": "call_a",
+                "name": "lookup"
+              }
+            },
+            {
+              "functionCall": {
+                "args": "{\"city\":\"Bergen\"}",
+                "id": "call_b",
+                "name": "lookup"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "target-model",
+    "responseId": "chatcmpl-2",
+    "usageMetadata": {
+      "cachedContentTokenCount": 0,
+      "candidatesTokenCount": 15,
+      "promptTokenCount": 20,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 35
+    }
+  },
+  "status": 200
+}

@@ -1,0 +1,28 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "done"
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "target-model",
+    "responseId": "msg_3",
+    "usageMetadata": {
+      "cachedContentTokenCount": 0,
+      "candidatesTokenCount": 1,
+      "promptTokenCount": 3,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 4
+    }
+  },
+  "status": 200
+}

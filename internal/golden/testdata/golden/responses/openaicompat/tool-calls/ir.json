@@ -1,0 +1,45 @@
+{
+  "ID": "chatcmpl-2",
+  "Model": "target-model",
+  "Content": [
+    {
+      "Type": "tool_use",
+      "Text": "",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": {
+        "ID": "call_a",
+        "Name": "lookup",
+        "Input": "{\"city\":\"Oslo\"}"
+      },
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    },
+    {
+      "Type": "tool_use",
+      "Text": "",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": {
+        "ID": "call_b",
+        "Name": "lookup",
+        "Input": "{\"city\":\"Bergen\"}"
+      },
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "tool_use",
+  "Usage": {
+    "InputTokens": 20,
+    "OutputTokens": 15,
+    "CacheReadTokens": 0,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}

@@ -1,0 +1,102 @@
+[
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "role": "assistant"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_5",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_5",
+      "model": "target-model",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 0,
+        "prompt_tokens": 5,
+        "total_tokens": 5
+      }
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "content": "one "
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_5",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "content": "two "
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_5",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "content": "three "
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_5",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "error": {
+        "code": "overloaded_error",
+        "message": "Overloaded",
+        "type": "overloaded"
+      }
+    }
+  },
+  {
+    "data": "[DONE]"
+  }
+]

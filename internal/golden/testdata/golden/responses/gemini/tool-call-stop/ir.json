@@ -1,0 +1,47 @@
+{
+  "ID": "r-1",
+  "Model": "target-model",
+  "Content": [
+    {
+      "Type": "thinking",
+      "Text": "",
+      "Media": null,
+      "Thinking": {
+        "Text": "checking",
+        "Signature": "CtEBAdHtim8=",
+        "Data": ""
+      },
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    },
+    {
+      "Type": "tool_use",
+      "Text": "",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": {
+        "ID": "",
+        "Name": "lookup",
+        "Input": {
+          "city": "Oslo"
+        }
+      },
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "tool_use",
+  "Usage": {
+    "InputTokens": 12,
+    "OutputTokens": 6,
+    "CacheReadTokens": 4,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 5,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}
