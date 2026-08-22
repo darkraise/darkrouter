@@ -176,17 +176,37 @@ Unmapped or future enum values are treated as `end_turn` with a warning rather t
 
 | IR | OpenAI | Anthropic | Gemini |
 |---|---|---|---|
-| `ResponseFormat.JSONSchema` | `response_format: {type:"json_schema", json_schema}` | structured-output beta where available, else dropped with warning | `responseMimeType: "application/json"` plus `responseSchema` |
-| `Reasoning.Effort` | `reasoning_effort` | converted to `thinking: {type:"enabled", budget_tokens}` | `thinkingConfig.thinkingBudget` with `includeThoughts` |
-| `Reasoning.Budget` | converted to the nearest `reasoning_effort` | `budget_tokens` directly | `thinkingBudget` directly |
+| `ResponseFormat.JSONSchema` | `response_format: {type:"json_schema", json_schema}` | `output_config: {format: {type:"json_schema", schema}}` | `responseMimeType: "application/json"` plus `responseSchema` |
+| `Reasoning.Effort` | `reasoning_effort` | `thinking: {type:"adaptive"}` plus `output_config.effort`, or `thinking: {type:"enabled", budget_tokens}` — see below | `thinkingConfig.thinkingBudget` with `includeThoughts` |
+| `Reasoning.Budget` | converted to the nearest `reasoning_effort` | `budget_tokens` directly where the generation accepts it, else banded to an effort | `thinkingBudget` directly |
 
 The effort-to-budget conversion is fixed and documented rather than left to each adapter: `low` =
 4,096 tokens, `medium` = 16,384, `high` = 32,768, clamped to the model's maximum output tokens from
 the catalog. Two implementers would otherwise choose differently and the same request would reason
 differently per target.
 
-Whether Anthropic's structured-output beta is GA must be checked at implementation time; the spec
-assumes beta and drops with a warning where unavailable.
+**Anthropic's structured output is generally available.** Verified against the live documentation on
+2026-08-22: no beta header, and the schema lives under `output_config.format` rather than at the top
+level. The earlier text here assumed a beta and told the implementer to re-check; it was wrong.
+
+**Anthropic's extended thinking has split into two mutually exclusive per-generation shapes.**
+`thinking: {type:"enabled", budget_tokens}` returns a 400 on Claude 4.7 and later;
+`thinking: {type:"adaptive"}` with `output_config.effort` returns a 400 on Claude 4.5 and earlier.
+Choosing the wrong one makes every reasoning request against that generation fail, so the shape is a
+property of the model rather than of the request. Phase 4 read it off the model name because there
+was no catalog; **phase 6 moved it onto the catalog entry** and deleted the name table.
+
+The sampling rule follows the same split, and is narrower than "no sampling with thinking":
+
+- On the generations that accept `budget_tokens`, `temperature` and `top_k` are rejected alongside
+  thinking, but `top_p` survives **between 0.95 and 1**.
+- On the newest generation — `opus-4-7`, `opus-4-8`, `opus-5`, `sonnet-5`, `fable-5` — any non-default
+  sampling value is a 400 on **every** request, thinking or not.
+
+models.dev cannot express the first distinction: it lists `effort` among `claude-opus-4-5`'s
+`reasoning_options`, but that names `output_config.effort`, not adaptive thinking. The two are
+different controls sharing a word, which is why phase 6 declares the thinking shape in preset data
+rather than deriving it.
 
 ### 4.7 Required-field synthesis
 
@@ -194,7 +214,9 @@ Anthropic requires `max_tokens`. An OpenAI- or Gemini-inbound request carrying n
 model's `max_output_tokens` from the catalog, or a 4,096 default when the catalog does not know it,
 recorded as a warning so the substitution is visible.
 
-Its current requiredness should be re-confirmed during implementation.
+Confirmed still required on 2026-08-22. From phase 6 the substitution is the model's real
+`max_output_tokens` from the catalog rather than a constant, and a request asking for more than the
+model can produce is clamped with a warning rather than forwarded to a 400.
 
 ### 4.8 Streaming
 
