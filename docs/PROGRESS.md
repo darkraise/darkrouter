@@ -9,7 +9,7 @@ Last updated: 2026-08-22
 | 1 — Foundation | ✅ | ✅ | **Complete.** Race-clean, `go vet` clean, Docker image verified, all four manual checks passed. |
 | 2 — Persistence and health | ✅ | ✅ | **Merged to master.** 18 tasks, all done criteria met. |
 | 3 — Routing and failover | ✅ | ✅ | **Merged to master.** 20 tasks, all done criteria met. |
-| 4 — Dialects | ✅ | — | Not started |
+| 4 — Dialects | ✅ | ✅ | Plan written (37 tasks); implementation not started |
 | 5 — Auxiliary surfaces | ✅ | — | Not started |
 | 6 — Catalog | ✅ | — | Not started |
 | 7 — Admin API and UI | ✅ | — | Not started |
