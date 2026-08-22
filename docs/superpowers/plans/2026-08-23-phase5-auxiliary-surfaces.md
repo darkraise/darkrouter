@@ -2065,3 +2065,451 @@ git commit -m "feat(router): filter on adapter surface support"
 ```
 
 ---
+
+### Task 9: The executor supplies the adapter-surface map
+
+**Files:**
+- Modify: `internal/exec/exec.go` (`New`)
+- Modify: `internal/exec/resolve.go`
+- Test: `internal/exec/exec_test.go`
+
+**Interfaces:**
+- Consumes: `adapter.SurfacesOf` (Task 7), `router.Snapshot.AdapterSurfaces` (Task 8).
+- Produces: nothing new. The filter Task 8 added starts constraining.
+
+**Implementer:** dcc-superpower-companions:impl-sonnet-high
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
+**Approach:** inline - skip 2: the registry already exists on the `Executor` and this reads it once.
+
+The map is computed **once in `New`**, not per request. `e.adapters` is fixed at construction and never mutated, so rebuilding the map on every request would allocate for a value that cannot change — and the router snapshot is meant to be frozen inputs, not derived work.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/exec/exec_test.go`:
+
+```go
+func TestAnEmbeddingRequestSkipsAChatOnlyAdapter(t *testing.T) {
+	// anthropic declares no surfaces, so it defaults to llm. Its preset could
+	// still claim embeddings — the catalog describes the upstream, not what
+	// Darkrouter can speak — and routing there would fail at the provider.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
+	w := httptest.NewRecorder()
+	e.RunSurface(w, httptest.NewRequest("POST", "/v1/embeddings", nil), op)
+
+	if op.builds != 0 {
+		t.Errorf("the op built %d requests; a chat-only adapter must be filtered before any attempt", op.builds)
+	}
+	got := rec.only(t)
+	var found bool
+	for _, s := range got.Skips {
+		if strings.Contains(s, "adapter_surface") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("skips = %v; the trace does not explain why nothing routed", got.Skips)
+	}
+}
+
+func TestAChatRequestStillRoutesToAChatOnlyAdapter(t *testing.T) {
+	// The obvious regression: constraining the map must not exclude the kind
+	// that only ever served llm.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestAnEmbeddingRequestSkips|TestAChatRequestStill' -race -count=1 -v
+```
+
+Expected: `TestAnEmbeddingRequestSkipsAChatOnlyAdapter` fails — the map is nil, so nothing filters and the op builds one request. The second test passes already and is there to stay passing.
+
+- [ ] **Step 3: Compute the map once**
+
+In `internal/exec/exec.go`, add the field to `Executor`:
+
+```go
+type Executor struct {
+	store    *config.Store
+	src      provider.Source
+	adapters map[string]adapter.Adapter
+	// adapterSurfaces is what each kind can render, derived from adapters at
+	// construction. It cannot change afterwards, so recomputing it per request
+	// would allocate for a constant — and the router snapshot is meant to hold
+	// frozen inputs rather than derived work.
+	adapterSurfaces map[string]adapter.SurfaceSet
+	client          *http.Client
+	deps            Deps
+}
+```
+
+and fill it in `New`, immediately before the returned literal:
+
+```go
+	surfaces := make(map[string]adapter.SurfaceSet, len(adapters))
+	for kind, ad := range adapters {
+		surfaces[kind] = adapter.SurfacesOf(ad)
+	}
+```
+
+then set `adapterSurfaces: surfaces` in the `&Executor{...}` literal alongside `adapters`.
+
+- [ ] **Step 4: Put it on the snapshot**
+
+In `internal/exec/resolve.go`, add the field where the snapshot is built:
+
+```go
+	snap := router.Snapshot{
+		At: start, Providers: providers, Catalog: cat, Config: cfg,
+		AdapterSurfaces: e.adapterSurfaces,
+	}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package. Every existing chat test routes through `openaicompat`, `anthropic` or `gemini` on the `llm` surface, which all three declare or default to.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/exec/exec.go internal/exec/resolve.go internal/exec/exec_test.go
+git commit -m "feat(exec): supply adapter surfaces to the router"
+```
+
+---
+
+### Task 10: The auxiliary op scaffold
+
+**Files:**
+- Create: `internal/exec/aux.go`
+- Test: `internal/exec/aux_test.go`
+
+**Interfaces:**
+- Consumes: `SurfaceOp`, `AttemptCtx`, `CommitWriter` (Tasks 5, 6).
+- Produces: `exec.AuxOp` with `exec.NewAuxOp(router.Query, AuxBuild, AuxRespond, AuxWriteError) *AuxOp`, plus `exec.DecodeJSON` and `exec.ReadCapped`. Tasks 11 onward each construct one.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: the three closure types fall directly out of `SurfaceOp`'s method set, which Task 6 fixed.
+
+Six surfaces differ in exactly two ways — what they render and how they write — and are identical in every other respect. Six near-duplicate types implementing four methods each would be thirty-odd methods of ceremony around twelve lines of actual difference.
+
+So the scaffold takes the difference as three closures and supplies the rest. This is not a new abstraction layer: it is `SurfaceOp` with the boilerplate written once.
+
+`ReadCapped` exists because every JSON auxiliary response must be bounded. An embedding response is large but finite; an unbounded read from a misbehaving provider on a background-free request path is the hazard `max_body_bytes` exists to prevent inbound, and nothing was enforcing it outbound.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/exec/aux_test.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+func TestAuxOpDelegatesToItsClosures(t *testing.T) {
+	q := router.Query{Model: "m", Surface: ir.SurfaceEmbedding}
+	var built, responded, errored bool
+
+	op := NewAuxOp(q,
+		func(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+			built = true
+			return http.NewRequestWithContext(ctx, "POST", "http://x/v1/embeddings", strings.NewReader("{}"))
+		},
+		func(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+			responded = true
+			return adapter.OutcomeSuccess, nil
+		},
+		func(w http.ResponseWriter, e *ir.Error) error {
+			errored = true
+			return nil
+		})
+
+	if op.Query() != q {
+		t.Errorf("Query() = %+v", op.Query())
+	}
+	if _, _, err := op.Build(context.Background(), &adapter.Target{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, aerr := op.Respond(NewCommitWriter(httptest.NewRecorder()),
+		&http.Response{Body: io.NopCloser(strings.NewReader(""))}, &AttemptCtx{}); aerr != nil {
+		t.Fatal(aerr)
+	}
+	_ = op.WriteError(httptest.NewRecorder(), &ir.Error{})
+
+	if !built || !responded || !errored {
+		t.Errorf("delegation = (%v, %v, %v), want all true", built, responded, errored)
+	}
+}
+
+func TestAuxOpSatisfiesSurfaceOp(t *testing.T) {
+	var _ SurfaceOp = NewAuxOp(router.Query{}, nil, nil, nil)
+}
+
+func TestReadCappedStopsAtTheLimit(t *testing.T) {
+	// An unbounded read from a misbehaving provider is exactly the hazard
+	// max_body_bytes prevents inbound and nothing was preventing outbound.
+	body := io.NopCloser(strings.NewReader(strings.Repeat("a", 100)))
+	got, err := ReadCapped(body, 10)
+	if err == nil {
+		t.Fatal("an oversized body read cleanly")
+	}
+	if len(got) > 10 {
+		t.Errorf("read %d bytes past a 10-byte cap", len(got))
+	}
+}
+
+func TestReadCappedAcceptsAnExactFit(t *testing.T) {
+	// The boundary must not be an off-by-one: a response exactly at the cap is
+	// legitimate, and rejecting it would fail on a perfectly good payload.
+	got, err := ReadCapped(io.NopCloser(strings.NewReader("0123456789")), 10)
+	if err != nil {
+		t.Fatalf("a body exactly at the cap was rejected: %v", err)
+	}
+	if string(got) != "0123456789" {
+		t.Errorf("body = %q", got)
+	}
+}
+
+func TestDecodeJSONRejectsGarbage(t *testing.T) {
+	// An HTML error page behind a 200 is a provider fault, not a decode
+	// curiosity: it must surface as an error the loop can classify.
+	var into struct {
+		A int `json:"a"`
+	}
+	err := DecodeJSON(io.NopCloser(strings.NewReader("<html>502</html>")), 1<<20, &into)
+	if err == nil {
+		t.Fatal("an HTML body decoded cleanly")
+	}
+}
+
+func TestDecodeJSONReadsTheDocument(t *testing.T) {
+	var into struct {
+		A int `json:"a"`
+	}
+	if err := DecodeJSON(io.NopCloser(strings.NewReader(`{"a":7}`)), 1<<20, &into); err != nil {
+		t.Fatal(err)
+	}
+	if into.A != 7 {
+		t.Errorf("a = %d, want 7", into.A)
+	}
+}
+
+func TestDecodeJSONPropagatesTheCap(t *testing.T) {
+	var into map[string]any
+	err := DecodeJSON(io.NopCloser(strings.NewReader(`{"a":"`+strings.Repeat("x", 100)+`"}`)), 16, &into)
+	if err == nil {
+		t.Fatal("an oversized document decoded cleanly")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Errorf("err = %v, want ErrBodyTooLarge so the caller can tell it from a syntax error", err)
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestAuxOp|TestReadCapped|TestDecodeJSON' -v
+```
+
+Expected: FAIL to build — `undefined: NewAuxOp`, `undefined: ReadCapped`, `undefined: DecodeJSON`, `undefined: ErrBodyTooLarge`.
+
+- [ ] **Step 3: Write the scaffold**
+
+Create `internal/exec/aux.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+// The three ways an auxiliary surface differs from every other. Everything else
+// — the budget gate, health, credential rotation, classification, attempt
+// records, commit semantics — belongs to the loop.
+type (
+	AuxBuild      func(context.Context, *adapter.Target, adapter.Adapter) (*http.Request, []ir.Warning, error)
+	AuxRespond    func(*CommitWriter, *http.Response, *AttemptCtx) (adapter.Outcome, *ir.Error)
+	AuxWriteError func(http.ResponseWriter, *ir.Error) error
+)
+
+// AuxOp is SurfaceOp with the boilerplate written once.
+//
+// Six surfaces differ in what they render and how they write, and are identical
+// in everything else. Six near-duplicate types implementing four methods each
+// would be thirty methods of ceremony around a dozen lines of real difference,
+// and every one of them an opportunity to diverge on the parts that must not.
+type AuxOp struct {
+	query    router.Query
+	build    AuxBuild
+	respond  AuxRespond
+	writeErr AuxWriteError
+}
+
+func NewAuxOp(q router.Query, build AuxBuild, respond AuxRespond, writeErr AuxWriteError) *AuxOp {
+	return &AuxOp{query: q, build: build, respond: respond, writeErr: writeErr}
+}
+
+func (o *AuxOp) Query() router.Query { return o.query }
+
+func (o *AuxOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	return o.build(ctx, tgt, ad)
+}
+
+func (o *AuxOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	return o.respond(cw, resp, ac)
+}
+
+func (o *AuxOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.writeErr(w, e)
+}
+
+var _ SurfaceOp = (*AuxOp)(nil)
+
+// ErrBodyTooLarge distinguishes an oversized response from a malformed one.
+// They classify differently: an oversized body is a provider fault worth
+// failing over, a syntax error may be a refusal shaped like one.
+var ErrBodyTooLarge = errors.New("response body exceeds the cap")
+
+// ReadCapped reads at most max bytes and reports ErrBodyTooLarge if there were
+// more. It reads max+1 to tell "exactly at the cap" from "over it" — a response
+// landing exactly on the boundary is legitimate and must not be rejected.
+func ReadCapped(r io.Reader, max int64) ([]byte, error) {
+	buf, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return buf, err
+	}
+	if int64(len(buf)) > max {
+		return buf[:max], fmt.Errorf("%w: %d bytes", ErrBodyTooLarge, max)
+	}
+	return buf, nil
+}
+
+// DecodeJSON reads a bounded JSON document into v.
+//
+// Bounded because an unbounded read from a misbehaving provider is the hazard
+// max_body_bytes prevents on the way in and nothing was preventing on the way
+// out. The body is read whole rather than streamed into a decoder so the cap is
+// enforced before any parsing work happens.
+func DecodeJSON(r io.Reader, max int64, v any) error {
+	buf, err := ReadCapped(r, max)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(buf, v); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestAuxOp|TestReadCapped|TestDecodeJSON' -race -count=1 -v
+```
+
+Expected: PASS, seven tests.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing constructs an `AuxOp` yet; Task 11 is its first user and is what proves the scaffold.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/exec/aux.go internal/exec/aux_test.go
+git commit -m "feat(exec): add the auxiliary surface scaffold"
+```
+
+---
