@@ -4133,9 +4133,19 @@ git commit -m "chore(docker): add image, compose, example config"
 After Task 15, the whole phase is verified by:
 
 ```bash
-go test ./... -race          # every package, no race reports
+go test ./...                # every package
+go vet ./...
 go build ./cmd/darkrouter    # static binary
 docker build -t darkrouter:dev .
+```
+
+The race detector needs cgo and a C toolchain, which a stock Windows checkout
+does not have (`CGO_ENABLED=0`, no gcc on PATH). It runs in the build image
+instead, and this is the only place tasks 5, 13, and 14 get race coverage:
+
+```bash
+docker run --rm -v "$PWD":/src -w /src golang:1.26-alpine \
+  sh -c 'apk add --no-cache gcc musl-dev >/dev/null && go test -race ./...'
 ```
 
 Done criteria from the spec that these commands do not cover, and which need a

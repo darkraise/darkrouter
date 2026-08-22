@@ -1,0 +1,26 @@
+server:
+  proxy_listen: :8080
+  admin_listen: :8081
+  # Optional. An unset variable means proxy authentication is off, which is why
+  # this file loads on a machine that has never set it.
+  proxy_token: ${DARKROUTER_PROXY_TOKEN}
+  max_body_bytes: 33554432
+  shutdown_grace: 30s
+  sse:
+    max_line_bytes: 1048576
+
+providers:
+  - id: groq
+    kind: openaicompat
+    base_url: https://api.groq.com/openai/v1
+    api_key: ${GROQ_KEY}
+    priority: 10
+    models:
+      - llama-3.3-70b-versatile
+
+policy:
+  timeout:
+    connect: 10s
+    first_byte: 60s
+    total: 10m
+    idle: 120s
