@@ -40,7 +40,7 @@ func New(store *config.Store) *Server {
 	return &Server{
 		store:   store,
 		src:     src,
-		ex:      exec.New(store, src, openaicompat.New()),
+		ex:      exec.New(store, src, openaicompat.New(), exec.Deps{}),
 		started: time.Now(),
 	}
 }
