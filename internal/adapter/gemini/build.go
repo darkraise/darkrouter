@@ -23,6 +23,17 @@ func (f *Fetcher) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.R
 
 	sys, w := xlate.CollectSystem(req, targetName)
 	warns = append(warns, w...)
+	// systemInstruction is prose, so a cache marker on a system block has
+	// nowhere to go. A cached system prompt is the most valuable thing a client
+	// caches, and losing it silently is the failure spec §5 exists to prevent.
+	for _, b := range req.System {
+		if b.CacheControl != nil {
+			warns = append(warns, ir.Warning{
+				Field: "system[].cache_control", Target: targetName,
+				Reason: "Gemini caches explicitly through cachedContent, not per block",
+			})
+		}
+	}
 	if sys != "" {
 		body["systemInstruction"] = map[string]any{"parts": []any{map[string]any{"text": sys}}}
 	}

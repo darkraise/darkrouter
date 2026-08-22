@@ -21,6 +21,12 @@ func renderMessages(req *ir.Request, target string) ([]any, []ir.Warning) {
 	if len(req.System) > 0 {
 		text, w := blocksText(req.System, "system[]", target)
 		warns = append(warns, w...)
+		// System blocks carry cache markers too, and a cached system prompt is
+		// the most valuable thing a client caches. Flattening to a string drops
+		// the marker, so it has to be recorded here as well as in the turns.
+		for _, b := range req.System {
+			warns = append(warns, cacheWarning(b, target)...)
+		}
 		if text != "" {
 			out = append(out, map[string]any{"role": "system", "content": text})
 		}
