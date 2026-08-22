@@ -268,7 +268,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	defer timer.Stop()
 
 	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model}
-	hr, err := e.ad.BuildRequest(ctx, tgt, req)
+	hr, warns, err := e.ad.BuildRequest(ctx, tgt, req)
 	if err != nil {
 		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
 	}
@@ -306,7 +306,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	}
 
 	if req.Stream {
-		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq, timer)
+		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq, timer, warns)
 	}
 
 	out, perr := e.ad.ParseResponse(resp)
@@ -326,6 +326,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	applyUsage(rec, &out.Usage)
 	rec.FinalProviderID = c.ProviderID
 	rec.FinalModel = c.Model
+	// Assigned, not appended: the request is re-rendered per attempt, and the
+	// record must describe the translation the client actually received rather
+	// than every attempt that was abandoned on the way there.
+	rec.Warnings = warningStrings(append(warns, out.Warnings...))
 	e.writeDiagnostics(w, rec.ID, c, seq)
 	_ = d.WriteResponse(w, out)
 	return adapter.OutcomeSuccess, statusCode, nil
@@ -340,9 +344,14 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 // commit, because building it mutates the response headers.
 func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	cfg *config.Config, c router.Candidate, resp *http.Response, statusCode int,
-	rec *store.RequestRecord, seq int, timer *time.Timer) (adapter.Outcome, int, *ir.Error) {
+	rec *store.RequestRecord, seq int, timer *time.Timer,
+	warns []ir.Warning) (adapter.Outcome, int, *ir.Error) {
 
 	defer resp.Body.Close()
+
+	// Warnings raised by the events themselves, as distinct from the ones the
+	// request rendering produced.
+	var streamWarns []ir.Warning
 
 	next, stop := iter.Pull2(e.ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes))
 	defer stop()
@@ -372,6 +381,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 		if ev.Usage != nil {
 			applyUsage(rec, ev.Usage)
 		}
+		streamWarns = append(streamWarns, ev.Warnings...)
 		if IsContentBearing(ev) {
 			committed, haveCommitted = ev, true
 			break
@@ -392,6 +402,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	}
 	rec.FinalProviderID = c.ProviderID
 	rec.FinalModel = c.Model
+	rec.Warnings = warningStrings(warns)
 	e.writeDiagnostics(w, rec.ID, c, seq)
 
 	// Post-commit, policy.timeout.total stops applying and policy.timeout.idle
@@ -424,6 +435,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 				if ev.Usage != nil {
 					applyUsage(rec, ev.Usage)
 				}
+				streamWarns = append(streamWarns, ev.Warnings...)
 			}
 			if !yield(ev, err) {
 				return
@@ -436,6 +448,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 		}
 	}
 	_ = d.WriteStream(w, events)
+	rec.Warnings = warningStrings(append(warns, streamWarns...))
 	return adapter.OutcomeSuccess, statusCode, nil
 }
 
@@ -620,6 +633,19 @@ func errorFor(o adapter.Outcome, err error) *ir.Error {
 	default:
 		return &ir.Error{Type: ir.ErrAPI, Message: msg}
 	}
+}
+
+// warningStrings flattens for the request row, whose warnings column is a JSON
+// array of strings. Nil stays nil so the column encodes [] rather than null.
+func warningStrings(ws []ir.Warning) []string {
+	if len(ws) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, w.String())
+	}
+	return out
 }
 
 func applyUsage(rec *store.RequestRecord, u *ir.Usage) {

@@ -12,7 +12,8 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, error) {
+func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
+	var warns []ir.Warning
 	body := map[string]any{
 		"model":    t.Model,
 		"messages": renderMessages(req),
@@ -46,18 +47,18 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, warns, err
 	}
 	url := strings.TrimRight(t.BaseURL, "/") + "/chat/completions"
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 	if err != nil {
-		return nil, err
+		return nil, warns, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
 	if t.APIKey != "" {
 		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
 	}
-	return hr, nil
+	return hr, warns, nil
 }
 
 func renderMessages(req *ir.Request) []any {

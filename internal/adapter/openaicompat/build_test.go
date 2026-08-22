@@ -13,7 +13,7 @@ import (
 func build(t *testing.T, req *ir.Request) map[string]any {
 	t.Helper()
 	tgt := &adapter.Target{BaseURL: "https://up.example/v1", APIKey: "sk-x", Model: "up-model"}
-	hr, err := BuildRequest(context.Background(), tgt, req)
+	hr, _, err := BuildRequest(context.Background(), tgt, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,5 +86,20 @@ func TestBuildEmitsTools(t *testing.T) {
 	fn := tools[0].(map[string]any)["function"].(map[string]any)
 	if fn["name"] != "f" {
 		t.Fatalf("tools = %v", tools)
+	}
+}
+
+func TestBuildRequestReturnsNoWarningsForAPlainRequest(t *testing.T) {
+	_, warns, err := BuildRequest(context.Background(),
+		&adapter.Target{BaseURL: "https://x.example/v1", Model: "m"},
+		&ir.Request{Messages: []ir.Message{{
+			Role:    ir.RoleUser,
+			Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}},
+		}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v, want none", warns)
 	}
 }

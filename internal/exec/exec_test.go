@@ -17,6 +17,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -517,5 +518,17 @@ func TestHandleWithNoHealthRecorderDoesNotPanic(t *testing.T) {
 	e := newExecutorWith(t, up.URL, Deps{}, 0)
 	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestWarningStringsFlattensForTheRecord(t *testing.T) {
+	got := warningStrings([]ir.Warning{
+		{Field: "top_k", Target: "openaicompat", Reason: "no equivalent"},
+	})
+	if len(got) != 1 || got[0] != "top_k -> openaicompat: no equivalent" {
+		t.Fatalf("warningStrings = %v", got)
+	}
+	if warningStrings(nil) != nil {
+		t.Error("warningStrings(nil) must stay nil so the record encodes []")
 	}
 }
