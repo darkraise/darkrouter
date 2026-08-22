@@ -22,31 +22,83 @@ func finishReason(s ir.StopReason) string {
 	}
 }
 
+// now is a seam so the golden suite can pin `created`, which is the only
+// non-deterministic field in an OpenAI response.
+var now = time.Now
+
 func WriteResponse(w http.ResponseWriter, resp *ir.Response) error {
-	var text strings.Builder
+	var text, reasoning strings.Builder
+	var calls []any
 	for _, b := range resp.Content {
-		if b.Type == ir.BlockText {
+		switch b.Type {
+		case ir.BlockText:
 			text.WriteString(b.Text)
+		case ir.BlockThinking:
+			if b.Thinking != nil {
+				reasoning.WriteString(b.Thinking.Text)
+			}
+		case ir.BlockToolUse:
+			if b.ToolUse == nil {
+				continue
+			}
+			args := string(b.ToolUse.Input)
+			if args == "" {
+				args = "{}"
+			}
+			calls = append(calls, map[string]any{
+				"id": b.ToolUse.ID, "type": "function",
+				"function": map[string]any{"name": b.ToolUse.Name, "arguments": args},
+			})
 		}
 	}
+
+	msg := map[string]any{"role": "assistant"}
+	// null rather than "" when there is no text: an OpenAI client reads an
+	// empty string as a real empty answer and stops its loop.
+	if text.Len() > 0 {
+		msg["content"] = text.String()
+	} else {
+		msg["content"] = nil
+	}
+	if reasoning.Len() > 0 {
+		msg["reasoning_content"] = reasoning.String()
+	}
+	if len(calls) > 0 {
+		msg["tool_calls"] = calls
+	}
+
 	out := map[string]any{
 		"id":      resp.ID,
 		"object":  "chat.completion",
-		"created": time.Now().Unix(),
+		"created": now().Unix(),
 		"model":   resp.Model,
 		"choices": []any{map[string]any{
 			"index":         0,
-			"message":       map[string]any{"role": "assistant", "content": text.String()},
+			"message":       msg,
 			"finish_reason": finishReason(resp.StopReason),
 		}},
-		"usage": map[string]any{
-			"prompt_tokens":     resp.Usage.InputTokens,
-			"completion_tokens": resp.Usage.OutputTokens,
-			"total_tokens":      resp.Usage.InputTokens + resp.Usage.OutputTokens,
-		},
+		"usage": usageBody(resp.Usage),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	return json.NewEncoder(w).Encode(out)
+}
+
+// usageBody reports cache and reasoning tokens under OpenAI's nested details
+// objects, and omits each object when its counter is zero — sending zeros would
+// claim the provider reported them.
+func usageBody(u ir.Usage) map[string]any {
+	body := map[string]any{
+		"prompt_tokens":     u.InputTokens,
+		"completion_tokens": u.OutputTokens,
+		"total_tokens":      u.InputTokens + u.OutputTokens,
+	}
+	if u.CacheReadTokens > 0 {
+		body["prompt_tokens_details"] = map[string]any{"cached_tokens": u.CacheReadTokens}
+	}
+	if u.ReasoningTokens > 0 {
+		body["completion_tokens_details"] = map[string]any{"reasoning_tokens": u.ReasoningTokens}
+	}
+	return body
 }
 
 // statusFor maps a canonical error type to the HTTP status an OpenAI client

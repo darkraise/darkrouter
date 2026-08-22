@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 )
@@ -81,5 +82,104 @@ func TestStatusForMapsEveryErrorType(t *testing.T) {
 		if got := statusFor(tc.in); got != tc.want {
 			t.Errorf("statusFor(%s) = %d, want %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+func written(t *testing.T, resp *ir.Response) map[string]any {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	if err := WriteResponse(rec, resp); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestWriteResponseEmitsToolCalls(t *testing.T) {
+	got := written(t, &ir.Response{
+		ID: "req-1", Model: "m", StopReason: ir.StopToolUse,
+		Content: []ir.ContentBlock{{
+			Type:    ir.BlockToolUse,
+			ToolUse: &ir.ToolUse{ID: "call_a", Name: "f", Input: json.RawMessage(`{"x":1}`)},
+		}},
+	})
+	choice := got["choices"].([]any)[0].(map[string]any)
+	if choice["finish_reason"] != "tool_calls" {
+		t.Errorf("finish_reason = %v", choice["finish_reason"])
+	}
+	msg := choice["message"].(map[string]any)
+	if msg["content"] != nil {
+		t.Errorf("content = %v; a tool-call-only reply sends null", msg["content"])
+	}
+	calls := msg["tool_calls"].([]any)
+	fn := calls[0].(map[string]any)["function"].(map[string]any)
+	if fn["arguments"] != `{"x":1}` {
+		t.Errorf("arguments = %v; OpenAI takes a JSON string", fn["arguments"])
+	}
+}
+
+func TestWriteResponseEmitsReasoningContent(t *testing.T) {
+	got := written(t, &ir.Response{
+		ID: "req-1", Model: "m", StopReason: ir.StopEndTurn,
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "let me see", Signature: "sig"}},
+			{Type: ir.BlockText, Text: "42"},
+		},
+	})
+	msg := got["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+	if msg["content"] != "42" {
+		t.Errorf("content = %v", msg["content"])
+	}
+	if msg["reasoning_content"] != "let me see" {
+		t.Errorf("reasoning_content = %v", msg["reasoning_content"])
+	}
+}
+
+func TestWriteResponseReportsCachedAndReasoningTokens(t *testing.T) {
+	got := written(t, &ir.Response{
+		ID: "req-1", Model: "m", StopReason: ir.StopEndTurn,
+		Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}},
+		Usage: ir.Usage{
+			InputTokens: 10, OutputTokens: 5, CacheReadTokens: 8, ReasoningTokens: 3,
+		},
+	})
+	usage := got["usage"].(map[string]any)
+	pd := usage["prompt_tokens_details"].(map[string]any)
+	if pd["cached_tokens"].(float64) != 8 {
+		t.Errorf("cached_tokens = %v", pd["cached_tokens"])
+	}
+	cd := usage["completion_tokens_details"].(map[string]any)
+	if cd["reasoning_tokens"].(float64) != 3 {
+		t.Errorf("reasoning_tokens = %v", cd["reasoning_tokens"])
+	}
+}
+
+func TestWriteResponseMapsStopSequenceAndPauseTurn(t *testing.T) {
+	for _, sr := range []ir.StopReason{ir.StopStopSequence, ir.StopPauseTurn} {
+		got := written(t, &ir.Response{
+			ID: "r", Model: "m", StopReason: sr,
+			Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}},
+		})
+		fr := got["choices"].([]any)[0].(map[string]any)["finish_reason"]
+		if fr != "stop" {
+			t.Errorf("finish_reason for %q = %v, want stop", sr, fr)
+		}
+	}
+}
+
+func TestWriteResponseUsesTheClockSeam(t *testing.T) {
+	orig := now
+	now = func() time.Time { return time.Unix(1700000000, 0) }
+	defer func() { now = orig }()
+
+	got := written(t, &ir.Response{
+		ID: "r", Model: "m", StopReason: ir.StopEndTurn,
+		Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}},
+	})
+	if got["created"].(float64) != 1700000000 {
+		t.Errorf("created = %v", got["created"])
 	}
 }
