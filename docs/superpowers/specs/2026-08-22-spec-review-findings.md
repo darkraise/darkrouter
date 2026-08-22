@@ -102,12 +102,14 @@ The columns become `input_price_micros_per_mtok` / `output_price_micros_per_mtok
 **D13 — One term: "surface".** The seven-value enum (`llm`, `embedding`, `image`, `tts`, `stt`,
 `rerank`, `moderation`) is called a surface everywhere. "Service kind" is retired. *(R1-C22)*
 
-### 2.3 Still open — needs a decision before phase 5
+### 2.3 Applied provisionally — revisit before phase 5
 
 **O1 — The rerank wire shape.** OpenAI has no rerank endpoint; Cohere v2, Jina, and Voyage differ.
-Recommendation: adopt Cohere v2 as Darkrouter's rerank contract, keep the `openaicompat` kind, and
-let each preset declare its rerank path. Providers whose shape deviates materially are excluded from
-the surface rather than special-cased. *(R4-F15/A8, R1-C21)*
+The specs adopt **Cohere v2** as Darkrouter's rerank contract, keeping the `openaicompat` kind, with
+each preset declaring its own rerank path via the `rerank-path=` quirk. Providers whose shape deviates
+materially are excluded from the surface rather than special-cased. This was applied as the
+recommendation rather than settled by the operator, and should be revisited if the actual provider mix
+argues for Jina's or Voyage's shape. *(R4-F15/A8, R1-C21)*
 
 ---
 
