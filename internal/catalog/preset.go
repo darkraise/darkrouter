@@ -23,43 +23,43 @@ type Preset struct {
 	BaseURL     string   `yaml:"base_url"`
 	Auth        Auth     `yaml:"auth"`
 	Surfaces    []string `yaml:"surfaces"`
-	ModelsDevID string   `yaml:"models_dev_id"`
+	ModelsDevID string   `yaml:"models_dev_id,omitempty"`
 
 	// NoModelsDev is the explicit exemption spec §10 requires. Without it an
 	// entry that merely forgot its join key is indistinguishable from one that
 	// genuinely has no models.dev counterpart.
-	NoModelsDev bool     `yaml:"no_models_dev"`
-	FreeTier    bool     `yaml:"free_tier"`
-	Website     string   `yaml:"website"`
-	Quirks      []string `yaml:"quirks"`
+	NoModelsDev bool     `yaml:"no_models_dev,omitempty"`
+	FreeTier    bool     `yaml:"free_tier,omitempty"`
+	Website     string   `yaml:"website,omitempty"`
+	Quirks      []string `yaml:"quirks,omitempty"`
 
 	// ModelsURL overrides the listing endpoint the kind would otherwise
 	// derive. Some OpenAI-compatible upstreams serve chat and listing from
 	// different hosts.
-	ModelsURL string `yaml:"models_url"`
+	ModelsURL string `yaml:"models_url,omitempty"`
 
 	// ModelAliases maps a Darkrouter model id to the models.dev model id the
 	// normalization rule failed to reach. Spec §4.1.
-	ModelAliases map[string]string `yaml:"model_aliases"`
+	ModelAliases map[string]string `yaml:"model_aliases,omitempty"`
 
 	// ModelTraits declares per-generation request-shape facts models.dev
 	// cannot express. See TraitRule.
-	ModelTraits []TraitRule `yaml:"model_traits"`
+	ModelTraits []TraitRule `yaml:"model_traits,omitempty"`
 
 	// CapabilityProbe names a runtime that reports its own capabilities.
 	// Empty means none; "ollama" means /api/show. Spec §6.
-	CapabilityProbe string `yaml:"capability_probe"`
+	CapabilityProbe string `yaml:"capability_probe,omitempty"`
 
-	OAuth *OAuth `yaml:"oauth"`
+	OAuth *OAuth `yaml:"oauth,omitempty"`
 }
 
 type Auth struct {
 	Style string `yaml:"style"`
 	// Header overrides the header name for the api-key style, whose spelling
 	// varies per upstream.
-	Header string `yaml:"header"`
+	Header string `yaml:"header,omitempty"`
 	// QueryParam names the parameter for the query-param style.
-	QueryParam string `yaml:"query_param"`
+	QueryParam string `yaml:"query_param,omitempty"`
 }
 
 type OAuth struct {
@@ -86,9 +86,9 @@ type TraitRule struct {
 	// Match is a substring of the normalized model name. Rules are evaluated
 	// longest-match-first so "opus-4-5" cannot be shadowed by "opus-4".
 	Match        string `yaml:"match"`
-	Adaptive     bool   `yaml:"adaptive"`
-	ManualBudget bool   `yaml:"manual_budget"`
-	FreeSampling bool   `yaml:"free_sampling"`
+	Adaptive     bool   `yaml:"adaptive,omitempty"`
+	ManualBudget bool   `yaml:"manual_budget,omitempty"`
+	FreeSampling bool   `yaml:"free_sampling,omitempty"`
 }
 
 type Presets map[string]Preset
