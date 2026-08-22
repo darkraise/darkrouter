@@ -733,3 +733,525 @@ git commit -m "test(exec): pin empty streams and warning scope"
 ```
 
 ---
+
+### Task 4: Extract the request prologue
+
+**Files:**
+- Create: `internal/exec/resolve.go`
+- Modify: `internal/exec/exec.go` (`Handle`)
+- Modify: `internal/exec/count.go` (`HandleCount`)
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: `exec.errorWriter`, `exec.resolved`, and `(*Executor).resolve(...) (resolved, bool)`. Tasks 6 onward and all seven new routes go through it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-medium
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 2 = 5
+**Approach:** inline - skip 2: both copies exist and the extraction is the intersection of two functions already in the tree.
+
+The prologue — fetch providers, freeze the snapshot, resolve candidates, record the trace — is **already** duplicated between `Handle` (`internal/exec/exec.go`) and `HandleCount` (`internal/exec/count.go`), and seven new routes would make nine copies. Extracting it now is what keeps each new route a thin constructor rather than a third transcription of the same twenty lines.
+
+The two copies differ in exactly three ways, and each becomes a parameter rather than a fork:
+
+- `Handle` takes its surface from the passthrough; `HandleCount` hardcodes `ir.SurfaceLLM`. Both become the caller's `router.Query`.
+- `Handle` records `Candidates` and `Skips` on the record; `HandleCount` discards the skips. Both record — dropping the trace was an omission, not a decision, and a count that routes to nothing should be as diagnosable as a chat request that does.
+- `Handle` sets `X-Darkrouter-Attempts`; `HandleCount` does not. That stays in the callers, because a count that never attempts should not claim it did.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/exec/exec_test.go`:
+
+```go
+func TestResolveRecordsTheTraceForEveryRoute(t *testing.T) {
+	// HandleCount discarded its skips, so a count request that routed to
+	// nothing was undiagnosable. Sharing the prologue fixes that as a side
+	// effect, and this is what pins it.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "chat-only", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [chat-only]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"nonexistent","messages":[{"role":"user","content":"hi"}]}`))
+	e.HandleCount(w, r, anthropicedge.New(), "anthropic")
+
+	got := rec.only(t)
+	if got.RequestedModel != "nonexistent" {
+		t.Errorf("requested model = %q", got.RequestedModel)
+	}
+	if got.ErrorCode == "" {
+		t.Error("a count that resolved to nothing recorded no error code")
+	}
+}
+```
+
+Add `anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"` to the imports if it is not present.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run TestResolveRecordsTheTrace -race -count=1 -v
+```
+
+Expected: FAIL. The count path resolves nothing and returns an error to the client, but the record's `ErrorCode` is set — read the actual failure. If it already passes, the behavior is better than assumed; keep the test and note it in the commit rather than deleting it.
+
+- [ ] **Step 3: Write the extraction**
+
+Create `internal/exec/resolve.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/catalog"
+	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/router"
+	"github.com/darkraise/darkrouter/internal/store"
+)
+
+// errorWriter is the slice of a dialect the prologue needs. Both edge.Dialect
+// and edge.CountWriter satisfy it, and so will every auxiliary surface's
+// writer — the prologue must be able to report a failure in whatever shape the
+// client speaks, per master design §14.
+type errorWriter interface {
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
+// resolved is everything the prologue produced, frozen for the attempt loop.
+type resolved struct {
+	Candidates []router.Candidate
+	ByID       map[string]provider.Provider
+	Catalog    catalog.Reader
+	Cfg        *config.Config
+}
+
+// resolve runs the prologue every route shares: fetch the provider set, freeze
+// the router snapshot, resolve candidates, and record the trace.
+//
+// It reports false when it has already written an error to w — the caller must
+// return immediately rather than inspecting the zero resolved. Returning a
+// bool rather than an error keeps the "who writes the response" question
+// answered in exactly one place.
+//
+// The snapshot freezes every input the router is allowed to read, and health is
+// resolved to booleans here rather than inside Resolve, which is what keeps the
+// router a pure function of its arguments.
+func (e *Executor) resolve(ctx context.Context, w http.ResponseWriter, ew errorWriter,
+	q router.Query, rec *store.RequestRecord, cfg *config.Config, start time.Time) (resolved, bool) {
+
+	rec.Surface = string(q.Surface)
+	rec.RequestedModel = q.Model
+
+	providers, err := e.src.Providers(ctx)
+	if err != nil {
+		rec.ErrorCode = string(ir.ErrDarkrouter)
+		_ = ew.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()})
+		return resolved{}, false
+	}
+
+	cat := e.catalogFor(providers)
+	snap := router.Snapshot{At: start, Providers: providers, Catalog: cat, Config: cfg}
+	if e.deps.Fleet != nil {
+		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
+		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
+	}
+
+	cands, skips, rerr := router.Resolve(q, snap)
+	// Recorded before the error check: the skips are what explain an empty
+	// candidate list, so discarding them on the failure path throws away the
+	// only evidence of why nothing routed.
+	rec.Candidates = traceCandidates(cands)
+	rec.Skips = traceSkips(skips)
+
+	if rerr != nil {
+		e2 := routerError(rerr)
+		rec.ErrorCode = string(e2.Type)
+		_ = ew.WriteError(w, e2)
+		return resolved{}, false
+	}
+
+	byID := make(map[string]provider.Provider, len(providers))
+	for _, p := range providers {
+		byID[p.ID] = p
+	}
+	return resolved{Candidates: cands, ByID: byID, Catalog: cat, Cfg: cfg}, true
+}
+```
+
+- [ ] **Step 4: Rewire both callers**
+
+In `internal/exec/exec.go`, replace everything in `Handle` from the `providers, err := e.src.Providers(...)` line through the `byID` loop with:
+
+```go
+	needs := req.Needs()
+	res, ok := e.resolve(r.Context(), w, d, router.Query{
+		Model: req.Model, Surface: surface,
+		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
+	}, rec, cfg, start)
+	if !ok {
+		return
+	}
+	e.runAttempts(w, r, d, cfg, req, res.Candidates, rec, start, res.ByID, res.Catalog)
+```
+
+The two lines above it that set `rec.Surface` and `rec.RequestedModel` come out — `resolve` sets both.
+
+In `internal/exec/count.go`, replace the same span in `HandleCount` with:
+
+```go
+	needs := req.Needs()
+	res, ok := e.resolve(r.Context(), w, d, router.Query{
+		Model: req.Model, Surface: ir.SurfaceLLM,
+		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
+	}, rec, cfg, start)
+	if !ok {
+		return
+	}
+	cands, byID := res.Candidates, res.ByID
+```
+
+and delete its now-duplicated `rec.RequestedModel` assignment. `HandleCount` keeps everything after that unchanged.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package. The prologue is behavior-preserving for `Handle`; the only change anywhere is that `HandleCount` now records its skips.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/exec/resolve.go internal/exec/exec.go internal/exec/count.go internal/exec/exec_test.go
+git commit -m "refactor(exec): extract the shared request prologue"
+```
+
+---
+
+### Task 5: The commit-aware response writer
+
+**Files:**
+- Create: `internal/exec/commitwriter.go`
+- Test: `internal/exec/commitwriter_test.go`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `exec.CommitWriter` with `Committed() bool`, `Bytes() int64`, `OnCommit(func())`, and the `http.ResponseWriter` and `http.Flusher` methods. Task 6's loop wraps every response in one.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
+**Approach:** inline - skip 2: the wrapper is a standard `http.ResponseWriter` decorator and its contract is stated in full below.
+
+Phase 3's rule is that once the first byte reaches the client there is no re-route. Today that fact is inferred from an outcome value, and `attemptStream` returns `OutcomeSuccess` for a *post-commit failure* — conflating "committed" with "succeeded". That encoding is survivable with one surface. Inheriting it into six more is not: a binary surface that reports success after writing half a truncated audio body would otherwise be indistinguishable from one that finished.
+
+So the fact becomes observable rather than reported. The loop wraps the writer, and after a surface hands back control the loop asks the **wrapper**, not the surface, whether bytes went out.
+
+`Bytes()` is not bookkeeping for its own sake — spec §7 requires the byte count to be logged precisely because a truncated binary response cannot be warned about in-band, so the trace is the only place the truncation can show up.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/exec/commitwriter_test.go`:
+
+```go
+package exec
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestCommitWriterStartsUncommitted(t *testing.T) {
+	cw := NewCommitWriter(httptest.NewRecorder())
+	if cw.Committed() {
+		t.Error("a writer nobody has written to reports committed")
+	}
+	if cw.Bytes() != 0 {
+		t.Errorf("bytes = %d", cw.Bytes())
+	}
+}
+
+func TestWriteHeaderCommits(t *testing.T) {
+	// A status line is as irrevocable as a body byte: the client has been told
+	// this attempt is the answer.
+	rec := httptest.NewRecorder()
+	cw := NewCommitWriter(rec)
+	cw.WriteHeader(http.StatusOK)
+	if !cw.Committed() {
+		t.Error("WriteHeader did not commit")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func TestWriteCommitsAndCounts(t *testing.T) {
+	rec := httptest.NewRecorder()
+	cw := NewCommitWriter(rec)
+	n, err := cw.Write([]byte("hello"))
+	if err != nil || n != 5 {
+		t.Fatalf("Write = (%d, %v)", n, err)
+	}
+	if _, err := cw.Write([]byte(" world")); err != nil {
+		t.Fatal(err)
+	}
+	if !cw.Committed() {
+		t.Error("Write did not commit")
+	}
+	if cw.Bytes() != 11 {
+		t.Errorf("bytes = %d, want 11", cw.Bytes())
+	}
+	if rec.Body.String() != "hello world" {
+		t.Errorf("body = %q", rec.Body.String())
+	}
+}
+
+func TestAnEmptyWriteDoesNotCommit(t *testing.T) {
+	// A zero-length write reaches no client and must not end the chain. A
+	// surface that probes with one would otherwise lose its failover.
+	cw := NewCommitWriter(httptest.NewRecorder())
+	if _, err := cw.Write(nil); err != nil {
+		t.Fatal(err)
+	}
+	if cw.Committed() {
+		t.Error("an empty write committed")
+	}
+}
+
+func TestOnCommitFiresExactlyOnce(t *testing.T) {
+	// The loop hangs the total-to-idle timeout switch and the diagnostics
+	// headers off this hook. Firing it twice would restart the idle clock
+	// mid-stream.
+	var fired int
+	cw := NewCommitWriter(httptest.NewRecorder())
+	cw.OnCommit(func() { fired++ })
+
+	cw.WriteHeader(http.StatusOK)
+	_, _ = cw.Write([]byte("a"))
+	_, _ = cw.Write([]byte("b"))
+
+	if fired != 1 {
+		t.Errorf("OnCommit fired %d times, want 1", fired)
+	}
+}
+
+func TestOnCommitRegisteredAfterCommitFiresImmediately(t *testing.T) {
+	// Registration order must not decide whether the hook runs, or a surface
+	// that writes before the loop finishes wiring would skip the timer switch.
+	var fired int
+	cw := NewCommitWriter(httptest.NewRecorder())
+	_, _ = cw.Write([]byte("a"))
+	cw.OnCommit(func() { fired++ })
+	if fired != 1 {
+		t.Errorf("OnCommit fired %d times, want 1", fired)
+	}
+}
+
+func TestFlushPassesThroughAndCommits(t *testing.T) {
+	// SSE surfaces flush per event. A recorder implements http.Flusher, and a
+	// wrapper that swallowed it would buffer every stream to completion.
+	rec := httptest.NewRecorder()
+	cw := NewCommitWriter(rec)
+	f, ok := any(cw).(http.Flusher)
+	if !ok {
+		t.Fatal("CommitWriter does not implement http.Flusher")
+	}
+	f.Flush()
+	if !cw.Committed() {
+		t.Error("a flush did not commit; the client has seen the headers")
+	}
+	if !rec.Flushed {
+		t.Error("the flush did not reach the underlying writer")
+	}
+}
+
+func TestHeaderIsTheUnderlyingHeader(t *testing.T) {
+	rec := httptest.NewRecorder()
+	cw := NewCommitWriter(rec)
+	cw.Header().Set("X-Test", "1")
+	if rec.Header().Get("X-Test") != "1" {
+		t.Error("Header() did not reach the underlying writer")
+	}
+	if cw.Committed() {
+		t.Error("setting a header committed; nothing has been sent yet")
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestCommitWriter|TestWriteHeaderCommits|TestWriteCommits|TestAnEmptyWrite|TestOnCommit|TestFlushPasses|TestHeaderIsThe' -v
+```
+
+Expected: FAIL to build — `undefined: NewCommitWriter`.
+
+- [ ] **Step 3: Write the wrapper**
+
+Create `internal/exec/commitwriter.go`:
+
+```go
+package exec
+
+import "net/http"
+
+// CommitWriter makes Phase 3's commit rule observable rather than reported.
+//
+// The rule is that once the first byte reaches the client there is no
+// re-route. Today the loop infers that from an outcome value, and the stream
+// path returns OutcomeSuccess for a post-commit failure — conflating
+// "committed" with "succeeded". That is survivable with one surface and not
+// with seven: a binary surface reporting success after writing half a
+// truncated body would be indistinguishable from one that finished.
+//
+// So the loop wraps the response writer and, after a surface returns, asks the
+// wrapper rather than the surface. Detecting what counts as content-bearing
+// stays with the surface — only it knows its wire format — but the record of
+// whether anything actually went out belongs here.
+//
+// It is not safe for concurrent use. One request writes to one of these from
+// one goroutine, which is what the handler contract already requires.
+type CommitWriter struct {
+	w         http.ResponseWriter
+	committed bool
+	bytes     int64
+	onCommit  []func()
+}
+
+func NewCommitWriter(w http.ResponseWriter) *CommitWriter {
+	return &CommitWriter{w: w}
+}
+
+// Committed reports whether anything has reached the client. Once true it
+// never returns false again.
+func (c *CommitWriter) Committed() bool { return c.committed }
+
+// Bytes is how many body bytes went out. Spec §7 requires this on the record:
+// a truncated binary response cannot be signalled in-band, so the trace is the
+// only place the truncation can appear.
+func (c *CommitWriter) Bytes() int64 { return c.bytes }
+
+// OnCommit registers a hook to run when the first byte goes out — the loop
+// hangs the total-to-idle timeout switch and the diagnostics headers off it.
+//
+// A hook registered after the commit runs immediately, so registration order
+// cannot decide whether it runs at all.
+func (c *CommitWriter) OnCommit(fn func()) {
+	if c.committed {
+		fn()
+		return
+	}
+	c.onCommit = append(c.onCommit, fn)
+}
+
+func (c *CommitWriter) commit() {
+	if c.committed {
+		return
+	}
+	c.committed = true
+	for _, fn := range c.onCommit {
+		fn()
+	}
+	c.onCommit = nil
+}
+
+func (c *CommitWriter) Header() http.Header { return c.w.Header() }
+
+func (c *CommitWriter) WriteHeader(status int) {
+	// A status line is as irrevocable as a body byte: the client has been told
+	// this attempt is the answer.
+	c.commit()
+	c.w.WriteHeader(status)
+}
+
+func (c *CommitWriter) Write(b []byte) (int, error) {
+	if len(b) == 0 {
+		// A zero-length write reaches no client, so it must not end the chain.
+		// net/http would send headers here, but a surface probing with an empty
+		// write has not answered anything and keeps its failover.
+		return 0, nil
+	}
+	c.commit()
+	n, err := c.w.Write(b)
+	c.bytes += int64(n)
+	return n, err
+}
+
+// Flush forwards to the underlying writer. SSE surfaces flush per event, and a
+// wrapper that swallowed it would buffer every stream to completion.
+func (c *CommitWriter) Flush() {
+	c.commit()
+	if f, ok := c.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+var (
+	_ http.ResponseWriter = (*CommitWriter)(nil)
+	_ http.Flusher        = (*CommitWriter)(nil)
+)
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestCommitWriter|TestWriteHeaderCommits|TestWriteCommits|TestAnEmptyWrite|TestOnCommit|TestFlushPasses|TestHeaderIsThe' -race -count=1 -v
+```
+
+Expected: PASS, eight tests.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing consumes `CommitWriter` yet; Task 6 wires it in.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/exec/commitwriter.go internal/exec/commitwriter_test.go
+git commit -m "feat(exec): add a commit-aware response writer"
+```
+
+---
