@@ -25,6 +25,13 @@ type Provider struct {
 	Kind    string
 	BaseURL string
 
+	// Preset names the shipped entry this provider was created from, or is
+	// empty for an uncatalogued one. It is how quirks, surfaces, model traits
+	// and the models.dev join key are reached at request time.
+	Preset string
+	// AuthStyle is the provider row's override of its preset's style.
+	AuthStyle string
+
 	// Credentials are every enabled credential, ordered by id. Credential
 	// rotation happens before advancing to the next provider, so the router
 	// needs all of them rather than a chosen one.

@@ -35,7 +35,7 @@ func NewSQLSource(db *store.DB, key *crypto.Key) *SQLSource {
 // applies to a broken edit.
 func (s *SQLSource) Reload(ctx context.Context) error {
 	rows, err := s.db.Read.QueryContext(ctx,
-		`SELECT id, kind, base_url, priority
+		`SELECT id, preset, kind, base_url, auth_style, priority
 		   FROM providers
 		  WHERE enabled = 1
 		  ORDER BY priority DESC, id`)
@@ -45,13 +45,13 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 	defer rows.Close()
 
 	type row struct {
-		id, kind, baseURL string
-		priority          int
+		id, preset, kind, baseURL, authStyle string
+		priority                             int
 	}
 	var raw []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.id, &r.kind, &r.baseURL, &r.priority); err != nil {
+		if err := rows.Scan(&r.id, &r.preset, &r.kind, &r.baseURL, &r.authStyle, &r.priority); err != nil {
 			return fmt.Errorf("scan provider: %w", err)
 		}
 		raw = append(raw, r)
@@ -79,6 +79,7 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 		}
 		out = append(out, Provider{
 			ID: r.id, Kind: r.kind, BaseURL: r.baseURL,
+			Preset: r.preset, AuthStyle: r.authStyle,
 			Credentials: enabled,
 			Priority:    r.priority, Models: models,
 		})
@@ -157,6 +158,7 @@ func revisionOf(ps []Provider) uint64 {
 	for _, p := range sorted {
 		_, _ = h.Write([]byte(p.ID))
 		_, _ = h.Write([]byte(p.BaseURL))
+		_, _ = h.Write([]byte(p.Preset))
 		_, _ = h.Write([]byte(strconv.Itoa(p.Priority)))
 		for _, c := range p.Credentials {
 			_, _ = h.Write([]byte(c.ID))
