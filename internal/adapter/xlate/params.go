@@ -8,8 +8,9 @@ import (
 )
 
 // DefaultMaxTokens is the cap substituted when a target requires one and
-// neither the request nor the catalog supplies it. Phase 6 replaces the
-// catalog half; until then every substitution carries a warning.
+// neither the request nor the catalog supplies it. Every substitution carries a
+// warning, so a truncated answer is traceable to it rather than looking like
+// the model stopping early.
 const DefaultMaxTokens = 4096
 
 // MaxCacheBreakpoints is Anthropic's hard limit. A fifth marker is a 400 the
@@ -61,18 +62,41 @@ func BudgetEffort(budget int) string {
 	}
 }
 
-// RequiredMaxTokens supplies the cap a target demands. A request that carries
-// none gets DefaultMaxTokens and a warning, so a truncated answer is traceable
-// to the substitution rather than looking like the model stopping early.
-func RequiredMaxTokens(req *ir.Request, target string) (int, []ir.Warning) {
+// RequiredMaxTokens supplies the cap a target demands.
+//
+// catalogMax is the model's real maximum output, or 0 when the catalog does not
+// know it. Three cases, each warned about when it changes what the client sent:
+//
+//   - No cap in the request: the catalog's maximum, or DefaultMaxTokens.
+//   - A cap above the model's maximum: clamped. Forwarding it is a 400 the
+//     client cannot diagnose, and keeping a servable request servable is the
+//     same choice phase 4 made for a thinking budget that exceeded max_tokens.
+//   - A cap the model can honor: passed through untouched and unwarned.
+func RequiredMaxTokens(req *ir.Request, target string, catalogMax int) (int, []ir.Warning) {
 	if req.MaxTokens != nil && *req.MaxTokens > 0 {
-		return *req.MaxTokens, nil
+		asked := *req.MaxTokens
+		if catalogMax > 0 && asked > catalogMax {
+			return catalogMax, []ir.Warning{{
+				Field:  "max_tokens",
+				Target: target,
+				Reason: "above the model's maximum output; clamped to " + strconv.Itoa(catalogMax),
+			}}
+		}
+		return asked, nil
+	}
+	if catalogMax > 0 {
+		return catalogMax, []ir.Warning{{
+			Field:  "max_tokens",
+			Target: target,
+			Reason: "required by the target and absent from the request; substituted " +
+				"the model's maximum, " + strconv.Itoa(catalogMax),
+		}}
 	}
 	return DefaultMaxTokens, []ir.Warning{{
 		Field:  "max_tokens",
 		Target: target,
-		Reason: "required by the target and absent from the request; substituted " +
-			strconv.Itoa(DefaultMaxTokens),
+		Reason: "required by the target and absent from the request, and the catalog " +
+			"does not know the model's maximum; substituted " + strconv.Itoa(DefaultMaxTokens),
 	}}
 }
 
