@@ -5,7 +5,6 @@ import (
 	"errors"
 	"iter"
 	"net/http"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
@@ -18,7 +17,7 @@ func chunk(id, model string, delta map[string]any, finish any) map[string]any {
 	return map[string]any{
 		"id":      id,
 		"object":  "chat.completion.chunk",
-		"created": time.Now().Unix(),
+		"created": now().Unix(),
 		"model":   model,
 		"choices": []any{map[string]any{
 			"index":         0,
@@ -45,6 +44,11 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 	// id and model arrive on message_start; without capturing them every chunk
 	// would report an empty model, which clients surface to users.
 	var id, model string
+	// OpenAI numbers tool calls densely from zero in the order they open. The
+	// IR block index is not that number — the openaicompat adapter offsets tool
+	// blocks by 1000 to keep them clear of the text block — so the two are
+	// mapped rather than passed through.
+	toolIndex := map[int]int{}
 	var sendErr error
 	for ev, err := range events {
 		if err != nil {
@@ -58,16 +62,66 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			break
 		}
 		switch ev.Type {
-		case ir.EventPing, ir.EventBlockStart, ir.EventBlockStop:
+		case ir.EventPing, ir.EventBlockStop:
 			continue
 		case ir.EventMessageStart:
 			id, model = ev.ID, ev.Model
 			sendErr = send(chunk(id, model, map[string]any{"role": "assistant"}, nil))
-		case ir.EventContentDelta:
-			if ev.Delta == nil || ev.Delta.Type != ir.BlockText {
+		case ir.EventBlockStart:
+			if ev.Delta == nil || ev.Delta.Type != ir.BlockToolUse {
 				continue
 			}
-			sendErr = send(chunk(id, model, map[string]any{"content": ev.Delta.Text}, nil))
+			idx := len(toolIndex)
+			toolIndex[ev.Index] = idx
+			sendErr = send(chunk(id, model, map[string]any{
+				"tool_calls": []any{map[string]any{
+					"index": idx, "id": ev.Delta.ToolID, "type": "function",
+					"function": map[string]any{"name": ev.Delta.ToolName, "arguments": ""},
+				}},
+			}, nil))
+		case ir.EventContentDelta:
+			if ev.Delta == nil {
+				continue
+			}
+			switch ev.Delta.Type {
+			case ir.BlockText:
+				sendErr = send(chunk(id, model, map[string]any{"content": ev.Delta.Text}, nil))
+			case ir.BlockThinking:
+				if ev.Delta.Thinking == "" {
+					continue
+				}
+				sendErr = send(chunk(id, model, map[string]any{"reasoning_content": ev.Delta.Thinking}, nil))
+			case ir.BlockToolUse:
+				if ev.Delta.ToolInput == "" {
+					continue
+				}
+				idx, ok := toolIndex[ev.Index]
+				if !ok {
+					// A provider that streams arguments without ever opening the
+					// block still has to reach the client, so the block is
+					// opened here rather than dropping the call.
+					idx = len(toolIndex)
+					toolIndex[ev.Index] = idx
+					if err := send(chunk(id, model, map[string]any{
+						"tool_calls": []any{map[string]any{
+							"index": idx, "id": ev.Delta.ToolID, "type": "function",
+							"function": map[string]any{"name": ev.Delta.ToolName, "arguments": ""},
+						}},
+					}, nil)); err != nil {
+						return err
+					}
+				}
+				// No id on a continuation: repeating it makes some clients open
+				// a second call.
+				sendErr = send(chunk(id, model, map[string]any{
+					"tool_calls": []any{map[string]any{
+						"index":    idx,
+						"function": map[string]any{"arguments": ev.Delta.ToolInput},
+					}},
+				}, nil))
+			default:
+				continue
+			}
 		case ir.EventMessageDelta:
 			if ev.Usage == nil {
 				continue
