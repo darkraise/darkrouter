@@ -9995,6 +9995,13 @@ git commit -m "feat(edge/gemini): write candidates and errors"
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
 
+**The stream goldens must exercise both Gemini wire forms.** `dialects()`
+returns `geminiedge.New()`, whose `SSE` field is false, so a harness that reuses
+it records the JSON-array body — which carries no `data:` framing at all, and
+whose golden file therefore comes out empty while the suite still passes. Use a
+`streamDialects()` map with explicit `gemini-sse` and `gemini-array` entries,
+and teach the reader to parse a bare JSON array.
+
 Two shapes, one event loop. `?alt=sse` frames each chunk as `data: {...}`;
 without it the response is one JSON array written incrementally — `[`, then
 chunks separated by commas, then `]`. Both are flushed per chunk, or the array
