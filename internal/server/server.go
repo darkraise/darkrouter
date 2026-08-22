@@ -8,17 +8,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/crypto"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/exec"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // Version is stamped at build time with -ldflags "-X ...Version=v1.2.3".
@@ -30,19 +35,39 @@ const terminalGrace = 500 * time.Millisecond
 
 type Server struct {
 	store   *config.Store
-	src     provider.Source
+	db      *store.DB
+	src     *provider.SQLSource
 	ex      *exec.Executor
-	started time.Time
+	logw    *store.LogWriter
+	breaker *health.Breaker
+	persist *health.Persister
+
+	started  time.Time
+	warnings []string
 }
 
-func New(store *config.Store) *Server {
-	src := provider.NewYAMLSource(store)
-	return &Server{
-		store:   store,
-		src:     src,
-		ex:      exec.New(store, src, openaicompat.New(), exec.Deps{}),
-		started: time.Now(),
+// New wires the gateway. It loads the provider set eagerly so a bad credential
+// fails startup rather than every request.
+func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings []string) (*Server, error) {
+	cfg := cfgStore.Current()
+
+	src := provider.NewSQLSource(db, key)
+	if err := src.Reload(context.Background()); err != nil {
+		return nil, fmt.Errorf("load providers: %w", err)
 	}
+
+	logw := store.NewLogWriter(db, store.LogOptions{})
+	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
+
+	return &Server{
+		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
+		persist: health.NewPersister(breaker, db, 5*time.Second),
+		ex: exec.New(cfgStore, src, openaicompat.New(), exec.Deps{
+			Log: logw, Health: breaker,
+		}),
+		started:  time.Now(),
+		warnings: startupWarnings,
+	}, nil
 }
 
 func (s *Server) ProxyHandler() http.Handler {
@@ -129,11 +154,20 @@ func (s *Server) AdminHandler() http.Handler {
 		// Read once: two calls could straddle a reload and report a valid config
 		// with an error attached, or an invalid one with none.
 		cfgErr := s.store.LastError()
+
+		// Startup warnings first: they explain state the config file cannot,
+		// such as a providers block that is no longer the source of truth.
+		warnings := append(append([]string{}, s.warnings...), cfg.Warnings...)
+
 		body := map[string]any{
 			"config_valid": cfgErr == nil,
-			"warnings":     cfg.Warnings,
+			"warnings":     warnings,
 			"uptime":       time.Since(s.started).Round(time.Second).String(),
 			"version":      Version,
+			// A non-zero count means usage_daily is a lower bound. It counts
+			// records, not tokens or dollars.
+			"log_records_dropped": s.logw.Dropped(),
+			"log_records_written": s.logw.Written(),
 		}
 		if cfgErr != nil {
 			body["config_error"] = cfgErr.Error()
@@ -146,7 +180,14 @@ func (s *Server) AdminHandler() http.Handler {
 	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = w.Write([]byte("# Phase 2 populates this endpoint.\n"))
+		fmt.Fprintf(w,
+			"# HELP darkrouter_log_records_dropped_total Request records discarded because the log channel was full.\n"+
+				"# TYPE darkrouter_log_records_dropped_total counter\n"+
+				"darkrouter_log_records_dropped_total %d\n"+
+				"# HELP darkrouter_log_records_written_total Request records persisted.\n"+
+				"# TYPE darkrouter_log_records_written_total counter\n"+
+				"darkrouter_log_records_written_total %d\n",
+			s.logw.Dropped(), s.logw.Written())
 	})
 	return mux
 }
@@ -157,6 +198,49 @@ func (s *Server) Run(ctx context.Context) error {
 	// path, not only on the caller's cancellation.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Workers get a context independent of the request lifecycle. Cancelling
+	// them with the handlers would stop the log writer while requests were
+	// still producing records, and the drain would race the producers.
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	// Backstop for every exit path, including a listener that fails to bind
+	// before the ordered shutdown below is ever reached. On the normal path the
+	// explicit stop runs first and this is a no-op.
+	defer func() {
+		stopWorkers()
+		workers.Wait()
+	}()
+	startWorker := func(name string, fn func(context.Context) error) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			if err := fn(workerCtx); err != nil {
+				log.Printf("%s: %v", name, err)
+			}
+		}()
+	}
+
+	if err := s.persist.Restore(workerCtx); err != nil {
+		// Not fatal: an unreadable health table costs a restart's worth of
+		// accuracy, and refusing to serve over it would be worse.
+		s.store.RecordError(fmt.Errorf("health rehydration: %w", err))
+	}
+
+	startWorker("log writer", s.logw.Run)
+	startWorker("health persister", s.persist.Run)
+	startWorker("rollup", func(c context.Context) error {
+		return store.RunRollup(c, s.db, time.Hour)
+	})
+	startWorker("retention", func(c context.Context) error {
+		return store.RunRetention(c, s.db, s.store, time.Hour)
+	})
+	startWorker("config watcher", func(c context.Context) error {
+		// A watcher that cannot start leaves hot reload silently dead, so the
+		// failure has to reach /healthz rather than being discarded.
+		s.store.RecordError(s.store.Watch(c))
+		return nil
+	})
 
 	cfg := s.store.Current()
 
@@ -199,11 +283,7 @@ func (s *Server) Run(ctx context.Context) error {
 	errCh := make(chan error, 2)
 	go func() { errCh <- ignoreClosed(proxy.Serve(proxyLn)) }()
 	go func() { errCh <- ignoreClosed(admin.Serve(adminLn)) }()
-	go func() {
-		// A watcher that cannot start leaves hot reload silently dead, so the
-		// failure has to reach /healthz rather than being discarded.
-		s.store.RecordError(s.store.Watch(ctx))
-	}()
+
 
 	select {
 	case err := <-errCh:
@@ -235,6 +315,12 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	_ = admin.Shutdown(drain)
 	_ = admin.Close()
+
+	// In-flight requests have finished, so nothing more will be produced.
+	// Stopping the workers now drains the log channel and flushes health, in
+	// the order master design §16 fixes.
+	stopWorkers()
+	workers.Wait()
 	return shutdownErr
 }
 

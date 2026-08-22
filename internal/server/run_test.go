@@ -2,14 +2,19 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // freePort returns a port that was listenable a moment ago. Racy in principle,
@@ -35,11 +40,11 @@ func serverOn(t *testing.T, proxyAddr, adminAddr string) *Server {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store)
+	return serverBackedBy(t, cfgStore)
 }
 
 func TestRunReturnsOnContextCancelAndReleasesPorts(t *testing.T) {
@@ -149,3 +154,177 @@ var errWatcherDead = errWatcher{}
 type errWatcher struct{}
 
 func (errWatcher) Error() string { return "watcher: could not start" }
+
+// serverBackedBy builds a Server on a temporary database, so every test in this
+// package exercises the real persistence wiring.
+func serverBackedBy(t *testing.T, cfgStore *config.Store) *Server {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	key, err := store.OpenKeyring(ctx, db, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mirror what main.go does on first start: providers live in SQLite from
+	// phase 2 on, so a config that declares them has to be imported before the
+	// server can serve them.
+	if _, err := store.ImportFromConfig(ctx, db, key, cfgStore.Current()); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func testConfigStore(t *testing.T, dir string) *config.Store {
+	t.Helper()
+	path := filepath.Join(dir, "darkrouter.yaml")
+	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfgStore
+}
+
+func TestHealthzReportsDroppedRecordsAndWarnings(t *testing.T) {
+	dir := t.TempDir()
+	cfgStore := testConfigStore(t, dir)
+
+	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	key, err := store.OpenKeyring(ctx, db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := New(cfgStore, db, key, []string{"a startup warning"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rr, httptest.NewRequest("GET", "/healthz", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d", rr.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["log_records_dropped"]; !ok {
+		t.Error("healthz must report the log drop counter; without it a shortfall in spend is invisible")
+	}
+	warnings, _ := body["warnings"].([]any)
+	found := false
+	for _, w := range warnings {
+		if s, _ := w.(string); s == "a startup warning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("startup warnings must reach healthz, got %v", warnings)
+	}
+}
+
+func TestMetricsReportsCounters(t *testing.T) {
+	dir := t.TempDir()
+	cfgStore := testConfigStore(t, dir)
+	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := store.OpenKeyring(ctx, db, "master")
+	s, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rr, httptest.NewRequest("GET", "/metrics", nil))
+	if !strings.Contains(rr.Body.String(), "darkrouter_log_records_dropped_total") {
+		t.Errorf("metrics = %s", rr.Body.String())
+	}
+}
+
+// A done criterion: a cooldown survives a restart.
+func TestCooldownSurvivesAGracefulRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "darkrouter.db")
+	ctx := context.Background()
+	k := health.Key{ProviderID: "groq", KeyID: "k1", Model: "m"}
+
+	// First process: cool the triple, then flush on shutdown.
+	db1, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db1.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b1 := health.New(3, 15*time.Minute)
+	p1 := health.NewPersister(b1, db1, time.Hour)
+	for i := 0; i < 3; i++ {
+		b1.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	}
+	if b1.Available(k) {
+		t.Fatal("the triple should be cooling before the restart")
+	}
+	runCtx, stop := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- p1.Run(runCtx) }()
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := db1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second process: rehydrate and confirm the cooldown and counter survived.
+	db2, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	if err := db2.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b2 := health.New(3, 15*time.Minute)
+	p2 := health.NewPersister(b2, db2, time.Hour)
+	if err := p2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b2.Available(k) {
+		t.Fatal("the cooldown did not survive the restart")
+	}
+	snap := b2.Snapshot()
+	if len(snap) != 1 || snap[0].ConsecutiveFailures != 3 {
+		t.Errorf("failure counter did not survive: %+v", snap)
+	}
+}

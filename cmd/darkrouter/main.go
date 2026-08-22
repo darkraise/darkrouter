@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -35,8 +36,12 @@ func main() {
 func runServer(args []string) error {
 	fs := flag.NewFlagSet("darkrouter", flag.ExitOnError)
 	path := fs.String("config", "darkrouter.yaml", "path to the configuration file")
+	dbPath := fs.String("db", "", "path to the database file (default: darkrouter.db beside the config)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *dbPath == "" {
+		*dbPath = filepath.Join(filepath.Dir(*path), "darkrouter.db")
 	}
 
 	cfgStore, err := config.NewStore(*path, os.LookupEnv)
@@ -47,14 +52,51 @@ func runServer(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	db, err := store.Open(*dbPath)
+	if err != nil {
+		return err
+	}
+	// Closed last, after Run has drained the log channel and flushed health.
+	defer db.Close()
+
+	if err := db.Migrate(context.Background()); err != nil {
+		return err
+	}
+	key, err := store.OpenKeyring(context.Background(), db, os.Getenv("DARKROUTER_MASTER_KEY"))
+	if err != nil {
+		return err
+	}
+
 	cfg := cfgStore.Current()
+	var warnings []string
+
+	res, err := store.ImportFromConfig(context.Background(), db, key, cfg)
+	if err != nil {
+		return err
+	}
+	if res.Imported {
+		log.Printf("imported %d providers from %s into the database", res.Providers, *path)
+	}
+	stale, err := store.StaleBlockWarning(context.Background(), db, cfg)
+	if err != nil {
+		return err
+	}
+	if stale != "" {
+		warnings = append(warnings, stale)
+	}
+
+	srv, err := server.New(cfgStore, db, key, warnings)
+	if err != nil {
+		return err
+	}
+
 	log.Printf("darkrouter %s listening: proxy %s admin %s",
 		server.Version, cfg.Server.ProxyListen, cfg.Server.AdminListen)
-	for _, w := range cfg.Warnings {
+	for _, w := range append(warnings, cfg.Warnings...) {
 		log.Printf("config warning: %s", w)
 	}
 
-	if err := server.New(cfgStore).Run(ctx); err != nil {
+	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server: %w", err)
 	}
 	log.Print("darkrouter stopped")
