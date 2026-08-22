@@ -16,7 +16,7 @@ providers:
     api_key: ${GROQ_KEY}
     priority: 10
     models:
-      - llama-3.3-70b-versatile
+      - openai/gpt-oss-120b
 
 policy:
   timeout:

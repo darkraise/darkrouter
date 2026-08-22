@@ -22,7 +22,7 @@ Then:
 ```bash
 curl -N http://localhost:8080/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"model":"llama-3.3-70b-versatile","stream":true,
+  -d '{"model":"openai/gpt-oss-120b","stream":true,
        "messages":[{"role":"user","content":"say hi"}]}'
 ```
 
