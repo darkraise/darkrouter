@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
+	"github.com/darkraise/darkrouter/internal/edge"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -75,33 +75,29 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 func (s *Server) ProxyHandler() http.Handler {
 	mux := http.NewServeMux()
-	d := openaiedge.New()
-	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		s.ex.Handle(w, r, d)
-	})
-	mux.HandleFunc("GET /v1/models", s.handleModels)
-	return s.withProxyAuth(mux)
+	oa := openaiedge.New()
+	mux.HandleFunc("POST /v1/chat/completions", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, oa)
+	}))
+	mux.HandleFunc("GET /v1/models", s.authed(oa, s.handleModels))
+	return mux
 }
 
-// withProxyAuth enforces the optional bearer token. The token is read live
-// because proxy_token is hot-reloadable, unlike the listen addresses.
-func (s *Server) withProxyAuth(next http.Handler) http.Handler {
-	d := openaiedge.New()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// authed enforces the optional proxy token in the route's own dialect. The
+// token is read live because proxy_token is hot-reloadable, unlike the listen
+// addresses, and a rejection is written in the dialect the client speaks so its
+// existing error handling applies.
+func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		token := s.store.Current().Server.ProxyToken
-		if token == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		got := parseBearer(r.Header.Get("Authorization"))
-		if !constantTimeEqual(got, token) {
+		if token != "" && !constantTimeEqual(d.ProxyToken(r), token) {
 			_ = d.WriteError(w, &ir.Error{
 				Type: ir.ErrAuthentication, Message: "invalid proxy token",
 			})
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
+		h(w, r)
+	}
 }
 
 // constantTimeEqual compares two secrets without leaking their lengths.
@@ -111,15 +107,6 @@ func constantTimeEqual(got, want string) bool {
 	g := sha256.Sum256([]byte(got))
 	w := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
-}
-
-// parseBearer extracts the token. RFC 7235 auth schemes are case-insensitive.
-func parseBearer(h string) string {
-	scheme, token, found := strings.Cut(h, " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
-		return ""
-	}
-	return strings.TrimSpace(token)
 }
 
 // handleModels lists configured models. Aliases would be listed first, but

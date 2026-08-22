@@ -18,6 +18,13 @@ type Passthrough struct {
 
 type Dialect interface {
 	Name() string
+
+	// ProxyToken extracts the inbound proxy credential in this dialect's own
+	// form. Master design §13: an OpenAI client sends Authorization: Bearer, an
+	// Anthropic client x-api-key, a Gemini client x-goog-api-key or ?key=. All
+	// three are compared against the same server.proxy_token.
+	ProxyToken(r *http.Request) string
+
 	ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *Passthrough, error)
 	WriteResponse(w http.ResponseWriter, resp *ir.Response) error
 	WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error
