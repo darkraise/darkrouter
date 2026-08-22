@@ -328,3 +328,36 @@ func TestCooldownSurvivesAGracefulRestart(t *testing.T) {
 		t.Errorf("failure counter did not survive: %+v", snap)
 	}
 }
+
+func TestRequestRowRecordsTheCandidateChain(t *testing.T) {
+	dir := t.TempDir()
+	cfgStore := testConfigStore(t, dir)
+	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := store.OpenKeyring(ctx, db, "master")
+	s, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No providers are configured, so the router refuses before any attempt and
+	// the request id must still reach the client.
+	rr := httptest.NewRecorder()
+	s.ProxyHandler().ServeHTTP(rr, httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"nope","messages":[]}`)))
+	if rr.Code != 404 {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+	if rr.Header().Get("X-Darkrouter-Request") == "" {
+		t.Error("the request id must be returned even when no attempt was made")
+	}
+	if rr.Header().Get("X-Darkrouter-Provider") != "" {
+		t.Error("no attempt was made, so no provider may be named")
+	}
+}

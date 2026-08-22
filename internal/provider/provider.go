@@ -12,16 +12,24 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
+// Credential is one usable key for a provider. Secret is plaintext and lives
+// only in memory; the store decrypts once at load.
+type Credential struct {
+	ID      string
+	Secret  string
+	Enabled bool
+}
+
 type Provider struct {
 	ID      string
 	Kind    string
 	BaseURL string
-	APIKey  string
-	// KeyID identifies the credential row the APIKey came from. The circuit
-	// breaker is keyed on (provider_id, key_id, model), so health recorded in
-	// phase 2 stays valid once phase 3 starts choosing among credentials.
-	// YAMLSource leaves it empty: config credentials have no row.
-	KeyID    string
+
+	// Credentials are every enabled credential, ordered by id. Credential
+	// rotation happens before advancing to the next provider, so the router
+	// needs all of them rather than a chosen one.
+	Credentials []Credential
+
 	Priority int
 	Models   []string
 }
@@ -43,7 +51,10 @@ func (s *YAMLSource) Providers(context.Context) ([]Provider, error) {
 	for _, p := range cfg.Providers {
 		out = append(out, Provider{
 			ID: p.ID, Kind: p.Kind, BaseURL: p.BaseURL,
-			APIKey: p.APIKey, Priority: p.Priority, Models: p.Models,
+			// A config credential has no database row, so its id is empty. The
+			// breaker keys on that empty id, which is what phase 2 already did.
+			Credentials: []Credential{{ID: "", Secret: p.APIKey, Enabled: true}},
+			Priority:    p.Priority, Models: p.Models,
 		})
 	}
 	return out, nil

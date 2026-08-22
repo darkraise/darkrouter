@@ -85,6 +85,7 @@ func cooldownFor(level int, max time.Duration) time.Duration {
 type Breaker struct {
 	mu        sync.Mutex
 	m         map[Key]*state
+	lastUsed  map[CredKey]time.Time
 	tripAfter int
 	max       time.Duration
 
@@ -102,7 +103,9 @@ func New(tripAfter int, max time.Duration) *Breaker {
 		max = 15 * time.Minute
 	}
 	return &Breaker{
-		m: make(map[Key]*state), tripAfter: tripAfter, max: max, now: time.Now,
+		m:         make(map[Key]*state),
+		lastUsed:  make(map[CredKey]time.Time),
+		tripAfter: tripAfter, max: max, now: time.Now,
 	}
 }
 
