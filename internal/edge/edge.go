@@ -13,7 +13,7 @@ import (
 type Passthrough struct {
 	Body       []byte // the raw inbound body, retained for replay across attempts
 	ModelField string // top-level JSON key holding the model, or "" when in the URL
-	Surface    string
+	Surface    ir.Surface
 }
 
 type Dialect interface {

@@ -117,11 +117,12 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
+	// A dialect that returns no passthrough, or leaves the surface unset, is
+	// serving chat. Parsing a string here was Phase 3 checking at runtime what
+	// the type system can check at compile time.
 	surface := ir.SurfaceLLM
-	if pt != nil {
-		if s, ok := ir.ParseSurface(pt.Surface); ok {
-			surface = s
-		}
+	if pt != nil && pt.Surface != "" {
+		surface = pt.Surface
 	}
 	rec.Surface = string(surface)
 	rec.RequestedModel = req.Model
