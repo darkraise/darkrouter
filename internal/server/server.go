@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -173,26 +174,14 @@ func (s *Server) handleGemini(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.src.Providers(r.Context())
-	if err != nil {
-		_ = geminiedge.New().WriteError(w, &ir.Error{
-			Type: ir.ErrDarkrouter, Message: "could not list providers",
+	entries := make([]geminiedge.ModelEntry, 0)
+	for _, m := range s.listedModels() {
+		entries = append(entries, geminiedge.ModelEntry{
+			ID: m.ID, ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens,
 		})
-		return
-	}
-	seen := map[string]bool{}
-	var models []string
-	for _, p := range ps {
-		for _, m := range p.Models {
-			if seen[m] {
-				continue
-			}
-			seen[m] = true
-			models = append(models, m)
-		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(geminiedge.ListModels(models))
+	_ = json.NewEncoder(w).Encode(geminiedge.ListModels(entries))
 }
 
 // authed enforces the optional proxy token in the route's own dialect. The
@@ -223,27 +212,59 @@ func constantTimeEqual(got, want string) bool {
 
 // handleModels lists configured models. Aliases would be listed first, but
 // Phase 1 has none; Phase 6 replaces the backing with the catalog.
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.src.Providers(r.Context())
-	if err != nil {
-		// Errors are normalized into the inbound dialect's shape, per design §14.
-		_ = openaiedge.New().WriteError(w, &ir.Error{
-			Type: ir.ErrDarkrouter, Message: "could not list providers",
-		})
-		return
-	}
+// listedModel is one row of a client-facing listing.
+type listedModel struct {
+	ID              string
+	OwnedBy         string
+	ContextWindow   int
+	MaxOutputTokens int
+}
+
+// listedModels returns the models a client should see: the configured aliases
+// first, then everything routable in the catalog.
+//
+// Aliases first is phase 1's behavior and spec §9 preserves it deliberately.
+// They are the names the operator chose for this gateway; burying them under
+// two hundred discovered ids makes it look like somebody else's catalog.
+//
+// Search excludes removed_upstream by default and keeps stale, which is the
+// asymmetry spec §5.1 exists for.
+func (s *Server) listedModels() []listedModel {
 	seen := map[string]bool{}
-	data := []any{}
-	for _, p := range ps {
-		for _, m := range p.Models {
-			if seen[m] {
-				continue
-			}
-			seen[m] = true
-			data = append(data, map[string]any{
-				"id": m, "object": "model", "owned_by": p.ID,
-			})
+	out := []listedModel{}
+
+	cfg := s.store.Current()
+	aliases := make([]string, 0, len(cfg.Aliases))
+	for name := range cfg.Aliases {
+		aliases = append(aliases, name)
+	}
+	// Map iteration is random; a listing that reorders itself between two
+	// requests looks broken in a client's model picker.
+	sort.Strings(aliases)
+	for _, name := range aliases {
+		seen[name] = true
+		out = append(out, listedModel{ID: name, OwnedBy: "darkrouter"})
+	}
+
+	for _, m := range s.cat.Snapshot().Search(catalog.Filter{Surface: ir.SurfaceLLM}) {
+		if seen[m.ModelID] {
+			continue
 		}
+		seen[m.ModelID] = true
+		out = append(out, listedModel{
+			ID: m.ModelID, OwnedBy: m.ProviderID,
+			ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens,
+		})
+	}
+	return out
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	data := []any{}
+	for _, m := range s.listedModels() {
+		data = append(data, map[string]any{
+			"id": m.ID, "object": "model", "owned_by": m.OwnedBy,
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
