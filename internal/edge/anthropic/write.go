@@ -2,7 +2,6 @@ package anthropic
 
 import (
 	"encoding/json"
-	"iter"
 	"net/http"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -127,9 +126,4 @@ func WriteError(w http.ResponseWriter, e *ir.Error) error {
 		"type":  "error",
 		"error": map[string]any{"type": name, "message": e.Message},
 	})
-}
-
-// WriteStream is implemented in Task 20.
-func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error {
-	return WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: "streaming not implemented"})
 }
