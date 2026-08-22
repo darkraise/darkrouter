@@ -182,3 +182,72 @@ func TestSQLSourceProvidersBeforeReloadIsEmptyNotNil(t *testing.T) {
 		t.Fatal("Providers must return an empty slice, not nil, before the first Reload")
 	}
 }
+
+func TestSQLSourceLoadsEveryEnabledCredential(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	first := seed(t, db, key, "groq", 0, true, "m")
+	second, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "groq", Secret: "sk-second", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps) != 1 {
+		t.Fatalf("got %d providers, want 1", len(ps))
+	}
+	creds := ps[0].Credentials
+	if len(creds) != 2 {
+		t.Fatalf("got %d credentials, want 2", len(creds))
+	}
+	// Ordered by id, which for ULIDs is insertion order. Credential rotation
+	// depends on a total, deterministic order.
+	if creds[0].ID != first || creds[1].ID != second {
+		t.Errorf("credential order = %s, %s; want %s, %s",
+			creds[0].ID, creds[1].ID, first, second)
+	}
+	if creds[1].Secret != "sk-second" {
+		t.Errorf("secret = %q", creds[1].Secret)
+	}
+}
+
+func TestSQLSourceExcludesDisabledCredentials(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	enabled := seed(t, db, key, "groq", 0, true, "m")
+	if _, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "groq", Secret: "sk-off", Enabled: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps[0].Credentials) != 1 || ps[0].Credentials[0].ID != enabled {
+		t.Errorf("credentials = %+v, want only the enabled one", ps[0].Credentials)
+	}
+}
+
+// The phase 2 fields stay populated until the attempt loop stops reading them.
+func TestSQLSourceStillPopulatesTheSingleCredentialFields(t *testing.T) {
+	db, key := newTestDB(t)
+	first := seed(t, db, key, "groq", 0, true, "m")
+
+	src := NewSQLSource(db, key)
+	if err := src.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(context.Background())
+	if ps[0].KeyID != first || ps[0].APIKey != "sk-groq" {
+		t.Errorf("legacy fields = %s/%s", ps[0].KeyID, ps[0].APIKey)
+	}
+}
