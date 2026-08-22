@@ -197,3 +197,59 @@ func TestMergeIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestPresetSurfacesAreNotShadowedByADiscoveredRow(t *testing.T) {
+	// Discovery hardcodes '["llm"]' into every row it inserts
+	// (store/catalog_lifecycle.go) and never updates it, and the models.dev
+	// sync echoes that value straight back. With the row outranking the preset,
+	// widening a preset had no effect on any discovered model: an embedding
+	// request was skipped as SkipSurface and returned "no provider offers
+	// this" — on exactly the providers whose discovery works.
+	in := mergeInput()
+	in.Presets["acme"] = Preset{
+		Name: "Acme", Kind: "openaicompat", ModelsDevID: "acme",
+		Surfaces: []string{"llm", "embeddings"},
+	}
+	in.Rows = []store.ModelRow{{
+		ProviderID: "p", ModelID: "text-embedding-3-small",
+		State: "live", CapabilitiesSource: "inferred",
+		Surfaces: []string{"llm"}, // exactly what RecordDiscoverySuccess writes
+	}}
+
+	m := find(t, Merge(in), "text-embedding-3-small")
+	if !m.DeclaresSurface(ir.SurfaceEmbeddings) {
+		t.Errorf("surfaces = %v; the discovered row's constant shadowed the preset", m.Surfaces)
+	}
+}
+
+func TestAnOverrideStillBeatsThePreset(t *testing.T) {
+	// The operator's intent is the one source that outranks the preset. It is
+	// also the only writer of per-model surfaces that will ever carry
+	// information — discovery writes a constant.
+	in := mergeInput()
+	in.Presets["acme"] = Preset{
+		Name: "Acme", Kind: "openaicompat", ModelsDevID: "acme",
+		Surfaces: []string{"llm", "embeddings"},
+	}
+	in.Overrides = []store.ModelOverride{{
+		ProviderID: "p", ModelID: "big", Surfaces: []string{"llm"},
+	}}
+	m := find(t, Merge(in), "big")
+	if len(m.Surfaces) != 1 || m.Surfaces[0] != ir.SurfaceLLM {
+		t.Errorf("surfaces = %v, want the override's [llm]", m.Surfaces)
+	}
+}
+
+func TestAPresetlessProviderFallsBackToTheRow(t *testing.T) {
+	// An uncatalogued provider declares nothing, so the row is all there is.
+	in := mergeInput()
+	in.Providers[0].Preset = ""
+	in.Rows = []store.ModelRow{{
+		ProviderID: "p", ModelID: "m", State: "live",
+		Surfaces: []string{"llm", "rerank"},
+	}}
+	m := find(t, Merge(in), "m")
+	if len(m.Surfaces) != 2 || !m.DeclaresSurface(ir.SurfaceRerank) {
+		t.Errorf("surfaces = %v, want the row's [llm rerank]", m.Surfaces)
+	}
+}
