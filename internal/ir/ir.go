@@ -2,7 +2,10 @@
 // It has no I/O and depends on no other internal package.
 package ir
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type Role string
 
@@ -83,6 +86,12 @@ type Media struct {
 	MIME string
 	Data string // base64
 	URL  string
+
+	// FileID is a provider-side handle — an OpenAI file_id, a Gemini
+	// fileData.fileUri, an Anthropic file source. It is not interchangeable
+	// with URL: a target that accepts its own handle will reject a public
+	// address and vice versa.
+	FileID string
 }
 
 type Thinking struct {
@@ -99,8 +108,24 @@ type ToolUse struct {
 
 type ToolResult struct {
 	ToolUseID string
-	Content   string
+	Content   []ContentBlock
 	IsError   bool
+}
+
+// Text flattens the text blocks. OpenAI tool messages and Gemini
+// functionResponse payloads are text-only, so both need this and both must
+// separately account for whatever it leaves behind.
+func (t *ToolResult) Text() string {
+	if t == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, blk := range t.Content {
+		if blk.Type == BlockText {
+			b.WriteString(blk.Text)
+		}
+	}
+	return b.String()
 }
 
 type CacheControl struct {
@@ -151,11 +176,17 @@ type SafetySetting struct {
 }
 
 type Request struct {
-	Model          string
-	System         []ContentBlock
-	Messages       []Message
-	Tools          []Tool
-	ToolChoice     *ToolChoice
+	Model      string
+	System     []ContentBlock
+	Messages   []Message
+	Tools      []Tool
+	ToolChoice *ToolChoice
+
+	// ParallelToolCalls is a pointer because false and unset differ: Anthropic
+	// inverts it into disable_parallel_tool_use, and sending that unasked
+	// changes behavior.
+	ParallelToolCalls *bool
+
 	MaxTokens      *int
 	Temperature    *float64
 	TopP           *float64
@@ -182,6 +213,10 @@ type Warning struct {
 	Field  string
 	Target string
 	Reason string
+}
+
+func (w Warning) String() string {
+	return w.Field + " -> " + w.Target + ": " + w.Reason
 }
 
 type Response struct {
@@ -220,6 +255,7 @@ type Delta struct {
 	Type      BlockType
 	Text      string
 	Thinking  string
+	Signature string // thinking-block signature fragment
 	ToolInput string // JSON fragment
 	ToolID    string
 	ToolName  string
@@ -238,6 +274,11 @@ type StreamEvent struct {
 	// an empty model.
 	ID    string
 	Model string
+
+	// Warnings record what this event's translation could not express. The
+	// unary path carries them on Response; without this the streaming path,
+	// which is what every CLI uses by default, could only lose things silently.
+	Warnings []Warning
 }
 
 // Needs reports the capabilities a target must have to serve this request.
@@ -255,11 +296,28 @@ func (r *Request) Needs() Needs {
 		Reasoning: r.Reasoning != nil,
 	}
 	for _, m := range r.Messages {
-		for _, b := range m.Content {
-			if b.Type == BlockImage {
-				n.Vision = true
-			}
+		if blocksHaveImage(m.Content) {
+			n.Vision = true
 		}
 	}
 	return n
+}
+
+// blocksHaveImage descends one level into tool results. A tool that returns a
+// screenshot needs vision exactly as much as a user who attaches one, and the
+// router would otherwise pick a text-only model for it.
+func blocksHaveImage(blocks []ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type == BlockImage {
+			return true
+		}
+		if b.ToolResult != nil {
+			for _, inner := range b.ToolResult.Content {
+				if inner.Type == BlockImage {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

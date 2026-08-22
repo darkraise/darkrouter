@@ -74,8 +74,11 @@ const eventOverhead = 64
 func eventBytes(ev ir.StreamEvent) int {
 	n := eventOverhead + len(ev.ID) + len(ev.Model)
 	if ev.Delta != nil {
-		n += len(ev.Delta.Text) + len(ev.Delta.Thinking) + len(ev.Delta.ToolInput) +
-			len(ev.Delta.ToolID) + len(ev.Delta.ToolName)
+		n += len(ev.Delta.Text) + len(ev.Delta.Thinking) + len(ev.Delta.Signature) +
+			len(ev.Delta.ToolInput) + len(ev.Delta.ToolID) + len(ev.Delta.ToolName)
+	}
+	for _, w := range ev.Warnings {
+		n += len(w.Field) + len(w.Target) + len(w.Reason)
 	}
 	return n
 }
