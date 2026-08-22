@@ -779,3 +779,126 @@ providers:
 		t.Errorf("Info = %+v, want the zero value", got.Info)
 	}
 }
+
+func TestInferredCandidateProducesAWarning(t *testing.T) {
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "local", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+		Source:   catalog.SourceInferred,
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [local]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+	  "model":"local",
+	  "messages":[{"role":"user","content":"hi"}],
+	  "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]
+	}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	got := rec.only(t)
+	var found bool
+	for _, s := range got.Warnings {
+		if strings.Contains(s, "capabilities") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v; the inferred-capability warning did not reach the record", got.Warnings)
+	}
+}
+
+func TestNoInferredWarningWhenNothingWasNeeded(t *testing.T) {
+	// A plain chat request against an inferred model needs no capability, so
+	// warning about it would be noise that trains people to ignore warnings.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "local", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM}, Source: catalog.SourceInferred,
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [local]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"local","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	for _, s := range rec.only(t).Warnings {
+		if strings.Contains(s, "capabilities") {
+			t.Errorf("warned about capabilities nothing asked for: %v", rec.only(t).Warnings)
+		}
+	}
+}
+
+func TestKnownCapableCandidateProducesNoWarning(t *testing.T) {
+	// The other half: once models.dev says the model has tools, the warning
+	// must stop. Otherwise every request carries it and it means nothing.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "known", State: catalog.StateLive,
+		Surfaces:     []ir.Surface{ir.SurfaceLLM},
+		Capabilities: catalog.Capabilities{Tools: true, Known: true},
+		Source:       catalog.SourceModelsDev,
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [known]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+	  "model":"known",
+	  "messages":[{"role":"user","content":"hi"}],
+	  "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]
+	}`))
+	e.Handle(w, r, openaiedge.New())
+
+	for _, s := range rec.only(t).Warnings {
+		if strings.Contains(s, "capabilities") {
+			t.Errorf("warned about a model models.dev vouched for: %v", rec.only(t).Warnings)
+		}
+	}
+}
