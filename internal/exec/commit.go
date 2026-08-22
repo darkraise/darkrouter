@@ -51,7 +51,7 @@ func newPreCommitBuffer(maxBytes int) *preCommitBuffer {
 }
 
 func (b *preCommitBuffer) add(ev ir.StreamEvent) error {
-	n := payloadBytes(ev)
+	n := eventBytes(ev)
 	if b.maxBytes > 0 && b.bytes+n > b.maxBytes {
 		return ErrPreCommitBufferFull
 	}
@@ -64,11 +64,18 @@ func (b *preCommitBuffer) add(ev ir.StreamEvent) error {
 // caller must replay exactly once — twice would duplicate the client's stream.
 func (b *preCommitBuffer) events() []ir.StreamEvent { return b.evs }
 
-// payloadBytes counts only what a provider can inflate. Pings carry nothing, so
-// a ping flood is stopped by the time bound rather than by this cap.
-func payloadBytes(ev ir.StreamEvent) int {
-	if ev.Delta == nil {
-		return 0
+// eventOverhead charges every buffered event, not only its payload.
+//
+// Without it the cap is unreachable: the only fields carrying bytes are the
+// ones that commit, so a flood of pings, message_starts, or usage deltas could
+// buffer without bound and the byte cap would protect against nothing.
+const eventOverhead = 64
+
+func eventBytes(ev ir.StreamEvent) int {
+	n := eventOverhead + len(ev.ID) + len(ev.Model)
+	if ev.Delta != nil {
+		n += len(ev.Delta.Text) + len(ev.Delta.Thinking) + len(ev.Delta.ToolInput) +
+			len(ev.Delta.ToolID) + len(ev.Delta.ToolName)
 	}
-	return len(ev.Delta.Text) + len(ev.Delta.Thinking) + len(ev.Delta.ToolInput)
+	return n
 }

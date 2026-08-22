@@ -30,6 +30,10 @@ type ServerConfig struct {
 
 type SSEConfig struct {
 	MaxLineBytes int `yaml:"max_line_bytes"`
+	// MaxPrecommitBytes bounds what one attempt may buffer before committing.
+	// The first_byte deadline alone is not enough: a provider can emit
+	// megabytes inside sixty seconds.
+	MaxPrecommitBytes int `yaml:"max_precommit_bytes"`
 }
 
 type ProviderConfig struct {

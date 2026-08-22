@@ -314,27 +314,110 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	return adapter.OutcomeSuccess, statusCode, nil
 }
 
-// attemptStream streams a committed response. Task 16 replaces this with a
-// buffered, replayable form; for now it forwards straight through, which is the
-// phase 2 behavior.
+// attemptStream buffers the upstream's events until one of them commits the
+// response, then replays the buffer and streams the rest.
+//
+// Nothing reaches the client before commit, which is what makes a pre-commit
+// failure invisible: the buffered events are simply discarded and the loop
+// tries the next candidate. The dialect writer is not even constructed until
+// commit, because building it mutates the response headers.
 func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	cfg *config.Config, c router.Candidate, resp *http.Response, statusCode int,
 	rec *store.RequestRecord, seq int) (adapter.Outcome, int, *ir.Error) {
 
 	defer resp.Body.Close()
+
+	next, stop := iter.Pull2(e.ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes))
+	defer stop()
+
+	buf := newPreCommitBuffer(cfg.Server.SSE.MaxPrecommitBytes)
+	var committed ir.StreamEvent
+	haveCommitted := false
+
+	// Phase one: drain until a content-bearing event arrives, or the attempt
+	// fails. Nothing is written to w in this phase.
+	for {
+		ev, err, ok := next()
+		if !ok {
+			// The stream ended cleanly without any content-bearing event. That
+			// is a legitimately empty completion, not a fault: failing over
+			// here would burn the whole chain every time a model stops
+			// immediately. Fall through and flush whatever was buffered.
+			break
+		}
+		if err != nil {
+			// A 2xx whose stream fails before commit is classified from the
+			// stream error, not the status line. Anthropic delivers
+			// overloaded_error as an in-stream event under a 200.
+			return adapter.OutcomeRetryableProvider, statusCode,
+				e.reclassifyStream(c, resp, rec, err.Error())
+		}
+		if ev.Usage != nil {
+			applyUsage(rec, ev.Usage)
+		}
+		if IsContentBearing(ev) {
+			committed, haveCommitted = ev, true
+			break
+		}
+		if berr := buf.add(ev); berr != nil {
+			// A cap breach is an attempt failure, not a client error: the
+			// provider is misbehaving and another one may not.
+			return adapter.OutcomeRetryableProvider, statusCode,
+				e.reclassifyStream(c, resp, rec, berr.Error())
+		}
+	}
+
+	// Phase two: committed, or the stream ended empty. Failover is impossible
+	// from here, so every later failure becomes an error event in the stream.
+	if haveCommitted {
+		ttft := time.Since(rec.TS).Milliseconds()
+		rec.TTFTMs = &ttft
+	}
 	rec.FinalProviderID = c.ProviderID
 	rec.FinalModel = c.Model
 	e.writeDiagnostics(w, rec.ID, c, seq)
 
-	events := tapStream(e.ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes),
-		func() {
-			ttft := time.Since(rec.TS).Milliseconds()
-			rec.TTFTMs = &ttft
-		},
-		func(u *ir.Usage) { applyUsage(rec, u) },
-	)
+	events := func(yield func(ir.StreamEvent, error) bool) {
+		for _, buffered := range buf.events() {
+			if !yield(buffered, nil) {
+				return
+			}
+		}
+		if haveCommitted && !yield(committed, nil) {
+			return
+		}
+		for {
+			ev, err, ok := next()
+			if !ok {
+				return
+			}
+			if err == nil && ev.Usage != nil {
+				applyUsage(rec, ev.Usage)
+			}
+			if !yield(ev, err) {
+				return
+			}
+			if err != nil {
+				// The dialect has rendered the error; the stream then ends.
+				return
+			}
+		}
+	}
 	_ = d.WriteStream(w, events)
 	return adapter.OutcomeSuccess, statusCode, nil
+}
+
+// reclassifyStream records a pre-commit stream failure against health and the
+// attempt row, and returns the error to serve if this was the last candidate.
+func (e *Executor) reclassifyStream(c router.Candidate, resp *http.Response,
+	rec *store.RequestRecord, msg string) *ir.Error {
+
+	e.recordHealthFor(c, adapter.OutcomeRetryableProvider, resp)
+	if n := len(rec.Attempts); n > 0 {
+		rec.Attempts[n-1].Outcome = string(adapter.OutcomeRetryableProvider)
+		rec.Attempts[n-1].Error = msg
+	}
+	return &ir.Error{Type: ir.ErrAPI, Message: msg}
 }
 
 var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
