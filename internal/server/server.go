@@ -92,6 +92,11 @@ func (s *Server) ProxyHandler() http.Handler {
 	mux.HandleFunc("POST /v1/messages", s.authed(an, func(w http.ResponseWriter, r *http.Request) {
 		s.ex.Handle(w, r, an)
 	}))
+	// More specific than "POST /v1/messages", so net/http's precedence rules
+	// pick it without any ordering concern.
+	mux.HandleFunc("POST /v1/messages/count_tokens", s.authed(an, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleCount(w, r, an, "anthropic")
+	}))
 
 	// One pattern for every Gemini method. A net/http wildcard occupies a whole
 	// path segment, so "{model}:generateContent" is not a legal pattern and the
@@ -107,6 +112,8 @@ func (s *Server) ProxyHandler() http.Handler {
 func (s *Server) handleGemini(w http.ResponseWriter, r *http.Request) {
 	_, method := geminiedge.ExtractModel(r.PathValue("model"))
 	switch method {
+	case "countTokens":
+		s.ex.HandleCount(w, r, geminiedge.New(), "gemini")
 	case "generateContent", "streamGenerateContent":
 		// NewFor rather than New: ?alt=sse selects the streaming wire form, and
 		// WriteStream cannot see the request that chose it.
