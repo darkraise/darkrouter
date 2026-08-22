@@ -18,6 +18,7 @@ import (
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -47,9 +48,21 @@ type Server struct {
 	breaker *health.Breaker
 	persist *health.Persister
 
+	cat  *catalog.Store
+	disc *catalog.Discoverer
+	sync *catalog.Syncer
+
 	started  time.Time
 	warnings []string
 }
+
+// Catalog exposes the live snapshot holder. The listing handlers read it, and
+// phase 7's admin API will too.
+func (s *Server) Catalog() *catalog.Store { return s.cat }
+
+// Discoverer exposes the worker so a provider change can trigger an immediate
+// probe. It is nil when discovery is disabled.
+func (s *Server) Discoverer() *catalog.Discoverer { return s.disc }
 
 // New wires the gateway. It loads the provider set eagerly so a bad credential
 // fails startup rather than every request.
@@ -64,15 +77,49 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
 
+	// A provider whose preset this build no longer ships degrades to its
+	// stored kind and base url. The degradation is free — provider rows carry
+	// both — but losing the preset's quirks and surfaces silently on upgrade
+	// is not, so it reaches /healthz.
+	if ps, err := src.Providers(context.Background()); err == nil {
+		startupWarnings = append(startupWarnings, catalog.OrphanedPresets(ps, catalog.Embedded())...)
+	}
+
+	cat := catalog.NewStore(db, src)
+	// Rebuilt synchronously, before anything binds a listener. A request
+	// arriving in the first second must route against what the database
+	// already knows rather than against an empty snapshot.
+	if err := cat.Rebuild(context.Background()); err != nil {
+		// Not fatal: an unreadable catalog costs routing precision, and
+		// refusing to serve over it would be worse. It reaches /healthz
+		// through the same channel a bad config edit does.
+		startupWarnings = append(startupWarnings, fmt.Sprintf("catalog: %v", err))
+	}
+
+	var disc *catalog.Discoverer
+	if e := cfg.Catalog.Discovery.Enabled; e == nil || *e {
+		disc = catalog.NewDiscoverer(db, src, cat, breaker, catalog.DiscoveryOptions{
+			Interval:    cfg.Catalog.Discovery.Interval,
+			Concurrency: cfg.Catalog.Discovery.Concurrency,
+			Timeout:     cfg.Catalog.Discovery.Timeout,
+		})
+	}
+	syncer := catalog.NewSyncer(db, src, cat, catalog.SyncOptions{
+		URL:      cfg.Catalog.ModelsDevURL,
+		Interval: cfg.Catalog.SyncInterval,
+		Timeout:  cfg.Catalog.SyncTimeout,
+	})
+
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
+		cat:     cat, disc: disc, sync: syncer,
 		ex: exec.New(cfgStore, src, map[string]adapter.Adapter{
 			"openaicompat": openaicompat.New(),
 			"anthropic":    anthropicadapter.New(),
 			"gemini":       geminiadapter.New(),
 		}, exec.Deps{
-			Log: logw, Health: breaker, Fleet: breaker,
+			Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
 		}),
 		started:  time.Now(),
 		warnings: startupWarnings,
@@ -314,6 +361,15 @@ func (s *Server) Run(ctx context.Context) error {
 	startWorker("retention", func(c context.Context) error {
 		return store.RunRetention(c, s.db, s.store, time.Hour)
 	})
+	// Both take workerCtx rather than ctx. Run already keeps worker lifetime
+	// separate from request lifetime, and a sweep cancelled the instant
+	// SIGTERM arrives would record a provider failure that was really a
+	// shutdown — three of those mark its whole catalogue stale.
+	if s.disc != nil {
+		startWorker("discovery", s.disc.Run)
+	}
+	startWorker("models.dev sync", s.sync.Run)
+
 	startWorker("config watcher", func(c context.Context) error {
 		// A watcher that cannot start leaves hot reload silently dead, so the
 		// failure has to reach /healthz rather than being discarded.
