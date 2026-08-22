@@ -8,7 +8,7 @@ Last updated: 2026-08-22
 |---|---|---|---|
 | 1 — Foundation | ✅ | ✅ | **Complete.** Race-clean, `go vet` clean, Docker image verified, all four manual checks passed. |
 | 2 — Persistence and health | ✅ | ✅ | **Implemented** on branch `phase-2-persistence-health`. 18 tasks, all done criteria met. |
-| 3 — Routing and failover | ✅ | — | Not started |
+| 3 — Routing and failover | ✅ | ✅ | Plan written, 20 tasks. Not started |
 | 4 — Dialects | ✅ | — | Not started |
 | 5 — Auxiliary surfaces | ✅ | — | Not started |
 | 6 — Catalog | ✅ | — | Not started |
