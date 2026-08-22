@@ -90,6 +90,28 @@ func applyDefaults(c *Config) {
 	if c.Capture.Retention == 0 {
 		c.Capture.Retention = 72 * time.Hour
 	}
+	if c.Catalog.ModelsDevURL == "" {
+		c.Catalog.ModelsDevURL = "https://models.dev/api.json"
+	}
+	if c.Catalog.SyncInterval == 0 {
+		c.Catalog.SyncInterval = 12 * time.Hour
+	}
+	if c.Catalog.SyncTimeout == 0 {
+		c.Catalog.SyncTimeout = 30 * time.Second
+	}
+	if c.Catalog.Discovery.Enabled == nil {
+		on := true
+		c.Catalog.Discovery.Enabled = &on
+	}
+	if c.Catalog.Discovery.Interval == 0 {
+		c.Catalog.Discovery.Interval = 15 * time.Minute
+	}
+	if c.Catalog.Discovery.Timeout == 0 {
+		c.Catalog.Discovery.Timeout = 15 * time.Second
+	}
+	if c.Catalog.Discovery.Concurrency == 0 {
+		c.Catalog.Discovery.Concurrency = 8
+	}
 	if c.Policy.Retry.MaxAttempts == 0 {
 		c.Policy.Retry.MaxAttempts = 4
 	}

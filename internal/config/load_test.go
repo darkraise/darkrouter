@@ -273,3 +273,69 @@ func TestParseAcceptsAnAliasNamingAnUnknownProvider(t *testing.T) {
 		t.Fatalf("an unknown provider in an alias must not fail the load: %v", err)
 	}
 }
+
+func TestCatalogDefaults(t *testing.T) {
+	c, err := Parse([]byte("server:\n  proxy_listen: \":8080\"\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Catalog.ModelsDevURL != "https://models.dev/api.json" {
+		t.Errorf("url = %q", c.Catalog.ModelsDevURL)
+	}
+	if c.Catalog.SyncInterval != 12*time.Hour {
+		t.Errorf("sync interval = %v, want 12h", c.Catalog.SyncInterval)
+	}
+	if c.Catalog.Discovery.Interval != 15*time.Minute {
+		t.Errorf("discovery interval = %v, want 15m", c.Catalog.Discovery.Interval)
+	}
+	if c.Catalog.Discovery.Concurrency != 8 {
+		t.Errorf("concurrency = %d, want 8", c.Catalog.Discovery.Concurrency)
+	}
+	// Enabled is a pointer so "absent" and "explicitly false" stay apart; the
+	// default is on.
+	if c.Catalog.Discovery.Enabled == nil || !*c.Catalog.Discovery.Enabled {
+		t.Errorf("discovery enabled = %v, want true", c.Catalog.Discovery.Enabled)
+	}
+}
+
+func TestCatalogBlockParses(t *testing.T) {
+	c, err := Parse([]byte(`
+server:
+  proxy_listen: ":8080"
+catalog:
+  models_dev_url: https://example.invalid/api.json
+  sync_interval: 1h
+  discovery:
+    enabled: false
+    interval: 90s
+    concurrency: 2
+    timeout: 5s
+`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Catalog.ModelsDevURL != "https://example.invalid/api.json" {
+		t.Errorf("url = %q", c.Catalog.ModelsDevURL)
+	}
+	if c.Catalog.SyncInterval != time.Hour {
+		t.Errorf("sync interval = %v", c.Catalog.SyncInterval)
+	}
+	if c.Catalog.Discovery.Enabled == nil || *c.Catalog.Discovery.Enabled {
+		t.Errorf("discovery enabled = %v, want an explicit false", c.Catalog.Discovery.Enabled)
+	}
+	if c.Catalog.Discovery.Interval != 90*time.Second || c.Catalog.Discovery.Concurrency != 2 {
+		t.Errorf("discovery = %+v", c.Catalog.Discovery)
+	}
+	if c.Catalog.Discovery.Timeout != 5*time.Second {
+		t.Errorf("timeout = %v", c.Catalog.Discovery.Timeout)
+	}
+}
+
+func TestUnknownCatalogFieldIsRejected(t *testing.T) {
+	// KnownFields(true) is what turns a typo into a startup error rather than
+	// a setting that silently did nothing.
+	_, err := Parse([]byte("catalog:\n  sync_intervals: 1h\n"), nil)
+	if err == nil {
+		t.Fatal("a misspelled catalog field parsed cleanly")
+	}
+}
