@@ -200,3 +200,76 @@ func TestShippedExampleParses(t *testing.T) {
 		t.Errorf("capture = %+v", c.Capture)
 	}
 }
+
+func TestParseReadsAliases(t *testing.T) {
+	body := minimal + `
+aliases:
+  fast:
+    - groq/llama-3.3-70b
+    - cerebras/llama-3.3-70b
+  coding:
+    - anthropic/claude-sonnet-4-5
+`
+	c, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Aliases) != 2 {
+		t.Fatalf("got %d aliases, want 2", len(c.Aliases))
+	}
+	fast := c.Aliases["fast"]
+	if len(fast) != 2 || fast[0] != "groq/llama-3.3-70b" {
+		t.Errorf("fast = %v", fast)
+	}
+	// Order is the chain order and must survive the round trip.
+	if fast[1] != "cerebras/llama-3.3-70b" {
+		t.Errorf("alias order was not preserved: %v", fast)
+	}
+}
+
+func TestParseDefaultsMaxAttempts(t *testing.T) {
+	c, err := Parse([]byte(minimal), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Policy.Retry.MaxAttempts != 4 {
+		t.Errorf("MaxAttempts = %d, want 4", c.Policy.Retry.MaxAttempts)
+	}
+}
+
+func TestParseReadsMaxAttempts(t *testing.T) {
+	body := minimal + "\npolicy:\n  retry: { max_attempts: 2 }\n"
+	c, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Policy.Retry.MaxAttempts != 2 {
+		t.Errorf("MaxAttempts = %d, want 2", c.Policy.Retry.MaxAttempts)
+	}
+}
+
+// A written 0 is indistinguishable from an omitted key by the time validate
+// runs, so it becomes the default 4. A negative value is the case that can be
+// caught, and the one an operator might actually produce by arithmetic.
+func TestParseRejectsNegativeMaxAttempts(t *testing.T) {
+	body := minimal + "\npolicy:\n  retry: { max_attempts: -1 }\n"
+	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err == nil {
+		t.Fatal("expected a negative max_attempts to be rejected")
+	}
+}
+
+func TestParseRejectsAnEmptyAlias(t *testing.T) {
+	body := minimal + "\naliases:\n  broken: []\n"
+	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err == nil {
+		t.Fatal("expected an alias with no targets to be rejected")
+	}
+}
+
+// A provider that does not exist is a warning, not an error: providers live in
+// SQLite and the loader cannot see them.
+func TestParseAcceptsAnAliasNamingAnUnknownProvider(t *testing.T) {
+	body := minimal + "\naliases:\n  fast:\n    - nosuchprovider/model\n"
+	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err != nil {
+		t.Fatalf("an unknown provider in an alias must not fail the load: %v", err)
+	}
+}

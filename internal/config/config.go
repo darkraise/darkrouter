@@ -6,9 +6,13 @@ import "time"
 type Config struct {
 	Server    ServerConfig     `yaml:"server"`
 	Providers []ProviderConfig `yaml:"providers"`
-	Policy    PolicyConfig     `yaml:"policy"`
-	Log       LogConfig        `yaml:"log"`
-	Capture   CaptureConfig    `yaml:"capture"`
+	// Aliases map a friendly name to an ordered fallback chain. Order is the
+	// chain order, so a map of slices is the right shape: the values are
+	// ordered even though the keys are not.
+	Aliases map[string][]string `yaml:"aliases"`
+	Policy  PolicyConfig        `yaml:"policy"`
+	Log     LogConfig           `yaml:"log"`
+	Capture CaptureConfig       `yaml:"capture"`
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
 	// /healthz rather than rejecting the document.
@@ -39,7 +43,14 @@ type ProviderConfig struct {
 
 type PolicyConfig struct {
 	Cooldown CooldownConfig `yaml:"cooldown"`
+	Retry    RetryConfig    `yaml:"retry"`
 	Timeout  TimeoutConfig  `yaml:"timeout"`
+}
+
+// RetryConfig carries only max_attempts: outcome classification is fixed
+// rather than configurable, so there is nothing else to tune.
+type RetryConfig struct {
+	MaxAttempts int `yaml:"max_attempts"`
 }
 
 // CooldownConfig governs the circuit breaker. TripAfter counts consecutive
