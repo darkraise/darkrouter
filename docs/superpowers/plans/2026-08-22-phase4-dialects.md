@@ -24,7 +24,8 @@
 - **Every task ends green.** `export PATH=$PATH:/usr/local/go/bin` first; the toolchain is not on `PATH`. Run `go test ./... -race -count=1` and `go vet ./...` before committing.
 - **Silent loss is the failure this phase exists to prevent.** An adapter that cannot express an IR field appends an `ir.Warning` naming the field, the target kind, and the reason. A translation branch that drops something without a warning is a defect even when the output is otherwise correct.
 - **System content placement.** The OpenAI edge leaves `system` and `developer` messages inline in `Messages` with `ir.RoleSystem`, because OpenAI permits several and their position is meaningful. The Anthropic and Gemini edges put their single top-level system field in `ir.Request.System`. Every adapter needing one system field calls `xlate.CollectSystem`, which concatenates `req.System` first and then every `RoleSystem` message in order, and warns when a system message appeared after the first non-system message.
-- **Effort and budget convert by one fixed table, never per adapter.** `low` = 4096, `medium` = 16384, `high` = 32768, clamped to the model's maximum output tokens when known. Reverse: a budget below 8192 is `low`, below 24576 is `medium`, otherwise `high`. It lives in `xlate` so the same request reasons identically against every target.
+- **Effort and budget convert by one fixed table, never per adapter.** `low` = 4096, `medium` = 16384, `high` = 32768, clamped to the model's maximum output tokens when known. The reverse bands at the midpoints — under 10240 is `low`, under 24576 is `medium`, otherwise `high` — so `BudgetEffort(EffortBudget(e, 0)) == e`. It lives in `xlate` so the same request reasons identically against every target.
+- **Anthropic reasoning takes one of two mutually exclusive shapes, chosen by model generation.** `thinking: {type:"enabled", budget_tokens}` is a 400 on Claude 4.7 and later; `thinking: {type:"adaptive"}` with `output_config.effort` is a 400 on Claude 4.5 and earlier. Until Phase 6's catalog exists, the generation is read off the model name, and an unrecognized name is honored as the client spelled it and warned about. The effort table above still governs the budget wherever a budget is what gets sent.
 - **Anthropic requires `max_tokens`.** When the IR carries none, substitute 4096 and record a warning. The catalog cannot supply the model's real maximum until Phase 6.
 - **Anthropic thinking blocks and Gemini thought signatures round-trip verbatim.** Text, signature, and order are preserved unmodified. A re-serialized signature that differs by one byte loses the model's reasoning state on the next turn.
 - **Gemini's assistant role is `model`.** Emitting `assistant` is an API error, not a silent mismatch.
@@ -73,7 +74,7 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `ir.ToolResult{ToolUseID string; Content []ContentBlock; IsError bool}` with `func (t *ToolResult) Text() string`; `ir.Media{MIME, Data, URL, FileID string}`; `ir.Delta` gains `Signature string`; `ir.Request` gains `ParallelToolCalls *bool`; `func (w Warning) String() string`.
+- Produces: `ir.ToolResult{ToolUseID string; Content []ContentBlock; IsError bool}` with `func (t *ToolResult) Text() string`; `ir.Media{MIME, Data, URL, FileID string}`; `ir.Delta` gains `Signature string`; `ir.Request` gains `ParallelToolCalls *bool`; `ir.StreamEvent` gains `Warnings []Warning`; `func (w Warning) String() string`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
@@ -95,6 +96,12 @@ impossible to express.
 as its own `signature_delta`, arriving after the thinking text. Without the
 field the signature is unreachable from the stream and reasoning state dies on
 the next turn.
+
+`StreamEvent.Warnings` exists because the streaming path otherwise has nowhere to
+record loss. Spec §4.5 requires an unmapped stop reason to degrade *with a
+warning*, and `ir.Response.Warnings` serves only the unary path — so on the path
+every CLI uses by default, that warning had no channel at all. Master design §5
+makes silent loss the specific failure this phase exists to prevent.
 
 `Needs()` must look inside tool results. A conversation whose only image is
 attached to a tool result needs vision just as much as one with an image in a
@@ -133,6 +140,18 @@ func TestWarningStringNamesFieldTargetAndReason(t *testing.T) {
 	}
 }
 
+func TestStreamEventCarriesWarnings(t *testing.T) {
+	ev := StreamEvent{
+		Type: EventMessageStop,
+		Warnings: []Warning{{
+			Field: "finishReason", Target: "gemini", Reason: "unrecognized value",
+		}},
+	}
+	if len(ev.Warnings) != 1 || ev.Warnings[0].Field != "finishReason" {
+		t.Errorf("warnings = %+v", ev.Warnings)
+	}
+}
+
 func TestNeedsFindsVisionInsideAToolResult(t *testing.T) {
 	r := &Request{Messages: []Message{{
 		Role: RoleTool,
@@ -154,7 +173,7 @@ func TestNeedsFindsVisionInsideAToolResult(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/ir/ -run 'ToolResult|Warning|Needs' -v`
+Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/ir/ -run 'ToolResult|Warning|Needs|StreamEvent' -v`
 Expected: compile failure — `tr.Text undefined`, `w.String undefined`, and `Content` being a `string` rejects the composite literal.
 
 - [ ] **Step 3: Change the types**
@@ -208,6 +227,15 @@ type Delta struct {
 	ToolID    string
 	ToolName  string
 }
+```
+
+Add to `StreamEvent`, below its `Model` field:
+
+```go
+	// Warnings record what this event's translation could not express. The
+	// unary path carries them on ir.Response; without this the streaming path,
+	// which is what every CLI uses by default, could only lose things silently.
+	Warnings []Warning
 ```
 
 Add to `Request`, after `ToolChoice`:
@@ -274,6 +302,9 @@ provider streaming enormous signatures escapes the cap:
 	if ev.Delta != nil {
 		n += len(ev.Delta.Text) + len(ev.Delta.Thinking) + len(ev.Delta.Signature) +
 			len(ev.Delta.ToolInput) + len(ev.Delta.ToolID) + len(ev.Delta.ToolName)
+	}
+	for _, w := range ev.Warnings {
+		n += len(w.Field) + len(w.Target) + len(w.Reason)
 	}
 ```
 
@@ -564,6 +595,31 @@ the commit block, next to `rec.FinalProviderID`:
 	rec.Warnings = warningStrings(warns)
 ```
 
+That assignment covers a client that disconnects mid-stream. Events can also
+carry warnings of their own — an unmapped stop reason, for instance — so collect
+those too. Declare a slice at the top of `attemptStream`:
+
+```go
+	// Warnings raised by the events themselves, as distinct from the ones the
+	// request rendering produced.
+	var streamWarns []ir.Warning
+```
+
+append to it beside each of the two `applyUsage(rec, ev.Usage)` calls — the
+phase-one drain loop and the live loop inside the `events` closure, but **not**
+the buffered replay, whose events phase one already saw:
+
+```go
+			streamWarns = append(streamWarns, ev.Warnings...)
+```
+
+and supersede the commit-time value once the stream is done, immediately after
+`_ = d.WriteStream(w, events)`:
+
+```go
+	rec.Warnings = warningStrings(append(warns, streamWarns...))
+```
+
 Add the helper at the bottom of `internal/exec/exec.go`:
 
 ```go
@@ -656,7 +712,7 @@ func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
 	if w.Code != 502 {
 		t.Fatalf("code = %d, want 502", w.Code)
 	}
-	got := rec.last()
+	got := rec.only(t)
 	if len(got.Attempts) != 0 {
 		t.Errorf("attempts = %d, want 0", len(got.Attempts))
 	}
@@ -672,8 +728,10 @@ func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
 }
 ```
 
-`captureLogger` already exists in `internal/exec/loop_test.go`; confirm its
-`last()` accessor is named that way and adjust the call if not. Add `os`,
+`captureLogger` is declared in `internal/exec/exec_test.go:226` — the same file
+this test goes in — and its accessor is `only(t *testing.T) *store.RequestRecord`,
+which fatals unless exactly one record was logged. That is the right assertion
+here: a skipped candidate must still produce exactly one request row. Add `os`,
 `path/filepath`, `net/http`, `net/http/httptest`, `strings`,
 `internal/adapter`, `internal/adapter/openaicompat`, `internal/config`, and
 `internal/provider` to the test file's imports if any are missing.
@@ -1038,6 +1096,11 @@ There are two collectors because there are two shapes. Gemini's
 system prompt is a Phase 4 done criterion — flattening it to a string would
 throw the caching away on the one request type that most needs it.
 
+Both are defined over one unexported `systemSources` walk. Two copies of the
+walk would put the misplacement and non-text warnings in two places that must
+stay in lockstep forever, which is the same divergence-is-invisible problem this
+package exists to solve, one level down.
+
 - [ ] **Step 1: Write the failing tests**
 
 Create `internal/adapter/xlate/system_test.go`:
@@ -1222,37 +1285,35 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// CollectSystem flattens every source of system content into the single string
-// Anthropic and Gemini accept, and reports what the collapse cost.
+// systemSources walks every source of system content exactly once: req.System
+// first, then RoleSystem messages in conversation order, one group per source.
 //
-// Order is req.System first, then RoleSystem messages in conversation order.
-// A system message that arrived after a non-system turn had a position that
-// carried meaning, and that position cannot be expressed in a target with one
-// system field — so it is recorded rather than dropped quietly. One warning
-// covers all of them: the client's fix is the same however many there were.
-func CollectSystem(req *ir.Request, target string) (string, []ir.Warning) {
+// Both public collectors are defined over this. The grouping is what the string
+// form needs — sources join with a blank line while blocks within one source
+// concatenate — and a flat block slice destroys it, which is why the split is
+// here rather than at the block level.
+func systemSources(req *ir.Request, target string) ([][]ir.ContentBlock, []ir.Warning) {
 	var (
-		parts    []string
-		warns    []ir.Warning
-		seenTurn bool
+		groups    [][]ir.ContentBlock
+		warns     []ir.Warning
+		seenTurn  bool
 		misplaced bool
 	)
-
 	add := func(blocks []ir.ContentBlock, field string) {
-		var b strings.Builder
-		for _, blk := range blocks {
-			if blk.Type == ir.BlockText {
-				b.WriteString(blk.Text)
+		var g []ir.ContentBlock
+		for _, b := range blocks {
+			if b.Type == ir.BlockText {
+				g = append(g, b)
 				continue
 			}
 			warns = append(warns, ir.Warning{
-				Field:  field + "." + string(blk.Type),
+				Field:  field + "." + string(b.Type),
 				Target: target,
 				Reason: "system content accepts text only",
 			})
 		}
-		if s := b.String(); s != "" {
-			parts = append(parts, s)
+		if len(g) > 0 {
+			groups = append(groups, g)
 		}
 	}
 
@@ -1262,6 +1323,10 @@ func CollectSystem(req *ir.Request, target string) (string, []ir.Warning) {
 			seenTurn = true
 			continue
 		}
+		// A system message that arrived after a non-system turn had a position
+		// that carried meaning, and no target with one system field can express
+		// it. One warning covers all of them: the client's fix is the same
+		// however many there were.
 		if seenTurn {
 			misplaced = true
 		}
@@ -1274,6 +1339,22 @@ func CollectSystem(req *ir.Request, target string) (string, []ir.Warning) {
 			Reason: "a system message after a conversation turn was moved to the front",
 		})
 	}
+	return groups, warns
+}
+
+// CollectSystem flattens to the single string Gemini's systemInstruction takes.
+func CollectSystem(req *ir.Request, target string) (string, []ir.Warning) {
+	groups, warns := systemSources(req, target)
+	parts := make([]string, 0, len(groups))
+	for _, g := range groups {
+		var b strings.Builder
+		for _, blk := range g {
+			b.WriteString(blk.Text)
+		}
+		if text := b.String(); text != "" {
+			parts = append(parts, text)
+		}
+	}
 	return strings.Join(parts, "\n\n"), warns
 }
 
@@ -1281,43 +1362,10 @@ func CollectSystem(req *ir.Request, target string) (string, []ir.Warning) {
 // array. Blocks keep their cache_control, which is what lets an Anthropic
 // client's cached system prompt stay cached through the gateway.
 func CollectSystemBlocks(req *ir.Request, target string) ([]ir.ContentBlock, []ir.Warning) {
-	var (
-		out       []ir.ContentBlock
-		warns     []ir.Warning
-		seenTurn  bool
-		misplaced bool
-	)
-	keep := func(blocks []ir.ContentBlock, field string) {
-		for _, b := range blocks {
-			if b.Type == ir.BlockText {
-				out = append(out, b)
-				continue
-			}
-			warns = append(warns, ir.Warning{
-				Field:  field + "." + string(b.Type),
-				Target: target,
-				Reason: "system content accepts text only",
-			})
-		}
-	}
-
-	keep(req.System, "system[]")
-	for _, m := range req.Messages {
-		if m.Role != ir.RoleSystem {
-			seenTurn = true
-			continue
-		}
-		if seenTurn {
-			misplaced = true
-		}
-		keep(m.Content, "messages[].system")
-	}
-	if misplaced {
-		warns = append(warns, ir.Warning{
-			Field:  "messages[].role=system",
-			Target: target,
-			Reason: "a system message after a conversation turn was moved to the front",
-		})
+	groups, warns := systemSources(req, target)
+	var out []ir.ContentBlock
+	for _, g := range groups {
+		out = append(out, g...)
 	}
 	return out, warns
 }
@@ -1339,6 +1387,12 @@ Note the warning field for a non-text block nested in a `RoleSystem` message
 reads `messages[].system.image`, and for one in `req.System` reads
 `system[].image`. `TestCollectSystemWarnsOnNonTextSystemBlocks` asserts the
 latter.
+
+`CollectSystem` joins *groups* with a blank line while concatenating blocks
+within a group with no separator. That is what
+`TestCollectSystemPutsTheTopLevelFieldFirst` (`"first\n\nsecond"`, two sources)
+and `TestCollectSystemLeadingMessagesProduceNoWarning` (`"a\n\nb"`, two
+messages) pin. Flattening to blocks before joining would change both.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2324,17 +2378,23 @@ func TestBuildRequestPassesParallelToolCallsThrough(t *testing.T) {
 	}
 }
 
-func TestBuildRequestDoesNotLeakTheAnthropicVersionMetadata(t *testing.T) {
+func TestBuildRequestDoesNotLeakAnthropicTransportMetadata(t *testing.T) {
 	got, _ := built(t, &ir.Request{
 		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
-		Metadata: map[string]string{"anthropic_version": "2023-06-01", "user_id": "u1"},
+		Metadata: map[string]string{
+			"anthropic_version":       "2023-06-01",
+			"anthropic_thinking_type": "adaptive",
+			"user_id":                 "u1",
+		},
 	})
 	md, ok := got["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("metadata = %v", got["metadata"])
 	}
-	if _, leaked := md["anthropic_version"]; leaked {
-		t.Error("the transport version must not reach an OpenAI upstream as metadata")
+	for _, k := range []string{"anthropic_version", "anthropic_thinking_type"} {
+		if _, leaked := md[k]; leaked {
+			t.Errorf("%s must not reach an OpenAI upstream as metadata", k)
+		}
 	}
 	if md["user_id"] != "u1" {
 		t.Errorf("metadata = %v", md)
@@ -2480,17 +2540,18 @@ Delete the old `if req.Reasoning != nil && req.Reasoning.Effort != ""` block it
 replaces. Add the helper at the bottom of `build.go`:
 
 ```go
-// forwardableMetadata strips the keys Darkrouter uses internally. anthropic_version
-// is transport state the Anthropic edge parks in Metadata so the Anthropic
-// adapter can echo it; forwarding it to an OpenAI upstream would be nonsense at
-// best and a rejected request at worst.
+// forwardableMetadata strips the keys Darkrouter uses internally. The
+// anthropic_ prefix is transport state the Anthropic edge parks in Metadata so
+// the Anthropic adapter can act on it — the version header and the thinking
+// mode; forwarding either to an OpenAI upstream would be nonsense at best and a
+// rejected request at worst.
 func forwardableMetadata(md map[string]string) map[string]string {
 	if len(md) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(md))
 	for k, v := range md {
-		if k == "anthropic_version" {
+		if strings.HasPrefix(k, "anthropic_") {
 			continue
 		}
 		out[k] = v
@@ -3896,22 +3957,46 @@ git commit -m "feat(anthropic): render content blocks"
 
 **Interfaces:**
 - Consumes: `renderBlocks`, `cacheBudget`, `targetName` from Task 13; `xlate.CollectSystemBlocks`, `xlate.NonSystemMessages`, `xlate.RequiredMaxTokens`, `xlate.EffortBudget` from Tasks 6 and 7.
-- Produces: `anthropic.BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error)`; `const DefaultVersion = "2023-06-01"`.
+- Produces: `anthropic.BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error)`; `const DefaultVersion = "2023-06-01"`; `modelTraits` with `traitsFor(model string) modelTraits`; `thinkingChoice` with `thinkingMode(req *ir.Request, traits modelTraits) thinkingChoice`; `adaptiveEffort(req *ir.Request) string`; `droppedPrefill(req *ir.Request) bool`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
 
-Four API constraints decide whether this works against the real service, and
-none of them produce a useful error message when violated:
+Seven API constraints decide whether this works against the real service, and
+none of them produce an error a client can act on. All were checked against the
+live documentation on 2026-08-22, because spec §4.6 and §4.7 explicitly asked for
+that and two of the spec's assumptions had gone stale.
 
-1. `max_tokens` is mandatory. Spec §4.7 substitutes and warns.
-2. `max_tokens` must be **strictly greater** than `thinking.budget_tokens`.
-3. `temperature`, `top_p`, and `top_k` are rejected when extended thinking is on.
-4. Messages must alternate roles. Two consecutive user turns — which the IR
+1. `max_tokens` is mandatory. Spec §4.7 substitutes 4096 and warns.
+2. **Thinking splits by model generation, and the two modes are mutually
+   exclusive.** `thinking: {type:"enabled", budget_tokens}` is deprecated on the
+   4.6 generation and **returns a 400 on Claude 4.7 and later**;
+   `thinking: {type:"adaptive"}` **returns a 400 on Claude 4.5 and earlier**,
+   where manual is the only mode. Emitting one shape everywhere fails every
+   reasoning request against half the fleet.
+3. `budget_tokens` must be at least **1024** and **strictly less** than
+   `max_tokens`. The clamp for the second can land under the first.
+4. Sampling parameters split the same way. On Fable 5, Mythos 5, Mythos Preview,
+   Opus 5, Opus 4.8, Opus 4.7, and Sonnet 5, a non-default `temperature`,
+   `top_p`, or `top_k` is a 400 on **every** request, thinking or not. On older
+   models the restriction applies only while thinking is on, and there
+   `temperature` and `top_k` are rejected while **`top_p` is allowed between
+   0.95 and 1** — the spec's "all three are rejected" was an over-generalization.
+5. Forced tool use (`tool_choice` `any` or `tool`) is incompatible with manual
+   thinking, though fine with adaptive.
+6. A response prefill is rejected while thinking is on.
+7. Messages must alternate roles. Two consecutive user turns — which the IR
    produces whenever a tool-result turn follows a user turn — is a 400.
 
-Merging consecutive same-role turns rather than emitting them separately is what
-makes an Anthropic target usable from a conversation any other dialect produced.
+**The generation is read off the model name**, because there is no catalog until
+Phase 6. That is a heuristic and it says so: an unrecognized name gets the
+permissive traits and a `model` warning, and the request is then shaped by what
+the client asked for rather than by a guess. `internal/tokenize` picks a
+vocabulary the same way, so the technique is already established here.
+
+Structured output is **generally available** — no beta header, and the schema
+lives under `output_config.format`. Spec §4.6 assumed a beta and told the
+implementer to re-check; it was right to.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3930,10 +4015,18 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
+// built renders against a manual-budget generation, which is what most of these
+// cases are about. builtFor names a different one where the generation is the
+// thing under test.
 func built(t *testing.T, req *ir.Request) (*http_Request, map[string]any, []ir.Warning) {
 	t.Helper()
+	return builtFor(t, "claude-sonnet-4-5", req)
+}
+
+func builtFor(t *testing.T, model string, req *ir.Request) (*http_Request, map[string]any, []ir.Warning) {
+	t.Helper()
 	hr, warns, err := BuildRequest(context.Background(),
-		&adapter.Target{BaseURL: "https://api.anthropic.com/v1", APIKey: "sk-ant", Model: "claude-x"}, req)
+		&adapter.Target{BaseURL: "https://api.anthropic.com/v1", APIKey: "sk-ant", Model: model}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4032,10 +4125,10 @@ func TestBuildRequestKeepsSystemAsBlocksWithCacheControl(t *testing.T) {
 
 func TestBuildRequestClampsThinkingBelowMaxTokens(t *testing.T) {
 	n := 2000
-	_, body, warns := built(t, &ir.Request{
+	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
 		MaxTokens: &n,
-		Reasoning: &ir.Reasoning{Effort: "high"},
+		Reasoning: &ir.Reasoning{Budget: 30000},
 	})
 	th := body["thinking"].(map[string]any)
 	if th["type"] != "enabled" {
@@ -4049,23 +4142,182 @@ func TestBuildRequestClampsThinkingBelowMaxTokens(t *testing.T) {
 	}
 }
 
+func TestBuildRequestDisablesThinkingBelowTheMinimumBudget(t *testing.T) {
+	n := 900
+	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		MaxTokens: &n,
+		Reasoning: &ir.Reasoning{Budget: 30000},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v; the clamp landed under the 1024 floor, which is a 400", body["thinking"])
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestBuildRequestUsesAdaptiveThinkingOnNewerModels(t *testing.T) {
+	_, body, _ := builtFor(t, "claude-opus-4-7", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Budget: 16000},
+	})
+	th := body["thinking"].(map[string]any)
+	if th["type"] != "adaptive" {
+		t.Fatalf("thinking = %v; type enabled is a 400 on Claude 4.7 and later", th)
+	}
+	if _, ok := th["budget_tokens"]; ok {
+		t.Error("adaptive thinking takes no budget")
+	}
+	if body["output_config"].(map[string]any)["effort"] != "medium" {
+		t.Errorf("output_config = %v; a budget bands back to an effort", body["output_config"])
+	}
+}
+
+func TestBuildRequestUsesManualThinkingOnOlderModels(t *testing.T) {
+	n := 32000
+	_, body, _ := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		MaxTokens: &n,
+		Reasoning: &ir.Reasoning{Effort: "medium"},
+	})
+	th := body["thinking"].(map[string]any)
+	if th["type"] != "enabled" {
+		t.Fatalf("thinking = %v; type adaptive is a 400 on Claude 4.5 and earlier", th)
+	}
+	if th["budget_tokens"].(float64) != 16384 {
+		t.Errorf("budget_tokens = %v; medium is 16384 by the fixed table", th["budget_tokens"])
+	}
+}
+
+func TestBuildRequestRoundTripsAnInboundThinkingType(t *testing.T) {
+	_, body, _ := builtFor(t, "claude-opus-4-7", &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Metadata: map[string]string{"anthropic_thinking_type": "disabled"},
+	})
+	th := body["thinking"].(map[string]any)
+	if th["type"] != "disabled" {
+		t.Errorf("thinking = %v; an explicit off switch must survive", th)
+	}
+}
+
+func TestBuildRequestOmitsThinkingWhenDisabledOnAnOlderModel(t *testing.T) {
+	_, body, _ := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Metadata: map[string]string{"anthropic_thinking_type": "disabled"},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v; older models have no disabled type, they just omit it", body["thinking"])
+	}
+}
+
 func TestBuildRequestDropsSamplingWhenThinkingIsOn(t *testing.T) {
-	temp := 0.7
+	temp, wide, narrow := 0.7, 0.5, 0.97
 	k := 40
-	_, body, warns := built(t, &ir.Request{
+	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
 		Messages:    []ir.Message{userMsg("hi")},
 		Temperature: &temp,
 		TopK:        &k,
+		TopP:        &wide,
 		Reasoning:   &ir.Reasoning{Budget: 1024},
 	})
 	if _, ok := body["temperature"]; ok {
-		t.Error("temperature is rejected alongside extended thinking")
+		t.Error("temperature is rejected alongside thinking")
 	}
 	if _, ok := body["top_k"]; ok {
-		t.Error("top_k is rejected alongside extended thinking")
+		t.Error("top_k is rejected alongside thinking")
 	}
-	if !hasWarning(warns, "temperature") || !hasWarning(warns, "top_k") {
+	if _, ok := body["top_p"]; ok {
+		t.Error("top_p below 0.95 is rejected alongside thinking")
+	}
+	if !hasWarning(warns, "temperature") || !hasWarning(warns, "top_k") || !hasWarning(warns, "top_p") {
 		t.Errorf("warnings = %+v", warns)
+	}
+
+	_, body2, _ := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		TopP:      &narrow,
+		Reasoning: &ir.Reasoning{Budget: 1024},
+	})
+	if body2["top_p"].(float64) != 0.97 {
+		t.Errorf("top_p = %v; Anthropic accepts 0.95 to 1 with thinking on", body2["top_p"])
+	}
+}
+
+func TestBuildRequestDropsAllSamplingOnTheNewestGeneration(t *testing.T) {
+	temp, top := 0.7, 0.97
+	k := 40
+	_, body, warns := builtFor(t, "claude-opus-5", &ir.Request{
+		Messages:    []ir.Message{userMsg("hi")},
+		Temperature: &temp, TopP: &top, TopK: &k,
+	})
+	for _, f := range []string{"temperature", "top_p", "top_k"} {
+		if _, ok := body[f]; ok {
+			t.Errorf("%s survived; this generation rejects any non-default sampling value", f)
+		}
+		if !hasWarning(warns, f) {
+			t.Errorf("warnings = %+v, missing %s", warns, f)
+		}
+	}
+}
+
+func TestBuildRequestDropsThinkingForAForcedToolChoice(t *testing.T) {
+	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages:   []ir.Message{userMsg("hi")},
+		Tools:      []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: &ir.ToolChoice{Mode: "any"},
+		Reasoning:  &ir.Reasoning{Budget: 2048},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Error("manual thinking is incompatible with a forced tool choice")
+	}
+	if body["tool_choice"].(map[string]any)["type"] != "any" {
+		t.Errorf("tool_choice = %v; the client's explicit instruction is the one that survives",
+			body["tool_choice"])
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestBuildRequestDropsAPrefillWhenThinkingIsOn(t *testing.T) {
+	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages: []ir.Message{
+			userMsg("return JSON"),
+			{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}},
+		},
+		Reasoning: &ir.Reasoning{Budget: 2048},
+	})
+	if len(body["messages"].([]any)) != 1 {
+		t.Errorf("messages = %v; a prefill is rejected while thinking is on", body["messages"])
+	}
+	if !hasWarning(warns, "messages[last].assistant_prefill") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestBuildRequestKeepsAPrefillWithoutThinking(t *testing.T) {
+	_, body, warns := builtFor(t, "claude-sonnet-4-5", &ir.Request{
+		Messages: []ir.Message{
+			userMsg("return JSON"),
+			{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}},
+		},
+	})
+	if len(body["messages"].([]any)) != 2 {
+		t.Errorf("messages = %v; prefill is Anthropic's own idiom", body["messages"])
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestBuildRequestWarnsOnAnUnknownModelName(t *testing.T) {
+	_, _, warns := builtFor(t, "some-proxy/mystery-model", &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Budget: 2048},
+	})
+	if !hasWarning(warns, "model") {
+		t.Errorf("warnings = %+v; the generation was guessed and that must be visible", warns)
 	}
 }
 
@@ -4093,13 +4345,26 @@ func TestBuildRequestRendersToolsAndChoice(t *testing.T) {
 	}
 }
 
-func TestBuildRequestWarnsOnResponseFormatAndSafety(t *testing.T) {
-	_, _, warns := built(t, &ir.Request{
-		Messages:       []ir.Message{userMsg("hi")},
-		ResponseFormat: &ir.ResponseFormat{Type: "json_schema", Schema: json.RawMessage(`{}`)},
-		Safety:         []ir.SafetySetting{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_NONE"}},
+func TestBuildRequestEmitsStructuredOutputAndWarnsOnSafety(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		ResponseFormat: &ir.ResponseFormat{
+			Type: "json_schema", Schema: json.RawMessage(`{"type":"object"}`),
+		},
+		Safety: []ir.SafetySetting{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_NONE"}},
 	})
-	if !hasWarning(warns, "response_format") || !hasWarning(warns, "safety") {
+	format := body["output_config"].(map[string]any)["format"].(map[string]any)
+	if format["type"] != "json_schema" {
+		t.Fatalf("output_config = %v; structured output is GA under output_config.format",
+			body["output_config"])
+	}
+	if _, ok := format["schema"]; !ok {
+		t.Errorf("format = %v", format)
+	}
+	if hasWarning(warns, "response_format") {
+		t.Error("structured output is no longer dropped, so it must not warn")
+	}
+	if !hasWarning(warns, "safety") {
 		t.Errorf("warnings = %+v", warns)
 	}
 }
@@ -4152,61 +4417,117 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		body["system"] = rendered
 	}
 
-	msgs, w := renderMessages(req, cb)
-	warns = append(warns, w...)
-	body["messages"] = msgs
-
 	maxTok, w := xlate.RequiredMaxTokens(req, targetName)
 	warns = append(warns, w...)
 	body["max_tokens"] = maxTok
 
-	thinking := false
-	if req.Reasoning != nil {
+	outputConfig := map[string]any{}
+	traits := traitsFor(t.Model)
+
+	// Thinking splits by model generation, and the two modes are mutually
+	// exclusive per generation: type "enabled" is a 400 on Claude 4.7 and
+	// later, and type "adaptive" is a 400 on Claude 4.5 and earlier. Getting
+	// this wrong makes every reasoning request against that generation fail.
+	thinking, manual := false, false
+	mode := thinkingMode(req, traits)
+	if mode != modeNone && !traits.known {
+		// Warned here rather than unconditionally: an unrecognized name only
+		// costs something once the guess decides a wire shape, and warning on
+		// every request to a self-hosted Anthropic-compatible endpoint would be
+		// noise that trains people to ignore warnings.
+		warns = append(warns, ir.Warning{
+			Field: "model", Target: targetName,
+			Reason: "unrecognized Anthropic model name; the thinking mode was guessed from the request",
+		})
+	}
+	switch mode {
+	case modeAdaptive:
+		body["thinking"] = map[string]any{"type": "adaptive"}
+		if e := adaptiveEffort(req); e != "" {
+			outputConfig["effort"] = e
+		}
+		thinking = true
+
+	case modeManual:
 		budget := req.Reasoning.Budget
 		if budget == 0 {
 			budget = xlate.EffortBudget(req.Reasoning.Effort, 0)
 		}
-		if budget > 0 {
-			// Anthropic requires max_tokens strictly greater than the budget.
-			// Clamping is better than a 400 the client cannot act on.
-			if budget >= maxTok {
-				budget = maxTok - 1
-				warns = append(warns, ir.Warning{
-					Field: "reasoning.budget", Target: targetName,
-					Reason: "clamped below max_tokens, which Anthropic requires to be larger",
-				})
-			}
-			body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
-			thinking = true
+		// max_tokens must be strictly greater than the budget. Clamping keeps a
+		// servable request servable; raising max_tokens instead would silently
+		// multiply the bill on the one control the client actually set.
+		if budget >= maxTok {
+			budget = maxTok - 1
+			warns = append(warns, ir.Warning{
+				Field: "reasoning.budget", Target: targetName,
+				Reason: "clamped below max_tokens, which Anthropic requires to be larger",
+			})
+		}
+		// The clamp can land under Anthropic's 1024 floor, which is a
+		// guaranteed 400. Below it there is no budget worth asking for.
+		if budget < 1024 {
+			warns = append(warns, ir.Warning{
+				Field: "reasoning", Target: targetName,
+				Reason: "budget below Anthropic's 1024-token minimum; thinking disabled",
+			})
+			break
+		}
+		// Forced tool use is incompatible with manual thinking, though not with
+		// adaptive. The forced tool is the client's explicit instruction and an
+		// agentic loop depends on it; the reasoning depth is the softer ask.
+		if req.ToolChoice != nil && (req.ToolChoice.Mode == "any" || req.ToolChoice.Mode == "tool") {
+			warns = append(warns, ir.Warning{
+				Field: "reasoning", Target: targetName,
+				Reason: "manual thinking is incompatible with a forced tool choice; thinking disabled",
+			})
+			break
+		}
+		body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
+		thinking, manual = true, true
+
+	case modeDisabled:
+		// Only adaptive-capable models have an explicit off switch; on older
+		// ones, omitting the field is what "no thinking" means.
+		if traits.adaptive {
+			body["thinking"] = map[string]any{"type": "disabled"}
 		}
 	}
 
-	// Extended thinking rejects every sampling parameter. Dropping them keeps
-	// the request valid; the warning is what makes the changed behavior visible.
-	drop := func(field string) {
-		warns = append(warns, ir.Warning{
-			Field: field, Target: targetName,
-			Reason: "rejected by Anthropic alongside extended thinking",
-		})
+	// Sampling parameters. On the newest generation any non-default value is a
+	// 400 on every request, thinking or not. On older models the restriction
+	// applies only while thinking is on, and top_p survives inside a narrow band.
+	drop := func(field, reason string) {
+		warns = append(warns, ir.Warning{Field: field, Target: targetName, Reason: reason})
 	}
+	const sealed = "this model rejects any non-default sampling parameter"
+	const withThinking = "rejected by Anthropic alongside thinking"
 	if req.Temperature != nil {
-		if thinking {
-			drop("temperature")
-		} else {
+		switch {
+		case !traits.freeSampling:
+			drop("temperature", sealed)
+		case thinking:
+			drop("temperature", withThinking)
+		default:
 			body["temperature"] = *req.Temperature
 		}
 	}
 	if req.TopP != nil {
-		if thinking {
-			drop("top_p")
-		} else {
+		switch {
+		case !traits.freeSampling:
+			drop("top_p", sealed)
+		case thinking && (*req.TopP < 0.95 || *req.TopP > 1):
+			drop("top_p", "with thinking on, Anthropic accepts top_p only between 0.95 and 1")
+		default:
 			body["top_p"] = *req.TopP
 		}
 	}
 	if req.TopK != nil {
-		if thinking {
-			drop("top_k")
-		} else {
+		switch {
+		case !traits.freeSampling:
+			drop("top_k", sealed)
+		case thinking:
+			drop("top_k", withThinking)
+		default:
 			body["top_k"] = *req.TopK
 		}
 	}
@@ -4223,11 +4544,15 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if tc := renderToolChoice(req.ToolChoice, req.ParallelToolCalls); tc != nil {
 		body["tool_choice"] = tc
 	}
-	if req.ResponseFormat != nil {
-		warns = append(warns, ir.Warning{
-			Field: "response_format", Target: targetName,
-			Reason: "structured output is a beta Darkrouter does not enable",
-		})
+	// Structured output is generally available: no beta header, and the schema
+	// lives under output_config.format.
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
+		outputConfig["format"] = map[string]any{
+			"type": "json_schema", "schema": req.ResponseFormat.Schema,
+		}
+	}
+	if len(outputConfig) > 0 {
+		body["output_config"] = outputConfig
 	}
 	if len(req.Safety) > 0 {
 		warns = append(warns, ir.Warning{
@@ -4237,6 +4562,18 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if uid := req.Metadata["user_id"]; uid != "" {
 		body["metadata"] = map[string]any{"user_id": uid}
 	}
+
+	// Rendered last, because the assistant-prefill rule depends on whether
+	// thinking ended up enabled: a prefill is rejected while it is.
+	msgs, w := renderMessages(req, cb, thinking)
+	warns = append(warns, w...)
+	if thinking && manual && droppedPrefill(req) {
+		warns = append(warns, ir.Warning{
+			Field: "messages[last].assistant_prefill", Target: targetName,
+			Reason: "response prefill is rejected while thinking is on; the turn was dropped",
+		})
+	}
+	body["messages"] = msgs
 
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -4262,7 +4599,11 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 // renderMessages merges consecutive same-role turns. Anthropic requires
 // alternating roles, and the IR routinely produces two user turns in a row —
 // a tool-result turn follows a user turn in every agentic loop.
-func renderMessages(req *ir.Request, cb *cacheBudget) ([]any, []ir.Warning) {
+//
+// A trailing text-only assistant turn is Anthropic's prefill idiom and is
+// normally preserved. It is dropped when thinking is on, which Anthropic
+// rejects outright.
+func renderMessages(req *ir.Request, cb *cacheBudget, thinking bool) ([]any, []ir.Warning) {
 	var (
 		out     []any
 		warns   []ir.Warning
@@ -4276,7 +4617,12 @@ func renderMessages(req *ir.Request, cb *cacheBudget) ([]any, []ir.Warning) {
 		out = append(out, map[string]any{"role": curRole, "content": content})
 		curRole, content = "", nil
 	}
-	for _, m := range xlate.NonSystemMessages(req.Messages) {
+
+	msgs := xlate.NonSystemMessages(req.Messages)
+	if thinking && droppedPrefill(req) {
+		msgs = msgs[:len(msgs)-1]
+	}
+	for _, m := range msgs {
 		role := "user"
 		if m.Role == ir.RoleAssistant {
 			role = "assistant"
@@ -4294,6 +4640,126 @@ func renderMessages(req *ir.Request, cb *cacheBudget) ([]any, []ir.Warning) {
 	}
 	flush()
 	return out, warns
+}
+
+// droppedPrefill reports whether the conversation ends in the prefill idiom —
+// a trailing assistant turn holding only text. Anthropic rejects a prefill
+// while thinking is on, so that combination has to give one of them up.
+func droppedPrefill(req *ir.Request) bool {
+	msgs := xlate.NonSystemMessages(req.Messages)
+	if len(msgs) == 0 {
+		return false
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != ir.RoleAssistant || len(last.Content) == 0 {
+		return false
+	}
+	for _, b := range last.Content {
+		if b.Type != ir.BlockText {
+			return false
+		}
+	}
+	return true
+}
+
+// modelTraits records what one Anthropic model generation accepts.
+type modelTraits struct {
+	adaptive     bool // accepts thinking: {"type": "adaptive"}
+	manualBudget bool // accepts thinking: {"type": "enabled", budget_tokens}
+	freeSampling bool // accepts non-default temperature, top_p, or top_k
+	known        bool
+}
+
+// generations maps a model-name fragment to its traits, most specific first.
+//
+// Reading the generation off the name is a heuristic, and it is here because
+// there is no catalog until Phase 6 — the same technique internal/tokenize uses
+// to pick a vocabulary. It is checked longest-first because "opus-4-5" and
+// "opus-4" would otherwise both match the same name.
+var generations = []struct {
+	fragment string
+	traits   modelTraits
+}{
+	{"mythos-preview", modelTraits{adaptive: true, manualBudget: true, known: true}},
+	{"opus-4-7", modelTraits{adaptive: true, known: true}},
+	{"opus-4-8", modelTraits{adaptive: true, known: true}},
+	{"opus-5", modelTraits{adaptive: true, known: true}},
+	{"sonnet-5", modelTraits{adaptive: true, known: true}},
+	{"fable-5", modelTraits{adaptive: true, known: true}},
+	{"mythos-5", modelTraits{adaptive: true, known: true}},
+	{"opus-4-6", modelTraits{adaptive: true, manualBudget: true, freeSampling: true, known: true}},
+	{"sonnet-4-6", modelTraits{adaptive: true, manualBudget: true, freeSampling: true, known: true}},
+	{"opus-4-5", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+	{"sonnet-4-5", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+	{"haiku-4-5", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+	{"opus-4-1", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+	{"opus-4", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+	{"sonnet-4", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+	{"claude-3", modelTraits{manualBudget: true, freeSampling: true, known: true}},
+}
+
+// traitsFor reads a model name. Dots become dashes first, because proxies spell
+// the same model "claude-sonnet-4.5" where Anthropic spells it
+// "claude-sonnet-4-5-20250929". An unrecognized name gets the permissive set,
+// so the request is shaped by what the client asked for rather than by a guess.
+func traitsFor(model string) modelTraits {
+	name := strings.ReplaceAll(strings.ToLower(model), ".", "-")
+	for _, g := range generations {
+		if strings.Contains(name, g.fragment) {
+			return g.traits
+		}
+	}
+	return modelTraits{adaptive: true, manualBudget: true, freeSampling: true}
+}
+
+type thinkingChoice int
+
+const (
+	modeNone thinkingChoice = iota
+	modeAdaptive
+	modeManual
+	modeDisabled
+)
+
+// thinkingMode picks the wire shape. The client's own spelling decides what it
+// wants; the model's traits decide what it can have, and the conversion runs
+// through xlate so a request reasons the same depth either way.
+func thinkingMode(req *ir.Request, traits modelTraits) thinkingChoice {
+	inbound := req.Metadata["anthropic_thinking_type"]
+	if inbound == "disabled" {
+		return modeDisabled
+	}
+	if req.Reasoning == nil && inbound == "" {
+		return modeNone
+	}
+	// An explicit token budget is evidence the client targets a budget-taking
+	// model; effort or an adaptive config is evidence of the opposite. Where the
+	// target cannot honor the client's shape, convert rather than fail.
+	wantsManual := inbound == "enabled" || (req.Reasoning != nil && req.Reasoning.Budget > 0)
+	if wantsManual && traits.manualBudget && req.Reasoning != nil {
+		return modeManual
+	}
+	if traits.adaptive {
+		return modeAdaptive
+	}
+	// Manual mode needs a budget to state. A client that asked for thinking
+	// without one, against a model with no adaptive mode, gets none.
+	if traits.manualBudget && req.Reasoning != nil {
+		return modeManual
+	}
+	return modeNone
+}
+
+// adaptiveEffort is the depth control adaptive thinking takes in place of a
+// budget. A client that sent a budget has it banded back to an effort here.
+func adaptiveEffort(req *ir.Request) string {
+	if req.Reasoning == nil {
+		return ""
+	}
+	if req.Reasoning.Effort != "" {
+		return strings.ToLower(req.Reasoning.Effort)
+	}
+	return xlate.BudgetEffort(req.Reasoning.Budget)
 }
 
 func renderTools(tools []ir.Tool) []any {
@@ -5238,6 +5704,13 @@ git commit -m "feat(anthropic): parse the message stream"
 
 Two shapes matter here more than the field list.
 
+**The thinking mode round-trips, not just the budget.** Anthropic now has three
+`thinking.type` values — `enabled` with a budget, `adaptive`, and `disabled` —
+and only the first carries a number. Reading `budget_tokens` alone would discard
+a Claude Code client's `adaptive` config and, worse, silently ignore an explicit
+`disabled`. The type is parked in `Metadata` alongside `anthropic_version` and
+Task 14 turns it back into whichever shape the target generation accepts.
+
 **Tool results stay in their user turn.** Anthropic carries them as blocks
 inside a `user` message, and the IR keeps them exactly that way — role
 `RoleUser`, block `BlockToolResult`. Converting them to `RoleTool` would split a
@@ -5350,6 +5823,17 @@ func TestParseRequestReadsToolChoiceAndParallelFlag(t *testing.T) {
 	}
 	if req.ParallelToolCalls == nil || *req.ParallelToolCalls {
 		t.Errorf("parallel = %v; disable_parallel_tool_use inverts", req.ParallelToolCalls)
+	}
+}
+
+func TestParseRequestRoundTripsTheThinkingType(t *testing.T) {
+	for _, mode := range []string{"adaptive", "disabled", "enabled"} {
+		req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[],
+			"thinking":{"type":"`+mode+`"}}`, nil)
+		if req.Metadata["anthropic_thinking_type"] != mode {
+			t.Errorf("%s: metadata = %v; the mode is transport state the adapter needs",
+				mode, req.Metadata)
+		}
 	}
 }
 
@@ -5493,8 +5977,20 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		}
 		req.Metadata["anthropic_version"] = v
 	}
-	if w.Thinking != nil && w.Thinking.BudgetTokens > 0 {
-		req.Reasoning = &ir.Reasoning{Budget: w.Thinking.BudgetTokens}
+	if w.Thinking != nil {
+		if w.Thinking.BudgetTokens > 0 {
+			req.Reasoning = &ir.Reasoning{Budget: w.Thinking.BudgetTokens}
+		}
+		// The mode itself is transport state, like the version header: the
+		// Anthropic adapter needs it to choose between the manual and adaptive
+		// shapes, and a client that explicitly disabled thinking must not have
+		// that instruction silently discarded.
+		if w.Thinking.Type != "" {
+			if req.Metadata == nil {
+				req.Metadata = map[string]string{}
+			}
+			req.Metadata["anthropic_thinking_type"] = w.Thinking.Type
+		}
 	}
 
 	sys, err := parseContent(w.System)
@@ -7550,7 +8046,7 @@ func (f *Fetcher) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.R
 	}
 	if len(req.Metadata) > 0 {
 		for k := range req.Metadata {
-			if k == "anthropic_version" {
+			if strings.HasPrefix(k, "anthropic_") {
 				continue
 			}
 			warns = append(warns, ir.Warning{
@@ -8262,6 +8758,22 @@ func TestParseStreamReportsABlockedPrompt(t *testing.T) {
 	}
 }
 
+func TestParseStreamWarnsOnAnUnknownFinishReason(t *testing.T) {
+	evs, err := collect(t, data(`{"candidates":[{"content":{"parts":[{"text":"hi"}]},
+		"finishReason":"SOMETHING_NEW"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := evs[len(evs)-1]
+	if last.Type != ir.EventMessageStop || last.StopReason != ir.StopEndTurn {
+		t.Fatalf("last event = %+v", last)
+	}
+	if len(last.Warnings) != 1 || last.Warnings[0].Field != "finishReason" {
+		t.Errorf("warnings = %+v; a stream must not lose what the unary path records",
+			last.Warnings)
+	}
+}
+
 func TestParseStreamIgnoresAnUnparseableChunk(t *testing.T) {
 	body := "data: {not json\n\n" + data(`{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`)
 	evs, err := collect(t, body)
@@ -8457,8 +8969,18 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				if !closeAll() {
 					return
 				}
-				sr, _ := finishReason(c.FinishReason, hasCall)
-				if !yield(ir.StreamEvent{Type: ir.EventMessageStop, StopReason: sr}, nil) {
+				sr, known := finishReason(c.FinishReason, hasCall)
+				stop := ir.StreamEvent{Type: ir.EventMessageStop, StopReason: sr}
+				if !known {
+					// Spec §4.5: degrade, but never silently. The unary path
+					// puts this on ir.Response.Warnings; streaming has its own
+					// channel for exactly this reason.
+					stop.Warnings = append(stop.Warnings, ir.Warning{
+						Field: "finishReason", Target: targetName,
+						Reason: "unrecognized value " + c.FinishReason + "; reported as end_turn",
+					})
+				}
+				if !yield(stop, nil) {
 					return
 				}
 				return
@@ -10917,10 +11439,14 @@ func (a *Adapter) BuildCountRequest(ctx context.Context, t *adapter.Target, req 
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
-	// count_tokens rejects both: it counts input, so an output cap is
-	// meaningless and streaming has nothing to stream.
+	// count_tokens counts input, so an output cap is meaningless, streaming has
+	// nothing to stream, and an output schema shapes a response that will never
+	// be generated. Anthropic rejects the first two outright; the third is
+	// stripped because an unrecognized field on this endpoint is a 400 risk for
+	// no benefit.
 	delete(body, "max_tokens")
 	delete(body, "stream")
+	delete(body, "output_config")
 
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -13097,8 +13623,10 @@ func TestEveryDroppedFieldProducesAWarning(t *testing.T) {
 	// Each kind's unsupported set, from the spec's mapping tables.
 	unsupported := map[string][]string{
 		"openaicompat": {"top_k", "safety"},
-		"anthropic":    {"response_format", "safety", "messages[].audio"},
-		"gemini":       {"parallel_tool_calls"},
+		// Not response_format: Anthropic's structured output is GA and Task 14
+		// emits it under output_config.format.
+		"anthropic": {"safety", "messages[].audio"},
+		"gemini":    {"parallel_tool_calls"},
 	}
 	for kind, fields := range unsupported {
 		t.Run(kind, func(t *testing.T) {
@@ -13401,9 +13929,12 @@ Add a "Carried into Phase 5 and beyond" section recording, at minimum:
   `X-Darkrouter-Estimated` says so, but a client budgeting a context window
   around a large image will be wrong. Phase 6's catalog is what makes a better
   answer possible.
-- **Anthropic structured output is dropped with a warning.** Spec §4.6 assumed a
-  beta; whether it is GA now was not re-checked at implementation time. Confirm
-  before Phase 5's auxiliary surfaces, which lean on `response_format`.
+- **Two spec assumptions were stale and are now corrected in the plan**, both
+  confirmed against the live documentation on 2026-08-22: Anthropic's structured
+  output is generally available under `output_config.format` rather than a beta,
+  and extended thinking has split into two mutually exclusive per-generation
+  shapes. Spec §4.6 should be amended to match rather than left to mislead the
+  next reader.
 - **Gemini media inlining fetches client-supplied URLs.** It is bounded to
   http and https, no redirects, 20 MB, and a ten-second timeout, but it is
   outbound traffic the gateway initiates on a client's behalf. Phase 7's settings
@@ -13450,5 +13981,7 @@ Written before implementation; Task 37 revises it with what actually happened.
 - **The Anthropic `max_tokens` substitution is a constant.** 4096 with a warning, because the catalog cannot supply the model's real maximum until Phase 6. A model whose real cap is lower will still 400.
 - **The effort-to-budget clamp is inert.** `xlate.EffortBudget` takes a `maxOut` argument every caller passes as 0. Phase 6 supplies it.
 - **No Anthropic-shaped `GET /v1/models`.** That path serves the OpenAI listing. If a client turns out to need Anthropic's shape there, it needs a routing decision rather than a second handler.
+- **The Anthropic model-generation table is a name heuristic.** `traitsFor` in `internal/adapter/anthropic/build.go` decides the thinking mode and the sampling rules by matching fragments of the model name, because there is no catalog until Phase 6. It is wrong for an aliased or proxied model whose name says nothing about its generation, and it needs a new entry every time Anthropic ships a generation. Phase 6 should move these three booleans onto the catalog entry and delete the table.
+- **A refusal reaches the client as a hard error, not a refusal.** A Gemini blocked prompt is HTTP 200 with `promptFeedback.blockReason` natively, and 400 `INVALID_ARGUMENT` through Darkrouter; an Anthropic `refusal` is a 200 with `stop_reason: "refusal"` natively, and a 400 `invalid_request_error` through Darkrouter on the unary path. This follows from master design §8.1 classifying content filter as `Fatal` and §14 normalizing into the inbound dialect, so it is deliberate — but Gemini CLI and Claude Code will surface it as a failure rather than as the model declining, and that is worth knowing before someone files it as a bug.
 - **`Adapter.Surfaces()` from master design §5.1 does not exist.** The interface still has no way to say which surfaces a kind implements, so routing cannot exclude a provider on that basis. Phase 5 introduces the auxiliary surfaces and is where it becomes load-bearing.
 - **Bedrock and Vertex extend the golden suite, not replace it.** Phase 8 adds `bedrock` and both `vertex` publisher variants to `adapters()` in `internal/golden/golden_test.go`, regenerates, and reviews the new files.
