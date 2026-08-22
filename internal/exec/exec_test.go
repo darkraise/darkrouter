@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -364,6 +366,147 @@ func TestHandleRecordsTTFTAndUsageOnAStream(t *testing.T) {
 }
 
 func TestHandleWithNoLoggerDoesNotPanic(t *testing.T) {
+	up := unaryUpstream()
+	defer up.Close()
+	e := newExecutorWith(t, up.URL, Deps{}, 0)
+	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+type captureHealth struct {
+	mu      sync.Mutex
+	keys    []health.Key
+	signals []health.Signal
+}
+
+func (c *captureHealth) Record(k health.Key, s health.Signal) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys = append(c.keys, k)
+	c.signals = append(c.signals, s)
+}
+
+func (c *captureHealth) only(t *testing.T) (health.Key, health.Signal) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.signals) != 1 {
+		t.Fatalf("got %d signals, want 1", len(c.signals))
+	}
+	return c.keys[0], c.signals[0]
+}
+
+func TestHandleRecordsHealthOnAProviderFailure(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	defer up.Close()
+	h := &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Health: h}, 0)
+
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	k, s := h.only(t)
+	if k.ProviderID != "fake" || k.Model != "m" {
+		t.Errorf("key = %+v", k)
+	}
+	if s.Outcome != adapter.OutcomeRetryableProvider || s.StatusCode != 503 {
+		t.Errorf("signal = %+v", s)
+	}
+	if s.HasRetryAfter {
+		t.Error("no Retry-After was sent, but one was recorded")
+	}
+}
+
+func TestHandleForwardsRetryAfter(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "42")
+		w.WriteHeader(429)
+	}))
+	defer up.Close()
+	h := &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Health: h}, 0)
+
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	_, s := h.only(t)
+	if s.StatusCode != 429 || !s.HasRetryAfter || s.RetryAfter != 42*time.Second {
+		t.Errorf("signal = %+v", s)
+	}
+}
+
+func TestHandleRecordsSuccess(t *testing.T) {
+	up := unaryUpstream()
+	defer up.Close()
+	h := &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Health: h}, 0)
+
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	_, s := h.only(t)
+	if s.Outcome != adapter.OutcomeSuccess {
+		t.Errorf("Outcome = %q, want success", s.Outcome)
+	}
+}
+
+// A done criterion: a client disconnect leaves every provider healthy.
+func TestClientDisconnectIsNotAProviderFailure(t *testing.T) {
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release // hold the upstream open until the client has gone
+		w.WriteHeader(200)
+	}))
+	defer up.Close()
+	defer close(release)
+
+	h := &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Health: h}, 0)
+
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"ping"}]}`))
+	ctx, cancel := context.WithCancel(r.Context())
+	r = r.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Handle(rec, r, openaiedge.New())
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel() // the client hung up
+	<-done
+
+	_, s := h.only(t)
+	if s.Outcome != adapter.OutcomeClientCancelled {
+		t.Fatalf("Outcome = %q, want client_cancelled — a disconnect must never "+
+			"count against a provider", s.Outcome)
+	}
+}
+
+// A Darkrouter-imposed deadline is a provider timeout and must be recorded.
+func TestDarkrouterDeadlineIsAProviderFailure(t *testing.T) {
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.WriteHeader(200)
+	}))
+	defer up.Close()
+	defer close(release)
+
+	h := &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Health: h}, 80*time.Millisecond)
+
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	_, s := h.only(t)
+	if s.Outcome != adapter.OutcomeRetryableProvider {
+		t.Fatalf("Outcome = %q, want retryable_provider — a Darkrouter deadline "+
+			"is a provider timeout, not a client disconnect", s.Outcome)
+	}
+}
+
+func TestHandleWithNoHealthRecorderDoesNotPanic(t *testing.T) {
 	up := unaryUpstream()
 	defer up.Close()
 	e := newExecutorWith(t, up.URL, Deps{}, 0)
