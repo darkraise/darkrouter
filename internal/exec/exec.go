@@ -1,13 +1,13 @@
-// Package exec drives a request to an upstream. Phase 1 handles exactly one
-// candidate; Phase 3 wraps this same call sequence in an attempt loop rather
-// than restructuring it.
+// Package exec drives a request to an upstream, attempting each candidate the
+// router produced until one commits or the chain is exhausted.
 package exec
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
-	"fmt"
+	"io"
 	"iter"
 	"net"
 	"net/http"
@@ -17,11 +17,13 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -31,10 +33,19 @@ type Logger interface {
 	Log(*store.RequestRecord)
 }
 
-// HealthRecorder receives one signal per attempt. It must not block: the
-// breaker answers under a mutex and returns immediately.
+// HealthRecorder receives one signal per attempt.
 type HealthRecorder interface {
 	Record(k health.Key, s health.Signal)
+}
+
+// Fleet is the live health state the loop consults between attempts. It is the
+// same *health.Breaker as Deps.Health; a separate interface keeps the recorder
+// narrow for the callers that only record.
+type Fleet interface {
+	SnapshotAvailability(at time.Time) health.Availability
+	LastUsedSnapshot() map[health.CredKey]time.Time
+	MarkUsed(ck health.CredKey, at time.Time)
+	Available(k health.Key) bool
 }
 
 // Deps carries the optional collaborators. A zero Deps is valid and disables
@@ -42,6 +53,7 @@ type HealthRecorder interface {
 type Deps struct {
 	Log    Logger
 	Health HealthRecorder
+	Fleet  Fleet
 }
 
 type Executor struct {
@@ -86,10 +98,8 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	// The record is built as the request proceeds and emitted exactly once, on
 	// every exit path. Status starts as "error" so an early return that forgets
 	// to set it is recorded as a failure rather than a silent success.
-	// "llm" is the surface name the OpenAI dialect reports; it is the default
-	// only for the error paths that return before ParseRequest yields one.
 	rec := &store.RequestRecord{
-		ID: reqID, TS: start, Dialect: d.Name(), Surface: "llm", Status: "error",
+		ID: reqID, TS: start, Dialect: d.Name(), Surface: string(ir.SurfaceLLM), Status: "error",
 	}
 	defer func() {
 		total := time.Since(start).Milliseconds()
@@ -97,8 +107,6 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		e.log(rec)
 	}()
 
-	// Written up front so every error path carries them, per master design §10.
-	// The count is overwritten once an attempt has actually been made.
 	w.Header().Set("X-Darkrouter-Request", reqID)
 	w.Header().Set("X-Darkrouter-Attempts", "0")
 
@@ -108,9 +116,13 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
-	if pt != nil && pt.Surface != "" {
-		rec.Surface = pt.Surface
+	surface := ir.SurfaceLLM
+	if pt != nil {
+		if s, ok := ir.ParseSurface(pt.Surface); ok {
+			surface = s
+		}
 	}
+	rec.Surface = string(surface)
 	rec.RequestedModel = req.Model
 
 	providers, err := e.src.Providers(r.Context())
@@ -119,125 +131,239 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		_ = d.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()})
 		return
 	}
-	p, ok := provider.Resolve(providers, req.Model)
-	if !ok {
-		rec.ErrorCode = string(ir.ErrNotFound)
-		_ = d.WriteError(w, &ir.Error{
-			Type:    ir.ErrNotFound,
-			Message: fmt.Sprintf("no configured provider offers model %q", req.Model),
-		})
+
+	// The snapshot freezes every input the router is allowed to read. Health is
+	// resolved to booleans here rather than inside Resolve, which is what keeps
+	// the router a pure function of its arguments.
+	snap := router.Snapshot{
+		At:        start,
+		Providers: providers,
+		Catalog:   catalog.FromProviders(providers),
+		Config:    cfg,
+	}
+	if e.deps.Fleet != nil {
+		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
+		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
+	}
+
+	needs := req.Needs()
+	cands, skips, rerr := router.Resolve(router.Query{
+		Model: req.Model, Surface: surface,
+		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
+	}, snap)
+
+	rec.Candidates = traceCandidates(cands)
+	rec.Skips = traceSkips(skips)
+
+	if rerr != nil {
+		e2 := routerError(rerr)
+		rec.ErrorCode = string(e2.Type)
+		_ = d.WriteError(w, e2)
 		return
 	}
-	rec.Candidates = []string{p.ID}
-	rec.FinalProviderID = p.ID
-	rec.FinalModel = req.Model
 
-	// The upstream context derives from the inbound one, so a client hanging up
-	// cancels the upstream call. WithCancelCause is used because the cause is
-	// the only way to tell a disconnect from a Darkrouter deadline.
+	byID := make(map[string]provider.Provider, len(providers))
+	for _, p := range providers {
+		byID[p.ID] = p
+	}
+	e.runAttempts(w, r, d, cfg, req, cands, rec, start, byID)
+}
+
+// runAttempts drives the chain. The ordered list is fixed at snapshot time and
+// never re-ordered; only skipping is dynamic, because another request may have
+// tripped a breaker since the snapshot was taken.
+func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Dialect,
+	cfg *config.Config, req *ir.Request, cands []router.Candidate,
+	rec *store.RequestRecord, start time.Time, byID map[string]provider.Provider) {
+
+	bud := newBudget(cfg.Policy.Timeout, start)
+	maxAttempts := cfg.Policy.Retry.MaxAttempts
+
+	var lastErr *ir.Error
+	attempts := 0
+
+	for i := 0; i < len(cands) && attempts < maxAttempts; {
+		c := cands[i]
+		now := time.Now()
+
+		// The budget gate: an attempt that cannot possibly complete wastes the
+		// budget and the provider's quota, and replaces a clear
+		// attempts-exhausted error with a bare timeout.
+		if !bud.canStartAttempt(now) {
+			if lastErr == nil {
+				lastErr = &ir.Error{Type: ir.ErrDarkrouter, Message: "attempts exhausted by deadline"}
+			} else {
+				lastErr.Message += " (attempts exhausted by deadline)"
+			}
+			break
+		}
+
+		// Re-check live health: another request may have tripped this breaker
+		// since the snapshot. Record the skip so the trace still explains the
+		// realized sequence.
+		hk := health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}
+		if e.deps.Fleet != nil && !e.deps.Fleet.Available(hk) {
+			rec.Skips = append(rec.Skips, traceSkipOf(c, "cooling"))
+			i++
+			continue
+		}
+
+		// At attempt start, not on success: a credential that always fails must
+		// not keep a stale timestamp and sort first forever.
+		if e.deps.Fleet != nil {
+			e.deps.Fleet.MarkUsed(health.CredKey{ProviderID: c.ProviderID, KeyID: c.KeyID}, now)
+		}
+
+		attempts++
+		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts)
+		if aerr != nil {
+			lastErr = aerr
+		}
+
+		next, action := nextIndex(cands, i, outcome, status)
+		switch action {
+		case actionFinish:
+			rec.Status = "success"
+			return
+		case actionReturn:
+			if outcome == adapter.OutcomeClientCancelled {
+				rec.Status = "cancelled"
+			}
+			if lastErr != nil {
+				rec.ErrorCode = string(lastErr.Type)
+				e.writeErrorDiagnostics(w, rec, attempts)
+				_ = d.WriteError(w, lastErr)
+			}
+			return
+		default:
+			i = next
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = &ir.Error{Type: ir.ErrAPI, Message: "every candidate failed"}
+	}
+	rec.ErrorCode = string(lastErr.Type)
+	e.writeErrorDiagnostics(w, rec, attempts)
+	_ = d.WriteError(w, lastErr)
+}
+
+// attempt performs one upstream call and records it. It returns the outcome,
+// the upstream status code, and the dialect error to serve if this turns out to
+// be the last attempt.
+func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialect,
+	cfg *config.Config, req *ir.Request, c router.Candidate, p provider.Provider,
+	bud budget, rec *store.RequestRecord, seq int) (adapter.Outcome, int, *ir.Error) {
+
 	ctx, cancel := context.WithCancelCause(r.Context())
 	defer cancel(nil)
-	// Phase 1 applies the total budget to the whole request. Phase 3 replaces
-	// this with commit semantics plus policy.timeout.idle for committed streams.
-	ctx, cancelTimeout := context.WithTimeoutCause(ctx, cfg.Policy.Timeout.Total,
+	ctx, cancelTimeout := context.WithDeadlineCause(ctx, bud.attemptDeadline(time.Now()),
 		errDarkrouterTimeout)
 	defer cancelTimeout()
 
-	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: p.APIKey, Model: req.Model}
+	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model}
 	hr, err := e.ad.BuildRequest(ctx, tgt, req)
 	if err != nil {
-		rec.ErrorCode = string(ir.ErrDarkrouter)
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()})
-		return
+		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+	}
+	if err := makeReplayable(hr); err != nil {
+		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
 	}
 
 	attemptStart := time.Now()
 	resp, doErr := e.client.Do(hr)
 	outcome := e.classify(r.Context(), ctx, resp, doErr)
 
-	attempt := store.AttemptRecord{
-		Seq: 0, ProviderID: p.ID, KeyID: p.KeyID, Model: req.Model,
-		Outcome:   string(outcome),
-		LatencyMs: time.Since(attemptStart).Milliseconds(),
-	}
+	statusCode := 0
 	if resp != nil {
-		attempt.StatusCode = resp.StatusCode
+		statusCode = resp.StatusCode
 	}
-	if doErr != nil {
-		attempt.Error = doErr.Error()
-	}
-	rec.Attempts = append(rec.Attempts, attempt)
-
-	hk := health.Key{ProviderID: p.ID, KeyID: p.KeyID, Model: req.Model}
-	sig := health.Signal{Outcome: outcome}
-	if resp != nil {
-		sig.StatusCode = resp.StatusCode
-		// Read before the body is closed; a 429's Retry-After is the difference
-		// between a precise cooldown and the generic ladder.
-		if d, ok := health.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); ok {
-			sig.RetryAfter, sig.HasRetryAfter = d, true
-		}
-	}
-	e.recordHealth(hk, sig)
-
-	w.Header().Set("X-Darkrouter-Provider", p.ID)
-	w.Header().Set("X-Darkrouter-Model", req.Model)
-	w.Header().Set("X-Darkrouter-Attempts", strconv.Itoa(1))
+	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(attemptStart))
+	e.recordHealthFor(c, outcome, resp)
 
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		e2 := errorFor(outcome, doErr)
-		rec.ErrorCode = string(e2.Type)
-		if outcome == adapter.OutcomeClientCancelled {
-			rec.Status = "cancelled"
-		}
-		_ = d.WriteError(w, e2)
-		return
+		return outcome, statusCode, errorFor(outcome, doErr)
 	}
 
 	if req.Stream {
-		defer resp.Body.Close()
-		// TTFT is the first content delta rather than the response header, so
-		// it measures what the client actually waited for.
-		events := tapStream(e.ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes),
-			func() {
-				ttft := time.Since(start).Milliseconds()
-				rec.TTFTMs = &ttft
-			},
-			func(u *ir.Usage) { applyUsage(rec, u) },
-		)
-		_ = d.WriteStream(w, events)
-		rec.Status = "success"
-		return
+		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq)
 	}
 
-	// For a non-streaming response the client waits for the whole body, so
-	// first token and last token are the same moment.
-	ttft := time.Since(start).Milliseconds()
+	out, perr := e.ad.ParseResponse(resp)
+	if perr != nil {
+		// A 2xx that cannot be read is a provider fault, so it rejoins the
+		// outcome path rather than going around it.
+		e.recordHealthFor(c, adapter.OutcomeRetryableProvider, resp)
+		last := len(rec.Attempts) - 1
+		rec.Attempts[last].Outcome = string(adapter.OutcomeRetryableProvider)
+		rec.Attempts[last].Error = perr.Error()
+		return adapter.OutcomeRetryableProvider, statusCode,
+			errorFor(adapter.OutcomeRetryableProvider, perr)
+	}
+
+	ttft := time.Since(rec.TS).Milliseconds()
 	rec.TTFTMs = &ttft
+	applyUsage(rec, &out.Usage)
+	rec.FinalProviderID = c.ProviderID
+	rec.FinalModel = c.Model
+	e.writeDiagnostics(w, rec.ID, c, seq)
+	_ = d.WriteResponse(w, out)
+	return adapter.OutcomeSuccess, statusCode, nil
+}
 
-	out, err := e.ad.ParseResponse(resp)
-	if err != nil {
-		// Design §8.2: a read or parse failure on a 2xx is a provider fault, so
-		// it goes through the outcome path rather than around it. Phase 3 then
-		// retries it by adding a loop, not by restructuring this branch.
-		e2 := errorFor(adapter.OutcomeRetryableProvider, err)
-		rec.ErrorCode = string(e2.Type)
-		rec.Attempts[0].Outcome = string(adapter.OutcomeRetryableProvider)
-		rec.Attempts[0].Error = err.Error()
-		// A 2xx that cannot be read is a provider fault, so it must reach the
-		// breaker rather than being recorded only in the log.
-		e.recordHealth(hk, health.Signal{
-			Outcome: adapter.OutcomeRetryableProvider, StatusCode: resp.StatusCode,
-		})
-		_ = d.WriteError(w, e2)
+// attemptStream streams a committed response. Task 16 replaces this with a
+// buffered, replayable form; for now it forwards straight through, which is the
+// phase 2 behavior.
+func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
+	cfg *config.Config, c router.Candidate, resp *http.Response, statusCode int,
+	rec *store.RequestRecord, seq int) (adapter.Outcome, int, *ir.Error) {
+
+	defer resp.Body.Close()
+	rec.FinalProviderID = c.ProviderID
+	rec.FinalModel = c.Model
+	e.writeDiagnostics(w, rec.ID, c, seq)
+
+	events := tapStream(e.ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes),
+		func() {
+			ttft := time.Since(rec.TS).Milliseconds()
+			rec.TTFTMs = &ttft
+		},
+		func(u *ir.Usage) { applyUsage(rec, u) },
+	)
+	_ = d.WriteStream(w, events)
+	return adapter.OutcomeSuccess, statusCode, nil
+}
+
+var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
+
+// classify asks the adapter, then overrides for the two cases no adapter can
+// see: a Darkrouter-imposed deadline, and a cancellation whose origin is the
+// inbound request rather than the upstream.
+//
+// The deadline is checked first. Both cancel the same derived context, and if
+// the client also disappears in that instant, checking the disconnect first
+// would silently reclassify a genuine provider timeout as a client hang-up.
+func (e *Executor) classify(inbound, upstream context.Context, resp *http.Response, err error) adapter.Outcome {
+	if err == nil {
+		return e.ad.Classify(resp, nil)
+	}
+	if errors.Is(context.Cause(upstream), errDarkrouterTimeout) {
+		return adapter.OutcomeRetryableProvider
+	}
+	if errors.Is(inbound.Err(), context.Canceled) {
+		return adapter.OutcomeClientCancelled
+	}
+	return e.ad.Classify(resp, err)
+}
+
+func (e *Executor) log(rec *store.RequestRecord) {
+	if e.deps.Log == nil {
 		return
 	}
-	applyUsage(rec, &out.Usage)
-	rec.Status = "success"
-	_ = d.WriteResponse(w, out)
+	e.deps.Log.Log(rec)
 }
 
 func (e *Executor) recordHealth(k health.Key, s health.Signal) {
@@ -247,11 +373,138 @@ func (e *Executor) recordHealth(k health.Key, s health.Signal) {
 	e.deps.Health.Record(k, s)
 }
 
-func (e *Executor) log(rec *store.RequestRecord) {
-	if e.deps.Log == nil {
+func (e *Executor) recordAttempt(rec *store.RequestRecord, c router.Candidate,
+	o adapter.Outcome, statusCode int, err error, latency time.Duration) {
+
+	a := store.AttemptRecord{
+		Seq: len(rec.Attempts), ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model,
+		Outcome: string(o), StatusCode: statusCode, LatencyMs: latency.Milliseconds(),
+	}
+	if err != nil {
+		a.Error = err.Error()
+	}
+	rec.Attempts = append(rec.Attempts, a)
+}
+
+func (e *Executor) recordHealthFor(c router.Candidate, o adapter.Outcome, resp *http.Response) {
+	sig := health.Signal{Outcome: o}
+	if resp != nil {
+		sig.StatusCode = resp.StatusCode
+		// Read before the body is closed; a 429's Retry-After is the difference
+		// between a precise cooldown and the generic ladder.
+		if d, ok := health.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); ok {
+			sig.RetryAfter, sig.HasRetryAfter = d, true
+		}
+	}
+	e.recordHealth(health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}, sig)
+}
+
+// writeDiagnostics names the target that served the response. Master design §8
+// requires these on commit and on Darkrouter-originated errors.
+func (e *Executor) writeDiagnostics(w http.ResponseWriter, reqID string, c router.Candidate, attempts int) {
+	w.Header().Set("X-Darkrouter-Request", reqID)
+	w.Header().Set("X-Darkrouter-Provider", c.ProviderID)
+	w.Header().Set("X-Darkrouter-Model", c.Model)
+	w.Header().Set("X-Darkrouter-Attempts", strconv.Itoa(attempts))
+}
+
+// writeErrorDiagnostics names the last attempted target on an error response.
+// Provider and model are omitted when no attempt was made, because naming one
+// would imply it was tried.
+func (e *Executor) writeErrorDiagnostics(w http.ResponseWriter, rec *store.RequestRecord, attempts int) {
+	w.Header().Set("X-Darkrouter-Attempts", strconv.Itoa(attempts))
+	if len(rec.Attempts) == 0 {
 		return
 	}
-	e.deps.Log.Log(rec)
+	last := rec.Attempts[len(rec.Attempts)-1]
+	w.Header().Set("X-Darkrouter-Provider", last.ProviderID)
+	w.Header().Set("X-Darkrouter-Model", last.Model)
+}
+
+// makeReplayable sets GetBody so retries inside the transport can resend the
+// body. Each attempt re-renders from the IR, so this is not what makes failover
+// work — it is what stops a transport-level retry from sending an empty body.
+func makeReplayable(hr *http.Request) error {
+	if hr.Body == nil || hr.GetBody != nil {
+		return nil
+	}
+	buf, err := io.ReadAll(hr.Body)
+	if err != nil {
+		return err
+	}
+	_ = hr.Body.Close()
+	hr.Body = io.NopCloser(bytes.NewReader(buf))
+	hr.ContentLength = int64(len(buf))
+	hr.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(buf)), nil
+	}
+	return nil
+}
+
+func secretOf(p provider.Provider, keyID string) string {
+	for _, c := range p.Credentials {
+		if c.ID == keyID {
+			return c.Secret
+		}
+	}
+	return ""
+}
+
+func traceCandidates(cs []router.Candidate) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.ProviderID+"/"+c.KeyID+"/"+c.Model)
+	}
+	return out
+}
+
+func traceSkips(ss []router.Skip) []string {
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, s.ProviderID+"/"+s.KeyID+"/"+s.Model+":"+string(s.Reason))
+	}
+	return out
+}
+
+func traceSkipOf(c router.Candidate, reason string) string {
+	return c.ProviderID + "/" + c.KeyID + "/" + c.Model + ":" + reason
+}
+
+// routerError maps the router's distinguishable empty-result cases onto the
+// dialect's error shape. Collapsing them here would undo the whole point of
+// having separate sentinels.
+func routerError(err error) *ir.Error {
+	switch {
+	case errors.Is(err, router.ErrModelNotFound):
+		return &ir.Error{Type: ir.ErrNotFound, Message: "no configured provider offers this model"}
+	case errors.Is(err, router.ErrSurfaceUnsupported):
+		return &ir.Error{Type: ir.ErrNotFound, Message: "no configured provider offers this model on this surface"}
+	case errors.Is(err, router.ErrAllCooling):
+		return &ir.Error{Type: ir.ErrAPI, Message: "every provider offering this model is cooling"}
+	case errors.Is(err, router.ErrCapabilityUnsatisfied):
+		return &ir.Error{Type: ir.ErrInvalidRequest, Message: "no provider offering this model has the required capabilities"}
+	default:
+		return &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+	}
+}
+
+func errorFor(o adapter.Outcome, err error) *ir.Error {
+	msg := "upstream request failed"
+	if err != nil {
+		msg = err.Error()
+	}
+	switch o {
+	case adapter.OutcomeRetryableCredential:
+		return &ir.Error{Type: ir.ErrAuthentication, Message: "upstream rejected the credential"}
+	case adapter.OutcomeRetryableModel:
+		return &ir.Error{Type: ir.ErrNotFound, Message: "upstream does not serve this model"}
+	case adapter.OutcomeFatal:
+		return &ir.Error{Type: ir.ErrInvalidRequest, Message: msg}
+	case adapter.OutcomeClientCancelled:
+		return &ir.Error{Type: ir.ErrDarkrouter, Message: "client cancelled the request"}
+	default:
+		return &ir.Error{Type: ir.ErrAPI, Message: msg}
+	}
 }
 
 func applyUsage(rec *store.RequestRecord, u *ir.Usage) {
@@ -288,49 +541,5 @@ func tapStream(events iter.Seq2[ir.StreamEvent, error],
 				return
 			}
 		}
-	}
-}
-
-var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
-
-// classify asks the adapter, then overrides for the two cases no adapter can
-// see: a Darkrouter-imposed deadline, and a cancellation whose origin is the
-// inbound request rather than the upstream.
-//
-// The deadline is checked first. Both cancel the same derived context, and if
-// the client also disappears in that instant, checking the disconnect first
-// would silently reclassify a genuine provider timeout as a client hang-up.
-//
-// Keeping this in exec is what lets the executor stay adapter-agnostic, which
-// Phase 3 needs once more than one adapter exists.
-func (e *Executor) classify(inbound, upstream context.Context, resp *http.Response, err error) adapter.Outcome {
-	if err == nil {
-		return e.ad.Classify(resp, nil)
-	}
-	if errors.Is(context.Cause(upstream), errDarkrouterTimeout) {
-		return adapter.OutcomeRetryableProvider
-	}
-	if errors.Is(inbound.Err(), context.Canceled) {
-		return adapter.OutcomeClientCancelled
-	}
-	return e.ad.Classify(resp, err)
-}
-
-func errorFor(o adapter.Outcome, err error) *ir.Error {
-	msg := "upstream request failed"
-	if err != nil {
-		msg = err.Error()
-	}
-	switch o {
-	case adapter.OutcomeRetryableCredential:
-		return &ir.Error{Type: ir.ErrAuthentication, Message: "upstream rejected the credential"}
-	case adapter.OutcomeRetryableModel:
-		return &ir.Error{Type: ir.ErrNotFound, Message: "upstream does not serve this model"}
-	case adapter.OutcomeFatal:
-		return &ir.Error{Type: ir.ErrInvalidRequest, Message: msg}
-	case adapter.OutcomeClientCancelled:
-		return &ir.Error{Type: ir.ErrDarkrouter, Message: "client cancelled the request"}
-	default:
-		return &ir.Error{Type: ir.ErrAPI, Message: msg}
 	}
 }

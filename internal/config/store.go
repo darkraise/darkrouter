@@ -36,6 +36,10 @@ func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
 
 func (s *Store) Current() *Config { return s.cur.Load() }
 
+// Path reports the file the store watches. Tests rewrite it to exercise a
+// reload; nothing on the request path needs it.
+func (s *Store) Path() string { return s.path }
+
 func (s *Store) LastError() error {
 	if p := s.lastErr.Load(); p != nil {
 		return *p
