@@ -7,8 +7,8 @@ Last updated: 2026-08-22
 | Phase | Spec | Plan | Status |
 |---|---|---|---|
 | 1 — Foundation | ✅ | ✅ | **Complete.** Race-clean, `go vet` clean, Docker image verified, all four manual checks passed. |
-| 2 — Persistence and health | ✅ | ✅ | **Implemented** on branch `phase-2-persistence-health`. 18 tasks, all done criteria met. |
-| 3 — Routing and failover | ✅ | ✅ | **Implemented** on branch `phase-3-routing-failover`. 20 tasks, all done criteria met. |
+| 2 — Persistence and health | ✅ | ✅ | **Merged to master.** 18 tasks, all done criteria met. |
+| 3 — Routing and failover | ✅ | ✅ | **Merged to master.** 20 tasks, all done criteria met. |
 | 4 — Dialects | ✅ | — | Not started |
 | 5 — Auxiliary surfaces | ✅ | — | Not started |
 | 6 — Catalog | ✅ | — | Not started |
@@ -24,6 +24,22 @@ dependency graph. Plans live in `docs/superpowers/plans/`.
 The Linux machine needs Go 1.26.1 at `/usr/local/go` (add `/usr/local/go/bin` to
 `PATH`) and gcc, which `-race` requires via cgo. `CGO_ENABLED` defaults to 1
 there, unlike the original Windows machine.
+
+## Carried forward into phase 4 and beyond
+
+From phase 3's plan, the two most likely to surprise:
+
+- **Capability filtering admits everything.** Every model's capabilities are
+  `inferred` until phase 6 supplies real data, and per master design §6.4
+  inferred capabilities pass with a warning. A request needing tools will route
+  to a model that has none and fail at the provider. The filter is wired and
+  tested; it is not yet selective.
+- **Failed attempts burn tokens invisibly.** `request_attempts` carries no usage
+  columns, so tokens spent by failed pre-commit attempts never reach
+  `usage_daily`. Spend figures understate reality whenever failover fires.
+
+Four smaller items are listed at the end of
+`docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
 
 ## Open items
 
