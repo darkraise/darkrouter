@@ -1255,3 +1255,424 @@ git commit -m "feat(exec): add a commit-aware response writer"
 ```
 
 ---
+
+### Task 6: SurfaceOp, and the loop re-parameterized over it
+
+**Files:**
+- Create: `internal/exec/surface.go`
+- Modify: `internal/exec/exec.go` (`runAttempts`, `attempt`, `attemptStream`, `Handle`)
+- Test: `internal/exec/exec_test.go`
+
+**Interfaces:**
+- Consumes: `CommitWriter` (Task 5), `resolved` (Task 4).
+- Produces: `exec.SurfaceOp`, `exec.AttemptCtx`, `exec.chatOp`, and `runAttempts(w, r, op SurfaceOp, cfg, cands, rec, start, byID, cat)`. Every auxiliary surface from Task 8 onward implements `SurfaceOp`.
+
+**Implementer:** dcc-superpower-companions:impl-opus-high
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 3 = 6
+**Approach:** inline - skip 2: the interface and the cut points are stated in full below, and the largest moving part is a verbatim relocation rather than new code.
+
+Risk is 3 because this rewrites the request path every existing route runs on. **Chat behavior must not change.** Task 3's two tests plus `internal/exec`'s existing suite — idle handoff, deadline-cause classification, pre-commit replay, the `postcommit_test.go` pair — are the net. `internal/golden` is not: it never imports `exec`.
+
+**The cut.** `attempt` currently does seven things. Five are surface-invariant and stay in the loop, because they are exactly where Phase 3's subtle bugs were fixed:
+
+| Stays in the loop | Moves to the op |
+|---|---|
+| The cancel-cause timer and its post-commit reset | — |
+| `adapter.Target` construction, including `modelInfo` | — |
+| `makeReplayable`, `client.Do`, `classify` | — |
+| The `BodyClassifier` 400-body reclassification | — |
+| `recordAttempt`, `recordHealthFor`, the non-success early return | — |
+| — | Rendering the outbound request (`Build`) |
+| — | Turning a 2xx into client bytes (`Respond`) |
+
+A single opaque `Attempt` method would have made six new surfaces each re-implement the left column.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/exec/exec_test.go`. This asserts the seam itself rather than chat behavior, which the existing suite already covers:
+
+```go
+// probeOp is a SurfaceOp that records what the loop handed it. It exists to
+// pin the contract between the loop and an op, which no chat test can: chat is
+// the one implementation whose behavior the rest of the suite already fixes.
+type probeOp struct {
+	q         router.Query
+	builds    int
+	responds  int
+	lastInfo  adapter.ModelInfo
+	buildWarn string
+	onRespond func(cw *CommitWriter) (adapter.Outcome, *ir.Error)
+}
+
+func (p *probeOp) Query() router.Query { return p.q }
+
+func (p *probeOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	p.builds++
+	p.lastInfo = tgt.Info
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(tgt.BaseURL, "/")+"/probe",
+		strings.NewReader(`{}`))
+	if err != nil {
+		return nil, nil, err
+	}
+	var warns []ir.Warning
+	if p.buildWarn != "" {
+		warns = append(warns, ir.Warning{Field: p.buildWarn, Target: "probe", Reason: "test"})
+	}
+	return req, warns, nil
+}
+
+func (p *probeOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	p.responds++
+	defer resp.Body.Close()
+	if p.onRespond != nil {
+		return p.onRespond(cw)
+	}
+	_, _ = cw.Write([]byte("ok"))
+	return adapter.OutcomeSuccess, nil
+}
+
+func (p *probeOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = w.Write([]byte(e.Message))
+	return nil
+}
+
+func TestTheLoopGivesAnOpTheCatalogFacts(t *testing.T) {
+	// The loop owns Target construction, so an op must receive the catalog's
+	// view without doing its own lookup.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM}, MaxOutputTokens: 4242,
+	}}, []string{"p"}))
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceLLM}}
+	e, rec := executorForOp(t, upstream.URL, cat)
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op)
+
+	if op.builds != 1 || op.responds != 1 {
+		t.Fatalf("builds = %d, responds = %d, want 1 and 1", op.builds, op.responds)
+	}
+	if op.lastInfo.MaxOutputTokens != 4242 {
+		t.Errorf("Info = %+v; the loop did not supply the catalog facts", op.lastInfo)
+	}
+	if got := rec.only(t); got.Status != "success" {
+		t.Errorf("status = %q", got.Status)
+	}
+}
+
+func TestAnOpThatCommittedCannotRestartTheChain(t *testing.T) {
+	// The op detects commit; the loop enforces it. An op reporting a retryable
+	// outcome after bytes went out must not produce a second attempt, or a
+	// client would receive two half-responses concatenated.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	op := &probeOp{
+		q: router.Query{Model: "m", Surface: ir.SurfaceLLM},
+		onRespond: func(cw *CommitWriter) (adapter.Outcome, *ir.Error) {
+			_, _ = cw.Write([]byte("partial"))
+			// A lie the loop must not believe.
+			return adapter.OutcomeRetryableProvider, &ir.Error{Type: ir.ErrAPI, Message: "boom"}
+		},
+	}
+	e, _ := executorForOpWithTwoProviders(t, upstream.URL)
+	w := httptest.NewRecorder()
+	e.RunSurface(w, httptest.NewRequest("POST", "/probe", nil), op)
+
+	if got := hits.Load(); got != 1 {
+		t.Errorf("upstream called %d times; a committed attempt restarted the chain", got)
+	}
+	if !strings.Contains(w.Body.String(), "partial") {
+		t.Errorf("body = %q; the committed bytes were lost", w.Body.String())
+	}
+}
+```
+
+Add two helpers beside them. `executorForOp` returns an executor whose single provider points at `url` with a `probe` kind, plus the `captureLogger` it logs to; `executorForOpWithTwoProviders` is the same with a second identical provider so a retry has somewhere to go. Both reuse `executorFor` from phase 6 and register `openaicompat.New()` under the kind name `probe` — the op builds its own request, so the adapter is only there to satisfy `adapterFor`.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestTheLoopGivesAnOp|TestAnOpThatCommitted' -v
+```
+
+Expected: FAIL to build — `undefined: SurfaceOp`, `undefined: AttemptCtx`, `e.RunSurface undefined`.
+
+- [ ] **Step 3: Declare the interface**
+
+Create `internal/exec/surface.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+	"github.com/darkraise/darkrouter/internal/store"
+)
+
+// SurfaceOp is what varies between surfaces. Everything else — the budget gate,
+// the live health re-check, credential rotation, adapter resolution, the send,
+// outcome classification, attempt records, health signals and the request log —
+// is surface-invariant and stays in the loop, because that is where phase 3's
+// subtle bugs were fixed and it must not be reimplemented six more times.
+//
+// The interface is deliberately four methods split at two joints: rendering the
+// outbound request, and turning a 2xx into client bytes.
+type SurfaceOp interface {
+	// Query is what the router filters on. Auxiliary surfaces set no capability
+	// needs — an embedding request does not ask for tools.
+	Query() router.Query
+
+	// Build renders the outbound request for one resolved target. It is called
+	// once per attempt, not once per request: the target's model name differs
+	// per candidate, and a multipart body must be re-rendered with the new name
+	// inside the form.
+	Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error)
+
+	// Respond turns a successful upstream response into client bytes. It is
+	// called only when the loop classified the response as OutcomeSuccess, and
+	// it owns closing resp.Body.
+	//
+	// Writing to cw is what commits the response. The op decides what counts as
+	// content-bearing for its wire format; the loop decides what that means for
+	// failover, by consulting the writer rather than the returned outcome.
+	Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error)
+
+	// WriteError renders a Darkrouter error in the shape the client speaks.
+	// Master design §14: an error is normalized into the inbound dialect.
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
+// AttemptCtx is what Respond needs from the attempt around it. It is a struct
+// rather than six parameters because auxiliary surfaces use different subsets
+// and the list would otherwise grow with every one of them.
+type AttemptCtx struct {
+	Exec *Executor
+	Cfg  *config.Config
+	Cand router.Candidate
+	Rec  *store.RequestRecord
+	Seq  int
+	// Timer bounds the attempt. Respond resets it at commit, when the total
+	// timeout stops applying and idle takes over.
+	Timer *time.Timer
+	// Warns are the warnings Build produced, plus the inferred-capability
+	// warning when the loop admitted a guess. Respond appends whatever the
+	// response itself raised and assigns the union to the record — assigned,
+	// never appended across attempts, so an abandoned attempt's warnings do not
+	// describe the translation the client received.
+	Warns   []ir.Warning
+	Adapter adapter.Adapter
+}
+```
+
+- [ ] **Step 4: Re-parameterize the loop**
+
+In `internal/exec/exec.go`, change `runAttempts` and `attempt` to take the op in place of `d edge.Dialect` and `req *ir.Request`.
+
+`runAttempts`'s signature and its three uses of the old parameters:
+
+```go
+func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op SurfaceOp,
+	cfg *config.Config, cands []router.Candidate,
+	rec *store.RequestRecord, start time.Time, byID map[string]provider.Provider,
+	cat catalog.Reader) {
+```
+
+Inside it, `e.attempt(w, r, d, cfg, req, c, ...)` becomes `e.attempt(w, r, op, cfg, c, ...)`, and both `_ = d.WriteError(w, lastErr)` calls become `_ = op.WriteError(w, lastErr)`. Nothing else in the body changes — the budget gate, the health re-check, `adapterFor`, `MarkUsed`, `nextIndex` and the status assignments are all surface-invariant already.
+
+`attempt` keeps its whole preamble and changes only where it reaches for the request or the dialect:
+
+```go
+func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
+	cfg *config.Config, c router.Candidate, p provider.Provider,
+	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
+	cat catalog.Reader) (adapter.Outcome, int, *ir.Error) {
+```
+
+Replace the build block — everything from `var warns []ir.Warning` through the `makeReplayable` check — with:
+
+```go
+	var warns []ir.Warning
+	if iw, ok := inferredWarningFor(c, op.Query()); ok {
+		warns = append(warns, iw)
+	}
+	hr, buildWarns, err := op.Build(ctx, tgt, ad)
+	warns = append(warns, buildWarns...)
+	if err != nil {
+		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+	}
+	if err := makeReplayable(hr); err != nil {
+		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+	}
+```
+
+Replace everything from `if req.Stream {` to the end of the function with:
+
+```go
+	cw := NewCommitWriter(w)
+	outcome, aerr := op.Respond(cw, resp, &AttemptCtx{
+		Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: seq, Timer: timer,
+		Warns: warns, Adapter: ad,
+	})
+	// The loop asks the writer, not the op. An op that reports a retryable
+	// outcome after bytes have gone out is describing a post-commit failure,
+	// and phase 3's rule says the chain ends there regardless — a second
+	// attempt would concatenate two half-responses on one connection.
+	if cw.Committed() && outcome != adapter.OutcomeSuccess {
+		rec.ErrorCode = string(ir.ErrAPI)
+		return adapter.OutcomeSuccess, statusCode, nil
+	}
+	return outcome, statusCode, aerr
+```
+
+`inferredWarningFor` is `inferredWarning` with its `*ir.Request` parameter replaced by the query, since an auxiliary surface has no `ir.Request` to ask. Replace the existing function with:
+
+```go
+// inferredWarningFor records that a candidate was admitted on guessed
+// capability metadata for a request that actually needed a capability.
+//
+// Master design §6.4 admits these rather than excluding them, because
+// hard-filtering on a guess would make every discovered local model refuse the
+// tool requests Claude Code always sends. The cost is that a provider's own
+// rejection looks like a Darkrouter failure, and this is what makes the trace
+// say otherwise.
+//
+// It takes the query rather than the request because an auxiliary surface has
+// no ir.Request — and needs no capability, so it never warns.
+func inferredWarningFor(c router.Candidate, q router.Query) (ir.Warning, bool) {
+	if !c.Inferred {
+		return ir.Warning{}, false
+	}
+	var missing []string
+	if q.NeedsTools {
+		missing = append(missing, "tools")
+	}
+	if q.NeedsVision {
+		missing = append(missing, "vision")
+	}
+	if q.NeedsReasoning {
+		missing = append(missing, "reasoning")
+	}
+	if len(missing) == 0 {
+		// Warning about a plain chat request would be noise, and noise is what
+		// trains people to ignore warnings.
+		return ir.Warning{}, false
+	}
+	return ir.Warning{
+		Field:  "capabilities",
+		Target: c.ProviderID + "/" + c.Model,
+		Reason: "the request needs " + strings.Join(missing, ", ") +
+			" and this model's capabilities are unverified; routed anyway",
+	}, true
+}
+```
+
+- [ ] **Step 5: Move chat behind the interface**
+
+Add `chatOp` to `internal/exec/surface.go`. Its `Respond` is the old tail of `attempt`, moved rather than rewritten:
+
+```go
+// chatOp is the llm surface. It is the first SurfaceOp and its behavior is
+// identical to phase 4's: the whole point of the extraction is that this file
+// contains a move, not a rewrite.
+type chatOp struct {
+	d   edge.Dialect
+	req *ir.Request
+}
+
+func (o *chatOp) Query() router.Query {
+	needs := o.req.Needs()
+	return router.Query{
+		Model: o.req.Model, Surface: ir.SurfaceLLM,
+		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
+	}
+}
+
+func (o *chatOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	return ad.BuildRequest(ctx, tgt, o.req)
+}
+
+func (o *chatOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+```
+
+`chatOp.Respond` is the code currently in `attempt` from `if req.Stream {` onward, relocated with three substitutions and no other change:
+
+- `req.Stream` becomes `o.req.Stream`, `d` becomes `o.d`, and `ad` becomes `ac.Adapter`.
+- `e.attemptStream(...)` becomes `ac.Exec.attemptStream(o.d, ac.Cfg, ac.Cand, resp, rec, ac.Seq, ac.Timer, ac.Warns, ac.Adapter, cw)` — give `attemptStream` a `*CommitWriter` in place of its `http.ResponseWriter` and drop its now-unused `statusCode` parameter, which it only passed through.
+- The unary tail keeps `rec.Warnings = warningStrings(append(ac.Warns, out.Warnings...))` **assigned, not appended**. Task 3's second test is what catches an accumulator here.
+
+Move `attemptStream` and its helpers unchanged otherwise. Its internal writes already go through the writer it is handed, so passing a `*CommitWriter` is the only edit its body needs.
+
+- [ ] **Step 6: Give the loop a public entry point**
+
+Add to `internal/exec/surface.go`:
+
+```go
+// RunSurface is the entry point every route shares: prologue, then the loop.
+// Handle and the six auxiliary routes are each a few lines of parsing followed
+// by one call to this.
+func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op SurfaceOp) {
+	start := time.Now()
+	cfg := e.store.Current()
+	rec, done := e.newRecord(start, op)
+	defer done()
+
+	res, ok := e.resolve(r.Context(), w, op, op.Query(), rec, cfg, start)
+	if !ok {
+		return
+	}
+	e.runAttempts(w, r, op, cfg, res.Candidates, rec, start, res.ByID, res.Catalog)
+}
+```
+
+`newRecord` is the record construction and deferred log that `Handle` and `HandleCount` both open with — extract it alongside, taking the op only for its surface. `Handle` keeps its own body-parsing preamble and then constructs a `chatOp` and calls `RunSurface`; `HandleCount` is unchanged, since it does not run the attempt loop.
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package — the two new seam tests, Task 3's two, and every phase 3 and 4 test unchanged. A failure in `postcommit_test.go` means the timer handoff moved; a failure in the idle or deadline tests means the cancel-cause plumbing did.
+
+- [ ] **Step 8: Verify chat end to end**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+go test ./internal/exec/ ./internal/server/ -race -count=5
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing, and no flakes across five runs. `internal/golden` passing proves nothing about this task — say so in the commit rather than citing it.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/exec/surface.go internal/exec/exec.go internal/exec/exec_test.go
+git commit -m "refactor(exec): drive the loop through a SurfaceOp"
+```
+
+---
