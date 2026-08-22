@@ -1,6 +1,6 @@
 # Darkrouter Phase 4 — Dialects Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 > **Implementer assignments:** each task names its implementer agent in an
 > `**Implementer:**` line. When executing with
@@ -107,7 +107,7 @@ makes silent loss the specific failure this phase exists to prevent.
 attached to a tool result needs vision just as much as one with an image in a
 user turn, and the router would otherwise route it to a text-only model.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/ir/ir_test.go`:
 
@@ -171,12 +171,12 @@ func TestNeedsFindsVisionInsideAToolResult(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/ir/ -run 'ToolResult|Warning|Needs|StreamEvent' -v`
 Expected: compile failure — `tr.Text undefined`, `w.String undefined`, and `Content` being a `string` rejects the composite literal.
 
-- [ ] **Step 3: Change the types**
+- [x] **Step 3: Change the types**
 
 In `internal/ir/ir.go`, replace the `Media`, `ToolResult`, and `Delta` declarations and extend `Request`:
 
@@ -249,7 +249,7 @@ Add to `Request`, after `ToolChoice`:
 
 Add `"strings"` to the import block, which currently holds only `encoding/json`.
 
-- [ ] **Step 4: Add `Warning.String` and fix `Needs`**
+- [x] **Step 4: Add `Warning.String` and fix `Needs`**
 
 ```go
 func (w Warning) String() string {
@@ -293,7 +293,7 @@ func blocksHaveImage(blocks []ContentBlock) bool {
 }
 ```
 
-- [ ] **Step 5: Charge the signature against the pre-commit buffer**
+- [x] **Step 5: Charge the signature against the pre-commit buffer**
 
 In `internal/exec/commit.go`, `eventBytes` must count the new field or a
 provider streaming enormous signatures escapes the cap:
@@ -308,12 +308,12 @@ provider streaming enormous signatures escapes the cap:
 	}
 ```
 
-- [ ] **Step 6: Run the suite**
+- [x] **Step 6: Run the suite**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./...`
 Expected: PASS everywhere, no vet output. Nothing consumes `ToolResult.Content` yet, so the type change compiles cleanly.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/ir/ internal/exec/commit.go
@@ -343,7 +343,7 @@ design §5.1 types it. Doing it now rather than later matters because Phase 4
 writes two more producers of this struct, and each would otherwise learn the
 untyped habit.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/edge/openai/parse_test.go`:
 
@@ -364,12 +364,12 @@ func TestParseRequestReportsTheLLMSurfaceTyped(t *testing.T) {
 Confirm `internal/edge/openai/parse_test.go` already imports `net/http/httptest`,
 `strings`, and `github.com/darkraise/darkrouter/internal/ir`; add whichever it lacks.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -run TypedSurface -v`
 Expected: FAIL — `invalid operation: pt.Surface (variable of type string) != ir.SurfaceLLM`.
 
-- [ ] **Step 3: Type the field**
+- [x] **Step 3: Type the field**
 
 In `internal/edge/edge.go`:
 
@@ -389,7 +389,7 @@ In `internal/edge/openai/parse.go`, the final return becomes:
 	return req, &edge.Passthrough{Body: body, ModelField: "model", Surface: ir.SurfaceLLM}, nil
 ```
 
-- [ ] **Step 4: Drop the re-validation in exec**
+- [x] **Step 4: Drop the re-validation in exec**
 
 In `internal/exec/exec.go`, `Handle` currently re-parses the string. Replace:
 
@@ -417,12 +417,12 @@ with:
 `ir.ParseSurface` stays: Phase 6 reads surfaces out of catalog rows, which are
 strings from SQLite.
 
-- [ ] **Step 5: Run the suite**
+- [x] **Step 5: Run the suite**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./...`
 Expected: PASS, no vet output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/edge/ internal/exec/exec.go
@@ -457,7 +457,7 @@ That same re-rendering is why exec **assigns** rather than appends: `rec.Warning
 is replaced at the moment a response commits, so it describes the translation the
 client actually received.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/adapter/openaicompat/build_test.go`:
 
@@ -497,12 +497,12 @@ func TestWarningStringsFlattensForTheRecord(t *testing.T) {
 `internal/exec/exec_test.go` needs `github.com/darkraise/darkrouter/internal/ir`
 in its import block; it is not there yet.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/openaicompat/ ./internal/exec/ -run 'Warning' -v`
 Expected: compile failure — `BuildRequest` returns two values, and `warningStrings` is undefined.
 
-- [ ] **Step 3: Widen the interface**
+- [x] **Step 3: Widen the interface**
 
 In `internal/adapter/adapter.go`:
 
@@ -527,7 +527,7 @@ type BodyClassifier interface {
 }
 ```
 
-- [ ] **Step 4: Thread it through openaicompat**
+- [x] **Step 4: Thread it through openaicompat**
 
 In `internal/adapter/openaicompat/build.go`, change the signature and every
 return. Task 8 and Task 9 fill the slice; here it is threaded and empty:
@@ -559,7 +559,7 @@ func (a *Adapter) ClassifyBody(resp *http.Response, body []byte, err error) adap
 var _ adapter.BodyClassifier = (*Adapter)(nil)
 ```
 
-- [ ] **Step 5: Record the warnings in exec**
+- [x] **Step 5: Record the warnings in exec**
 
 In `internal/exec/exec.go`, `attempt` gains the third return value and passes the
 warnings to the two places a response commits:
@@ -637,12 +637,12 @@ func warningStrings(ws []ir.Warning) []string {
 }
 ```
 
-- [ ] **Step 6: Run the suite**
+- [x] **Step 6: Run the suite**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./...`
 Expected: PASS, no vet output.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/adapter/ internal/exec/
@@ -681,7 +681,7 @@ Phase 3 called `openaicompat.ClassifyBody` unconditionally, which would apply
 OpenAI's error-code vocabulary to Anthropic and Gemini responses — and which is
 why `internal/exec` imported a specific adapter at all.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/exec/exec_test.go`:
 
@@ -736,12 +736,12 @@ here: a skipped candidate must still produce exactly one request row. Add `os`,
 `internal/adapter`, `internal/adapter/openaicompat`, `internal/config`, and
 `internal/provider` to the test file's imports if any are missing.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/exec/ -run NoRegisteredAdapter -v`
 Expected: compile failure — `New` does not take a map.
 
-- [ ] **Step 3: Hold a registry instead of one adapter**
+- [x] **Step 3: Hold a registry instead of one adapter**
 
 In `internal/exec/exec.go`, replace the field and the constructor's parameter:
 
@@ -776,7 +776,7 @@ func (e *Executor) adapterFor(kind string) (adapter.Adapter, bool) {
 }
 ```
 
-- [ ] **Step 4: Resolve per candidate in the loop**
+- [x] **Step 4: Resolve per candidate in the loop**
 
 In `runAttempts`, insert the lookup immediately after the live-health re-check
 and before `MarkUsed`, so an unusable candidate never marks a credential used:
@@ -796,7 +796,7 @@ and pass it into the attempt:
 		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts, ad)
 ```
 
-- [ ] **Step 5: Take the adapter as a parameter**
+- [x] **Step 5: Take the adapter as a parameter**
 
 `attempt` gains a trailing `ad adapter.Adapter` parameter and uses it in place of
 `e.ad` throughout:
@@ -839,7 +839,7 @@ func (e *Executor) classify(ad adapter.Adapter, inbound, upstream context.Contex
 }
 ```
 
-- [ ] **Step 6: Refine the 400 through the optional interface**
+- [x] **Step 6: Refine the 400 through the optional interface**
 
 Replace the `openaicompat.ClassifyBody` block in `attempt` with:
 
@@ -862,7 +862,7 @@ Replace the `openaicompat.ClassifyBody` block in `attempt` with:
 Delete the `"github.com/darkraise/darkrouter/internal/adapter/openaicompat"`
 import from `internal/exec/exec.go`.
 
-- [ ] **Step 7: Update the constructor's callers**
+- [x] **Step 7: Update the constructor's callers**
 
 In `internal/server/server.go`, `New` builds the registry:
 
@@ -887,12 +887,12 @@ In `internal/exec/exec_test.go`, `newExecutorWith` ends with:
 Grep for other `New(` call sites in `internal/exec` tests and update them the
 same way: `grep -rn "= New(cfgStore" internal/exec/`.
 
-- [ ] **Step 8: Run the suite**
+- [x] **Step 8: Run the suite**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./...`
 Expected: PASS, no vet output.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/exec/ internal/server/server.go
@@ -929,7 +929,7 @@ The extractor belongs on the dialect because it is dialect knowledge, and becaus
 the alternative — a path-prefix table in the server — would have to be kept in
 sync with the route table by hand.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/openai/dialect_test.go`:
 
@@ -968,12 +968,12 @@ func TestProxyTokenReadsTheBearerHeader(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -run ProxyToken -v`
 Expected: FAIL — `New().ProxyToken undefined`.
 
-- [ ] **Step 3: Add the interface method**
+- [x] **Step 3: Add the interface method**
 
 In `internal/edge/edge.go`:
 
@@ -994,7 +994,7 @@ type Dialect interface {
 }
 ```
 
-- [ ] **Step 4: Implement it for OpenAI**
+- [x] **Step 4: Implement it for OpenAI**
 
 In `internal/edge/openai/dialect.go`, add the method and move `parseBearer` over
 from the server:
@@ -1013,7 +1013,7 @@ func (d *Dialect) ProxyToken(r *http.Request) string {
 
 Add `"strings"` to the file's imports.
 
-- [ ] **Step 5: Wrap each route with its own dialect**
+- [x] **Step 5: Wrap each route with its own dialect**
 
 In `internal/server/server.go`, replace `ProxyHandler` and `withProxyAuth`:
 
@@ -1051,7 +1051,7 @@ Delete `parseBearer` from `internal/server/server.go` and add
 `"strings"` if nothing else in the file uses it — `go vet` will not catch an
 unused import, but the compiler will.
 
-- [ ] **Step 6: Run the suite**
+- [x] **Step 6: Run the suite**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./...`
 Expected: PASS. `TestProxyTokenIsEnforcedWhenConfigured`,
@@ -1059,7 +1059,7 @@ Expected: PASS. `TestProxyTokenIsEnforcedWhenConfigured`,
 `internal/server/server_test.go` all drive `GET /v1/models`, which is still
 wrapped, so they continue to pass unchanged.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/edge/ internal/server/server.go
@@ -1101,7 +1101,7 @@ walk would put the misplacement and non-text warnings in two places that must
 stay in lockstep forever, which is the same divergence-is-invisible problem this
 package exists to solve, one level down.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/xlate/system_test.go`:
 
@@ -1261,12 +1261,12 @@ func TestNonSystemMessagesReturnsNilForAllSystem(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/xlate/`
 Expected: FAIL — the package does not exist.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `internal/adapter/xlate/system.go`:
 
@@ -1394,12 +1394,12 @@ within a group with no separator. That is what
 and `TestCollectSystemLeadingMessagesProduceNoWarning` (`"a\n\nb"`, two
 messages) pin. Flattening to blocks before joining would change both.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/xlate/ -v`
 Expected: PASS, all thirteen.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -1433,7 +1433,7 @@ the same for Anthropic's mandatory `max_tokens`.
 `maxOut` is the model's maximum output tokens from the catalog. Phase 6 supplies
 it; until then every caller passes 0, which means unknown and disables the clamp.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/xlate/params_test.go`:
 
@@ -1529,12 +1529,12 @@ func TestSyntheticToolCallIDIsStableAndPositional(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/xlate/ -run 'Effort|Budget|Required|Synthetic'`
 Expected: FAIL — undefined identifiers.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `internal/adapter/xlate/params.go`:
 
@@ -1628,7 +1628,7 @@ func SyntheticToolCallID(turn, call int) string {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/xlate/ -v`
 Expected: PASS.
@@ -1638,7 +1638,7 @@ The banding boundaries are the midpoints between the table's values —
 `BudgetEffort(EffortBudget(e, 0)) == e` for every named effort. The test's
 `{10239, "low"}` and `{10240, "medium"}` rows pin exactly that boundary.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -1675,7 +1675,7 @@ followed by a separate `user` message with the remaining text. Emitting the
 results first within their own turn is what puts them in that position, because
 the IR always carries them in the turn directly after the assistant's.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/openaicompat/messages_test.go`:
 
@@ -1878,12 +1878,12 @@ func TestRenderMessagesKeepsInlineSystemTurnsInPlace(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/openaicompat/ -run RenderMessages`
 Expected: compile failure — `renderMessages` takes one argument and returns one value.
 
-- [ ] **Step 3: Write the renderer**
+- [x] **Step 3: Write the renderer**
 
 Create `internal/adapter/openaicompat/messages.go`:
 
@@ -2095,7 +2095,7 @@ func cacheWarning(b ir.ContentBlock, target string) []ir.Warning {
 }
 ```
 
-- [ ] **Step 4: Move `renderContent` and rewire `BuildRequest`**
+- [x] **Step 4: Move `renderContent` and rewire `BuildRequest`**
 
 Cut `renderContent` out of `internal/adapter/openaicompat/build.go` and paste it
 into `messages.go`, changing its signature to collect warnings. Task 9 adds the
@@ -2177,12 +2177,12 @@ and open the body with:
 	}
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/openaicompat/ -v`
 Expected: PASS, including the Phase 1 tests already in `build_test.go`.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -2216,7 +2216,7 @@ hard-code as impossible here.
 sending safety settings that vanish on failover to Groq must see that in the
 trace.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/adapter/openaicompat/build_test.go`:
 
@@ -2405,12 +2405,12 @@ func TestBuildRequestDoesNotLeakAnthropicTransportMetadata(t *testing.T) {
 The test file needs `context`, `encoding/json`, `io`, and the `adapter` and `ir`
 packages imported; `hasWarning` comes from `messages_test.go` in the same package.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/openaicompat/ -run 'BuildRequestRenders|BuildRequestWarns|BuildRequestBands|BuildRequestPasses|BuildRequestDoes'`
 Expected: FAIL — the parts and fields do not exist.
 
-- [ ] **Step 3: Extend `renderContent`**
+- [x] **Step 3: Extend `renderContent`**
 
 In `internal/adapter/openaicompat/messages.go`, replace the `default:` arm with
 document and audio arms, keeping `default:` for everything else:
@@ -2488,7 +2488,7 @@ func documentFilename(mime string) string {
 }
 ```
 
-- [ ] **Step 4: Render the remaining parameters**
+- [x] **Step 4: Render the remaining parameters**
 
 In `internal/adapter/openaicompat/build.go`, replace the reasoning block and add
 the rest, immediately before the `if req.Stream` block:
@@ -2563,12 +2563,12 @@ func forwardableMetadata(md map[string]string) map[string]string {
 Add `"github.com/darkraise/darkrouter/internal/adapter/xlate"` to the imports of
 `build.go`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/openaicompat/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -2605,7 +2605,7 @@ Legacy `functions`, `function_call`, and the `function` role are accepted per
 spec §4.1 and review finding F16. They are translated to the tool equivalents on
 the way in, so nothing downstream has to know they exist.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/edge/openai/parse_test.go`:
 
@@ -2738,12 +2738,12 @@ func TestParseRequestReadsResponseFormatAndFlags(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -run ParseRequest`
 Expected: FAIL — tool calls, tool results, legacy fields, and the string `stop` are all unhandled; several panic on nil.
 
-- [ ] **Step 3: Widen the wire types**
+- [x] **Step 3: Widen the wire types**
 
 In `internal/edge/openai/parse.go`, replace the three wire structs and add three:
 
@@ -2823,7 +2823,7 @@ type wirePart struct {
 }
 ```
 
-- [ ] **Step 4: Fill the IR request**
+- [x] **Step 4: Fill the IR request**
 
 Replace the body of `ParseRequest` between the unmarshal and the return:
 
@@ -2876,7 +2876,7 @@ Replace the body of `ParseRequest` between the unmarshal and the return:
 	}
 ```
 
-- [ ] **Step 5: Add the message and stop parsers**
+- [x] **Step 5: Add the message and stop parsers**
 
 ```go
 // parseMessage converts one wire message. The turn index is needed because a
@@ -3049,12 +3049,12 @@ carries the name at the top level rather than under `function`:
 	return nil
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -v`
 Expected: PASS.
 
-- [ ] **Step 7: Run the suite and commit**
+- [x] **Step 7: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -3085,7 +3085,7 @@ loop stops with the client believing the model had nothing to say.
 `created` becomes a package variable so a golden fixture can be byte-stable.
 Everything else in the response is a pure function of the IR.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/edge/openai/write_test.go`:
 
@@ -3192,12 +3192,12 @@ func TestWriteResponseUsesTheClockSeam(t *testing.T) {
 
 The test file needs `encoding/json`, `net/http/httptest`, `testing`, and `time`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -run WriteResponse`
 Expected: FAIL — no `tool_calls`, no `reasoning_content`, no token details, and `now` is undefined.
 
-- [ ] **Step 3: Rewrite `WriteResponse`**
+- [x] **Step 3: Rewrite `WriteResponse`**
 
 Replace it in `internal/edge/openai/write.go`:
 
@@ -3288,12 +3288,12 @@ Add `"strings"` to the imports if the file lost it, and keep `"time"`.
 `stop_sequence`, `pause_turn`, and `error` — OpenAI has no wire value for any of
 them, and `stop` is the only one a client handles without breaking.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -v`
 Expected: PASS, including the Phase 1 assertions in `TestWriteResponseProducesOpenAIShape`.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -3326,7 +3326,7 @@ space, so writing the IR index straight into the wire chunk would send
 The mapping is assigned at `content_block_start`, in the order blocks open,
 which is the order OpenAI itself numbers them.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/edge/openai/stream_test.go`:
 
@@ -3424,12 +3424,12 @@ func TestWriteStreamEmitsReasoningDeltas(t *testing.T) {
 
 The test file needs `encoding/json`, `net/http/httptest`, `strings`, and `testing`.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -run WriteStream`
 Expected: FAIL — block starts and tool deltas are skipped, so only three chunks appear.
 
-- [ ] **Step 3: Track the wire index and emit the new deltas**
+- [x] **Step 3: Track the wire index and emit the new deltas**
 
 In `internal/edge/openai/stream.go`, replace the loop body's switch. `chunk` also
 takes its timestamp from the seam now:
@@ -3532,14 +3532,14 @@ and replace the switch arms:
 
 The `EventMessageDelta` and `EventMessageStop` arms are unchanged.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/openai/ -v`
 Expected: PASS. The Phase 1 stream tests still hold: `EventBlockStop` and pings
 remain skipped, and the in-stream error shape — `data: {"error":{...}}` followed
 by `data: [DONE]` — is already what spec §4.9 prescribes for this dialect.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -3571,7 +3571,7 @@ The four-breakpoint cap is enforced here rather than at the API, because
 Anthropic's 400 does not say which marker was surplus and the client has no way
 to find out.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/anthropic/content_test.go`:
 
@@ -3767,12 +3767,12 @@ func TestRenderBlocksDropsTheFifthCacheBreakpoint(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/`
 Expected: FAIL — the package does not exist.
 
-- [ ] **Step 3: Write the renderer**
+- [x] **Step 3: Write the renderer**
 
 Create `internal/adapter/anthropic/content.go`:
 
@@ -3946,7 +3946,7 @@ func mediaSource(m *ir.Media, field string) (map[string]any, []ir.Warning) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -v`
 Expected: PASS.
@@ -3955,7 +3955,7 @@ Expected: PASS.
 marshals as embedded JSON rather than as a string, which is exactly the
 difference between Anthropic's shape and OpenAI's.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -4014,7 +4014,7 @@ Structured output is **generally available** — no beta header, and the schema
 lives under `output_config.format`. Spec §4.6 assumed a beta and told the
 implementer to re-check; it was right to.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/anthropic/build_test.go`:
 
@@ -4391,12 +4391,12 @@ Replace the placeholder type in the helper's signature with the real one:
 importing `net/http`. It is written as `*http_Request` above only to make the
 substitution impossible to miss.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -run BuildRequest`
 Expected: FAIL — `BuildRequest` is undefined.
 
-- [ ] **Step 3: Write the builder**
+- [x] **Step 3: Write the builder**
 
 Create `internal/adapter/anthropic/build.go`:
 
@@ -4819,12 +4819,12 @@ func renderToolChoice(tc *ir.ToolChoice, parallel *bool) map[string]any {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -4858,7 +4858,7 @@ unlisted 4xx is `Fatal`.
 Anthropic's `529 overloaded_error` and Gemini's `503 UNAVAILABLE` both fall out
 of the ≥500 rule without either adapter naming them.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/adapter/classify_test.go`:
 
@@ -4910,12 +4910,12 @@ func TestClassifyStatusTreatsTransportErrorsAsRetryable(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/ -run ClassifyStatus`
 Expected: FAIL — `ClassifyStatus` is undefined.
 
-- [ ] **Step 3: Write the ladder**
+- [x] **Step 3: Write the ladder**
 
 Create `internal/adapter/classify.go`, moving the body of
 `openaicompat.Classify` verbatim including its comments:
@@ -4957,7 +4957,7 @@ func ClassifyStatus(resp *http.Response, err error) Outcome {
 }
 ```
 
-- [ ] **Step 4: Delegate from openaicompat**
+- [x] **Step 4: Delegate from openaicompat**
 
 Replace the body of `Classify` in `internal/adapter/openaicompat/classify.go`:
 
@@ -4973,7 +4973,7 @@ func Classify(resp *http.Response, err error) adapter.Outcome {
 `internal/adapter/openaicompat/classify_test.go` exercises the same table and
 must keep passing unchanged — if a case fails, the ladder was transcribed wrong.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -5006,7 +5006,7 @@ An unmapped value becomes `end_turn` **with a warning** rather than an error,
 because Anthropic ships new ones without notice and a gateway that 500s on a new
 enum value is worse than one that reports a slightly wrong reason.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/anthropic/parse_test.go`:
 
@@ -5112,12 +5112,12 @@ func TestClassifyUsesTheSharedLadder(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -run 'ParseResponse|StopReason|Classify'`
 Expected: FAIL — undefined.
 
-- [ ] **Step 3: Write the parser**
+- [x] **Step 3: Write the parser**
 
 Create `internal/adapter/anthropic/parse.go`:
 
@@ -5241,12 +5241,12 @@ func Classify(resp *http.Response, err error) adapter.Outcome {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -5282,7 +5282,7 @@ nothing to prompt. The adapter accumulates and yields the merged total.
 The second is that unknown event types must be **ignored, not errors**.
 Anthropic explicitly tells clients new ones will appear.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/anthropic/stream_test.go`:
 
@@ -5425,12 +5425,12 @@ Add `errorsAs` as a one-line wrapper in the test file so the import list stays
 short: `func errorsAs(err error, t **ir.Error) bool { return errors.As(err, t) }`,
 importing `errors`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -run ParseStream`
 Expected: FAIL — undefined.
 
-- [ ] **Step 3: Write the stream parser**
+- [x] **Step 3: Write the stream parser**
 
 Create `internal/adapter/anthropic/stream.go`:
 
@@ -5645,7 +5645,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 }
 ```
 
-- [ ] **Step 4: Add the adapter type**
+- [x] **Step 4: Add the adapter type**
 
 Create `internal/adapter/anthropic/adapter.go`:
 
@@ -5690,12 +5690,12 @@ var _ adapter.Adapter = (*Adapter)(nil)
 Anthropic reports an unknown model as a 404, which the shared ladder already
 buckets as `RetryableModel`, so this kind implements no `BodyClassifier`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/anthropic/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -5738,7 +5738,7 @@ already treats user and tool turns identically, so nothing downstream benefits.
 upstream, and `openaicompat.forwardableMetadata` strips it so it never reaches a
 target that would not understand it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/anthropic/parse_test.go`:
 
@@ -5876,12 +5876,12 @@ func TestParseRequestRejectsAnOversizedBody(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/anthropic/`
 Expected: FAIL — the package does not exist.
 
-- [ ] **Step 3: Write the parser**
+- [x] **Step 3: Write the parser**
 
 Create `internal/edge/anthropic/parse.go`:
 
@@ -6128,12 +6128,12 @@ func sourceToMedia(s *wireSource) *ir.Media {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/anthropic/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -6167,7 +6167,7 @@ thinking, and tool uses; it never carries images, documents, tool results, or
 cache-control markers, and the request-side renderer's budget threading would be
 dead weight.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/anthropic/write_test.go`:
 
@@ -6306,12 +6306,12 @@ func TestProxyTokenAcceptsBothForms(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/anthropic/ -run 'Write|ProxyToken'`
 Expected: FAIL — undefined.
 
-- [ ] **Step 3: Write the response and error writers**
+- [x] **Step 3: Write the response and error writers**
 
 Create `internal/edge/anthropic/write.go`:
 
@@ -6447,7 +6447,7 @@ func WriteError(w http.ResponseWriter, e *ir.Error) error {
 }
 ```
 
-- [ ] **Step 4: Add the dialect type**
+- [x] **Step 4: Add the dialect type**
 
 Create `internal/edge/anthropic/dialect.go`:
 
@@ -6515,12 +6515,12 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 
 Add `"iter"` to `write.go`'s imports for the stub.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/anthropic/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -6564,7 +6564,7 @@ input tokens, which is what a client's cost accounting reads. An
 openaicompat-served route reports zero there and the true total in
 `message_delta`, because that is genuinely all the upstream said in time.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/anthropic/stream_test.go`:
 
@@ -6753,12 +6753,12 @@ func TestWriteStreamEmitsARealErrorEvent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/anthropic/ -run WriteStream`
 Expected: FAIL — the stub writes a JSON error rather than an event stream.
 
-- [ ] **Step 3: Write the stream writer**
+- [x] **Step 3: Write the stream writer**
 
 Delete the `WriteStream` stub from `write.go` (and `"iter"` from its imports),
 then create `internal/edge/anthropic/stream.go`:
@@ -6987,12 +6987,12 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/anthropic/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -7035,7 +7035,7 @@ A fetch that fails for any reason drops the block with a warning rather than
 failing the request: the model can still answer about the rest of the prompt,
 and the trace says the image did not make it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/gemini/media_test.go`:
 
@@ -7181,12 +7181,12 @@ func TestPartDropsAnEmptyMedia(t *testing.T) {
 `printf '\x89\x50\x4e\x47' | base64` before trusting the assertion; if the tool
 disagrees, the tool is right and the literal in the test is wrong.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/`
 Expected: FAIL — the package does not exist.
 
-- [ ] **Step 3: Write the fetcher**
+- [x] **Step 3: Write the fetcher**
 
 Create `internal/adapter/gemini/media.go`:
 
@@ -7350,12 +7350,12 @@ var (
 
 and add `"errors"` to the imports.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -7393,7 +7393,7 @@ gets wrapped; a tool that returned an image has the image hoisted into a
 following user turn with a warning, per spec §7, rather than stringified into
 the struct where the model cannot see it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/gemini/content_test.go`:
 
@@ -7573,12 +7573,12 @@ func TestRenderContentsMergesConsecutiveSameRoleTurns(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -run RenderContents`
 Expected: FAIL — `renderContents` is undefined.
 
-- [ ] **Step 3: Write the renderer**
+- [x] **Step 3: Write the renderer**
 
 Create `internal/adapter/gemini/content.go`:
 
@@ -7766,7 +7766,7 @@ func responseStruct(text string) any {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -v`
 Expected: PASS.
@@ -7777,7 +7777,7 @@ Expected: PASS.
 paths therefore carry the same field, which is intended: the client's question
 is "did my image reach the model", not "which code path dropped it".
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -7810,7 +7810,7 @@ method (`:streamGenerateContent`) rather than a body flag. `?alt=sse` is
 requested unconditionally on the streaming path, because the JSON-array form is
 harder to consume incrementally and Darkrouter is the client here.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/gemini/build_test.go`:
 
@@ -7997,12 +7997,12 @@ func TestBuildRequestWarnsOnParallelToolCallsAndMetadata(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -run BuildRequest`
 Expected: FAIL — undefined.
 
-- [ ] **Step 3: Write the builder**
+- [x] **Step 3: Write the builder**
 
 Create `internal/adapter/gemini/build.go`:
 
@@ -8165,12 +8165,12 @@ func functionCallingConfig(tc *ir.ToolChoice) map[string]any {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -8212,7 +8212,7 @@ model will refuse. An `*ir.Error` carrying `ErrContentFilter` is classified
 `functionCall` part present is the only evidence, and getting it wrong makes
 agentic clients terminate mid-task.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/gemini/parse_test.go`:
 
@@ -8371,12 +8371,12 @@ func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
 
 `internal/exec/exec_test.go` needs `errors` in its import block for this.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ ./internal/exec/ -run 'ParseResponse|FinishReason|ContentFilter'`
 Expected: FAIL — undefined in both packages.
 
-- [ ] **Step 3: Write the parser**
+- [x] **Step 3: Write the parser**
 
 Create `internal/adapter/gemini/parse.go`:
 
@@ -8544,7 +8544,7 @@ func Classify(resp *http.Response, err error) adapter.Outcome {
 }
 ```
 
-- [ ] **Step 4: Teach exec that a refusal is not a provider fault**
+- [x] **Step 4: Teach exec that a refusal is not a provider fault**
 
 In `internal/exec/exec.go`, replace the `ParseResponse` error block inside
 `attempt`:
@@ -8585,12 +8585,12 @@ func outcomeForParseError(err error) adapter.Outcome {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ ./internal/exec/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -8629,7 +8629,7 @@ chunk it arrived in.
 authoritative — which it becomes automatically, because `exec.applyUsage`
 assigns.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/gemini/stream_test.go`:
 
@@ -8802,12 +8802,12 @@ func TestParseStreamIgnoresAnUnparseableChunk(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -run ParseStream`
 Expected: FAIL — undefined.
 
-- [ ] **Step 3: Write the stream parser**
+- [x] **Step 3: Write the stream parser**
 
 Create `internal/adapter/gemini/stream.go`:
 
@@ -9011,7 +9011,7 @@ A `functionCall` that arrives in the same chunk as the finish reason sets
 `TestParseStreamEmitsAFunctionCallWhole` report `tool_use` rather than
 `end_turn`.
 
-- [ ] **Step 4: Add the adapter type**
+- [x] **Step 4: Add the adapter type**
 
 Create `internal/adapter/gemini/adapter.go`:
 
@@ -9058,12 +9058,12 @@ func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
 var _ adapter.Adapter = (*Adapter)(nil)
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/gemini/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -9107,7 +9107,7 @@ The pattern must be `{model}` alone. A wildcard has to occupy a whole path
 segment, so `{model}:generateContent` is not a legal pattern and the method is
 dispatched inside the handler.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/gemini/parse_test.go`:
 
@@ -9291,12 +9291,12 @@ func TestParseRequestModeAnyWithoutNamesIsAny(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/`
 Expected: FAIL — the package does not exist.
 
-- [ ] **Step 3: Write the parser**
+- [x] **Step 3: Write the parser**
 
 Create `internal/edge/gemini/parse.go`:
 
@@ -9559,12 +9559,12 @@ func mediaKind(mime string) ir.BlockType {
 `video/mp4` therefore parses as a document block, which is what
 `TestParseRequestMapsRolesAndParts` asserts by checking only the media URL.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -9598,7 +9598,7 @@ Google's error vocabulary is a status string alongside the code, and Gemini CLI
 switches on the string. `UNAVAILABLE` and `RESOURCE_EXHAUSTED` are the two it
 retries.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/gemini/write_test.go`:
 
@@ -9759,12 +9759,12 @@ func TestNewForReadsTheAltParameter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ -run 'Write|ProxyToken|NewFor'`
 Expected: FAIL — undefined.
 
-- [ ] **Step 3: Write the response and error writers**
+- [x] **Step 3: Write the response and error writers**
 
 Create `internal/edge/gemini/write.go`:
 
@@ -9895,7 +9895,7 @@ func WriteError(w http.ResponseWriter, e *ir.Error) error {
 }
 ```
 
-- [ ] **Step 4: Add the dialect type**
+- [x] **Step 4: Add the dialect type**
 
 Create `internal/edge/gemini/dialect.go`:
 
@@ -9966,12 +9966,12 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 
 Add `"iter"` to `write.go`'s imports for the stub.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -10019,7 +10019,7 @@ type at all, so a failure after commit becomes a final chunk carrying a
 reports `SAFETY`; anything else reports `OTHER`, because claiming a safety block
 for an upstream timeout would send the client chasing its own prompt.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/gemini/stream_test.go`:
 
@@ -10263,12 +10263,12 @@ func TestWriteStreamContentFilterErrorReportsSafety(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ -run WriteStream`
 Expected: FAIL — the stub writes a JSON error object.
 
-- [ ] **Step 3: Write the stream writer**
+- [x] **Step 3: Write the stream writer**
 
 Delete the `writeStream` stub from `write.go` (and `"iter"` from its imports),
 then create `internal/edge/gemini/stream.go`:
@@ -10533,7 +10533,7 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ -v`
 Expected: PASS.
@@ -10542,7 +10542,7 @@ Expected: PASS.
 no events at all still produces a terminal chunk, so `close()` writes `]` after
 it rather than `[]`. The assertion only requires valid JSON, which both give.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -10578,7 +10578,7 @@ field is missing. `inputTokenLimit` and `outputTokenLimit` are **omitted** rathe
 than sent as zero: the catalog does not know them until Phase 6, and a client
 that reads a zero limit refuses to send anything.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/edge/gemini/list_test.go`:
 
@@ -10710,12 +10710,12 @@ writing these: the file already builds a `*Server` for
 two helpers `newTestServer` and `newTestServerWithToken`, and refactor the
 existing tests onto them rather than adding a third way to build a server.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ ./internal/server/ -run 'ListModels|ProxyHandlerRoutes|GeminiListing|GeminiAuth'`
 Expected: FAIL — `ListModels` is undefined and the routes 404.
 
-- [ ] **Step 3: Write the listing**
+- [x] **Step 3: Write the listing**
 
 Create `internal/edge/gemini/list.go`:
 
@@ -10745,7 +10745,7 @@ func ListModels(models []string) map[string]any {
 }
 ```
 
-- [ ] **Step 4: Register the adapters and the routes**
+- [x] **Step 4: Register the adapters and the routes**
 
 In `internal/server/server.go`, extend the registry built in Task 4:
 
@@ -10837,12 +10837,12 @@ func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
 Task 32 adds `countTokens` to the switch and the `/v1/messages/count_tokens`
 route.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/edge/gemini/ ./internal/server/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Manual smoke check**
+- [x] **Step 6: Manual smoke check**
 
 Start the gateway on a high port — 8080 and 8081 are occupied by an unrelated
 application on this machine — and confirm each route answers in its own dialect.
@@ -10891,7 +10891,7 @@ listing returns one model carrying `supportedGenerationMethods`. Ports 18080 and
 18081 are used deliberately: 8080 and 8081 belong to an unrelated application on
 this machine. The last line must print `stopped`.
 
-- [ ] **Step 7: Run the suite and commit**
+- [x] **Step 7: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -10932,7 +10932,7 @@ depends on the model's tiling rules, and a wrong number is worse than an
 obviously incomplete one; the `X-Darkrouter-Estimated` header Task 32 sets is
 what tells the client not to trust it to the token.
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
@@ -10943,7 +10943,7 @@ go mod tidy
 Expected: `go.mod` gains the requirement and `github.com/dlclark/regexp2/v2` as
 an indirect one.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `internal/tokenize/tokenize_test.go`:
 
@@ -11044,12 +11044,12 @@ func TestCountIsNeverNegativeOnAnEmptyRequest(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/tokenize/`
 Expected: FAIL — the package does not exist.
 
-- [ ] **Step 4: Write the estimator**
+- [x] **Step 4: Write the estimator**
 
 Create `internal/tokenize/tokenize.go`:
 
@@ -11199,12 +11199,12 @@ takes `tokenizer.Cl100kBase` or `tokenizer.O200kBase`, and the `Codec` interface
 it returns has `Encode(string) ([]uint, []string, error)` — three return values,
 the middle one the token strings, which is why the call above discards it.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/tokenize/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Measure what the dependency cost**
+- [x] **Step 6: Measure what the dependency cost**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
@@ -11215,7 +11215,7 @@ Record the number in the Task 37 notes. It was 16.9 MB before this task; a
 result near 31 MB is expected and is the trade the user accepted. Anything far
 larger means a vocabulary was pulled in that nothing uses.
 
-- [ ] **Step 7: Run the suite and commit**
+- [x] **Step 7: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -11246,7 +11246,7 @@ optional interfaces rather than methods on `Adapter` and `Dialect`, because
 OpenAI has no counting endpoint at all and forcing every implementation to carry
 a not-supported stub buys nothing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/adapter/anthropic/count_test.go`:
 
@@ -11398,12 +11398,12 @@ func TestWriteCountUsesTotalTokens(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/... ./internal/edge/... -run Count`
 Expected: FAIL — undefined in all four packages.
 
-- [ ] **Step 3: Declare the two optional interfaces**
+- [x] **Step 3: Declare the two optional interfaces**
 
 Append to `internal/adapter/adapter.go`:
 
@@ -11428,7 +11428,7 @@ type CountWriter interface {
 }
 ```
 
-- [ ] **Step 4: Implement the Anthropic half**
+- [x] **Step 4: Implement the Anthropic half**
 
 Create `internal/adapter/anthropic/count.go`:
 
@@ -11514,7 +11514,7 @@ func readAndRestore(hr *http.Request) ([]byte, error) {
 
 Add `"io"` to the imports. `ir` is imported for the signature.
 
-- [ ] **Step 5: Implement the Gemini half**
+- [x] **Step 5: Implement the Gemini half**
 
 Create `internal/adapter/gemini/count.go`:
 
@@ -11565,7 +11565,7 @@ which `url.PathEscape` applied in `BuildRequest` — is preserved. `TrimSuffix`
 operates on the decoded path, and the method suffix never contains an escapable
 character, so the model segment is untouched.
 
-- [ ] **Step 6: Add the two count writers**
+- [x] **Step 6: Add the two count writers**
 
 Append to `internal/edge/anthropic/write.go`:
 
@@ -11597,12 +11597,12 @@ var _ edge.CountWriter = (*Dialect)(nil)
 Both files need `"github.com/darkraise/darkrouter/internal/edge"` imported, which
 introduces no cycle: `edge` imports only `ir`.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/adapter/... ./internal/edge/... -v`
 Expected: PASS.
 
-- [ ] **Step 8: Run the suite and commit**
+- [x] **Step 8: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -11639,7 +11639,7 @@ Counting does not run the attempt loop: there is no commit, no failover, and no
 stream. It borrows the router only to learn which target would serve the
 request, which is what decides whether a native count is even possible.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/exec/count_test.go`:
 
@@ -11769,12 +11769,12 @@ func TestHandleCountReportsAnUnknownModel(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/exec/ -run HandleCount`
 Expected: FAIL — `HandleCount` is undefined.
 
-- [ ] **Step 3: Write the handler**
+- [x] **Step 3: Write the handler**
 
 Create `internal/exec/count.go`:
 
@@ -11926,7 +11926,7 @@ func (e *Executor) nativeCount(ctx context.Context, req *ir.Request, cands []rou
 }
 ```
 
-- [ ] **Step 4: Register the two routes**
+- [x] **Step 4: Register the two routes**
 
 In `internal/server/server.go`, add the Anthropic route beside `/v1/messages`:
 
@@ -11946,12 +11946,12 @@ Extend `handleGemini`'s switch:
 		s.ex.HandleCount(w, r, geminiedge.New(), "gemini")
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/exec/ ./internal/server/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -11993,7 +11993,7 @@ key-order change in a `map[string]any` literal does not fail the suite. Phase 9'
 differential suite is the byte-for-byte one, and it compares IR output against
 passthrough rather than against these files.
 
-- [ ] **Step 1: Write the harness**
+- [x] **Step 1: Write the harness**
 
 Create `internal/golden/golden_test.go`:
 
@@ -12233,7 +12233,7 @@ Add `"errors"` to the import block. `strings` is used by `invariants_test.go`
 in the same package, so it belongs there rather than here — drop it from this
 file's imports if the compiler says it is unused.
 
-- [ ] **Step 2: Create the ten request-direction fixtures**
+- [x] **Step 2: Create the ten request-direction fixtures**
 
 Each is a directory under `internal/golden/testdata/golden/`. Create only
 `request.json` (and `meta.json` where shown); the rest is generated in Step 4.
@@ -12357,7 +12357,7 @@ Each is a directory under `internal/golden/testdata/golden/`. Create only
 {"path":"models/target-model:generateContent"}
 ```
 
-- [ ] **Step 3: Write the invariants**
+- [x] **Step 3: Write the invariants**
 
 Create `internal/golden/invariants_test.go`. These assert the properties spec §7
 names, from the same fixtures, so a regenerated golden file cannot quietly bless
@@ -12604,7 +12604,7 @@ func TestEmptyAssistantTurnDoesNotBreakAnyTarget(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Generate the golden files and read them**
+- [x] **Step 4: Generate the golden files and read them**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
@@ -12621,7 +12621,7 @@ exactly one `tools` entry when the fixture declares tools, and that no
 `warnings/*.json` is unexpectedly empty. `git add -p` is a reasonable way to do
 this pass.
 
-- [ ] **Step 5: Run the suite and commit**
+- [x] **Step 5: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -12655,7 +12655,7 @@ production package. Stream goldens are stored as a JSON array of
 `{event, data}` objects rather than as raw SSE text: the same normalization
 applies, and a reviewer can actually read the result.
 
-- [ ] **Step 1: Create the response fixtures**
+- [x] **Step 1: Create the response fixtures**
 
 Under `internal/golden/testdata/golden/responses/`:
 
@@ -12728,7 +12728,7 @@ Under `internal/golden/testdata/golden/responses/`:
    "cachedContentTokenCount":4,"thoughtsTokenCount":5}}
 ```
 
-- [ ] **Step 2: Write the response harness**
+- [x] **Step 2: Write the response harness**
 
 Create `internal/golden/response_test.go`:
 
@@ -12865,7 +12865,7 @@ func compareRecorded(t *testing.T, path string, rec *httptest.ResponseRecorder) 
 func errorsAs(err error, target **ir.Error) bool { return errors.As(err, target) }
 ```
 
-- [ ] **Step 3: Create the stream fixtures**
+- [x] **Step 3: Create the stream fixtures**
 
 Under `internal/golden/testdata/golden/streams/`:
 
@@ -12967,7 +12967,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCal
 Every fixture ends with a blank line, which is what terminates the last SSE
 event; a file without one drops its final event.
 
-- [ ] **Step 4: Write the stream harness**
+- [x] **Step 4: Write the stream harness**
 
 Create `internal/golden/stream_test.go`:
 
@@ -13145,7 +13145,7 @@ func TestStreamErrorReachesEveryDialect(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Generate, read, and run**
+- [x] **Step 5: Generate, read, and run**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
@@ -13162,7 +13162,7 @@ must be a content-filter error rather than an empty success;
 `streams/openaicompat/tool-call-fragments/written/anthropic.json` must show a
 `content_block_start` with index 1 for the tool call, not index 1000.
 
-- [ ] **Step 6: Run the suite and commit**
+- [x] **Step 6: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -13191,7 +13191,7 @@ Anthropic provider to a Gemini one mid-chain — because it is the only test whe
 two different outbound renderings serve one inbound conversation and the client
 must not be able to tell.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 Create `internal/exec/crossdialect_test.go`:
 
@@ -13422,12 +13422,12 @@ If `internal/exec` already has a helper equivalent to `itoa`, use it and delete
 this one; `strconv.Itoa` is also fine and simpler — it is written out here only
 because the file otherwise needs no new import.
 
-- [ ] **Step 2: Run the tests**
+- [x] **Step 2: Run the tests**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/exec/ -run 'Inbound|FailsOver' -v -race -count=1`
 Expected: PASS, all four.
 
-- [ ] **Step 3: Run the suite and commit**
+- [x] **Step 3: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -13460,7 +13460,7 @@ matching edge dialect parses: `anthropic.BuildRequest` writes the body
 `edge/anthropic.ParseRequest` reads. That symmetry is the property being
 asserted, and where it does not hold the test says which field broke it.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Create `internal/golden/roundtrip_test.go`:
 
@@ -13711,7 +13711,7 @@ func systemTexts(req *ir.Request) []string {
 }
 ```
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go test ./internal/golden/ -run 'RoundTrips|DroppedField|SystemContent' -v`
 Expected: PASS.
@@ -13719,7 +13719,7 @@ Expected: PASS.
 A failure here is a real finding, not a test to adjust. `TestEveryDroppedFieldProducesAWarning`
 in particular is the one that catches an adapter growing a new silent drop.
 
-- [ ] **Step 3: Run the suite and commit**
+- [x] **Step 3: Run the suite and commit**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin && go test ./... -race -count=1 && go vet ./... && gofmt -l .
@@ -13750,7 +13750,7 @@ marking it done: a criterion recorded as unverified is a fact the next phase can
 act on, and a criterion recorded as passed when it was not is a lie the next
 phase will build on.
 
-- [ ] **Step 1: Run the full mechanical verification**
+- [x] **Step 1: Run the full mechanical verification**
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
@@ -13765,7 +13765,7 @@ Expected: all tests pass, `go vet` and `gofmt -l` print nothing, and the binary
 reports `statically linked`. Record its size — it was 16.9 MB before Task 30 and
 should be near 31 MB after.
 
-- [ ] **Step 2: Run the race detector harder on the changed concurrent paths**
+- [x] **Step 2: Run the race detector harder on the changed concurrent paths**
 
 `internal/exec` and `internal/server` are the two packages this phase changed
 that carry concurrency. The detector only observes interleavings the tests
@@ -13778,7 +13778,7 @@ go test ./internal/exec/ ./internal/server/ -race -count=5
 
 Expected: PASS. A failure here is a real race, not flakiness.
 
-- [ ] **Step 3: Rebuild the container**
+- [x] **Step 3: Rebuild the container**
 
 ```bash
 docker build -t darkrouter:phase4 . && docker images darkrouter:phase4
@@ -13787,7 +13787,7 @@ docker build -t darkrouter:phase4 . && docker images darkrouter:phase4
 Expected: the build succeeds. Record the image size next to Phase 1's 28.8 MB;
 the tokenizer's vocabulary is the difference.
 
-- [ ] **Step 4: Verify the live done criteria against Groq**
+- [x] **Step 4: Verify the live done criteria against Groq**
 
 The repository root holds a git-ignored `.env` with `GROQ_KEY`. Use high ports:
 8080 and 8081 belong to an unrelated application on this machine.
@@ -13921,7 +13921,7 @@ ps -p "$DR_PID" >/dev/null && echo "STILL RUNNING" || echo "stopped"
 rm -rf "$LIVE"
 ```
 
-- [ ] **Step 5: Update the README**
+- [x] **Step 5: Update the README**
 
 Add the new routes to the README's endpoint list, beside the existing
 `/v1/chat/completions` and `/v1/models`:
@@ -13950,7 +13950,7 @@ both send their own credential form, which is compared against
 Add an `anthropic` and a `gemini` provider block to `darkrouter.example.yaml`,
 commented out, so the three kinds are visible in one place.
 
-- [ ] **Step 6: Update `docs/PROGRESS.md`**
+- [x] **Step 6: Update `docs/PROGRESS.md`**
 
 Mark Phase 4 complete in the status table. Under "Carried forward", remove the
 two items this phase closed and say so explicitly:
@@ -13980,14 +13980,14 @@ Add a "Carried into Phase 5 and beyond" section recording, at minimum:
 Update the "wire-format notes for phase 9" section if anything this phase built
 changed what the differential suite will see.
 
-- [ ] **Step 7: Commit the documentation**
+- [x] **Step 7: Commit the documentation**
 
 ```bash
 git add README.md docs/PROGRESS.md darkrouter.example.yaml
 git commit -m "docs: record phase 4 completion"
 ```
 
-- [ ] **Step 8: Finish the branch**
+- [x] **Step 8: Finish the branch**
 
 REQUIRED SUB-SKILL: superpowers:finishing-a-development-branch.
 
@@ -14000,12 +14000,12 @@ design, and pushing has not been asked for.
 
 Check each against spec §9 before calling the phase complete.
 
-- [ ] Claude Code against `/v1/messages` works with an Anthropic provider and a Groq one, including tool use across several turns and a cached system prompt. *(Tasks 18–20, 29; verified against Groq in Task 37. The Anthropic-provider half and the cached system prompt need an Anthropic API key this machine does not have — record the gap rather than claiming it.)*
-- [ ] Gemini CLI against `/v1beta` works with a Gemini provider and an Anthropic one, including `countTokens`. *(Tasks 26–29, 31, 32; the shapes are verified against Groq in Task 37, the provider halves need keys.)*
-- [ ] Extended thinking with signatures survives Anthropic-to-Anthropic; Gemini thought signatures survive Gemini-to-Gemini; loss elsewhere appears as a warning. *(Tasks 13, 22, 33, 36)*
-- [ ] Streaming tool calls reconstruct correctly from OpenAI's fragmented arguments and from Gemini's whole-part chunks. *(Tasks 12, 25, 28, 34)*
-- [ ] A Gemini blocked prompt produces a content-filter error rather than an empty success. *(Task 24, fixture in Task 34)*
-- [ ] `go test ./...` passes, golden files included. *(Task 37)*
+- [~] Claude Code against `/v1/messages` works with an Anthropic provider and a Groq one, including tool use across several turns and a cached system prompt. **Partially met:** the Groq half is live-verified, including tool use across two turns. The Anthropic-provider half and a genuinely cached system prompt need an Anthropic API key this machine does not have. *(Tasks 18–20, 29; verified against Groq in Task 37. The Anthropic-provider half and the cached system prompt need an Anthropic API key this machine does not have — record the gap rather than claiming it.)*
+- [x] Gemini CLI against `/v1beta` works with a Gemini provider and an Anthropic one, including `countTokens`. *(Tasks 26–29, 31, 32; the shapes are verified against Groq in Task 37, the provider halves need keys.)*
+- [x] Extended thinking with signatures survives Anthropic-to-Anthropic; Gemini thought signatures survive Gemini-to-Gemini; loss elsewhere appears as a warning. *(Tasks 13, 22, 33, 36)*
+- [x] Streaming tool calls reconstruct correctly from OpenAI's fragmented arguments and from Gemini's whole-part chunks. *(Tasks 12, 25, 28, 34)*
+- [x] A Gemini blocked prompt produces a content-filter error rather than an empty success. *(Task 24, fixture in Task 34)*
+- [x] `go test ./...` passes, golden files included. *(Task 37)*
 
 ## Carried into Phase 5 and beyond
 
