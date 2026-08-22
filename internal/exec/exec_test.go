@@ -574,3 +574,15 @@ func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
 		t.Errorf("skips = %v, want one ending in :no_adapter", got.Skips)
 	}
 }
+
+func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
+	if got := outcomeForParseError(&ir.Error{Type: ir.ErrContentFilter, Message: "blocked"}); got != adapter.OutcomeFatal {
+		t.Errorf("content filter = %q, want fatal; a refusal is an answer, not an outage", got)
+	}
+	if got := outcomeForParseError(errors.New("truncated JSON")); got != adapter.OutcomeRetryableProvider {
+		t.Errorf("malformed body = %q, want retryable", got)
+	}
+	if got := outcomeForParseError(&ir.Error{Type: ir.ErrAPI}); got != adapter.OutcomeRetryableProvider {
+		t.Errorf("generic API error = %q, want retryable", got)
+	}
+}

@@ -328,14 +328,22 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 
 	out, perr := ad.ParseResponse(resp)
 	if perr != nil {
-		// A 2xx that cannot be read is a provider fault, so it rejoins the
-		// outcome path rather than going around it.
-		e.recordHealthFor(c, adapter.OutcomeRetryableProvider, resp)
+		outcome := outcomeForParseError(perr)
 		last := len(rec.Attempts) - 1
-		rec.Attempts[last].Outcome = string(adapter.OutcomeRetryableProvider)
+		rec.Attempts[last].Outcome = string(outcome)
 		rec.Attempts[last].Error = perr.Error()
-		return adapter.OutcomeRetryableProvider, statusCode,
-			errorFor(adapter.OutcomeRetryableProvider, perr)
+		if outcome != adapter.OutcomeFatal {
+			// A 2xx that cannot be read is a provider fault, so it rejoins the
+			// outcome path. A refusal is not: recording it would trip the
+			// breaker on a healthy provider, and failing over would re-ask a
+			// question every model in the chain will refuse.
+			e.recordHealthFor(c, outcome, resp)
+		}
+		var ie *ir.Error
+		if errors.As(perr, &ie) {
+			return outcome, statusCode, ie
+		}
+		return outcome, statusCode, errorFor(outcome, perr)
 	}
 
 	ttft := time.Since(rec.TS).Milliseconds()
@@ -633,6 +641,16 @@ func routerError(err error) *ir.Error {
 	default:
 		return &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
 	}
+}
+
+// outcomeForParseError separates "this provider is broken" from "this provider
+// answered, and the answer was a refusal". Only the first is a health signal.
+func outcomeForParseError(err error) adapter.Outcome {
+	var e *ir.Error
+	if errors.As(err, &e) && e.Type == ir.ErrContentFilter {
+		return adapter.OutcomeFatal
+	}
+	return adapter.OutcomeRetryableProvider
 }
 
 func errorFor(o adapter.Outcome, err error) *ir.Error {
