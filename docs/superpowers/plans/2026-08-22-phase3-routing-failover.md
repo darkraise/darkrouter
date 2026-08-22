@@ -71,7 +71,7 @@ router records it as a `Skip` instead, where it is visible per request.
 `policy.retry` carries only `max_attempts` because outcome classification is
 fixed rather than configurable.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/config/load_test.go`:
 
@@ -150,12 +150,12 @@ func TestParseAcceptsAnAliasNamingAnUnknownProvider(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/config/ -run 'Alias|MaxAttempts' -v`
 Expected: FAIL — `c.Aliases undefined`, `c.Policy.Retry undefined`.
 
-- [ ] **Step 3: Add the types**
+- [x] **Step 3: Add the types**
 
 In `internal/config/config.go`, add `Aliases` to `Config` and `Retry` to
 `PolicyConfig`:
@@ -190,7 +190,7 @@ type RetryConfig struct {
 }
 ```
 
-- [ ] **Step 4: Add the default and validation**
+- [x] **Step 4: Add the default and validation**
 
 In `applyDefaults` in `internal/config/load.go`, append before the closing brace:
 
@@ -227,12 +227,12 @@ is a deliberate asymmetry: `max_attempts: 0` means "make no attempts", which no
 operator writes on purpose, so the pointer ceremony is not worth repeating. The
 check above still catches a negative value.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/config/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Update the example configuration**
+- [x] **Step 6: Update the example configuration**
 
 Add to `darkrouter.example.yaml`, above `policy:`:
 
@@ -251,7 +251,7 @@ and add `retry` inside the existing `policy:` block:
     max_attempts: 4
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/config/ darkrouter.example.yaml
@@ -283,7 +283,7 @@ change, which is more than this task should carry; the executor converts at the
 boundary with `ir.ParseSurface`. Phase 4 rewrites the edge layer for Anthropic
 and Gemini and is the right moment to type it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/ir/ir_test.go`:
 
@@ -316,12 +316,12 @@ func TestParseSurface(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/ir/ -run Surface -v`
 Expected: FAIL — `undefined: ParseSurface`.
 
-- [ ] **Step 3: Add the type**
+- [x] **Step 3: Add the type**
 
 In `internal/ir/ir.go`, add near the other string enums:
 
@@ -354,12 +354,12 @@ func ParseSurface(s string) (Surface, bool) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/ir/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/ir/
@@ -390,7 +390,7 @@ Doing it additively rather than as one breaking change is what keeps this task
 inside Rule S — a single change to `Provider` plus every consumer would be a
 shared-interface change touching five file shapes at once.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/provider/sqlsource_test.go`:
 
@@ -465,12 +465,12 @@ func TestSQLSourceStillPopulatesTheSingleCredentialFields(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/provider/ -run Credential -v`
 Expected: FAIL — `ps[0].Credentials undefined`.
 
-- [ ] **Step 3: Add the type**
+- [x] **Step 3: Add the type**
 
 In `internal/provider/provider.go`:
 
@@ -502,7 +502,7 @@ type Provider struct {
 }
 ```
 
-- [ ] **Step 4: Populate it**
+- [x] **Step 4: Populate it**
 
 In `internal/provider/sqlsource.go`, replace the body of the per-provider loop
 in `Reload` that builds the `Provider`:
@@ -550,7 +550,7 @@ func enabledOnly(creds []store.Credential) []Credential {
 }
 ```
 
-- [ ] **Step 5: Include credentials in the revision**
+- [x] **Step 5: Include credentials in the revision**
 
 In `revisionOf`, hash every credential id rather than the single `KeyID`, so
 adding a second key to a provider changes the revision:
@@ -570,13 +570,13 @@ adding a second key to a provider changes the revision:
 	}
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `go test ./... -race`
 Expected: PASS across every package — this task is additive, so the Phase 2
 executor and server tests are untouched.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/provider/
@@ -610,7 +610,7 @@ attempt. This path only reads.
 A zero `Availability` reports everything available, so a caller that forgot to
 build one fails open rather than routing to nothing.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/health/availability_test.go`:
 
@@ -705,12 +705,12 @@ func TestSnapshotDoesNotClaimTheHalfOpenProbe(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/health/ -run Availability -v`
 Expected: FAIL — `undefined: Availability`.
 
-- [ ] **Step 3: Write the snapshot**
+- [x] **Step 3: Write the snapshot**
 
 Create `internal/health/availability.go`:
 
@@ -771,12 +771,12 @@ func (b *Breaker) SnapshotAvailability(at time.Time) Availability {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/health/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/health/
@@ -813,7 +813,7 @@ It lives on the breaker because it shares the breaker's mutex. Two locks over
 the same per-credential decision would have to be taken in a fixed order by
 every caller, and one caller getting that order wrong is a deadlock.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/health/lru_test.go`:
 
@@ -886,12 +886,12 @@ func TestMarkUsedIsSafeUnderConcurrency(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/health/ -run LastUsed -v`
 Expected: FAIL — `undefined: CredKey`.
 
-- [ ] **Step 3: Add the field to the breaker**
+- [x] **Step 3: Add the field to the breaker**
 
 In `internal/health/breaker.go`, add one field to `Breaker` and initialize it in
 `New`:
@@ -913,7 +913,7 @@ type Breaker struct {
 
 In `New`, add `lastUsed: make(map[CredKey]time.Time),` to the returned struct.
 
-- [ ] **Step 4: Write the tracking**
+- [x] **Step 4: Write the tracking**
 
 Create `internal/health/lru.go`:
 
@@ -974,13 +974,13 @@ func (b *Breaker) RehydrateLastUsed(m map[CredKey]time.Time) {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/health/ -race -v`
 Expected: PASS. `TestMarkUsedIsSafeUnderConcurrency` is the one that matters
 under `-race`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/health/
@@ -1016,7 +1016,7 @@ An `UPDATE` rather than an upsert: a credential that is not in `provider_keys`
 has been deleted, and resurrecting a row for it would violate the foreign key
 its provider depends on.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/lastused_test.go`:
 
@@ -1122,12 +1122,12 @@ func TestSaveLastUsedWithNothingIsANoOp(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run LastUsed -v`
 Expected: FAIL — `db.SaveLastUsed undefined`.
 
-- [ ] **Step 3: Write the queries**
+- [x] **Step 3: Write the queries**
 
 Create `internal/store/lastused.go`:
 
@@ -1195,12 +1195,12 @@ func (d *DB) LoadLastUsed(ctx context.Context) (map[health.CredKey]time.Time, er
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -1231,7 +1231,7 @@ design §6.4 inferred capabilities pass the router's filter with a warning, so
 capability filtering is wired and exercised here while admitting everything.
 Phase 6 supplies the data that makes it selective.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/catalog/catalog_test.go`:
 
@@ -1329,12 +1329,12 @@ func TestKnownCapabilitiesAreSelective(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/catalog/ -v`
 Expected: FAIL — `undefined: FromProviders`.
 
-- [ ] **Step 3: Write the package**
+- [x] **Step 3: Write the package**
 
 Create `internal/catalog/catalog.go`:
 
@@ -1468,12 +1468,12 @@ func (r *providerReader) Offering(modelID string) []string {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/catalog/ -race -v`
 Expected: PASS, six tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/catalog/
@@ -1510,7 +1510,7 @@ Alias targets are expanded through rules 2 and 3 but **not** through rule 1: an
 alias naming another alias is not followed. Nested aliases would need cycle
 detection for a feature nobody asked for.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/router/model_test.go`:
 
@@ -1636,12 +1636,12 @@ func TestAliasWithAnUnknownProviderYieldsThatTargetAnyway(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/router/ -v`
 Expected: FAIL — `undefined: resolveModel`.
 
-- [ ] **Step 3: Write the types**
+- [x] **Step 3: Write the types**
 
 Create `internal/router/types.go`:
 
@@ -1722,7 +1722,7 @@ type target struct {
 }
 ```
 
-- [ ] **Step 4: Write model resolution**
+- [x] **Step 4: Write model resolution**
 
 Create `internal/router/model.go`:
 
@@ -1775,12 +1775,12 @@ func resolveDirect(name string, providers map[string]bool, cat catalog.Reader) [
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/router/ -race -v`
 Expected: PASS, nine tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/router/
@@ -1810,7 +1810,7 @@ predictable and explainable.
 A credential never dispatched to sorts first. That is the point: a freshly added
 key should be tried before one that has been carrying the load.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/router/order_test.go`:
 
@@ -1918,12 +1918,12 @@ func TestOrderDoesNotMutateItsInput(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/router/ -run Order -v`
 Expected: FAIL — `undefined: orderCredentials`.
 
-- [ ] **Step 3: Write the ordering**
+- [x] **Step 3: Write the ordering**
 
 Create `internal/router/order.go`:
 
@@ -1976,12 +1976,12 @@ func orderCredentials(providerID string, creds []provider.Credential,
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/router/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/router/
@@ -2012,7 +2012,7 @@ provider that is both cooling and lacks the surface should report the surface �
 the durable configuration problem — rather than the transient one, because the
 skip records are what an operator reads to work out why nothing routed.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/router/filter_test.go`:
 
@@ -2163,12 +2163,12 @@ func TestFilterAdmitsInferredCapabilities(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/router/ -run Filter -v`
 Expected: FAIL — `undefined: filterTarget`.
 
-- [ ] **Step 3: Write the filter**
+- [x] **Step 3: Write the filter**
 
 Create `internal/router/filter.go`:
 
@@ -2234,12 +2234,12 @@ func filterTarget(t target, q Query, snap Snapshot,
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/router/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/router/
@@ -2280,7 +2280,7 @@ is returned so the trace records everything that was eligible; the attempt loop
 truncates. Truncating here would make the recorded candidate list lie about what
 the router decided.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/router/router_test.go`:
 
@@ -2487,12 +2487,12 @@ func TestResolveDoesNotTruncateToMaxAttempts(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/router/ -run Resolve -v`
 Expected: FAIL — `undefined: Resolve`.
 
-- [ ] **Step 3: Write Resolve**
+- [x] **Step 3: Write Resolve**
 
 Create `internal/router/router.go`:
 
@@ -2592,12 +2592,12 @@ func emptyReason(skips []Skip) error {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/router/ -race -v`
 Expected: PASS across the whole package.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/router/
@@ -2628,7 +2628,7 @@ Worst-case pre-commit silence is `max_attempts × first_byte` — four minutes w
 the defaults. That is longer than some clients tolerate, and it is the reason
 `first_byte` defaults to 60s rather than higher. Do not raise it here.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/exec/deadline_test.go`:
 
@@ -2711,12 +2711,12 @@ func TestBudgetHandlesAZeroTotal(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -run Budget -v`
 Expected: FAIL — `undefined: newBudget`.
 
-- [ ] **Step 3: Write the budget**
+- [x] **Step 3: Write the budget**
 
 Create `internal/exec/deadline.go`:
 
@@ -2773,12 +2773,12 @@ func (b budget) attemptDeadline(now time.Time) time.Time {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/exec/ -race -v`
 Expected: PASS, including the Phase 1–2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/exec/
@@ -2815,7 +2815,7 @@ for nothing. Thinking **does** count, because a reasoning model can legitimately
 think for a minute before its first text token and holding the response open
 that long would blow the pre-commit budget.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/exec/commit_test.go`:
 
@@ -2924,12 +2924,12 @@ func TestBufferWithNoCapIsUnbounded(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -run 'Buffer|ContentBearing' -v`
 Expected: FAIL — `undefined: newPreCommitBuffer`.
 
-- [ ] **Step 3: Write the buffer**
+- [x] **Step 3: Write the buffer**
 
 Create `internal/exec/commit.go`:
 
@@ -3009,12 +3009,12 @@ func payloadBytes(ev ir.StreamEvent) int {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/exec/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/exec/
@@ -3045,7 +3045,7 @@ provider is worth trying, because rate limits are per credential. On **anything
 else retryable** the provider itself is in trouble and every remaining
 credential will hit the same wall, so they are skipped wholesale.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/exec/advance_test.go`:
 
@@ -3125,12 +3125,12 @@ func TestAdvanceSkipsEveryRemainingCredentialOfTheProvider(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -run Advance -v`
 Expected: FAIL — `undefined: nextIndex`.
 
-- [ ] **Step 3: Write the advance rules**
+- [x] **Step 3: Write the advance rules**
 
 Create `internal/exec/advance.go`:
 
@@ -3203,12 +3203,12 @@ func skipProvider(cands []router.Candidate, i int) int {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/exec/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/exec/
@@ -3244,7 +3244,7 @@ sequence.
 `MarkUsed` fires at **attempt start**, before the request is sent. A credential
 that always 401s would otherwise keep a stale timestamp and sort first forever.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/exec/loop_test.go`:
 
@@ -3565,12 +3565,12 @@ func setMaxAttempts(t *testing.T, e *Executor, n int) {
 func (s *Store) Path() string { return s.path }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -run Loop -v`
 Expected: FAIL — `unknown field Fleet in struct literal of type Deps`.
 
-- [ ] **Step 3: Add the Fleet dependency**
+- [x] **Step 3: Add the Fleet dependency**
 
 In `internal/exec/exec.go`:
 
@@ -3592,7 +3592,7 @@ type Deps struct {
 }
 ```
 
-- [ ] **Step 4: Rewrite Handle around the loop**
+- [x] **Step 4: Rewrite Handle around the loop**
 
 Replace `Handle` in `internal/exec/exec.go`. The body-parsing and record setup
 are unchanged from Phase 2 down to the point where the provider was resolved;
@@ -3945,12 +3945,12 @@ func (e *Executor) writeDiagnostics(w http.ResponseWriter, reqID string, c route
 `Candidates` in `internal/store/log.go` and marshal it into `candidates_json`
 alongside the candidates in Task 19.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/exec/ -race -v`
 Expected: PASS, including every Phase 1–2 test in the package.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/exec/ internal/config/ internal/store/
@@ -3983,7 +3983,7 @@ Anthropic delivers `overloaded_error` as an in-stream event under a 200, and
 treating the 200 as success would hand the client an error body with no failover
 attempted.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/exec/stream_test.go`:
 
@@ -4151,13 +4151,13 @@ type SSEConfig struct {
 	}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -run Stream -v`
 Expected: FAIL — the streaming path still writes the first attempt straight
 through, so the in-stream error reaches the client.
 
-- [ ] **Step 3: Write the streaming attempt**
+- [x] **Step 3: Write the streaming attempt**
 
 In `internal/exec/exec.go`, branch inside `attempt` before the unary path:
 
@@ -4257,7 +4257,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, r *http.Request, d edge.
 `d.WriteStream` writes the `[DONE]` sentinel itself, so a stream that commits
 and then ends normally needs nothing further here.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/exec/ -race -v`
 Expected: PASS.
@@ -4266,7 +4266,7 @@ If `TestStreamFailsOverOnAnInStreamErrorBeforeCommit` still writes the error to
 the client, `WriteStream` is emitting headers before the first yielded event.
 Check that the dialect writes nothing until its first `send`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/exec/ internal/config/
@@ -4300,7 +4300,7 @@ Phase 3 defines only that an error event is emitted and the stream ends. Its
 per-dialect shape is Phase 4's problem, because OpenAI has no standard in-stream
 error and Gemini's SSE has no error event type at all.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/exec/postcommit_test.go`:
 
@@ -4425,13 +4425,13 @@ func setTimeouts(t *testing.T, e *Executor, total, idle time.Duration) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -run 'PostCommit|Committed' -v`
 Expected: FAIL — the committed stream is still bounded by the attempt deadline,
 so `TestCommittedStreamOutlivesTheTotalBudget` is cut short.
 
-- [ ] **Step 3: Swap the deadline at commit**
+- [x] **Step 3: Swap the deadline at commit**
 
 `attempt` currently derives one context from `bud.attemptDeadline`. Streams need
 that bound only until commit, so `attemptStream` takes the cancel function and
@@ -4466,7 +4466,7 @@ Place that reset immediately after each successful `yield`, and add the same
 reset at the moment of commit so the first post-commit gap is measured from
 there rather than from the attempt's start.
 
-- [ ] **Step 4: Emit the in-stream error**
+- [x] **Step 4: Emit the in-stream error**
 
 In `attemptStream`, the committed branch already forwards the error to `yield`,
 which the dialect renders as an in-stream error event before writing `[DONE]`.
@@ -4483,12 +4483,12 @@ another candidate:
 
 Place this case **before** the `streamErr != nil && !committed` case.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/exec/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/exec/
@@ -4519,7 +4519,7 @@ The body is needed to tell that 400 from a genuinely malformed request, so this
 is a second entry point rather than a change to `Classify`: the existing
 signature has no body and every current caller is happy without one.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/adapter/openaicompat/classify_test.go`:
 
@@ -4577,12 +4577,12 @@ func TestClassifyBodyDefersToClassifyForEveryOtherStatus(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/adapter/openaicompat/ -run ClassifyBody -v`
 Expected: FAIL — `undefined: ClassifyBody`.
 
-- [ ] **Step 3: Write the refinement**
+- [x] **Step 3: Write the refinement**
 
 Append to `internal/adapter/openaicompat/classify.go`:
 
@@ -4635,7 +4635,7 @@ func ClassifyBody(resp *http.Response, body []byte, err error) adapter.Outcome {
 
 Add `encoding/json` and `strings` to the file's imports.
 
-- [ ] **Step 4: Use it from the executor**
+- [x] **Step 4: Use it from the executor**
 
 In `internal/exec/exec.go`, the unary error path currently classifies from the
 status line alone. Read the body once on a 400 so the refinement can run:
@@ -4656,12 +4656,12 @@ the same hazard `max_body_bytes` exists to prevent.
 
 Add `io` and the `openaicompat` import to `internal/exec/exec.go`.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./... -race`
 Expected: PASS across every package.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/adapter/ internal/exec/
@@ -4692,7 +4692,7 @@ which is the question an operator actually asks.
 Both live in `candidates_json` rather than a new column, because that keeps the
 Phase 2 schema unchanged and the two are only ever read together.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/store/log_test.go`:
 
@@ -4759,12 +4759,12 @@ func TestLogWriterWritesEmptyArraysNotNull(t *testing.T) {
 
 Add `encoding/json` and `strings` to that file's imports.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run 'CandidatesAndSkips|EmptyArrays' -v`
 Expected: FAIL — `r.Skips undefined`.
 
-- [ ] **Step 3: Add the field and the trace shape**
+- [x] **Step 3: Add the field and the trace shape**
 
 In `internal/store/log.go`, add `Skips` beside `Candidates`:
 
@@ -4789,7 +4789,7 @@ and replace the `candidates` marshalling in `insertOne`:
 
 and pass `string(trace)` where `string(candidates)` was passed.
 
-- [ ] **Step 4: Wire the fleet and the usage worker into the server**
+- [x] **Step 4: Wire the fleet and the usage worker into the server**
 
 In `internal/server/server.go`, pass the breaker as the fleet when building the
 executor:
@@ -4829,7 +4829,7 @@ persists it:
 	})
 ```
 
-- [ ] **Step 5: Assert the trace survives a real request**
+- [x] **Step 5: Assert the trace survives a real request**
 
 Append to `internal/server/run_test.go`:
 
@@ -4865,12 +4865,12 @@ func TestRequestRowRecordsTheCandidateChain(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `go test ./... -race`
 Expected: PASS across every package.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/store/ internal/server/
@@ -4902,7 +4902,7 @@ how they drift.
 config credential has no database row, and the breaker keying on an empty key id
 is the same behavior Phase 2 already had.
 
-- [ ] **Step 1: Delete the fields**
+- [x] **Step 1: Delete the fields**
 
 In `internal/provider/provider.go`, remove `APIKey` and `KeyID` from `Provider`:
 
@@ -4922,14 +4922,14 @@ type Provider struct {
 }
 ```
 
-- [ ] **Step 2: Run the build to find every consumer**
+- [x] **Step 2: Run the build to find every consumer**
 
 Run: `go build ./... && go vet ./...`
 Expected: FAIL, listing each remaining reference. Work through them; the
 executor should already be clean, and `YAMLSource` and the Phase 2 tests are the
 expected hits.
 
-- [ ] **Step 3: Update YAMLSource**
+- [x] **Step 3: Update YAMLSource**
 
 In `internal/provider/provider.go`, replace the `Provider` construction in
 `YAMLSource.Providers`:
@@ -4946,7 +4946,7 @@ In `internal/provider/provider.go`, replace the `Provider` construction in
 	}
 ```
 
-- [ ] **Step 4: Update SQLSource**
+- [x] **Step 4: Update SQLSource**
 
 Delete the `APIKey` and `KeyID` assignments from the `Provider` literal in
 `Reload`, and delete `TestSQLSourceStillPopulatesTheSingleCredentialFields` from
@@ -4955,19 +4955,19 @@ Delete the `APIKey` and `KeyID` assignments from the `Provider` literal in
 Update `TestSQLSourceLoadsProvidersWithDecryptedCredentials` to assert on
 `Credentials[0]` instead of `APIKey`/`KeyID`.
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 Run: `go test ./... -race -count=1 && go vet ./...`
 Expected: PASS, no output from vet.
 
-- [ ] **Step 6: Verify the binary still builds statically**
+- [x] **Step 6: Verify the binary still builds statically**
 
 ```bash
 CGO_ENABLED=0 go build -o /tmp/dr ./cmd/darkrouter && file /tmp/dr && rm /tmp/dr
 ```
 Expected: `statically linked`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/provider/
@@ -4980,12 +4980,12 @@ git commit -m "refactor(provider): drop the single-credential fields"
 
 Check each against spec §10 before calling the phase complete.
 
-- [ ] Killing the first provider in an alias chain is invisible to the client, and the trace shows every attempt and every skip with reasons. *(Tasks 11, 15, 16, 19)*
-- [ ] Two credentials on one provider are both exercised on a 429, and both skipped on a 5xx. *(Tasks 14, 15)*
-- [ ] A malformed request produces exactly one attempt; an unknown model advances without penalizing anyone. *(Tasks 14, 15, 18)*
-- [ ] A client disconnect leaves all providers healthy. *(Phase 2's Task 15, still asserted by `TestClientDisconnectIsNotAProviderFailure`)*
-- [ ] The candidate list and skip reasons on the request row explain the ordering without needing live health. *(Task 19)*
-- [ ] `go test ./... -race` passes and `go vet ./...` is clean. *(Task 20)*
+- [x] Killing the first provider in an alias chain is invisible to the client, and the trace shows every attempt and every skip with reasons. *(Tasks 11, 15, 16, 19)*
+- [x] Two credentials on one provider are both exercised on a 429, and both skipped on a 5xx. *(Tasks 14, 15)*
+- [x] A malformed request produces exactly one attempt; an unknown model advances without penalizing anyone. *(Tasks 14, 15, 18)*
+- [x] A client disconnect leaves all providers healthy. *(Phase 2's Task 15, still asserted by `TestClientDisconnectIsNotAProviderFailure`)*
+- [x] The candidate list and skip reasons on the request row explain the ordering without needing live health. *(Task 19)*
+- [x] `go test ./... -race` passes and `go vet ./...` is clean. *(Task 20)*
 
 ## Carried into Phase 4 and beyond
 

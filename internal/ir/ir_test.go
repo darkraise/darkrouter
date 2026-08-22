@@ -35,3 +35,30 @@ func TestNeedsIsFalseForPlainTextRequest(t *testing.T) {
 		t.Fatalf("expected all needs false, got %+v", n)
 	}
 }
+
+func TestParseSurface(t *testing.T) {
+	cases := []struct {
+		in     string
+		want   Surface
+		wantOK bool
+	}{
+		{"llm", SurfaceLLM, true},
+		{"embeddings", SurfaceEmbeddings, true},
+		{"images", SurfaceImages, true},
+		{"audio", SurfaceAudio, true},
+		{"rerank", SurfaceRerank, true},
+		{"moderations", SurfaceModerations, true},
+		{"", "", false},
+		{"nonsense", "", false},
+		// Surfaces come from stored catalog rows and inbound routes, both of
+		// which are lower-case by construction; accepting other casings would
+		// let two spellings of one surface diverge.
+		{"LLM", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := ParseSurface(tc.in)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("ParseSurface(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}

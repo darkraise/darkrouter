@@ -18,10 +18,18 @@ providers:
     models:
       - openai/gpt-oss-120b
 
+# Aliases map a friendly name to an ordered fallback chain. Targets are
+# provider/model or a bare model name.
+aliases:
+  fast:
+    - groq/openai/gpt-oss-120b
+
 policy:
   cooldown:
     trip_after: 3
     max: 15m
+  retry:
+    max_attempts: 4
   timeout:
     connect: 10s
     first_byte: 60s

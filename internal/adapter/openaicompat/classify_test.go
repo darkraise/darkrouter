@@ -61,3 +61,55 @@ func TestClassifyTransportErrorsAreRetryable(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyBodyDetectsAnUnknownModel400(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want adapter.Outcome
+	}{
+		{
+			name: "model_not_found code",
+			body: `{"error":{"message":"The model does not exist","code":"model_not_found"}}`,
+			want: adapter.OutcomeRetryableModel,
+		},
+		{
+			name: "invalid_model code",
+			body: `{"error":{"message":"bad model","code":"invalid_model"}}`,
+			want: adapter.OutcomeRetryableModel,
+		},
+		{
+			name: "model named in the message",
+			body: `{"error":{"message":"model \"llama-9\" does not exist","type":"invalid_request_error"}}`,
+			want: adapter.OutcomeRetryableModel,
+		},
+		{
+			name: "a genuinely malformed request stays fatal",
+			body: `{"error":{"message":"messages: field required","type":"invalid_request_error"}}`,
+			want: adapter.OutcomeFatal,
+		},
+		{
+			name: "an unparseable body stays fatal",
+			body: `not json`,
+			want: adapter.OutcomeFatal,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{StatusCode: 400, Header: http.Header{}}
+			if got := ClassifyBody(resp, []byte(tc.body), nil); got != tc.want {
+				t.Errorf("ClassifyBody = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyBodyDefersToClassifyForEveryOtherStatus(t *testing.T) {
+	for _, code := range []int{200, 401, 404, 429, 500, 503} {
+		resp := &http.Response{StatusCode: code, Header: http.Header{}}
+		want := Classify(resp, nil)
+		if got := ClassifyBody(resp, []byte(`{"error":{"code":"model_not_found"}}`), nil); got != want {
+			t.Errorf("status %d: ClassifyBody = %q, want %q", code, got, want)
+		}
+	}
+}

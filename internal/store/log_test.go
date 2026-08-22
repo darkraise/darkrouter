@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -170,5 +172,64 @@ func TestLogWriterSurvivesADuplicateID(t *testing.T) {
 	}
 	if got := countRows(t, db, "requests"); got != 1 {
 		t.Errorf("requests = %d, want 1", got)
+	}
+}
+
+func TestLogWriterPersistsCandidatesAndSkips(t *testing.T) {
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{Buffer: 4, BatchSize: 1, FlushEvery: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	r := rec("trace")
+	r.Candidates = []string{"groq/g1/m", "cerebras/c1/m"}
+	r.Skips = []string{"groq/g2/m:cooling"}
+	w.Log(r)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	var raw string
+	if err := db.Read.QueryRowContext(context.Background(),
+		`SELECT candidates_json FROM requests WHERE id = 'trace'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Candidates []string `json:"candidates"`
+		Skips      []string `json:"skips"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("candidates_json is not the expected shape: %v (%s)", err, raw)
+	}
+	if len(got.Candidates) != 2 || got.Candidates[0] != "groq/g1/m" {
+		t.Errorf("candidates = %v", got.Candidates)
+	}
+	// The skip is what explains why g2 was never attempted.
+	if len(got.Skips) != 1 || got.Skips[0] != "groq/g2/m:cooling" {
+		t.Errorf("skips = %v", got.Skips)
+	}
+}
+
+func TestLogWriterWritesEmptyArraysNotNull(t *testing.T) {
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{Buffer: 4, BatchSize: 1, FlushEvery: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	w.Log(rec("empty"))
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	var raw string
+	if err := db.Read.QueryRowContext(context.Background(),
+		`SELECT candidates_json FROM requests WHERE id = 'empty'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "null") {
+		t.Errorf("candidates_json = %s, want empty arrays rather than null", raw)
 	}
 }

@@ -36,7 +36,12 @@ func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Dur
 		"  - id: fake\n    kind: openaicompat\n    base_url: " + upstreamURL +
 		"\n    api_key: ${K}\n    models: [m]\n"
 	if total > 0 {
-		body += "policy:\n  timeout:\n    total: " + total.String() + "\n"
+		// connect and first_byte must be set alongside total: the budget gate
+		// refuses an attempt unless the remaining total covers connect +
+		// first_byte, so leaving the 70s defaults would mean a short total
+		// starts no attempt at all.
+		body += "policy:\n  timeout:\n    connect: 5ms\n    first_byte: " +
+			(total / 4).String() + "\n    total: " + total.String() + "\n"
 	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

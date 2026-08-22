@@ -59,6 +59,9 @@ func applyDefaults(c *Config) {
 	if c.Server.SSE.MaxLineBytes == 0 {
 		c.Server.SSE.MaxLineBytes = 1048576
 	}
+	if c.Server.SSE.MaxPrecommitBytes == 0 {
+		c.Server.SSE.MaxPrecommitBytes = 1048576
+	}
 	if c.Policy.Timeout.Connect == 0 {
 		c.Policy.Timeout.Connect = 10 * time.Second
 	}
@@ -86,6 +89,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.Capture.Retention == 0 {
 		c.Capture.Retention = 72 * time.Hour
+	}
+	if c.Policy.Retry.MaxAttempts == 0 {
+		c.Policy.Retry.MaxAttempts = 4
 	}
 }
 
@@ -139,6 +145,22 @@ func validate(c *Config) error {
 	}
 	if c.Capture.MaxBytes < 0 {
 		return fmt.Errorf("capture.max_bytes must not be negative")
+	}
+	if c.Policy.Retry.MaxAttempts < 1 {
+		return fmt.Errorf("policy.retry.max_attempts must be at least 1")
+	}
+	for name, targets := range c.Aliases {
+		if name == "" {
+			return fmt.Errorf("alias: name is required")
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("alias %q: at least one target is required", name)
+		}
+		for _, tgt := range targets {
+			if strings.TrimSpace(tgt) == "" {
+				return fmt.Errorf("alias %q: target must not be empty", name)
+			}
+		}
 	}
 
 	seen := make(map[string]bool, len(c.Providers))

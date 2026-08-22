@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -72,8 +73,11 @@ func TestSQLSourceLoadsProvidersWithDecryptedCredentials(t *testing.T) {
 		t.Fatalf("got %d providers, want 1", len(ps))
 	}
 	p := ps[0]
-	if p.ID != "groq" || p.APIKey != "sk-groq" || p.KeyID != keyID {
+	if p.ID != "groq" {
 		t.Errorf("provider = %+v", p)
+	}
+	if len(p.Credentials) != 1 || p.Credentials[0].ID != keyID || p.Credentials[0].Secret != "sk-groq" {
+		t.Errorf("credentials = %+v", p.Credentials)
 	}
 	if p.Priority != 10 || p.BaseURL != "https://groq.example/v1" {
 		t.Errorf("provider = %+v", p)
@@ -180,5 +184,68 @@ func TestSQLSourceProvidersBeforeReloadIsEmptyNotNil(t *testing.T) {
 	}
 	if ps == nil {
 		t.Fatal("Providers must return an empty slice, not nil, before the first Reload")
+	}
+}
+
+func TestSQLSourceLoadsEveryEnabledCredential(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	first := seed(t, db, key, "groq", 0, true, "m")
+	second, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "groq", Secret: "sk-second", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps) != 1 {
+		t.Fatalf("got %d providers, want 1", len(ps))
+	}
+	creds := ps[0].Credentials
+	if len(creds) != 2 {
+		t.Fatalf("got %d credentials, want 2", len(creds))
+	}
+	// Ordered by id, which is total and deterministic. It is NOT insertion
+	// order: two ULIDs minted in the same millisecond share a timestamp prefix
+	// and are separated only by their random component. Credential rotation
+	// needs determinism, which id order gives; it does not need recency, which
+	// the least-recently-used ordering supplies separately.
+	if !sort.SliceIsSorted(creds, func(i, j int) bool { return creds[i].ID < creds[j].ID }) {
+		t.Errorf("credentials are not in id order: %+v", creds)
+	}
+	byID := map[string]string{}
+	for _, c := range creds {
+		byID[c.ID] = c.Secret
+	}
+	if byID[first] != "sk-groq" {
+		t.Errorf("first credential secret = %q", byID[first])
+	}
+	if byID[second] != "sk-second" {
+		t.Errorf("second credential secret = %q", byID[second])
+	}
+}
+
+func TestSQLSourceExcludesDisabledCredentials(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	enabled := seed(t, db, key, "groq", 0, true, "m")
+	if _, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "groq", Secret: "sk-off", Enabled: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps[0].Credentials) != 1 || ps[0].Credentials[0].ID != enabled {
+		t.Errorf("credentials = %+v, want only the enabled one", ps[0].Credentials)
 	}
 }
