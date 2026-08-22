@@ -225,7 +225,12 @@ func (w *LogWriter) writeBatch(ctx context.Context, batch []*RequestRecord) (int
 }
 
 func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord) error {
-	candidates, err := json.Marshal(nonNil(r.Candidates))
+	// Candidates and skips travel together in one column: they are only ever
+	// read together, and keeping them there leaves the phase 2 schema alone.
+	trace, err := json.Marshal(struct {
+		Candidates []string `json:"candidates"`
+		Skips      []string `json:"skips"`
+	}{nonNil(r.Candidates), nonNil(r.Skips)})
 	if err != nil {
 		return err
 	}
@@ -235,7 +240,7 @@ func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord
 	}
 	if _, err := reqStmt.ExecContext(ctx,
 		r.ID, r.TS.UnixMilli(), r.Dialect, r.Surface, r.RequestedModel, r.ResolvedAlias,
-		string(candidates), r.FinalProviderID, r.FinalModel, r.Status,
+		string(trace), r.FinalProviderID, r.FinalModel, r.Status,
 		r.TokensIn, r.TokensOut, r.CacheReadTokens, r.CacheWriteTokens, r.ReasoningTokens,
 		r.CostMicros, r.TTFTMs, r.TotalMs, r.ErrorCode, string(warnings),
 	); err != nil {

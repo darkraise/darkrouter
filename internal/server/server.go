@@ -63,7 +63,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		ex: exec.New(cfgStore, src, openaicompat.New(), exec.Deps{
-			Log: logw, Health: breaker,
+			Log: logw, Health: breaker, Fleet: breaker,
 		}),
 		started:  time.Now(),
 		warnings: startupWarnings,
@@ -226,6 +226,30 @@ func (s *Server) Run(ctx context.Context) error {
 		// accuracy, and refusing to serve over it would be worse.
 		s.store.RecordError(fmt.Errorf("health rehydration: %w", err))
 	}
+
+	if lu, err := s.db.LoadLastUsed(workerCtx); err != nil {
+		s.store.RecordError(fmt.Errorf("credential usage rehydration: %w", err))
+	} else {
+		s.breaker.RehydrateLastUsed(lu)
+	}
+
+	startWorker("credential usage", func(c context.Context) error {
+		// Persisted purely for restart continuity: the in-memory map is
+		// authoritative, so a missed write costs ordering accuracy across one
+		// restart and nothing else.
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-c.Done():
+				return s.db.SaveLastUsed(context.Background(), s.breaker.LastUsedSnapshot())
+			case <-t.C:
+				if err := s.db.SaveLastUsed(c, s.breaker.LastUsedSnapshot()); err != nil {
+					log.Printf("credential usage: %v", err)
+				}
+			}
+		}
+	})
 
 	startWorker("log writer", s.logw.Run)
 	startWorker("health persister", s.persist.Run)
