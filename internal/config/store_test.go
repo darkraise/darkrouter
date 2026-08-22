@@ -84,7 +84,13 @@ func TestWatchDetectsRenameStyleSave(t *testing.T) {
 	s, path := newTestStore(t, minimal)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = s.Watch(ctx) }()
+	ready := make(chan struct{})
+	go func() { _ = s.watch(ctx, ready) }()
+	select {
+	case <-ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher did not start")
+	}
 
 	tmp := path + ".tmp"
 	writeFile(t, tmp, strings.Replace(minimal, "id: groq", "id: vimstyle", 1))
