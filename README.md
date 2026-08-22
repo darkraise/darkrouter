@@ -62,6 +62,28 @@ locally rather than forwarding to the provider's own counting endpoint. The
 estimate uses a bundled BPE for OpenAI-family models and
 characters-divided-by-four otherwise, and it does not count images.
 
+## The model catalog
+
+Darkrouter ships a catalog of provider presets, so adding a known provider is a
+name and a key rather than a base URL, an auth style, and a list of quirks.
+Three sources merge into one index:
+
+- **Presets** — shipped data: kind, base URL, auth style, surfaces, and known
+  quirks per named upstream.
+- **models.dev** — pricing, context windows, and capability flags, refreshed
+  every twelve hours. A snapshot is embedded in the binary, so Darkrouter starts
+  and serves with no outbound access to it.
+- **Discovery** — each enabled provider's own model listing, probed every
+  fifteen minutes and whenever a provider or credential changes.
+
+A provider that times out does not lose its models: after three consecutive
+failed probes they are marked stale and stay routable, because the circuit
+breaker rather than the catalog is what avoids a broken provider. A model a
+*successful* listing omits three times running is marked removed upstream and
+stops being routable.
+
+Both workers are optional. See the `catalog:` block in `darkrouter.example.yaml`.
+
 ## Develop
 
 ```bash

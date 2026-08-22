@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## Phase status
 
@@ -11,7 +11,7 @@ Last updated: 2026-08-22
 | 3 — Routing and failover | ✅ | ✅ | **Merged to master.** 20 tasks, all done criteria met. |
 | 4 — Dialects | ✅ | ✅ | **Complete.** 37 tasks; race-clean, verified live against Groq. |
 | 5 — Auxiliary surfaces | ✅ | — | Not started |
-| 6 — Catalog | ✅ | — | Not started |
+| 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | — | Not started |
 | 8 — Signed and OAuth credentials | ✅ | — | Not started |
 | 9 — Passthrough fast path | ✅ | — | Not started |
@@ -39,27 +39,9 @@ Two items phase 3 carried forward are done:
 
 ## Carried forward into phase 5 and beyond
 
-- **Capability filtering admits everything.** Every model's capabilities are
-  `inferred` until phase 6 supplies real data, and per master design §6.4
-  inferred capabilities pass with a warning. A request needing tools will route
-  to a model that has none and fail at the provider. The filter is wired and
-  tested; it is not yet selective.
 - **Failed attempts burn tokens invisibly.** `request_attempts` carries no usage
   columns, so tokens spent by failed pre-commit attempts never reach
   `usage_daily`. Spend figures understate reality whenever failover fires.
-- **The Anthropic model-generation table is a name heuristic.** `traitsFor` in
-  `internal/adapter/anthropic/build.go` decides the thinking mode and the
-  sampling rules by matching fragments of the model name, because there is no
-  catalog until phase 6. It is wrong for an aliased or proxied model whose name
-  says nothing about its generation, and it needs a new entry every time
-  Anthropic ships a generation. Phase 6 should move its three booleans onto the
-  catalog entry and delete the table. An unrecognized name is honored as the
-  client spelled it and warned about.
-- **The Anthropic `max_tokens` substitution is a constant.** 4096 with a
-  warning, because the catalog cannot supply the model's real maximum until
-  phase 6. A model whose real cap is lower will still 400.
-- **`xlate.EffortBudget`'s clamp is inert.** Every caller passes a `maxOut` of
-  0, which disables it. Phase 6 supplies the real value.
 - **A refusal reaches the client as a hard error, not a refusal.** A Gemini
   blocked prompt is HTTP 200 with `promptFeedback.blockReason` natively and 400
   `INVALID_ARGUMENT` through Darkrouter; an Anthropic `refusal` is a 200 with
@@ -86,22 +68,70 @@ Two items phase 3 carried forward are done:
 Four smaller items are listed at the end of
 `docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
 
-## Two spec assumptions that were stale
+## Closed by phase 6
 
-Both confirmed against the live Anthropic documentation on 2026-08-22 while
-executing phase 4, and both corrected in the plan. Spec §4.6 should be amended
-to match rather than left to mislead the next reader.
+Four items phase 4 carried forward are done:
 
-- **Structured output is generally available**, under
-  `output_config: {format: {type: "json_schema", schema: …}}` with no beta
-  header. The spec assumed a beta and told the implementer to re-check.
-- **Extended thinking has split into two mutually exclusive per-generation
-  shapes.** `thinking: {type: "enabled", budget_tokens}` returns a 400 on Claude
-  4.7 and later; `thinking: {type: "adaptive"}` with `output_config.effort`
-  returns a 400 on Claude 4.5 and earlier. The spec's sampling rule was also
-  over-general: `temperature` and `top_k` are rejected alongside thinking, but
-  `top_p` survives between 0.95 and 1 — and on the 5-generation any non-default
-  sampling value is a 400 on every request, thinking or not.
+- **Capability filtering is selective.** models.dev supplies real capability
+  data and Ollama's `/api/show` supplies discovered data, so a model known to
+  lack tools is no longer a candidate for a tool request. Inferred models still
+  route, per master design §6.4, and now carry a `capabilities` warning on the
+  request row so the trace explains why.
+- **The Anthropic model-generation table is deleted.** `var generations` and
+  `func traitsFor` are gone from `internal/adapter/anthropic/build.go`. Traits
+  are preset-declared data reaching the adapter on `adapter.Target.Info`, and
+  `internal/catalog/traits_test.go` asserts the shipped preset produces phase
+  4's live-verified traits for fourteen real model names, dotted proxy
+  spellings included.
+- **The Anthropic `max_tokens` substitution reads the catalog.** It is the
+  model's real `max_output_tokens`, and a request asking for more than the model
+  can produce is clamped with a warning rather than forwarded to a 400.
+- **`xlate.EffortBudget`'s clamp is live.** Callers pass
+  `t.Info.MaxOutputTokens`.
+
+**The two stale phase 4 spec assumptions are corrected in place.** Spec §4.6 now
+states that structured output is GA under `output_config.format` and that
+extended thinking has split into two mutually exclusive per-generation shapes,
+with the narrower sampling rule spelled out; §4.7 records that `max_tokens` is
+still required and now substitutes the catalog's value. The findings ledger's
+"could not verify" note is corrected too.
+
+## Carried forward from phase 6
+
+- **`presets.yaml` is generated, and regenerating it needs the OmniRoute
+  checkout.** `tools/presetgen` reads `/root/repositories-community/OmniRoute`
+  and a models.dev snapshot. Corrections belong in
+  `internal/catalog/presets.overrides.yaml`, which is re-applied on every run;
+  editing `presets.yaml` directly is discarded by the next run.
+- **OAuth presets are not transcribed.** Spec §2 expected them with their
+  `oauth:` blocks defined. Of OmniRoute's 21 `authType: oauth` entries only 7
+  carry any literal URL and none carries a complete block — `claude`, the best
+  case, has a token URL but no authorize URL, and its client id sits behind a
+  `resolvePublicCred()` call. Shipping an entry missing them would show a
+  provider in the UI that cannot be connected, so the 13 that survived the other
+  filters were dropped and only `anthropic-oauth`, whose values are verifiable,
+  is hand-written. Sourcing the rest is phase 8 work.
+- **The embedded metadata snapshot ages.**
+  `internal/catalog/models_snapshot.json` was taken on 2026-08-22. It is only
+  the cold-start fallback — the sync overwrites it within twelve hours of a
+  networked start — but a long-lived offline install runs on those numbers
+  indefinitely. Regenerate it when the binary ships.
+- **Vertex and Bedrock have no discovery.** `ProbeFor` returns
+  `ErrKindNotDiscoverable` for both, so their models come from presets and
+  models.dev alone. Bedrock's two control-plane calls arrive with its adapter in
+  phase 8; Vertex has no practical listing API and never will.
+- **The models.dev join is best-effort.** 49 of the 196 shipped presets join a
+  models.dev provider key by exact id and 9 more by hand-written override; the
+  rest carry `no_models_dev: true` and their models fall back to inferred
+  capabilities. Adding a `models_dev_id` to `presets.overrides.yaml` is the fix,
+  one provider at a time.
+- **Discovery probes every enabled provider on every tick regardless of how
+  static it is.** An `anthropic` provider's model list changes a few times a
+  year and is probed ninety-six times a day. Harmless, but phase 7's settings
+  screen is where a per-provider interval would belong.
+- **Failed attempts still burn tokens invisibly.** `request_attempts` carries no
+  usage columns, so tokens spent by failed pre-commit attempts never reach
+  `usage_daily`. Untouched by phase 6.
 
 ## Open items
 
@@ -208,6 +238,46 @@ against passthrough byte for byte, and both will surface there.
   `internal/edge/openai/stream.go:14` always builds `choices: [{index, delta,
   finish_reason}]`, so the usage chunk goes out with one empty-delta choice
   where OpenAI emits `choices: []`.
+
+### 5. Phase 6 verification against Groq — done
+
+Run on 2026-08-23 with a static `CGO_ENABLED=0` binary (29 MB, unchanged from
+phase 4 — the embedded metadata snapshot costs 667 KB) on ports 18080/18081.
+
+- **Discovery found 13 models** against the one the configuration named, with
+  zero consecutive failures and every row `live` at `missing_streak` 0. The
+  configured `models:` list is no longer what the gateway can serve.
+- **The sync priced 6 of them**, the rest being audio and guard models
+  models.dev carries no `cost` for. `openai/gpt-oss-120b` came back at
+  `input 150000` and `output 600000` micro-dollars per million — $0.15 and
+  $0.60 — with `context_window 131072`, `max_output_tokens 65536`, and
+  capabilities `tools:true, reasoning:true, vision:false`. All 13 rows ended
+  `capabilities_source = models_dev`.
+- **The join needs the provider row's `preset`.** A provider imported from the
+  YAML `providers:` block has an empty one, so nothing joins until it is set.
+  That is correct — an uncatalogued provider is a base URL and a key — but it
+  means a first-run import gets no metadata until phase 7's UI sets a preset, or
+  the operator does it by hand.
+- **`warnings_json` was checked in both directions, which is the point.** With
+  the preset set, models.dev vouches for tools and a tool request records **no**
+  capability warning. With the preset cleared so the join fails, the same
+  request records
+  `capabilities -> groq/openai/gpt-oss-120b: the request needs tools and this
+  model's capabilities are unverified; routed anyway` — and still succeeds, per
+  master design §6.4. The mechanism reaches the request row in production, not
+  only in tests.
+- **A cold start with no models.dev access serves.** Fresh database,
+  `models_dev_url` pointed at a closed port: `/readyz` 200, both listings serve,
+  a live completion returns, and the log carries one warning ending
+  "(serving embedded metadata)". With a preset set, `/v1beta/models` reported
+  `inputTokenLimit 131072` and `outputTokenLimit 65536` from the **embedded
+  snapshot alone** — the fallback supplies real numbers rather than only letting
+  the process boot.
+
+One process-hygiene note for the next session: `nohup … &` inside a compound
+command returns the subshell's pid, not the binary's, so `kill "$!"` leaves the
+gateway holding its port and the next start fails to bind. Kill by binary name
+(`ps -C darkrouter -o pid=`) instead.
 
 ### 4. One design decision still open
 
