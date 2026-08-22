@@ -59,6 +59,9 @@ func applyDefaults(c *Config) {
 	if c.Server.SSE.MaxLineBytes == 0 {
 		c.Server.SSE.MaxLineBytes = 1048576
 	}
+	if c.Server.SSE.MaxPrecommitBytes == 0 {
+		c.Server.SSE.MaxPrecommitBytes = 1048576
+	}
 	if c.Policy.Timeout.Connect == 0 {
 		c.Policy.Timeout.Connect = 10 * time.Second
 	}

@@ -77,14 +77,17 @@ func TestBufferBreachesTheByteCapOnAPayloadFlood(t *testing.T) {
 	}
 }
 
-func TestBufferCountsOnlyPayloadBytes(t *testing.T) {
-	b := newPreCommitBuffer(100)
-	// Fifty pings carry no payload and must not exhaust a byte cap on their own;
-	// the time bound is what stops an infinite ping stream.
-	for i := 0; i < 50; i++ {
-		if err := b.add(ir.StreamEvent{Type: ir.EventPing}); err != nil {
-			t.Fatalf("ping %d exhausted the byte cap: %v", i, err)
-		}
+// The spec is explicit that a provider emitting megabytes of pings inside
+// first_byte must breach the byte cap. Charging only payload would leave the
+// cap unreachable, since every field that carries bytes also commits.
+func TestBufferBreachesTheCapOnAPingFlood(t *testing.T) {
+	b := newPreCommitBuffer(1024)
+	var err error
+	for i := 0; i < 10000 && err == nil; i++ {
+		err = b.add(ir.StreamEvent{Type: ir.EventPing})
+	}
+	if !errors.Is(err, ErrPreCommitBufferFull) {
+		t.Fatalf("err = %v, want ErrPreCommitBufferFull", err)
 	}
 }
 
