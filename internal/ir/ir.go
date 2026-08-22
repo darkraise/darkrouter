@@ -13,6 +13,33 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// Surface is the kind of work a request asks for. It lives here rather than in
+// the router or the catalog because both need it and either import would
+// create a cycle.
+type Surface string
+
+const (
+	SurfaceLLM         Surface = "llm"
+	SurfaceEmbeddings  Surface = "embeddings"
+	SurfaceImages      Surface = "images"
+	SurfaceAudio       Surface = "audio"
+	SurfaceRerank      Surface = "rerank"
+	SurfaceModerations Surface = "moderations"
+)
+
+// ParseSurface converts a stored or inbound string. It reports failure rather
+// than defaulting, because a request routed to the wrong surface fails in a
+// much more confusing way than one refused up front.
+func ParseSurface(s string) (Surface, bool) {
+	switch Surface(s) {
+	case SurfaceLLM, SurfaceEmbeddings, SurfaceImages,
+		SurfaceAudio, SurfaceRerank, SurfaceModerations:
+		return Surface(s), true
+	default:
+		return "", false
+	}
+}
+
 type BlockType string
 
 const (
