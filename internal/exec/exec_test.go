@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,23 +16,34 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func newExecutor(t *testing.T, upstreamURL string) *Executor {
+	t.Helper()
+	return newExecutorWith(t, upstreamURL, Deps{}, 0)
+}
+
+// newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
+// total leaves the default of 10m in place.
+func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Duration) *Executor {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "darkrouter.yaml")
 	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
 		"  - id: fake\n    kind: openaicompat\n    base_url: " + upstreamURL +
 		"\n    api_key: ${K}\n    models: [m]\n"
+	if total > 0 {
+		body += "policy:\n  timeout:\n    total: " + total.String() + "\n"
+	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store, provider.NewYAMLSource(store), openaicompat.New())
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), openaicompat.New(), deps)
 }
 
 func post(t *testing.T, e *Executor, body string) *httptest.ResponseRecorder {
@@ -201,5 +213,161 @@ func TestHandleStreamChunksCarryModel(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"id":"cc-1"`) {
 		t.Fatalf("chunks must carry the upstream id, got:\n%s", rec.Body.String())
+	}
+}
+
+type captureLogger struct {
+	mu      sync.Mutex
+	records []*store.RequestRecord
+}
+
+func (c *captureLogger) Log(r *store.RequestRecord) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, r)
+}
+
+func (c *captureLogger) only(t *testing.T) *store.RequestRecord {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.records) != 1 {
+		t.Fatalf("got %d records, want 1", len(c.records))
+	}
+	return c.records[0]
+}
+
+func unaryUpstream() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","model":"m","choices":[{"message":
+			{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5}}`))
+	}))
+}
+
+func streamUpstream() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8}}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+}
+
+func TestHandleLogsASuccessfulRequest(t *testing.T) {
+	up := unaryUpstream()
+	defer up.Close()
+	logger := &captureLogger{}
+	e := newExecutorWith(t, up.URL, Deps{Log: logger}, 0)
+
+	rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	r := logger.only(t)
+	if r.Status != "success" {
+		t.Errorf("Status = %q, want success", r.Status)
+	}
+	if r.ID == "" || r.ID != rec.Header().Get("X-Darkrouter-Request") {
+		t.Errorf("record id %q does not match the response header", r.ID)
+	}
+	if r.Dialect != "openai" || r.Surface != "llm" {
+		t.Errorf("dialect/surface = %q/%q", r.Dialect, r.Surface)
+	}
+	if r.RequestedModel != "m" || r.FinalModel != "m" || r.FinalProviderID != "fake" {
+		t.Errorf("record = %+v", r)
+	}
+	if r.TokensIn != 3 || r.TokensOut != 5 {
+		t.Errorf("tokens: in=%d out=%d, want 3/5", r.TokensIn, r.TokensOut)
+	}
+	if r.CostMicros != nil {
+		t.Error("CostMicros must stay nil until phase 6 supplies pricing")
+	}
+	if r.TotalMs == nil || r.TTFTMs == nil {
+		t.Error("TotalMs and TTFTMs must both be recorded")
+	}
+	if len(r.Attempts) != 1 {
+		t.Fatalf("got %d attempts, want 1", len(r.Attempts))
+	}
+	a := r.Attempts[0]
+	if a.Seq != 0 || a.ProviderID != "fake" || a.Outcome != "success" || a.StatusCode != 200 {
+		t.Errorf("attempt = %+v", a)
+	}
+}
+
+func TestHandleLogsAnUpstreamFailure(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	defer up.Close()
+	logger := &captureLogger{}
+	e := newExecutorWith(t, up.URL, Deps{Log: logger}, 0)
+
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	r := logger.only(t)
+	if r.Status != "error" {
+		t.Errorf("Status = %q, want error", r.Status)
+	}
+	if len(r.Attempts) != 1 || r.Attempts[0].Outcome != "retryable_provider" {
+		t.Fatalf("attempts = %+v", r.Attempts)
+	}
+	if r.Attempts[0].StatusCode != 503 {
+		t.Errorf("StatusCode = %d, want 503", r.Attempts[0].StatusCode)
+	}
+}
+
+// A request that never reaches an upstream still produces a record, or the
+// spend figures silently omit every misrouted request.
+func TestHandleLogsAnUnknownModelWithNoAttempts(t *testing.T) {
+	logger := &captureLogger{}
+	e := newExecutorWith(t, "https://unused.example/v1", Deps{Log: logger}, 0)
+
+	post(t, e, `{"model":"nope","messages":[]}`)
+
+	r := logger.only(t)
+	if r.Status != "error" {
+		t.Errorf("Status = %q", r.Status)
+	}
+	if len(r.Attempts) != 0 {
+		t.Errorf("got %d attempts, want 0", len(r.Attempts))
+	}
+	if r.ErrorCode == "" {
+		t.Error("ErrorCode was not recorded")
+	}
+}
+
+func TestHandleRecordsTTFTAndUsageOnAStream(t *testing.T) {
+	up := streamUpstream()
+	defer up.Close()
+	logger := &captureLogger{}
+	e := newExecutorWith(t, up.URL, Deps{Log: logger}, 0)
+
+	post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
+
+	r := logger.only(t)
+	if r.Status != "success" {
+		t.Errorf("Status = %q", r.Status)
+	}
+	if r.TTFTMs == nil {
+		t.Fatal("TTFT was not recorded on a stream")
+	}
+	if r.TotalMs == nil || *r.TTFTMs > *r.TotalMs {
+		t.Errorf("TTFT %v exceeds total %v", r.TTFTMs, r.TotalMs)
+	}
+	// Usage arrives on a late event; without the tap it would be lost.
+	if r.TokensOut != 5 {
+		t.Errorf("stream usage not captured: TokensOut = %d, want 5", r.TokensOut)
+	}
+}
+
+func TestHandleWithNoLoggerDoesNotPanic(t *testing.T) {
+	up := unaryUpstream()
+	defer up.Close()
+	e := newExecutorWith(t, up.URL, Deps{}, 0)
+	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
 	}
 }
