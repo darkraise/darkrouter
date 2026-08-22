@@ -19,6 +19,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -30,10 +31,17 @@ type Logger interface {
 	Log(*store.RequestRecord)
 }
 
+// HealthRecorder receives one signal per attempt. It must not block: the
+// breaker answers under a mutex and returns immediately.
+type HealthRecorder interface {
+	Record(k health.Key, s health.Signal)
+}
+
 // Deps carries the optional collaborators. A zero Deps is valid and disables
 // the corresponding behavior.
 type Deps struct {
-	Log Logger
+	Log    Logger
+	Health HealthRecorder
 }
 
 type Executor struct {
@@ -145,7 +153,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 
 	attemptStart := time.Now()
 	resp, doErr := e.client.Do(hr)
-	outcome := e.classify(r.Context(), resp, doErr)
+	outcome := e.classify(r.Context(), ctx, resp, doErr)
 
 	attempt := store.AttemptRecord{
 		Seq: 0, ProviderID: p.ID, KeyID: p.KeyID, Model: req.Model,
@@ -159,6 +167,18 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		attempt.Error = doErr.Error()
 	}
 	rec.Attempts = append(rec.Attempts, attempt)
+
+	hk := health.Key{ProviderID: p.ID, KeyID: p.KeyID, Model: req.Model}
+	sig := health.Signal{Outcome: outcome}
+	if resp != nil {
+		sig.StatusCode = resp.StatusCode
+		// Read before the body is closed; a 429's Retry-After is the difference
+		// between a precise cooldown and the generic ladder.
+		if d, ok := health.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); ok {
+			sig.RetryAfter, sig.HasRetryAfter = d, true
+		}
+	}
+	e.recordHealth(hk, sig)
 
 	w.Header().Set("X-Darkrouter-Provider", p.ID)
 	w.Header().Set("X-Darkrouter-Model", req.Model)
@@ -207,12 +227,24 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		rec.ErrorCode = string(e2.Type)
 		rec.Attempts[0].Outcome = string(adapter.OutcomeRetryableProvider)
 		rec.Attempts[0].Error = err.Error()
+		// A 2xx that cannot be read is a provider fault, so it must reach the
+		// breaker rather than being recorded only in the log.
+		e.recordHealth(hk, health.Signal{
+			Outcome: adapter.OutcomeRetryableProvider, StatusCode: resp.StatusCode,
+		})
 		_ = d.WriteError(w, e2)
 		return
 	}
 	applyUsage(rec, &out.Usage)
 	rec.Status = "success"
 	_ = d.WriteResponse(w, out)
+}
+
+func (e *Executor) recordHealth(k health.Key, s health.Signal) {
+	if e.deps.Health == nil {
+		return
+	}
+	e.deps.Health.Record(k, s)
 }
 
 func (e *Executor) log(rec *store.RequestRecord) {
@@ -261,12 +293,24 @@ func tapStream(events iter.Seq2[ir.StreamEvent, error],
 
 var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
 
-// classify asks the adapter, then overrides for the one case no adapter can see:
-// a cancellation whose origin is the inbound request rather than the upstream.
+// classify asks the adapter, then overrides for the two cases no adapter can
+// see: a Darkrouter-imposed deadline, and a cancellation whose origin is the
+// inbound request rather than the upstream.
+//
+// The deadline is checked first. Both cancel the same derived context, and if
+// the client also disappears in that instant, checking the disconnect first
+// would silently reclassify a genuine provider timeout as a client hang-up.
+//
 // Keeping this in exec is what lets the executor stay adapter-agnostic, which
 // Phase 3 needs once more than one adapter exists.
-func (e *Executor) classify(inbound context.Context, resp *http.Response, err error) adapter.Outcome {
-	if err != nil && errors.Is(err, context.Canceled) && errors.Is(inbound.Err(), context.Canceled) {
+func (e *Executor) classify(inbound, upstream context.Context, resp *http.Response, err error) adapter.Outcome {
+	if err == nil {
+		return e.ad.Classify(resp, nil)
+	}
+	if errors.Is(context.Cause(upstream), errDarkrouterTimeout) {
+		return adapter.OutcomeRetryableProvider
+	}
+	if errors.Is(inbound.Err(), context.Canceled) {
 		return adapter.OutcomeClientCancelled
 	}
 	return e.ad.Classify(resp, err)
