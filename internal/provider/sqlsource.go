@@ -93,7 +93,8 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 
 func (s *SQLSource) models(ctx context.Context, providerID string) ([]string, error) {
 	rows, err := s.db.Read.QueryContext(ctx,
-		`SELECT model_id FROM models WHERE provider_id = ? AND state = 'active' ORDER BY model_id`,
+		`SELECT model_id FROM models WHERE provider_id = ? AND state IN ('live', 'stale')
+		  ORDER BY model_id`,
 		providerID)
 	if err != nil {
 		return nil, fmt.Errorf("list models for %q: %w", providerID, err)
