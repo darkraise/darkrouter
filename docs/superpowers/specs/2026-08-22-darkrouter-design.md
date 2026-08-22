@@ -165,6 +165,7 @@ type Dialect interface {
 
 type Adapter interface {
     Kind() Kind
+    Surfaces() SurfaceSet
     BuildRequest(context.Context, *Target, *ir.Request) (*http.Request, error)
     ParseResponse(*http.Response) (*ir.Response, error)
     ParseStream(io.Reader) iter.Seq2[ir.StreamEvent, error]
@@ -252,7 +253,7 @@ aliases:
     - openrouter/anthropic/claude-sonnet-4.5
 
 policy:
-  cooldown: { trip_after: 3, base: 30s, max: 15m }
+  cooldown: { trip_after: 3, max: 15m }
   retry:    { on: [429, 5xx, timeout, conn_reset], max_attempts: 4 }
   timeout:  { connect: 10s, first_byte: 60s, total: 10m }
 
