@@ -13,31 +13,11 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// Classify buckets an upstream result. The default buckets matter as much as the
-// listed codes: without them, DNS failures and TLS errors get classified
-// differently by different call sites.
+// Classify buckets an upstream result. The ladder is shared, because it is
+// about HTTP rather than about payload shape; ClassifyBody below is the part
+// that is genuinely OpenAI-specific.
 func Classify(resp *http.Response, err error) adapter.Outcome {
-	if err != nil || resp == nil {
-		return adapter.OutcomeRetryableProvider
-	}
-	switch code := resp.StatusCode; {
-	case code >= 200 && code < 300:
-		return adapter.OutcomeSuccess
-	case code == 401, code == 402, code == 403:
-		return adapter.OutcomeRetryableCredential
-	case code == 404:
-		return adapter.OutcomeRetryableModel
-	case code == 408, code == 429:
-		return adapter.OutcomeRetryableProvider
-	case code >= 300 && code < 400:
-		// Redirects are never followed: Go's client converts a redirected POST
-		// into a body-less GET.
-		return adapter.OutcomeRetryableProvider
-	case code >= 500:
-		return adapter.OutcomeRetryableProvider
-	default:
-		return adapter.OutcomeFatal
-	}
+	return adapter.ClassifyStatus(resp, err)
 }
 
 // ClassifyWithContext distinguishes a client disconnect from a Darkrouter
