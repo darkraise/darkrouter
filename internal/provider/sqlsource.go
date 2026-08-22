@@ -80,8 +80,6 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 		out = append(out, Provider{
 			ID: r.id, Kind: r.kind, BaseURL: r.baseURL,
 			Credentials: enabled,
-			APIKey:      enabled[0].Secret,
-			KeyID:       enabled[0].ID,
 			Priority:    r.priority, Models: models,
 		})
 	}
@@ -113,9 +111,13 @@ func (s *SQLSource) models(ctx context.Context, providerID string) ([]string, er
 	return out, rows.Err()
 }
 
-// enabledOnly keeps the enabled credentials in id order. ULID ids sort by
-// insertion time, which gives credential rotation a total and deterministic
-// order to start from.
+// enabledOnly keeps the enabled credentials in id order.
+//
+// That order is total and deterministic, which is all credential rotation needs
+// as a starting point — the least-recently-used ordering supplies recency. It
+// is deliberately not described as insertion order: two ULIDs minted in the
+// same millisecond share a timestamp prefix and are separated only by their
+// random component.
 func enabledOnly(creds []store.Credential) []Credential {
 	out := make([]Credential, 0, len(creds))
 	for _, c := range creds {

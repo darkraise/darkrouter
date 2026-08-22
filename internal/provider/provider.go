@@ -30,10 +30,6 @@ type Provider struct {
 	// needs all of them rather than a chosen one.
 	Credentials []Credential
 
-	// APIKey and KeyID hold the first enabled credential. They exist only
-	// until the attempt loop reads Credentials; task 20 removes them.
-	APIKey   string
-	KeyID    string
 	Priority int
 	Models   []string
 }
@@ -58,7 +54,6 @@ func (s *YAMLSource) Providers(context.Context) ([]Provider, error) {
 			// A config credential has no database row, so its id is empty. The
 			// breaker keys on that empty id, which is what phase 2 already did.
 			Credentials: []Credential{{ID: "", Secret: p.APIKey, Enabled: true}},
-			APIKey:      p.APIKey,
 			Priority:    p.Priority, Models: p.Models,
 		})
 	}
