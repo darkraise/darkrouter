@@ -1,0 +1,65 @@
+{
+  "Model": "target-model",
+  "System": null,
+  "Messages": [
+    {
+      "Role": "user",
+      "Content": [
+        {
+          "Type": "text",
+          "Text": "Compare these.",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        },
+        {
+          "Type": "image",
+          "Text": "",
+          "Media": {
+            "MIME": "image/png",
+            "Data": "iVBORw==",
+            "URL": "",
+            "FileID": ""
+          },
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        },
+        {
+          "Type": "image",
+          "Text": "",
+          "Media": {
+            "MIME": "",
+            "Data": "",
+            "URL": "https://example.invalid/second.png",
+            "FileID": ""
+          },
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    }
+  ],
+  "Tools": null,
+  "ToolChoice": null,
+  "ParallelToolCalls": null,
+  "MaxTokens": null,
+  "Temperature": null,
+  "TopP": null,
+  "TopK": null,
+  "StopSequences": null,
+  "Stream": false,
+  "Reasoning": null,
+  "ResponseFormat": null,
+  "Safety": null,
+  "Metadata": null,
+  "Extra": null
+}

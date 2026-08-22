@@ -13,31 +13,11 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// Classify buckets an upstream result. The default buckets matter as much as the
-// listed codes: without them, DNS failures and TLS errors get classified
-// differently by different call sites.
+// Classify buckets an upstream result. The ladder is shared, because it is
+// about HTTP rather than about payload shape; ClassifyBody below is the part
+// that is genuinely OpenAI-specific.
 func Classify(resp *http.Response, err error) adapter.Outcome {
-	if err != nil || resp == nil {
-		return adapter.OutcomeRetryableProvider
-	}
-	switch code := resp.StatusCode; {
-	case code >= 200 && code < 300:
-		return adapter.OutcomeSuccess
-	case code == 401, code == 402, code == 403:
-		return adapter.OutcomeRetryableCredential
-	case code == 404:
-		return adapter.OutcomeRetryableModel
-	case code == 408, code == 429:
-		return adapter.OutcomeRetryableProvider
-	case code >= 300 && code < 400:
-		// Redirects are never followed: Go's client converts a redirected POST
-		// into a body-less GET.
-		return adapter.OutcomeRetryableProvider
-	case code >= 500:
-		return adapter.OutcomeRetryableProvider
-	default:
-		return adapter.OutcomeFatal
-	}
+	return adapter.ClassifyStatus(resp, err)
 }
 
 // ClassifyWithContext distinguishes a client disconnect from a Darkrouter
@@ -56,8 +36,12 @@ func New() *Adapter { return &Adapter{} }
 
 func (a *Adapter) Kind() string { return "openaicompat" }
 
-func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, error) {
+func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	return BuildRequest(ctx, t, req)
+}
+
+func (a *Adapter) ClassifyBody(resp *http.Response, body []byte, err error) adapter.Outcome {
+	return ClassifyBody(resp, body, err)
 }
 
 func (a *Adapter) ParseResponse(resp *http.Response) (*ir.Response, error) {
@@ -73,6 +57,7 @@ func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
+var _ adapter.BodyClassifier = (*Adapter)(nil)
 
 // unknownModelCodes are the error codes OpenAI-compatible providers use when a
 // 400 means "I do not have that model" rather than "your request is malformed".

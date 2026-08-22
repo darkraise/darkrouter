@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -78,9 +79,10 @@ func loopExecutor(t *testing.T, up *httptest.Server, fleet []provider.Provider,
 		t.Fatal(err)
 	}
 	b := health.New(3, 15*time.Minute)
-	e := New(cfgStore, &fleetSource{ps: fleet}, openaicompat.New(), Deps{
-		Log: logger, Health: b, Fleet: b,
-	})
+	e := New(cfgStore, &fleetSource{ps: fleet},
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{
+			Log: logger, Health: b, Fleet: b,
+		})
 	return e, b
 }
 

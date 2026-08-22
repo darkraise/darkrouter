@@ -9,7 +9,7 @@ Last updated: 2026-08-22
 | 1 — Foundation | ✅ | ✅ | **Complete.** Race-clean, `go vet` clean, Docker image verified, all four manual checks passed. |
 | 2 — Persistence and health | ✅ | ✅ | **Merged to master.** 18 tasks, all done criteria met. |
 | 3 — Routing and failover | ✅ | ✅ | **Merged to master.** 20 tasks, all done criteria met. |
-| 4 — Dialects | ✅ | — | Not started |
+| 4 — Dialects | ✅ | ✅ | **Complete.** 37 tasks; race-clean, verified live against Groq. |
 | 5 — Auxiliary surfaces | ✅ | — | Not started |
 | 6 — Catalog | ✅ | — | Not started |
 | 7 — Admin API and UI | ✅ | — | Not started |
@@ -25,9 +25,19 @@ The Linux machine needs Go 1.26.1 at `/usr/local/go` (add `/usr/local/go/bin` to
 `PATH`) and gcc, which `-race` requires via cgo. `CGO_ENABLED` defaults to 1
 there, unlike the original Windows machine.
 
-## Carried forward into phase 4 and beyond
+## Closed by phase 4
 
-From phase 3's plan, the two most likely to surprise:
+Two items phase 3 carried forward are done:
+
+- **`edge.Passthrough.Surface` is now `ir.Surface`**, typed before either new
+  dialect wrote a producer of that struct.
+- **The per-dialect in-stream error shape is defined and tested.** OpenAI sends
+  `data: {"error":…}` then `[DONE]`; Anthropic sends a real `error` event and no
+  `message_stop`; Gemini, whose SSE has no error event type at all, sends a
+  terminal chunk carrying a `promptFeedback`-shaped object. One golden fixture
+  drives all three.
+
+## Carried forward into phase 5 and beyond
 
 - **Capability filtering admits everything.** Every model's capabilities are
   `inferred` until phase 6 supplies real data, and per master design §6.4
@@ -37,9 +47,61 @@ From phase 3's plan, the two most likely to surprise:
 - **Failed attempts burn tokens invisibly.** `request_attempts` carries no usage
   columns, so tokens spent by failed pre-commit attempts never reach
   `usage_daily`. Spend figures understate reality whenever failover fires.
+- **The Anthropic model-generation table is a name heuristic.** `traitsFor` in
+  `internal/adapter/anthropic/build.go` decides the thinking mode and the
+  sampling rules by matching fragments of the model name, because there is no
+  catalog until phase 6. It is wrong for an aliased or proxied model whose name
+  says nothing about its generation, and it needs a new entry every time
+  Anthropic ships a generation. Phase 6 should move its three booleans onto the
+  catalog entry and delete the table. An unrecognized name is honored as the
+  client spelled it and warned about.
+- **The Anthropic `max_tokens` substitution is a constant.** 4096 with a
+  warning, because the catalog cannot supply the model's real maximum until
+  phase 6. A model whose real cap is lower will still 400.
+- **`xlate.EffortBudget`'s clamp is inert.** Every caller passes a `maxOut` of
+  0, which disables it. Phase 6 supplies the real value.
+- **A refusal reaches the client as a hard error, not a refusal.** A Gemini
+  blocked prompt is HTTP 200 with `promptFeedback.blockReason` natively and 400
+  `INVALID_ARGUMENT` through Darkrouter; an Anthropic `refusal` is a 200 with
+  `stop_reason: "refusal"` natively and a 400 `invalid_request_error` through
+  Darkrouter on the unary path. This follows from master design §8.1 classifying
+  content filter as `Fatal` and §14 normalizing into the inbound dialect, so it
+  is deliberate — but Gemini CLI and Claude Code surface it as a failure rather
+  than as the model declining. Worth knowing before someone files it as a bug.
+- **The token estimate ignores media and is not the provider's tokenizer.**
+  `X-Darkrouter-Estimated: true` says so, but a client budgeting a context
+  window around a large image will be wrong.
+- **Gemini media inlining fetches client-supplied URLs.** Bounded to http and
+  https, no redirects, 20 MB, ten-second timeout — but it is outbound traffic
+  the gateway initiates on a client's behalf. Phase 7's settings screen should
+  be able to turn it off.
+- **`Adapter.Surfaces()` from master design §5.1 still does not exist.** The
+  interface has no way to say which surfaces a kind implements, so routing
+  cannot exclude a provider on that basis. Phase 5 is where it becomes
+  load-bearing.
+- **Phase 8 extends the golden suite rather than replacing it.** Add `bedrock`
+  and both `vertex` publisher variants to `adapters()` in
+  `internal/golden/golden_test.go`, regenerate, and read the new files.
 
 Four smaller items are listed at the end of
 `docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
+
+## Two spec assumptions that were stale
+
+Both confirmed against the live Anthropic documentation on 2026-08-22 while
+executing phase 4, and both corrected in the plan. Spec §4.6 should be amended
+to match rather than left to mislead the next reader.
+
+- **Structured output is generally available**, under
+  `output_config: {format: {type: "json_schema", schema: …}}` with no beta
+  header. The spec assumed a beta and told the implementer to re-check.
+- **Extended thinking has split into two mutually exclusive per-generation
+  shapes.** `thinking: {type: "enabled", budget_tokens}` returns a 400 on Claude
+  4.7 and later; `thinking: {type: "adaptive"}` with `output_config.effort`
+  returns a 400 on Claude 4.5 and earlier. The spec's sampling rule was also
+  over-general: `temperature` and `top_k` are rejected alongside thinking, but
+  `top_p` survives between 0.95 and 1 — and on the 5-generation any non-default
+  sampling value is a 400 on every request, thinking or not.
 
 ## Open items
 

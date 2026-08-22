@@ -1,0 +1,8 @@
+{"model":"target-model","max_tokens":1024,"messages":[
+  {"role":"assistant","content":[
+    {"type":"tool_use","id":"call_a","name":"screenshot","input":{"url":"https://x.invalid"}}]},
+  {"role":"user","content":[
+    {"type":"tool_result","tool_use_id":"call_a","content":[
+      {"type":"text","text":"captured"},
+      {"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}]},
+    {"type":"text","text":"What is on screen?"}]}]}

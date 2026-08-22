@@ -1,0 +1,27 @@
+{
+  "ID": "msg_1",
+  "Model": "target-model",
+  "Content": [
+    {
+      "Type": "text",
+      "Text": "I can't help with that.",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "content_filter",
+  "Usage": {
+    "InputTokens": 14,
+    "OutputTokens": 7,
+    "CacheReadTokens": 0,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}
