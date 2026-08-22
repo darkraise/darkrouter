@@ -303,3 +303,52 @@ func TestLoopRecordsSkipsOnTheTrace(t *testing.T) {
 		t.Errorf("candidates = %v, want only g2", r.Candidates)
 	}
 }
+
+// A 400 that means "I do not have that model" must advance rather than end the
+// chain: that is exactly the arrangement an alias exists to create.
+func TestLoopUnknownModel400AdvancesToTheNextProvider(t *testing.T) {
+	unknownModel := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"error":{"message":"no such model","code":"model_not_found"}}`))
+	}
+	sc := &scripted{by: map[string]http.HandlerFunc{
+		"g1": unknownModel, "g2": unknownModel, "c1": ok200,
+	}}
+	up := httptest.NewServer(sc)
+	defer up.Close()
+
+	logger := &captureLogger{}
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	// RetryableModel steps one at a time, so all three are tried.
+	if got := sc.order(); len(got) != 3 {
+		t.Errorf("order = %v, want all three tried", got)
+	}
+	r := logger.only(t)
+	if r.Attempts[0].Outcome != "retryable_model" {
+		t.Errorf("outcome = %q, want retryable_model", r.Attempts[0].Outcome)
+	}
+}
+
+// A genuinely malformed request must still end the chain immediately.
+func TestLoopMalformed400StaysFatal(t *testing.T) {
+	bad := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"error":{"message":"messages: field required"}}`))
+	}
+	sc := &scripted{by: map[string]http.HandlerFunc{"g1": bad, "g2": bad, "c1": ok200}}
+	up := httptest.NewServer(sc)
+	defer up.Close()
+
+	logger := &captureLogger{}
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	if got := sc.order(); len(got) != 1 {
+		t.Errorf("order = %v, want exactly 1", got)
+	}
+}
