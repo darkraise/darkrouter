@@ -255,11 +255,15 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	cfg *config.Config, req *ir.Request, c router.Candidate, p provider.Provider,
 	bud budget, rec *store.RequestRecord, seq int) (adapter.Outcome, int, *ir.Error) {
 
+	// A timer rather than a context deadline, because the bound changes at
+	// commit: total stops applying and idle takes over. A deadline cannot be
+	// moved once set.
 	ctx, cancel := context.WithCancelCause(r.Context())
 	defer cancel(nil)
-	ctx, cancelTimeout := context.WithDeadlineCause(ctx, bud.attemptDeadline(time.Now()),
-		errDarkrouterTimeout)
-	defer cancelTimeout()
+	timer := time.AfterFunc(time.Until(bud.attemptDeadline(time.Now())), func() {
+		cancel(errDarkrouterTimeout)
+	})
+	defer timer.Stop()
 
 	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model}
 	hr, err := e.ad.BuildRequest(ctx, tgt, req)
@@ -289,7 +293,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	}
 
 	if req.Stream {
-		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq)
+		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq, timer)
 	}
 
 	out, perr := e.ad.ParseResponse(resp)
@@ -323,7 +327,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 // commit, because building it mutates the response headers.
 func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	cfg *config.Config, c router.Candidate, resp *http.Response, statusCode int,
-	rec *store.RequestRecord, seq int) (adapter.Outcome, int, *ir.Error) {
+	rec *store.RequestRecord, seq int, timer *time.Timer) (adapter.Outcome, int, *ir.Error) {
 
 	defer resp.Body.Close()
 
@@ -377,6 +381,17 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	rec.FinalModel = c.Model
 	e.writeDiagnostics(w, rec.ID, c, seq)
 
+	// Post-commit, policy.timeout.total stops applying and policy.timeout.idle
+	// bounds the gap between events instead: a legitimate ten-minute reasoning
+	// response must not be killed, while a provider that goes silent must be.
+	idle := cfg.Policy.Timeout.Idle
+	resetIdle := func() {
+		if idle > 0 {
+			timer.Reset(idle)
+		}
+	}
+	resetIdle()
+
 	events := func(yield func(ir.StreamEvent, error) bool) {
 		for _, buffered := range buf.events() {
 			if !yield(buffered, nil) {
@@ -391,14 +406,18 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 			if !ok {
 				return
 			}
-			if err == nil && ev.Usage != nil {
-				applyUsage(rec, ev.Usage)
+			if err == nil {
+				resetIdle()
+				if ev.Usage != nil {
+					applyUsage(rec, ev.Usage)
+				}
 			}
 			if !yield(ev, err) {
 				return
 			}
 			if err != nil {
-				// The dialect has rendered the error; the stream then ends.
+				// Failover is impossible: the client already has bytes. The
+				// dialect has rendered the error and the stream now ends.
 				return
 			}
 		}
