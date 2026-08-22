@@ -2513,3 +2513,539 @@ git commit -m "feat(exec): add the auxiliary surface scaffold"
 ```
 
 ---
+
+### Task 11: Embedding IR types and the adapter interface
+
+**Files:**
+- Create: `internal/ir/aux.go`
+- Modify: `internal/adapter/adapter.go`
+- Test: `internal/ir/aux_test.go`
+
+**Interfaces:**
+- Consumes: `ir.Usage`.
+- Produces: `ir.EmbeddingRequest`, `ir.EmbeddingResponse`, `ir.Embedding`, and `adapter.Embedder`. Task 12 implements the interface; Task 14 constructs the request.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: spec §3 fixes the field list and `TokenCounter` in the same file is the optional-interface precedent.
+
+Spec §3: "Each type stays deliberately narrow. Forcing a six-field embedding call through the content-block message model would obscure both shapes and buy nothing."
+
+The one field carrying real design is `Embedding`. OpenAI returns `embedding` as an **array of floats** when `encoding_format` is `float` and as a **base64 string** when it is `base64`, and a client that asked for base64 did so to avoid the decode. Holding the base64 verbatim rather than decoding into floats and re-encoding on the way out preserves the bytes exactly and skips two conversions on the largest payload any of these surfaces carries.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/ir/aux_test.go`:
+
+```go
+package ir
+
+import "testing"
+
+func TestEmbeddingCarriesEitherEncoding(t *testing.T) {
+	// A client asking for base64 did so to avoid the decode. Holding the
+	// string verbatim preserves the bytes and skips two conversions on the
+	// largest payload these surfaces carry.
+	f := Embedding{Index: 0, Float: []float32{0.1, 0.2}}
+	if !f.IsFloat() || f.IsBase64() {
+		t.Errorf("float embedding misreported: %+v", f)
+	}
+	b := Embedding{Index: 1, Base64: "AACAPwAAAEA="}
+	if b.IsFloat() || !b.IsBase64() {
+		t.Errorf("base64 embedding misreported: %+v", b)
+	}
+	var empty Embedding
+	if empty.IsFloat() || empty.IsBase64() {
+		t.Error("an empty embedding claimed an encoding")
+	}
+}
+
+func TestEncodingOrDefault(t *testing.T) {
+	// OpenAI's default is float when the field is absent, and a request that
+	// omitted it must not be forwarded with an empty encoding_format.
+	if got := (&EmbeddingRequest{}).EncodingOrDefault(); got != "float" {
+		t.Errorf("default = %q, want float", got)
+	}
+	if got := (&EmbeddingRequest{Encoding: "base64"}).EncodingOrDefault(); got != "base64" {
+		t.Errorf("explicit = %q", got)
+	}
+}
+
+func TestEmbeddingRequestInputCount(t *testing.T) {
+	// Logged per spec §9 as the input item count, and it is what makes a
+	// batched call distinguishable from a single one in the trace.
+	if got := (&EmbeddingRequest{Input: []string{"a", "b", "c"}}).InputCount(); got != 3 {
+		t.Errorf("count = %d, want 3", got)
+	}
+	if got := (&EmbeddingRequest{}).InputCount(); got != 0 {
+		t.Errorf("count = %d, want 0", got)
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/ir/ -run 'TestEmbedding|TestEncodingOrDefault' -v
+```
+
+Expected: FAIL to build — `undefined: Embedding`, `undefined: EmbeddingRequest`.
+
+- [ ] **Step 3: Write the types**
+
+Create `internal/ir/aux.go`:
+
+```go
+package ir
+
+// The auxiliary surfaces' request and response types.
+//
+// Each is deliberately narrow. Forcing a six-field embedding call through the
+// content-block message model would obscure both shapes and buy nothing, so
+// these do not reuse Request or Response — only Usage, which every surface that
+// reports tokens reports in the same units.
+
+// EmbeddingRequest is one batched embedding call.
+type EmbeddingRequest struct {
+	Model string
+	// Input is always a slice. OpenAI accepts a bare string, an array of
+	// strings, or an array of token arrays; the edge normalizes all three here
+	// so nothing downstream has to branch on the inbound shape.
+	Input []string
+	// Encoding is "float" or "base64". Empty means the client did not say.
+	Encoding string
+	// Dimensions is 0 when unset. Zero is not a legal value, so it needs no
+	// separate presence flag.
+	Dimensions int
+	User       string
+}
+
+// EncodingOrDefault is the encoding to send upstream. OpenAI's default when the
+// field is absent is float, and forwarding an empty encoding_format would be a
+// different request from the one the client made.
+func (r *EmbeddingRequest) EncodingOrDefault() string {
+	if r.Encoding == "" {
+		return "float"
+	}
+	return r.Encoding
+}
+
+// InputCount is the batched item count, recorded on the request row per spec §9.
+func (r *EmbeddingRequest) InputCount() int { return len(r.Input) }
+
+// Embedding is one vector. Exactly one of Float and Base64 is populated.
+//
+// A client that asked for base64 did so to avoid the decode, so the string is
+// carried verbatim rather than decoded to floats and re-encoded on the way out:
+// that preserves the bytes exactly and skips two conversions on the largest
+// payload any auxiliary surface carries.
+type Embedding struct {
+	Index  int
+	Float  []float32
+	Base64 string
+}
+
+func (e Embedding) IsFloat() bool  { return len(e.Float) > 0 }
+func (e Embedding) IsBase64() bool { return e.Base64 != "" }
+
+type EmbeddingResponse struct {
+	// Model is what the provider actually served, which may differ from what
+	// was asked for. Spec §8: a failover to a different model returns vectors
+	// from a different vector space, so the served name is not decoration.
+	Model      string
+	Embeddings []Embedding
+	Usage      Usage
+}
+```
+
+- [ ] **Step 4: Add the adapter interface**
+
+In `internal/adapter/adapter.go`, beside `TokenCounter`:
+
+```go
+// Embedder is implemented by an adapter serving the embedding surface. Optional
+// for the same reason TokenCounter is: two of the five kinds have no embedding
+// endpoint, and a method on Adapter would make them stub it out.
+type Embedder interface {
+	BuildEmbedding(ctx context.Context, t *Target, req *ir.EmbeddingRequest) (*http.Request, []ir.Warning, error)
+	// ParseEmbedding takes ownership of resp.Body and always closes it.
+	ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, error)
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/ir/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing implements `Embedder` yet.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/ir/aux.go internal/ir/aux_test.go internal/adapter/adapter.go
+git commit -m "feat(ir): add embedding request and response types"
+```
+
+---
+
+### Task 12: openaicompat serves embeddings
+
+**Files:**
+- Create: `internal/adapter/openaicompat/embed.go`
+- Test: `internal/adapter/openaicompat/embed_test.go`
+
+**Interfaces:**
+- Consumes: `ir.EmbeddingRequest`, `ir.EmbeddingResponse`, `adapter.Embedder` (Task 11).
+- Produces: `openaicompat.Adapter` implementing `adapter.Embedder`.
+
+**Implementer:** dcc-superpower-companions:impl-sonnet-high
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
+**Approach:** inline - skip 2: the wire shape is OpenAI's `/v1/embeddings`, and `build.go` beside it is the pattern for rendering one.
+
+The response's `embedding` field is `[]float64` under `float` encoding and a `string` under `base64`. Decoding into `any` and type-switching is what handles both without asking the caller which it requested — and asking would be wrong anyway, because a provider is free to answer in the other one.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/adapter/openaicompat/embed_test.go`:
+
+```go
+package openaicompat
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestBuildEmbeddingRendersTheOpenAIShape(t *testing.T) {
+	hr, warns, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{BaseURL: "https://api.example.com/v1/", APIKey: "sk", Model: "text-embedding-3-small"},
+		&ir.EmbeddingRequest{
+			Input: []string{"a", "b"}, Encoding: "base64", Dimensions: 256, User: "u",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v; nothing in this request is lossy", warns)
+	}
+	if hr.URL.String() != "https://api.example.com/v1/embeddings" {
+		t.Errorf("url = %s", hr.URL)
+	}
+	if hr.Header.Get("Authorization") != "Bearer sk" {
+		t.Errorf("auth = %q", hr.Header.Get("Authorization"))
+	}
+
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "text-embedding-3-small" {
+		t.Errorf("model = %v; the target's name must be sent, not the client's", body["model"])
+	}
+	if body["encoding_format"] != "base64" {
+		t.Errorf("encoding_format = %v", body["encoding_format"])
+	}
+	if body["dimensions"].(float64) != 256 {
+		t.Errorf("dimensions = %v", body["dimensions"])
+	}
+	in, ok := body["input"].([]any)
+	if !ok || len(in) != 2 {
+		t.Errorf("input = %v", body["input"])
+	}
+}
+
+func TestBuildEmbeddingOmitsUnsetOptionals(t *testing.T) {
+	// dimensions is not a legal zero and an explicit 0 is a 400 on OpenAI.
+	hr, _, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1", Model: "m"},
+		&ir.EmbeddingRequest{Input: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	_ = json.Unmarshal(raw, &body)
+	if _, present := body["dimensions"]; present {
+		t.Error("an unset dimensions was sent")
+	}
+	if _, present := body["user"]; present {
+		t.Error("an unset user was sent")
+	}
+	// The encoding is always sent: omitting it would be a different request
+	// from the one the client made once the default is applied downstream.
+	if body["encoding_format"] != "float" {
+		t.Errorf("encoding_format = %v, want the applied default", body["encoding_format"])
+	}
+}
+
+func jsonResp(body string) *http.Response {
+	return &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestParseEmbeddingReadsFloatVectors(t *testing.T) {
+	out, err := New().ParseEmbedding(jsonResp(`{
+	  "object":"list","model":"text-embedding-3-small",
+	  "data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},
+	          {"object":"embedding","index":1,"embedding":[0.3]}],
+	  "usage":{"prompt_tokens":7,"total_tokens":7}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Model != "text-embedding-3-small" {
+		t.Errorf("model = %q; the served name is what spec §8 needs", out.Model)
+	}
+	if len(out.Embeddings) != 2 {
+		t.Fatalf("got %d vectors", len(out.Embeddings))
+	}
+	if !out.Embeddings[0].IsFloat() || len(out.Embeddings[0].Float) != 2 {
+		t.Errorf("vector 0 = %+v", out.Embeddings[0])
+	}
+	if out.Embeddings[1].Index != 1 {
+		t.Errorf("index = %d; the order is the client's batch order", out.Embeddings[1].Index)
+	}
+	// ir.Usage is Darkrouter's vocabulary, not OpenAI's: prompt_tokens maps to
+	// InputTokens, which is what the rollup and the cost calculation read.
+	if out.Usage.InputTokens != 7 {
+		t.Errorf("usage = %+v", out.Usage)
+	}
+}
+
+func TestParseEmbeddingReadsBase64Vectors(t *testing.T) {
+	// A provider may answer in base64 whatever was asked, so the parser reads
+	// the shape it received rather than the shape it requested.
+	out, err := New().ParseEmbedding(jsonResp(`{
+	  "object":"list","model":"m",
+	  "data":[{"object":"embedding","index":0,"embedding":"AACAPwAAAEA="}],
+	  "usage":{"prompt_tokens":2,"total_tokens":2}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Embeddings[0].IsBase64() {
+		t.Fatalf("vector = %+v, want base64", out.Embeddings[0])
+	}
+	if out.Embeddings[0].Base64 != "AACAPwAAAEA=" {
+		t.Errorf("base64 = %q; it must survive verbatim", out.Embeddings[0].Base64)
+	}
+}
+
+func TestParseEmbeddingRejectsAnEmptyList(t *testing.T) {
+	// A 200 carrying no vectors is a provider fault, not an empty answer: the
+	// client asked for N and got none, and failing over is the right response.
+	if _, err := New().ParseEmbedding(jsonResp(`{"object":"list","data":[]}`)); err == nil {
+		t.Error("an empty data array parsed cleanly")
+	}
+}
+
+func TestParseEmbeddingClosesTheBody(t *testing.T) {
+	// The interface says ParseEmbedding takes ownership. A leaked body holds a
+	// connection out of the pool for the process's lifetime.
+	rc := &closeTracker{Reader: strings.NewReader(`{"data":[{"index":0,"embedding":[1]}]}`)}
+	resp := &http.Response{StatusCode: 200, Body: rc, Header: http.Header{}}
+	if _, err := New().ParseEmbedding(resp); err != nil {
+		t.Fatal(err)
+	}
+	if !rc.closed {
+		t.Error("ParseEmbedding did not close the body")
+	}
+}
+
+type closeTracker struct {
+	io.Reader
+	closed bool
+}
+
+func (c *closeTracker) Close() error { c.closed = true; return nil }
+```
+
+If `closeTracker` already exists in the package's tests, use it rather than redeclaring.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ -run 'TestBuildEmbedding|TestParseEmbedding' -v
+```
+
+Expected: FAIL to build — `New().BuildEmbedding undefined`.
+
+- [ ] **Step 3: Write the adapter**
+
+Create `internal/adapter/openaicompat/embed.go`:
+
+```go
+package openaicompat
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// maxEmbeddingBytes bounds the response. A batched float embedding is the
+// largest payload any auxiliary surface carries — 2048 vectors of 3072 float64s
+// is tens of megabytes — so the cap is generous, but an unbounded read from a
+// misbehaving provider is the hazard it exists to stop.
+const maxEmbeddingBytes = 128 << 20
+
+func (a *Adapter) BuildEmbedding(ctx context.Context, t *adapter.Target,
+	req *ir.EmbeddingRequest) (*http.Request, []ir.Warning, error) {
+
+	body := map[string]any{
+		"model": t.Model,
+		"input": req.Input,
+		// Always sent: applying the default downstream and omitting it here
+		// would make the upstream request differ from the client's.
+		"encoding_format": req.EncodingOrDefault(),
+	}
+	// Neither is a legal zero, so absence needs no separate presence flag — and
+	// an explicit dimensions of 0 is a 400 on OpenAI.
+	if req.Dimensions > 0 {
+		body["dimensions"] = req.Dimensions
+	}
+	if req.User != "" {
+		body["user"] = req.User
+	}
+
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	url := strings.TrimRight(t.BaseURL, "/") + "/embeddings"
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build embedding request: %w", err)
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if t.APIKey != "" {
+		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
+	}
+	return hr, nil, nil
+}
+
+// embeddingEnvelope decodes the vector into any, because OpenAI returns an
+// array of numbers under float encoding and a string under base64 — and a
+// provider is free to answer in the other one whatever was asked.
+type embeddingEnvelope struct {
+	Model string `json:"model"`
+	Data  []struct {
+		Index     int `json:"index"`
+		Embedding any `json:"embedding"`
+	} `json:"data"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, error) {
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxEmbeddingBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read embedding response: %w", err)
+	}
+	var env embeddingEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("parse embedding response: %w", err)
+	}
+	if len(env.Data) == 0 {
+		// A 200 carrying no vectors is a provider fault: the client asked for
+		// N and got none, so failing over is the right answer rather than
+		// handing back an empty list that looks like a valid response.
+		return nil, errors.New("embedding response carried no vectors")
+	}
+
+	out := &ir.EmbeddingResponse{
+		Model:      env.Model,
+		Embeddings: make([]ir.Embedding, 0, len(env.Data)),
+		// Embeddings report input tokens only, per spec §9. OutputTokens stays
+		// zero rather than borrowing total_tokens, which would double-count
+		// the input in the daily rollup.
+		Usage: ir.Usage{InputTokens: env.Usage.PromptTokens},
+	}
+	for _, d := range env.Data {
+		e := ir.Embedding{Index: d.Index}
+		switch v := d.Embedding.(type) {
+		case string:
+			// Carried verbatim: the client asked for base64 to avoid the
+			// decode, and round-tripping through floats would undo that.
+			e.Base64 = v
+		case []any:
+			e.Float = make([]float32, 0, len(v))
+			for _, n := range v {
+				f, ok := n.(float64)
+				if !ok {
+					return nil, fmt.Errorf("embedding %d contains a non-numeric component", d.Index)
+				}
+				e.Float = append(e.Float, float32(f))
+			}
+		default:
+			return nil, fmt.Errorf("embedding %d has an unrecognized encoding", d.Index)
+		}
+		out.Embeddings = append(out.Embeddings, e)
+	}
+	return out, nil
+}
+
+var _ adapter.Embedder = (*Adapter)(nil)
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/adapter/openaicompat/embed.go internal/adapter/openaicompat/embed_test.go
+git commit -m "feat(openaicompat): render and parse embeddings"
+```
+
+---
