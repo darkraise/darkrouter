@@ -11,13 +11,18 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
+	"github.com/darkraise/darkrouter/internal/edge"
+	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -62,7 +67,11 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
-		ex: exec.New(cfgStore, src, openaicompat.New(), exec.Deps{
+		ex: exec.New(cfgStore, src, map[string]adapter.Adapter{
+			"openaicompat": openaicompat.New(),
+			"anthropic":    anthropicadapter.New(),
+			"gemini":       geminiadapter.New(),
+		}, exec.Deps{
 			Log: logw, Health: breaker, Fleet: breaker,
 		}),
 		started:  time.Now(),
@@ -72,33 +81,88 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 func (s *Server) ProxyHandler() http.Handler {
 	mux := http.NewServeMux()
-	d := openaiedge.New()
-	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		s.ex.Handle(w, r, d)
-	})
-	mux.HandleFunc("GET /v1/models", s.handleModels)
-	return s.withProxyAuth(mux)
+
+	oa := openaiedge.New()
+	mux.HandleFunc("POST /v1/chat/completions", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, oa)
+	}))
+	mux.HandleFunc("GET /v1/models", s.authed(oa, s.handleModels))
+
+	an := anthropicedge.New()
+	mux.HandleFunc("POST /v1/messages", s.authed(an, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, an)
+	}))
+	// More specific than "POST /v1/messages", so net/http's precedence rules
+	// pick it without any ordering concern.
+	mux.HandleFunc("POST /v1/messages/count_tokens", s.authed(an, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleCount(w, r, an, "anthropic")
+	}))
+
+	// One pattern for every Gemini method. A net/http wildcard occupies a whole
+	// path segment, so "{model}:generateContent" is not a legal pattern and the
+	// suffix is dispatched here instead.
+	gm := geminiedge.New()
+	mux.HandleFunc("POST /v1beta/models/{model}", s.authed(gm, s.handleGemini))
+	mux.HandleFunc("GET /v1beta/models", s.authed(gm, s.handleGeminiModels))
+
+	return mux
 }
 
-// withProxyAuth enforces the optional bearer token. The token is read live
-// because proxy_token is hot-reloadable, unlike the listen addresses.
-func (s *Server) withProxyAuth(next http.Handler) http.Handler {
-	d := openaiedge.New()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := s.store.Current().Server.ProxyToken
-		if token == "" {
-			next.ServeHTTP(w, r)
-			return
+// handleGemini dispatches on the method suffix the path segment carries.
+func (s *Server) handleGemini(w http.ResponseWriter, r *http.Request) {
+	_, method := geminiedge.ExtractModel(r.PathValue("model"))
+	switch method {
+	case "countTokens":
+		s.ex.HandleCount(w, r, geminiedge.New(), "gemini")
+	case "generateContent", "streamGenerateContent":
+		// NewFor rather than New: ?alt=sse selects the streaming wire form, and
+		// WriteStream cannot see the request that chose it.
+		s.ex.Handle(w, r, geminiedge.NewFor(r))
+	default:
+		_ = geminiedge.New().WriteError(w, &ir.Error{
+			Type: ir.ErrNotFound, Message: "unsupported method: " + method,
+		})
+	}
+}
+
+func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
+	ps, err := s.src.Providers(r.Context())
+	if err != nil {
+		_ = geminiedge.New().WriteError(w, &ir.Error{
+			Type: ir.ErrDarkrouter, Message: "could not list providers",
+		})
+		return
+	}
+	seen := map[string]bool{}
+	var models []string
+	for _, p := range ps {
+		for _, m := range p.Models {
+			if seen[m] {
+				continue
+			}
+			seen[m] = true
+			models = append(models, m)
 		}
-		got := parseBearer(r.Header.Get("Authorization"))
-		if !constantTimeEqual(got, token) {
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(geminiedge.ListModels(models))
+}
+
+// authed enforces the optional proxy token in the route's own dialect. The
+// token is read live because proxy_token is hot-reloadable, unlike the listen
+// addresses, and a rejection is written in the dialect the client speaks so its
+// existing error handling applies.
+func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := s.store.Current().Server.ProxyToken
+		if token != "" && !constantTimeEqual(d.ProxyToken(r), token) {
 			_ = d.WriteError(w, &ir.Error{
 				Type: ir.ErrAuthentication, Message: "invalid proxy token",
 			})
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
+		h(w, r)
+	}
 }
 
 // constantTimeEqual compares two secrets without leaking their lengths.
@@ -108,15 +172,6 @@ func constantTimeEqual(got, want string) bool {
 	g := sha256.Sum256([]byte(got))
 	w := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
-}
-
-// parseBearer extracts the token. RFC 7235 auth schemes are case-insensitive.
-func parseBearer(h string) string {
-	scheme, token, found := strings.Cut(h, " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
-		return ""
-	}
-	return strings.TrimSpace(token)
 }
 
 // handleModels lists configured models. Aliases would be listed first, but

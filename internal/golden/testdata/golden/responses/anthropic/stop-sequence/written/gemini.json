@@ -1,0 +1,33 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "counting",
+              "thought": true,
+              "thoughtSignature": "ErUBCkYIBRgCIkA="
+            },
+            {
+              "text": "one two three"
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "target-model",
+    "responseId": "msg_2",
+    "usageMetadata": {
+      "cachedContentTokenCount": 3,
+      "candidatesTokenCount": 5,
+      "promptTokenCount": 9,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 14
+    }
+  },
+  "status": 200
+}

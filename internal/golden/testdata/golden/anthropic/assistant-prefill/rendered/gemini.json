@@ -1,0 +1,23 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Return JSON only."
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "{"
+        }
+      ],
+      "role": "model"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  }
+}

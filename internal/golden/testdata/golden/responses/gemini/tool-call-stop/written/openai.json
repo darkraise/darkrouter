@@ -1,0 +1,41 @@
+{
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "index": 0,
+        "message": {
+          "content": null,
+          "reasoning_content": "checking",
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"city\":\"Oslo\"}",
+                "name": "lookup"
+              },
+              "id": "",
+              "type": "function"
+            }
+          ]
+        }
+      }
+    ],
+    "created": 0,
+    "id": "r-1",
+    "model": "target-model",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 6,
+      "completion_tokens_details": {
+        "reasoning_tokens": 5
+      },
+      "prompt_tokens": 12,
+      "prompt_tokens_details": {
+        "cached_tokens": 4
+      },
+      "total_tokens": 18
+    }
+  },
+  "status": 200
+}

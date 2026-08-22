@@ -1,0 +1,18 @@
+{
+  "messages": [
+    {
+      "content": "Is 91 prime?",
+      "role": "user"
+    },
+    {
+      "content": "No.",
+      "role": "assistant"
+    },
+    {
+      "content": "Show the factors.",
+      "role": "user"
+    }
+  ],
+  "model": "target-model",
+  "reasoning_effort": "low"
+}

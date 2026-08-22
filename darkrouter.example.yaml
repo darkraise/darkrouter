@@ -43,3 +43,18 @@ capture:
   bodies: false
   max_bytes: 256000
   retention: 72h
+
+# Anthropic and Gemini providers use the same shape; only `kind` differs. Any
+# inbound dialect can be served by any of them.
+#
+#  - id: anthropic
+#    kind: anthropic
+#    base_url: https://api.anthropic.com/v1
+#    api_key: ${ANTHROPIC_KEY}
+#    models: [claude-sonnet-4-5]
+#
+#  - id: gemini
+#    kind: gemini
+#    base_url: https://generativelanguage.googleapis.com/v1beta
+#    api_key: ${GEMINI_KEY}
+#    models: [gemini-2.0-flash]

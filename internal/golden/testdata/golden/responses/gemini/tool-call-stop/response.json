@@ -1,0 +1,6 @@
+{"responseId":"r-1","modelVersion":"target-model","candidates":[
+  {"index":0,"finishReason":"STOP","content":{"role":"model","parts":[
+    {"text":"checking","thought":true,"thoughtSignature":"CtEBAdHtim8="},
+    {"functionCall":{"name":"lookup","args":{"city":"Oslo"}}}]}}],
+ "usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":6,
+   "cachedContentTokenCount":4,"thoughtsTokenCount":5}}

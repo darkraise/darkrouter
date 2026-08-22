@@ -9,13 +9,20 @@ import (
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/xlate"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, error) {
+// targetName labels the warnings this kind produces.
+const targetName = "openaicompat"
+
+func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
+	var warns []ir.Warning
+	msgs, mwarns := renderMessages(req, targetName)
+	warns = append(warns, mwarns...)
 	body := map[string]any{
 		"model":    t.Model,
-		"messages": renderMessages(req),
+		"messages": msgs,
 	}
 	if req.MaxTokens != nil {
 		body["max_tokens"] = *req.MaxTokens
@@ -29,8 +36,45 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if len(req.StopSequences) > 0 {
 		body["stop"] = req.StopSequences
 	}
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		body["reasoning_effort"] = req.Reasoning.Effort
+	if req.TopK != nil {
+		warns = append(warns, ir.Warning{
+			Field: "top_k", Target: targetName, Reason: "no equivalent parameter",
+		})
+	}
+	if len(req.Safety) > 0 {
+		warns = append(warns, ir.Warning{
+			Field: "safety", Target: targetName, Reason: "safety settings are Gemini-only",
+		})
+	}
+	if req.Reasoning != nil {
+		switch {
+		case req.Reasoning.Effort != "":
+			body["reasoning_effort"] = req.Reasoning.Effort
+		case req.Reasoning.Budget > 0:
+			// A budget is finer-grained than an effort, so the conversion is
+			// lossy in one direction only and the loss is worth recording.
+			body["reasoning_effort"] = xlate.BudgetEffort(req.Reasoning.Budget)
+			warns = append(warns, ir.Warning{
+				Field: "reasoning.budget", Target: targetName,
+				Reason: "converted to the nearest reasoning_effort band",
+			})
+		}
+	}
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
+		body["response_format"] = map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "response",
+				"strict": true,
+				"schema": req.ResponseFormat.Schema,
+			},
+		}
+	}
+	if req.ParallelToolCalls != nil {
+		body["parallel_tool_calls"] = *req.ParallelToolCalls
+	}
+	if md := forwardableMetadata(req.Metadata); len(md) > 0 {
+		body["metadata"] = md
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = renderTools(req.Tools)
@@ -46,70 +90,18 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, warns, err
 	}
 	url := strings.TrimRight(t.BaseURL, "/") + "/chat/completions"
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 	if err != nil {
-		return nil, err
+		return nil, warns, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
 	if t.APIKey != "" {
 		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
 	}
-	return hr, nil
-}
-
-func renderMessages(req *ir.Request) []any {
-	out := make([]any, 0, len(req.Messages)+1)
-	if len(req.System) > 0 {
-		var b strings.Builder
-		for _, blk := range req.System {
-			b.WriteString(blk.Text)
-		}
-		out = append(out, map[string]any{"role": "system", "content": b.String()})
-	}
-	for _, m := range req.Messages {
-		out = append(out, map[string]any{"role": string(m.Role), "content": renderContent(m.Content)})
-	}
-	return out
-}
-
-// renderContent emits a plain string when every block is text, and the
-// multi-part form otherwise. Some compatible providers reject the multi-part
-// form for text-only messages.
-func renderContent(blocks []ir.ContentBlock) any {
-	onlyText := true
-	for _, b := range blocks {
-		if b.Type != ir.BlockText {
-			onlyText = false
-			break
-		}
-	}
-	if onlyText {
-		var b strings.Builder
-		for _, blk := range blocks {
-			b.WriteString(blk.Text)
-		}
-		return b.String()
-	}
-	parts := make([]any, 0, len(blocks))
-	for _, blk := range blocks {
-		switch blk.Type {
-		case ir.BlockText:
-			parts = append(parts, map[string]any{"type": "text", "text": blk.Text})
-		case ir.BlockImage:
-			if blk.Media == nil {
-				continue
-			}
-			url := blk.Media.URL
-			if url == "" && blk.Media.Data != "" {
-				url = "data:" + blk.Media.MIME + ";base64," + blk.Media.Data
-			}
-			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
-		}
-	}
-	return parts
+	return hr, warns, nil
 }
 
 func renderTools(tools []ir.Tool) []any {
@@ -137,4 +129,23 @@ func renderToolChoice(tc *ir.ToolChoice) any {
 		return map[string]any{"type": "function", "function": map[string]any{"name": tc.Name}}
 	}
 	return "auto"
+}
+
+// forwardableMetadata strips the keys Darkrouter uses internally. The
+// anthropic_ prefix is transport state the Anthropic edge parks in Metadata so
+// the Anthropic adapter can act on it — the version header and the thinking
+// mode; forwarding either to an OpenAI upstream would be nonsense at best and a
+// rejected request at worst.
+func forwardableMetadata(md map[string]string) map[string]string {
+	if len(md) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(md))
+	for k, v := range md {
+		if strings.HasPrefix(k, "anthropic_") {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }

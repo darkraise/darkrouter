@@ -1,0 +1,82 @@
+[
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "one "
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "two "
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "three "
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [],
+            "role": "model"
+          },
+          "finishReason": "OTHER",
+          "index": 0
+        }
+      ],
+      "modelVersion": "target-model",
+      "promptFeedback": {
+        "blockReason": "OTHER",
+        "blockReasonMessage": "Overloaded"
+      },
+      "usageMetadata": {
+        "cachedContentTokenCount": 0,
+        "candidatesTokenCount": 0,
+        "promptTokenCount": 5,
+        "thoughtsTokenCount": 0,
+        "totalTokenCount": 5
+      }
+    }
+  }
+]

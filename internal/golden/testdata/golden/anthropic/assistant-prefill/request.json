@@ -1,0 +1,3 @@
+{"model":"target-model","max_tokens":1024,"messages":[
+  {"role":"user","content":"Return JSON only."},
+  {"role":"assistant","content":"{"}]}

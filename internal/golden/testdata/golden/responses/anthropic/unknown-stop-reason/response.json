@@ -1,0 +1,4 @@
+{"id":"msg_3","type":"message","role":"assistant","model":"target-model",
+ "content":[{"type":"text","text":"done"}],
+ "stop_reason":"something_new_2027","stop_sequence":null,
+ "usage":{"input_tokens":3,"output_tokens":1}}

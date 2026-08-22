@@ -1,0 +1,40 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"url\":\"https://x.invalid\"}",
+            "name": "screenshot"
+          },
+          "id": "call_a",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "captured",
+      "role": "tool",
+      "tool_call_id": "call_a"
+    },
+    {
+      "content": [
+        {
+          "image_url": {
+            "url": "data:image/png;base64,iVBORw=="
+          },
+          "type": "image_url"
+        },
+        {
+          "text": "What is on screen?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

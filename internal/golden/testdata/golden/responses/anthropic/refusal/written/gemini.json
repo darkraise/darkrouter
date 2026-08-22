@@ -1,0 +1,28 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "I can't help with that."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "SAFETY",
+        "index": 0
+      }
+    ],
+    "modelVersion": "target-model",
+    "responseId": "msg_1",
+    "usageMetadata": {
+      "cachedContentTokenCount": 0,
+      "candidatesTokenCount": 7,
+      "promptTokenCount": 14,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 21
+    }
+  },
+  "status": 200
+}

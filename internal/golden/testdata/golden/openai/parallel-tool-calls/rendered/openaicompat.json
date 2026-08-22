@@ -1,0 +1,62 @@
+{
+  "messages": [
+    {
+      "content": "Weather in Oslo and Bergen?",
+      "role": "user"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"city\":\"Oslo\"}",
+            "name": "lookup"
+          },
+          "id": "call_a",
+          "type": "function"
+        },
+        {
+          "function": {
+            "arguments": "{\"city\":\"Bergen\"}",
+            "name": "lookup"
+          },
+          "id": "call_b",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "clear",
+      "role": "tool",
+      "tool_call_id": "call_a"
+    },
+    {
+      "content": "rain",
+      "role": "tool",
+      "tool_call_id": "call_b"
+    },
+    {
+      "content": "And tomorrow?",
+      "role": "user"
+    }
+  ],
+  "model": "target-model",
+  "tools": [
+    {
+      "function": {
+        "description": "weather",
+        "name": "lookup",
+        "parameters": {
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

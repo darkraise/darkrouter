@@ -1,0 +1,149 @@
+[
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "role": "assistant"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "content": "Looking"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "",
+                  "name": "lookup"
+                },
+                "id": "call_a",
+                "index": 0,
+                "type": "function"
+              }
+            ]
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"city\":"
+                },
+                "index": 0
+              }
+            ]
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "\"Oslo\"}"
+                },
+                "index": 0
+              }
+            ]
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": "tool_calls",
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "chatcmpl-3",
+      "model": "target-model",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 12,
+        "prompt_tokens": 18,
+        "total_tokens": 30
+      }
+    }
+  },
+  {
+    "data": "[DONE]"
+  }
+]

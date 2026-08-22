@@ -1,0 +1,5 @@
+{
+  "Type": "content_filter",
+  "Message": "the prompt was blocked: SAFETY",
+  "Code": "SAFETY"
+}

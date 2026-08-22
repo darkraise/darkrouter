@@ -13,7 +13,7 @@ import (
 func build(t *testing.T, req *ir.Request) map[string]any {
 	t.Helper()
 	tgt := &adapter.Target{BaseURL: "https://up.example/v1", APIKey: "sk-x", Model: "up-model"}
-	hr, err := BuildRequest(context.Background(), tgt, req)
+	hr, _, err := BuildRequest(context.Background(), tgt, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,5 +86,200 @@ func TestBuildEmitsTools(t *testing.T) {
 	fn := tools[0].(map[string]any)["function"].(map[string]any)
 	if fn["name"] != "f" {
 		t.Fatalf("tools = %v", tools)
+	}
+}
+
+func TestBuildRequestReturnsNoWarningsForAPlainRequest(t *testing.T) {
+	_, warns, err := BuildRequest(context.Background(),
+		&adapter.Target{BaseURL: "https://x.example/v1", Model: "m"},
+		&ir.Request{Messages: []ir.Message{{
+			Role:    ir.RoleUser,
+			Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}},
+		}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v, want none", warns)
+	}
+}
+
+func built(t *testing.T, req *ir.Request) (map[string]any, []ir.Warning) {
+	t.Helper()
+	hr, warns, err := BuildRequest(context.Background(),
+		&adapter.Target{BaseURL: "https://x.example/v1", Model: "m"}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(hr.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out, warns
+}
+
+func TestBuildRequestRendersADocumentPart(t *testing.T) {
+	got, warns := built(t, &ir.Request{Messages: []ir.Message{{
+		Role: ir.RoleUser,
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "summarize"},
+			{Type: ir.BlockDocument, Media: &ir.Media{MIME: "application/pdf", Data: "JVBER"}},
+		},
+	}}})
+	if len(warns) != 0 {
+		t.Fatalf("warnings = %+v, want none", warns)
+	}
+	parts := got["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	file := parts[1].(map[string]any)
+	if file["type"] != "file" {
+		t.Fatalf("part = %v", file)
+	}
+	f := file["file"].(map[string]any)
+	if f["filename"] != "document.pdf" {
+		t.Errorf("filename = %v", f["filename"])
+	}
+	if f["file_data"] != "data:application/pdf;base64,JVBER" {
+		t.Errorf("file_data = %v", f["file_data"])
+	}
+}
+
+func TestBuildRequestRendersADocumentByFileID(t *testing.T) {
+	got, _ := built(t, &ir.Request{Messages: []ir.Message{{
+		Role: ir.RoleUser,
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "read it"},
+			{Type: ir.BlockDocument, Media: &ir.Media{MIME: "application/pdf", FileID: "file-123"}},
+		},
+	}}})
+	parts := got["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	f := parts[1].(map[string]any)["file"].(map[string]any)
+	if f["file_id"] != "file-123" {
+		t.Errorf("file = %v", f)
+	}
+	if _, ok := f["file_data"]; ok {
+		t.Error("a file id and inline data must not both be sent")
+	}
+}
+
+func TestBuildRequestRendersInputAudio(t *testing.T) {
+	got, warns := built(t, &ir.Request{Messages: []ir.Message{{
+		Role: ir.RoleUser,
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "transcribe"},
+			{Type: ir.BlockAudio, Media: &ir.Media{MIME: "audio/wav", Data: "UklGR"}},
+		},
+	}}})
+	if len(warns) != 0 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	parts := got["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	a := parts[1].(map[string]any)
+	if a["type"] != "input_audio" {
+		t.Fatalf("part = %v", a)
+	}
+	in := a["input_audio"].(map[string]any)
+	if in["format"] != "wav" || in["data"] != "UklGR" {
+		t.Errorf("input_audio = %v", in)
+	}
+}
+
+func TestBuildRequestWarnsOnAnUnsupportedAudioFormat(t *testing.T) {
+	_, warns := built(t, &ir.Request{Messages: []ir.Message{{
+		Role: ir.RoleUser,
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "hi"},
+			{Type: ir.BlockAudio, Media: &ir.Media{MIME: "audio/ogg", Data: "T2dn"}},
+		},
+	}}})
+	if !hasWarning(warns, "messages[].audio") {
+		t.Errorf("warnings = %+v; OpenAI accepts wav and mp3 only", warns)
+	}
+}
+
+func TestBuildRequestRendersAJSONSchemaResponseFormat(t *testing.T) {
+	got, warns := built(t, &ir.Request{
+		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		ResponseFormat: &ir.ResponseFormat{
+			Type:   "json_schema",
+			Schema: json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"}}}`),
+		},
+	})
+	if len(warns) != 0 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	rf := got["response_format"].(map[string]any)
+	if rf["type"] != "json_schema" {
+		t.Fatalf("response_format = %v", rf)
+	}
+	js := rf["json_schema"].(map[string]any)
+	if js["name"] != "response" {
+		t.Errorf("json_schema = %v; OpenAI requires a name", js)
+	}
+	if _, ok := js["schema"]; !ok {
+		t.Errorf("json_schema = %v; the schema must be nested under `schema`", js)
+	}
+}
+
+func TestBuildRequestBandsAReasoningBudgetToAnEffort(t *testing.T) {
+	got, warns := built(t, &ir.Request{
+		Messages:  []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		Reasoning: &ir.Reasoning{Budget: 30000},
+	})
+	if got["reasoning_effort"] != "high" {
+		t.Errorf("reasoning_effort = %v, want high", got["reasoning_effort"])
+	}
+	if !hasWarning(warns, "reasoning.budget") {
+		t.Errorf("warnings = %+v; banding a budget loses precision and must say so", warns)
+	}
+}
+
+func TestBuildRequestWarnsOnTopKAndSafety(t *testing.T) {
+	k := 40
+	_, warns := built(t, &ir.Request{
+		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		TopK:     &k,
+		Safety:   []ir.SafetySetting{{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_NONE"}},
+	})
+	if !hasWarning(warns, "top_k") || !hasWarning(warns, "safety") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestBuildRequestPassesParallelToolCallsThrough(t *testing.T) {
+	no := false
+	got, _ := built(t, &ir.Request{
+		Messages:          []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		Tools:             []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ParallelToolCalls: &no,
+	})
+	if got["parallel_tool_calls"] != false {
+		t.Errorf("parallel_tool_calls = %v", got["parallel_tool_calls"])
+	}
+}
+
+func TestBuildRequestDoesNotLeakAnthropicTransportMetadata(t *testing.T) {
+	got, _ := built(t, &ir.Request{
+		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		Metadata: map[string]string{
+			"anthropic_version":       "2023-06-01",
+			"anthropic_thinking_type": "adaptive",
+			"user_id":                 "u1",
+		},
+	})
+	md, ok := got["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %v", got["metadata"])
+	}
+	for _, k := range []string{"anthropic_version", "anthropic_thinking_type"} {
+		if _, leaked := md[k]; leaked {
+			t.Errorf("%s must not reach an OpenAI upstream as metadata", k)
+		}
+	}
+	if md["user_id"] != "u1" {
+		t.Errorf("metadata = %v", md)
 	}
 }

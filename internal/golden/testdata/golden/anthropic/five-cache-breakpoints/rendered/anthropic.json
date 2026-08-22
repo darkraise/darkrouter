@@ -1,0 +1,47 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "cache_control": {
+            "ttl": "5m",
+            "type": "ephemeral"
+          },
+          "text": "one",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "ttl": "5m",
+            "type": "ephemeral"
+          },
+          "text": "two",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "ttl": "5m",
+            "type": "ephemeral"
+          },
+          "text": "three",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "ttl": "5m",
+            "type": "ephemeral"
+          },
+          "text": "four",
+          "type": "text"
+        },
+        {
+          "text": "five",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

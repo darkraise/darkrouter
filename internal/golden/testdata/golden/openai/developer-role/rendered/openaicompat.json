@@ -1,0 +1,13 @@
+{
+  "messages": [
+    {
+      "content": "Answer in one word.",
+      "role": "system"
+    },
+    {
+      "content": "Capital of Norway?",
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

@@ -1,0 +1,6 @@
+{"id":"msg_2","type":"message","role":"assistant","model":"target-model",
+ "content":[{"type":"thinking","thinking":"counting","signature":"ErUBCkYIBRgCIkA="},
+            {"type":"text","text":"one two three"}],
+ "stop_reason":"stop_sequence","stop_sequence":"END",
+ "usage":{"input_tokens":9,"output_tokens":5,
+   "cache_creation_input_tokens":7,"cache_read_input_tokens":3}}

@@ -1,0 +1,38 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "checking",
+              "thought": true,
+              "thoughtSignature": "CtEBAdHtim8="
+            },
+            {
+              "functionCall": {
+                "args": {
+                  "city": "Oslo"
+                },
+                "name": "lookup"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "target-model",
+    "responseId": "r-1",
+    "usageMetadata": {
+      "cachedContentTokenCount": 4,
+      "candidatesTokenCount": 6,
+      "promptTokenCount": 12,
+      "thoughtsTokenCount": 5,
+      "totalTokenCount": 18
+    }
+  },
+  "status": 200
+}

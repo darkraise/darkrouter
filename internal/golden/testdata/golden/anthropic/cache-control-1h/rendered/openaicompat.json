@@ -1,0 +1,14 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "You are a careful reviewer.",
+      "role": "system"
+    },
+    {
+      "content": "Review this.",
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

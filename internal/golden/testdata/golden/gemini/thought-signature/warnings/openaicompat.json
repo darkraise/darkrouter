@@ -1,0 +1,4 @@
+[
+  "messages[].assistant.thinking -\u003e openaicompat: assistant turns carry text and tool calls only",
+  "reasoning.budget -\u003e openaicompat: converted to the nearest reasoning_effort band"
+]

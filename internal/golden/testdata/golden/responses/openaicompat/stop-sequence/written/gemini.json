@@ -1,0 +1,28 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Answer: 42"
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "target-model",
+    "responseId": "chatcmpl-1",
+    "usageMetadata": {
+      "cachedContentTokenCount": 8,
+      "candidatesTokenCount": 4,
+      "promptTokenCount": 11,
+      "thoughtsTokenCount": 3,
+      "totalTokenCount": 15
+    }
+  },
+  "status": 200
+}
