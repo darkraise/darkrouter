@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -62,7 +63,9 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
-		ex: exec.New(cfgStore, src, openaicompat.New(), exec.Deps{
+		ex: exec.New(cfgStore, src, map[string]adapter.Adapter{
+			"openaicompat": openaicompat.New(),
+		}, exec.Deps{
 			Log: logw, Health: breaker, Fleet: breaker,
 		}),
 		started:  time.Now(),
