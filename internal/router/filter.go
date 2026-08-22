@@ -31,6 +31,13 @@ func filterTarget(t target, q Query, snap Snapshot,
 		return nil, []Skip{{ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipSurface}}, true
 	}
 
+	// A model a successful listing omitted three times running is gone. A 404
+	// classifies as RetryableModel and never penalizes the provider, so without
+	// this the wasted attempt happens on every request, forever.
+	if !m.Routable() {
+		return nil, []Skip{{ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipRemoved}}, true
+	}
+
 	if !m.Capabilities.Satisfies(catalog.Capabilities{
 		Tools: q.NeedsTools, Vision: q.NeedsVision, Reasoning: q.NeedsReasoning,
 	}) {
@@ -53,6 +60,10 @@ func filterTarget(t target, q Query, snap Snapshot,
 		}
 		cands = append(cands, Candidate{
 			ProviderID: p.ID, KeyID: c.ID, Model: t.ModelID, Kind: p.Kind,
+			// Recorded per candidate rather than per request: a chain can mix
+			// a models.dev-backed model with a locally discovered one, and the
+			// warning belongs to whichever actually served.
+			Inferred: !m.Capabilities.Known,
 		})
 	}
 	return cands, skips, true
