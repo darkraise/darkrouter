@@ -58,3 +58,20 @@ capture:
 #    base_url: https://generativelanguage.googleapis.com/v1beta
 #    api_key: ${GEMINI_KEY}
 #    models: [gemini-2.0-flash]
+
+# The model catalog. Both workers are optional: Darkrouter starts and serves
+# with no outbound access to models.dev, falling back to the metadata snapshot
+# embedded in the binary.
+catalog:
+  models_dev_url: https://models.dev/api.json
+  sync_interval: 12h
+  sync_timeout: 30s
+  discovery:
+    # Discovery probes each provider's model-listing endpoint. It is outbound
+    # traffic the gateway initiates on your behalf; set false to disable it and
+    # rely on presets and models.dev alone.
+    enabled: true
+    interval: 15m
+    timeout: 15s
+    # A cap across the whole fleet, not per provider.
+    concurrency: 8

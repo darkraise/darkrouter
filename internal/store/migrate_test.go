@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 1 {
-			t.Errorf("run %d: version = %d, want 1", i, v)
+		if v != 2 {
+			t.Errorf("run %d: version = %d, want 2", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -97,5 +97,107 @@ func TestMigrationsAreContiguous(t *testing.T) {
 		if m.version != i+1 {
 			t.Errorf("migration %d has version %d, want %d", i, m.version, i+1)
 		}
+	}
+}
+
+// atVersionOne builds a database carrying only migration 0001, so the upgrade
+// path itself is exercised rather than a fresh install that never had the old
+// values. Using the embedded migration rather than a copy is what keeps this
+// honest when 0001 changes.
+func atVersionOne(t *testing.T) *DB {
+	t.Helper()
+	ctx := context.Background()
+	db := openTest(t)
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx, ms[0].sql); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx, `INSERT INTO schema_version (version) VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func TestMigration0002RewritesLegacyRows(t *testing.T) {
+	ctx := context.Background()
+	db := atVersionOne(t)
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('p', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	// Exactly how a phase 2 row was written: both values come from the old
+	// defaults, which is the case an ADD COLUMN migration would have missed.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id, capabilities_source) VALUES ('p', 'legacy', 'inferred')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("upgrade from version 1: %v", err)
+	}
+
+	var state, surfaces, source string
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT state, surfaces, capabilities_source FROM models WHERE model_id = 'legacy'`).
+		Scan(&state, &surfaces, &source); err != nil {
+		t.Fatal(err)
+	}
+	if state != "live" {
+		t.Errorf("state = %q, want live", state)
+	}
+	if surfaces != `["llm"]` {
+		t.Errorf("surfaces = %q, want [\"llm\"]", surfaces)
+	}
+	// The rebuild must carry every pre-existing column across, not just the
+	// two it rewrites.
+	if source != "inferred" {
+		t.Errorf("capabilities_source = %q, want inferred", source)
+	}
+}
+
+func TestMigration0002FixesTheDefaults(t *testing.T) {
+	// A row written after the migration must not be able to reintroduce the
+	// old values. This is what the rebuild buys over ADD COLUMN.
+	ctx := context.Background()
+	db := migrated(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('p', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id) VALUES ('p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	var state, surfaces string
+	var streak int
+	var lastSeen *int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT state, surfaces, missing_streak, last_seen_at
+		   FROM models WHERE model_id = 'm'`).
+		Scan(&state, &surfaces, &streak, &lastSeen); err != nil {
+		t.Fatal(err)
+	}
+	if state != "live" || surfaces != `["llm"]` {
+		t.Errorf("defaults = (%q, %q), want (live, [\"llm\"])", state, surfaces)
+	}
+	if streak != 0 || lastSeen != nil {
+		t.Errorf("new columns = (%d, %v), want (0, nil)", streak, lastSeen)
+	}
+}
+
+func TestMigration0002CreatesProviderDiscovery(t *testing.T) {
+	var name string
+	err := migrated(t).Read.QueryRowContext(context.Background(),
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='provider_discovery'`).Scan(&name)
+	if err != nil {
+		t.Fatalf("provider_discovery missing: %v", err)
 	}
 }

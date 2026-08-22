@@ -13,6 +13,7 @@ type Config struct {
 	Policy  PolicyConfig        `yaml:"policy"`
 	Log     LogConfig           `yaml:"log"`
 	Capture CaptureConfig       `yaml:"capture"`
+	Catalog CatalogConfig       `yaml:"catalog"`
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
 	// /healthz rather than rejecting the document.
@@ -96,4 +97,27 @@ var RestartOnly = []string{
 	"server.admin_listen",
 	"policy.timeout.connect",
 	"policy.timeout.first_byte",
+}
+
+// CatalogConfig governs the two background workers that keep the model catalog
+// current.
+type CatalogConfig struct {
+	ModelsDevURL string        `yaml:"models_dev_url"`
+	SyncInterval time.Duration `yaml:"sync_interval"`
+	SyncTimeout  time.Duration `yaml:"sync_timeout"`
+
+	Discovery DiscoveryConfig `yaml:"discovery"`
+}
+
+type DiscoveryConfig struct {
+	// Enabled is a pointer so an explicit false is distinguishable from an
+	// absent key, which is what lets the default be on. Discovery is outbound
+	// traffic the gateway initiates on the operator's behalf, so it needs an
+	// off switch that is not "delete every provider".
+	Enabled  *bool         `yaml:"enabled"`
+	Interval time.Duration `yaml:"interval"`
+	Timeout  time.Duration `yaml:"timeout"`
+	// Concurrency is the cap across the whole discovery fleet, not per
+	// provider: forty providers must not open forty connections on boot.
+	Concurrency int `yaml:"concurrency"`
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -359,5 +360,132 @@ func TestRequestRowRecordsTheCandidateChain(t *testing.T) {
 	}
 	if rr.Header().Get("X-Darkrouter-Provider") != "" {
 		t.Error("no attempt was made, so no provider may be named")
+	}
+}
+
+// storeFor writes a configuration body and returns its store.
+func storeFor(t *testing.T, body string) *config.Store {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfgStore
+}
+
+// serverFixtureWith is serverBackedBy with the database and key handed back, so
+// a test can seed catalog rows before New reads them.
+func serverFixtureWith(t *testing.T, body string) (*store.DB, *crypto.Key, *config.Store) {
+	t.Helper()
+	cfgStore := storeFor(t, body)
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	key, err := store.OpenKeyring(ctx, db, "test-master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ImportFromConfig(ctx, db, key, cfgStore.Current()); err != nil {
+		t.Fatal(err)
+	}
+	return db, key, cfgStore
+}
+
+const offlineCatalog = `
+catalog:
+  models_dev_url: http://127.0.0.1:1/api.json
+  sync_timeout: 200ms
+  discovery:
+    enabled: false
+`
+
+func serverFixture(t *testing.T) (*store.DB, *crypto.Key, *config.Store) {
+	t.Helper()
+	return serverFixtureWith(t,
+		"server:\n  proxy_listen: \"127.0.0.1:0\"\n  admin_listen: \"127.0.0.1:0\"\n"+offlineCatalog)
+}
+
+func TestNewRebuildsTheCatalogBeforeServing(t *testing.T) {
+	// A request arriving in the first second must route against what the
+	// database already knows, not against an empty snapshot.
+	ctx := context.Background()
+	db, key, cfgStore := serverFixture(t)
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('p', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "p", Kind: "static", Secret: "sk", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p",
+		[]store.DiscoveredModel{{ModelID: "already-known"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := srv.Catalog().Snapshot().Lookup("p", "already-known"); !ok {
+		t.Error("New did not rebuild the catalog; the first request would 404")
+	}
+}
+
+func TestRunStartsAndStopsTheCatalogWorkers(t *testing.T) {
+	// The real assertion is the absence of a leak: Run must return, and the
+	// race detector must see no worker still touching the database after it.
+	db, key, cfgStore := serverFixture(t)
+	srv, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Run(ctx) }()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("Run returned %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return; a catalog worker is not honouring its context")
+	}
+}
+
+func TestDiscoveryCanBeDisabled(t *testing.T) {
+	// Discovery is outbound traffic the gateway initiates on the operator's
+	// behalf. An operator on a locked-down network needs an off switch.
+	db, key, cfgStore := serverFixtureWith(t, `
+server:
+  proxy_listen: "127.0.0.1:0"
+  admin_listen: "127.0.0.1:0"
+catalog:
+  models_dev_url: http://127.0.0.1:1/api.json
+  sync_timeout: 200ms
+  discovery:
+    enabled: false
+`)
+	srv, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srv.Discoverer() != nil {
+		t.Error("a discoverer was built with discovery disabled")
 	}
 }

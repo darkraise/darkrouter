@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -142,5 +143,137 @@ func TestFilterAdmitsInferredCapabilities(t *testing.T) {
 	cands, skips, _ := filterTarget(target{"groq", "llama"}, q, snap, byIDOf(ps))
 	if len(cands) != 1 {
 		t.Fatalf("inferred capabilities must admit the candidate, got %+v %+v", cands, skips)
+	}
+}
+
+// snapWithModels builds a snapshot over a fixed catalog. snapOf cannot: it
+// derives its catalog from the provider set, where every model is live and
+// every capability inferred.
+func snapWithModels(t *testing.T, ms []catalog.Model) Snapshot {
+	t.Helper()
+	ps := []provider.Provider{{
+		ID: "p", Kind: "openaicompat", BaseURL: "https://p.example/v1",
+		Credentials: []provider.Credential{{ID: "k1", Secret: "a", Enabled: true}},
+	}}
+	return Snapshot{
+		At:        time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+		Providers: ps,
+		Catalog:   catalog.NewSnapshot(ms, []string{"p"}),
+		Health:    health.Availability{},
+	}
+}
+
+func TestRetiredModelsAreNotCandidates(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "gone", State: catalog.StateRemovedUpstream,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}})
+
+	// Addressed as provider/model, which is the path that reaches filterTarget.
+	// A bare name never gets there — Offering already excludes retired models,
+	// so resolveModel returns no targets at all.
+	cands, skips, err := Resolve(Query{Model: "p/gone", Surface: ir.SurfaceLLM}, snap)
+	if len(cands) != 0 {
+		t.Fatalf("got %d candidates for a retired model", len(cands))
+	}
+	if err == nil {
+		t.Error("Resolve returned no error with no candidates")
+	}
+	var found bool
+	for _, sk := range skips {
+		if sk.Reason == SkipRemoved {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no SkipRemoved recorded; skips = %+v", skips)
+	}
+}
+
+func TestRetiredModelsAreNotOfferedByBareName(t *testing.T) {
+	// The other half: Offering excludes them, so a bare name is simply not
+	// found rather than being found and then rejected.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "gone", State: catalog.StateRemovedUpstream,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}})
+	if _, _, err := Resolve(Query{Model: "gone", Surface: ir.SurfaceLLM}, snap); !errors.Is(err, ErrModelNotFound) {
+		t.Errorf("err = %v, want ErrModelNotFound", err)
+	}
+}
+
+func TestStaleModelsStillRoute(t *testing.T) {
+	// The breaker, not the catalog, is what avoids a provider that is actually
+	// broken. Emptying the catalog on a flaky probe would break every alias.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateStale,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}})
+	cands, _, err := Resolve(Query{Model: "m", Surface: ir.SurfaceLLM}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 {
+		t.Errorf("got %d candidates for a stale model, want 1", len(cands))
+	}
+}
+
+func TestKnownCapabilitiesNowFilter(t *testing.T) {
+	// The carried-forward item: this used to admit everything because nothing
+	// was ever Known.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces:     []ir.Surface{ir.SurfaceLLM},
+		Capabilities: catalog.Capabilities{Tools: false, Known: true},
+		Source:       catalog.SourceModelsDev,
+	}})
+	cands, skips, _ := Resolve(Query{Model: "m", Surface: ir.SurfaceLLM, NeedsTools: true}, snap)
+	if len(cands) != 0 {
+		t.Error("a model known to have no tools was a candidate for a tool request")
+	}
+	var found bool
+	for _, s := range skips {
+		if s.Reason == SkipCapability {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no SkipCapability recorded; skips = %+v", skips)
+	}
+}
+
+func TestInferredCapabilitiesStillRouteAndAreFlagged(t *testing.T) {
+	// Master design §6.4. Claude Code always sends tools; hard-filtering on a
+	// guess would mean a local model appears in the catalog and never serves.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "llama3.3:70b", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+		Source:   catalog.SourceInferred,
+	}})
+	cands, _, err := Resolve(Query{Model: "llama3.3:70b", Surface: ir.SurfaceLLM, NeedsTools: true}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("got %d candidates, want 1 — an inferred model must still route", len(cands))
+	}
+	if !cands[0].Inferred {
+		t.Error("the candidate is not flagged inferred; nothing downstream can warn")
+	}
+}
+
+func TestKnownCapableModelsAreNotFlagged(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces:     []ir.Surface{ir.SurfaceLLM},
+		Capabilities: catalog.Capabilities{Tools: true, Known: true},
+		Source:       catalog.SourceModelsDev,
+	}})
+	cands, _, _ := Resolve(Query{Model: "m", Surface: ir.SurfaceLLM, NeedsTools: true}, snap)
+	if len(cands) != 1 {
+		t.Fatalf("got %d candidates", len(cands))
+	}
+	if cands[0].Inferred {
+		t.Error("a models.dev-sourced candidate was flagged inferred")
 	}
 }
