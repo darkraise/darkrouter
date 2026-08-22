@@ -10828,9 +10828,12 @@ fails at the provider and the *shape* of the failure is what is being checked.
 
 `cmd/darkrouter/main.go` takes `-config` and `-db`; the database defaults to
 sitting beside the config, so a scratch directory keeps both out of the repo.
+It also **refuses to start without `DARKROUTER_MASTER_KEY`** — Phase 2 encrypts
+provider credentials at rest — so the smoke run needs a throwaway value.
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
+export DARKROUTER_MASTER_KEY="smoke-test-key-not-a-secret"
 SMOKE=$(mktemp -d)
 cat > "$SMOKE/darkrouter.yaml" <<'YAML'
 server:
@@ -13766,9 +13769,13 @@ the tokenizer's vocabulary is the difference.
 The repository root holds a git-ignored `.env` with `GROQ_KEY`. Use high ports:
 8080 and 8081 belong to an unrelated application on this machine.
 
+`.env` supplies `GROQ_KEY`; `DARKROUTER_MASTER_KEY` is separate and must also
+be set or the binary refuses to start.
+
 ```bash
 export PATH=$PATH:/usr/local/go/bin
 set -a; . ./.env; set +a
+export DARKROUTER_MASTER_KEY="${DARKROUTER_MASTER_KEY:-live-smoke-key-not-a-secret}"
 LIVE=$(mktemp -d)
 cat > "$LIVE/darkrouter.yaml" <<'YAML'
 server:
