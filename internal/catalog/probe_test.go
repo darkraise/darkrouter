@@ -1,0 +1,194 @@
+package catalog
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/provider"
+)
+
+func TestProbeForBuildsFromThePreset(t *testing.T) {
+	p := provider.Provider{ID: "p", Kind: "openaicompat", BaseURL: "https://api.example.com/v1", Preset: "acme"}
+	pre := Preset{Kind: "openaicompat", Auth: Auth{Style: "bearer"}}
+	got, err := ProbeFor(p, pre, "sk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "openaicompat" || got.BaseURL != "https://api.example.com/v1" || got.APIKey != "sk-test" {
+		t.Errorf("probe = %+v", got)
+	}
+	if got.AuthStyle != "bearer" {
+		t.Errorf("auth style = %q", got.AuthStyle)
+	}
+}
+
+func TestProbeForPrefersTheProviderRowAuthStyle(t *testing.T) {
+	// The provider row overrides its preset, per spec §7's last line.
+	p := provider.Provider{ID: "p", Kind: "openaicompat", BaseURL: "https://x/v1", AuthStyle: "x-api-key"}
+	got, _ := ProbeFor(p, Preset{Auth: Auth{Style: "bearer"}}, "k")
+	if got.AuthStyle != "x-api-key" {
+		t.Errorf("auth style = %q, want the row's x-api-key", got.AuthStyle)
+	}
+}
+
+func TestProbeForRejectsUndiscoverableKinds(t *testing.T) {
+	// Vertex has no practical listing API and Bedrock needs two control-plane
+	// calls that arrive in phase 8. Both must be a recognizable skip rather
+	// than a probe that fails on every tick and cools a credential for it.
+	for _, kind := range []string{"vertex", "bedrock", "nonsense"} {
+		if _, err := ProbeFor(provider.Provider{Kind: kind, BaseURL: "https://x"}, Preset{}, "k"); !errors.Is(err, ErrKindNotDiscoverable) {
+			t.Errorf("kind %q: err = %v, want ErrKindNotDiscoverable", kind, err)
+		}
+	}
+}
+
+func TestBuildListRequestPerKind(t *testing.T) {
+	ctx := context.Background()
+
+	oa, err := BuildListRequest(ctx, Probe{Kind: "openaicompat", BaseURL: "https://api.example.com/v1/", AuthStyle: "bearer", APIKey: "sk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oa.URL.String() != "https://api.example.com/v1/models" {
+		t.Errorf("openaicompat url = %s", oa.URL)
+	}
+	if oa.Header.Get("Authorization") != "Bearer sk" {
+		t.Errorf("openaicompat auth = %q", oa.Header.Get("Authorization"))
+	}
+
+	an, err := BuildListRequest(ctx, Probe{Kind: "anthropic", BaseURL: "https://api.anthropic.com/v1", AuthStyle: "x-api-key", APIKey: "sk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if an.URL.String() != "https://api.anthropic.com/v1/models" {
+		t.Errorf("anthropic url = %s", an.URL)
+	}
+	if an.Header.Get("x-api-key") != "sk" {
+		t.Errorf("anthropic key header = %q", an.Header.Get("x-api-key"))
+	}
+	// Anthropic requires the version header on every request, listing
+	// included; without it the probe is a 400 that looks like a bad key.
+	if an.Header.Get("anthropic-version") == "" {
+		t.Error("anthropic-version header missing")
+	}
+
+	gm, err := BuildListRequest(ctx, Probe{
+		Kind: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta",
+		AuthStyle: "query-param", AuthQueryParam: "key", APIKey: "sk",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gm.URL.Path != "/v1beta/models" {
+		t.Errorf("gemini path = %s", gm.URL.Path)
+	}
+	if gm.URL.Query().Get("key") != "sk" {
+		t.Errorf("gemini key query = %q", gm.URL.Query().Get("key"))
+	}
+	// The key must never reach a header when it is a query parameter, and it
+	// must never appear twice.
+	if gm.Header.Get("Authorization") != "" {
+		t.Error("gemini sent an Authorization header alongside the query key")
+	}
+}
+
+func TestBuildListRequestHonorsAModelsURLOverride(t *testing.T) {
+	// Some OpenAI-compatible upstreams serve chat and listing from different
+	// hosts; the preset says so.
+	r, err := BuildListRequest(context.Background(), Probe{
+		Kind: "openaicompat", BaseURL: "https://chat.example.com/v1",
+		ModelsURL: "https://catalog.example.com/v1/models", AuthStyle: "bearer", APIKey: "sk",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.URL.String() != "https://catalog.example.com/v1/models" {
+		t.Errorf("url = %s", r.URL)
+	}
+}
+
+func TestBuildListRequestCustomAPIKeyHeader(t *testing.T) {
+	r, _ := BuildListRequest(context.Background(), Probe{
+		Kind: "openaicompat", BaseURL: "https://x/v1",
+		AuthStyle: "api-key", AuthHeader: "api-key", APIKey: "sk",
+	})
+	if r.Header.Get("api-key") != "sk" {
+		t.Errorf("api-key header = %q", r.Header.Get("api-key"))
+	}
+}
+
+func TestBuildListRequestNoAuth(t *testing.T) {
+	// A local runtime takes no key. Sending an empty Bearer header makes some
+	// of them 401 rather than serving.
+	r, _ := BuildListRequest(context.Background(), Probe{Kind: "openaicompat", BaseURL: "http://localhost:11434/v1", AuthStyle: "none"})
+	if r.Header.Get("Authorization") != "" {
+		t.Errorf("Authorization = %q, want empty", r.Header.Get("Authorization"))
+	}
+}
+
+func TestParseOpenAICompatList(t *testing.T) {
+	got, err := ParseList("openaicompat",
+		[]byte(`{"object":"list","data":[{"id":"gpt-4o","object":"model"},{"id":"gpt-4o-mini"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ModelID != "gpt-4o" || got[1].ModelID != "gpt-4o-mini" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestParseAnthropicList(t *testing.T) {
+	got, err := ParseList("anthropic",
+		[]byte(`{"data":[{"type":"model","id":"claude-opus-4-5","display_name":"Claude Opus 4.5"}],"has_more":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ModelID != "claude-opus-4-5" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestParseGeminiListStripsThePrefixAndKeepsLimits(t *testing.T) {
+	// Gemini names models "models/x" and reports real token limits, which is
+	// metadata no other probe supplies.
+	got, err := ParseList("gemini", []byte(`{"models":[
+	  {"name":"models/gemini-2.5-pro","inputTokenLimit":1048576,"outputTokenLimit":65536,
+	   "supportedGenerationMethods":["generateContent"]},
+	  {"name":"models/embedding-001","supportedGenerationMethods":["embedContent"]}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d models", len(got))
+	}
+	if got[0].ModelID != "gemini-2.5-pro" {
+		t.Errorf("id = %q, want the models/ prefix stripped", got[0].ModelID)
+	}
+	if got[0].ContextWindow != 1048576 || got[0].MaxOutputTokens != 65536 {
+		t.Errorf("limits = (%d, %d)", got[0].ContextWindow, got[0].MaxOutputTokens)
+	}
+}
+
+func TestParseListRejectsGarbage(t *testing.T) {
+	// An HTML error page or a truncated body must be an error. Reading it as
+	// an empty listing is the input that makes discovery retire every model
+	// the provider serves.
+	for _, body := range []string{"", "<html>502</html>", "{}", `{"data":[]}`} {
+		if _, err := ParseList("openaicompat", []byte(body)); err == nil {
+			t.Errorf("%q parsed as a valid listing", body)
+		}
+	}
+}
+
+func TestParseListRejectsEntriesWithoutIDs(t *testing.T) {
+	// A model with no id cannot be routed to and must not occupy a row.
+	got, err := ParseList("openaicompat", []byte(`{"data":[{"id":"a"},{"object":"model"},{"id":""}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ModelID != "a" {
+		t.Errorf("got %+v", got)
+	}
+}
