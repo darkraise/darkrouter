@@ -92,7 +92,12 @@ func restartOnlyWarnings(prev, next *Config) []string {
 // Watch reloads on change until ctx is cancelled. It watches the parent
 // directory and filters by filename, because a watch on the file itself is lost
 // the first time an editor saves by rename.
-func (s *Store) Watch(ctx context.Context) error {
+func (s *Store) Watch(ctx context.Context) error { return s.watch(ctx, nil) }
+
+// watch closes ready once the directory watch is established. The kernel does
+// not replay events that predate the watch, so a caller that edits the file
+// without waiting for this loses the notification permanently.
+func (s *Store) watch(ctx context.Context, ready chan<- struct{}) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -105,6 +110,9 @@ func (s *Store) Watch(ctx context.Context) error {
 	}
 	if err := w.Add(dir); err != nil {
 		return fmt.Errorf("watch %s: %w", dir, err)
+	}
+	if ready != nil {
+		close(ready)
 	}
 
 	var timer *time.Timer
