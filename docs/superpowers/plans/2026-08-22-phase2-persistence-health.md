@@ -74,7 +74,7 @@ consumer reads them from a fresh snapshot on each worker tick.
 `applyDefaults` turns both into 3 and the operator's nonsensical value is
 silently replaced instead of rejected.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/config/load_test.go`:
 
@@ -145,12 +145,12 @@ func TestParseRejectsNonPositiveRetention(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/config/ -run 'Phase2|TripAfter|Retention' -v`
 Expected: FAIL — compile error, `c.Policy.Cooldown` and `c.Log` undefined.
 
-- [ ] **Step 3: Add the types**
+- [x] **Step 3: Add the types**
 
 In `internal/config/config.go`, add two fields to `Config`:
 
@@ -198,7 +198,7 @@ type CaptureConfig struct {
 }
 ```
 
-- [ ] **Step 4: Add the defaults**
+- [x] **Step 4: Add the defaults**
 
 In `applyDefaults` in `internal/config/load.go`, append before the closing brace:
 
@@ -221,7 +221,7 @@ In `applyDefaults` in `internal/config/load.go`, append before the closing brace
 	}
 ```
 
-- [ ] **Step 5: Add the validation**
+- [x] **Step 5: Add the validation**
 
 In `validate` in `internal/config/load.go`, insert these checks at the very top
 of the function, before the provider loop:
@@ -247,12 +247,12 @@ of the function, before the provider loop:
 Dereferencing `TripAfter` here is safe: `Parse` calls `applyDefaults` before
 `validate`, so the pointer is always set by this point.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `go test ./internal/config/ -v`
 Expected: PASS, including the eight pre-existing tests.
 
-- [ ] **Step 7: Update the example configuration**
+- [x] **Step 7: Update the example configuration**
 
 Replace the `policy:` block in `darkrouter.example.yaml` and append two top-level
 blocks, so the shipped example documents every knob:
@@ -277,7 +277,7 @@ capture:
   retention: 72h
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/config/ darkrouter.example.yaml
@@ -305,18 +305,21 @@ so every mutation must share one connection or they contend and produce
 that writer. The third handle exists because `synchronous=FULL` is the right
 durability trade for credentials and the wrong one for a request log.
 
-- [ ] **Step 1: Add the SQLite dependency**
+- [x] **Step 1: Add the SQLite dependency**
 
 ```bash
 go get modernc.org/sqlite@latest
-go mod tidy
 ```
+
+Do **not** run `go mod tidy` here. Nothing imports the driver until Step 4, so
+tidy removes the requirement it was just given. Run `go get` again after Step 4
+and tidy then. *(Correction applied during execution.)*
 
 `modernc.org/sqlite` is a pure-Go translation of SQLite. It is chosen so
 `CGO_ENABLED=0` still produces a static binary, which is what the Dockerfile
 depends on. Never substitute `mattn/go-sqlite3`; it needs cgo.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `internal/store/db_test.go`:
 
@@ -441,12 +444,12 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -v`
 Expected: FAIL — `undefined: Open`, `undefined: DB`.
 
-- [ ] **Step 4: Write the database handles**
+- [x] **Step 4: Write the database handles**
 
 Create `internal/store/db.go`:
 
@@ -558,7 +561,7 @@ func (d *DB) Close() error {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, five tests.
@@ -567,7 +570,7 @@ If `TestOpenUsesWALAndIncrementalVacuum` reports `auto_vacuum = 0`, the pragma
 reached a database that already had tables. Confirm no earlier step created the
 file before `Open` ran.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add go.mod go.sum internal/store/
@@ -597,7 +600,7 @@ A database whose version is newer than the binary fails startup loudly. That
 happens on a rollback deploy, and running an old binary against a new schema
 corrupts quietly.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/migrate_test.go`:
 
@@ -705,12 +708,12 @@ func TestMigrationsAreContiguous(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Migrate -v`
 Expected: FAIL — `db.Migrate undefined`.
 
-- [ ] **Step 3: Write the schema**
+- [x] **Step 3: Write the schema**
 
 Create `internal/store/migrations/0001_init.sql`:
 
@@ -872,7 +875,7 @@ CREATE TABLE settings (
 ) STRICT;
 ```
 
-- [ ] **Step 4: Write the migrator**
+- [x] **Step 4: Write the migrator**
 
 Create `internal/store/migrate.go`:
 
@@ -1006,12 +1009,12 @@ func (d *DB) applyMigration(ctx context.Context, m migration) error {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, ten tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/
@@ -1040,7 +1043,7 @@ rows undetected.
 `crypto/pbkdf2` is in the standard library as of Go 1.24. Do not add
 `golang.org/x/crypto` for this.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/crypto/crypto_test.go`:
 
@@ -1191,12 +1194,12 @@ func TestNewSaltIsRandomAndCorrectLength(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/crypto/ -v`
 Expected: FAIL — `undefined: DeriveKey`.
 
-- [ ] **Step 3: Write the package**
+- [x] **Step 3: Write the package**
 
 Create `internal/crypto/crypto.go`:
 
@@ -1301,12 +1304,12 @@ func NewSalt() ([]byte, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/crypto/ -race -v`
 Expected: PASS, eight tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/crypto/
@@ -1339,7 +1342,7 @@ detection reliable.
 The verifier proves only that the master key is right. It does not prove every
 credential row is intact — that surfaces separately, at provider-load time.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/keyring_test.go`:
 
@@ -1486,12 +1489,12 @@ func TestOpenKeyringReportsAnIncompleteKeyring(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Keyring -v`
 Expected: FAIL — `undefined: OpenKeyring`.
 
-- [ ] **Step 3: Write the keyring**
+- [x] **Step 3: Write the keyring**
 
 Create `internal/store/keyring.go`:
 
@@ -1676,12 +1679,12 @@ func initKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, sixteen tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -1706,7 +1709,7 @@ The row id is the AAD, so the id must be generated before the secret is sealed.
 Sealing first and assigning an id afterwards would bind the ciphertext to
 nothing.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/credentials_test.go`:
 
@@ -1902,12 +1905,12 @@ func deriveForTest(ctx context.Context, d *DB, master string) (*crypto.Key, erro
 
 Its imports are `encoding/hex`, `strconv`, and `github.com/darkraise/darkrouter/internal/crypto`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Credential -v`
 Expected: FAIL — `db.AddCredential undefined`.
 
-- [ ] **Step 3: Write the credential store**
+- [x] **Step 3: Write the credential store**
 
 Create `internal/store/credentials.go`:
 
@@ -2071,12 +2074,12 @@ type sealedRow struct {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, twenty-one tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -2106,7 +2109,7 @@ Everything happens in one `synchronous=FULL` transaction. A crash mid-rotation
 rolls back; credentials are never half-rotated. Half-rotated credentials would
 be unrecoverable, because neither key opens the whole set.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/rotate_test.go`:
 
@@ -2235,12 +2238,12 @@ func TestRotateWithNoCredentialsStillRewritesTheVerifier(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Rotat -v`
 Expected: FAIL — `undefined: RotateMasterKey`.
 
-- [ ] **Step 3: Write the rotation**
+- [x] **Step 3: Write the rotation**
 
 Create `internal/store/rotate.go`:
 
@@ -2341,12 +2344,12 @@ func rotateWithHook(ctx context.Context, d *DB, oldKey *crypto.Key, newMaster st
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, twenty-five tests.
 
-- [ ] **Step 5: Add the subcommand**
+- [x] **Step 5: Add the subcommand**
 
 Rewrite `cmd/darkrouter/main.go` so a subcommand is dispatched before the
 server's flags are parsed:
@@ -2481,7 +2484,7 @@ Note the shadowing trap: the local variable `store` in `runServer` holds a
 `*config.Store` while the package `store` is also imported. Rename the local to
 `cfgStore` and update its three uses.
 
-- [ ] **Step 6: Verify the subcommand builds and reports a missing key**
+- [x] **Step 6: Verify the subcommand builds and reports a missing key**
 
 ```bash
 go build ./cmd/darkrouter
@@ -2489,7 +2492,7 @@ DARKROUTER_MASTER_KEY= ./darkrouter rotate-key -db /tmp/nonexistent.db
 ```
 Expected: exits non-zero with `rotate-key: DARKROUTER_MASTER_KEY must hold the current master key`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/store/ cmd/darkrouter/
@@ -2522,7 +2525,7 @@ provider — the first enabled one, by id — because choosing among credentials
 Phase 3's attempt loop. `KeyID` is what lets Phase 2 record health against the
 right triple anyway, so Phase 3 inherits correct state rather than a blank slate.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/provider/sqlsource_test.go`:
 
@@ -2713,12 +2716,12 @@ func TestSQLSourceProvidersBeforeReloadIsEmptyNotNil(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/provider/ -run SQLSource -v`
 Expected: FAIL — `undefined: NewSQLSource`.
 
-- [ ] **Step 3: Add KeyID to Provider**
+- [x] **Step 3: Add KeyID to Provider**
 
 In `internal/provider/provider.go`, add one field:
 
@@ -2738,7 +2741,7 @@ type Provider struct {
 }
 ```
 
-- [ ] **Step 4: Write the source**
+- [x] **Step 4: Write the source**
 
 Create `internal/provider/sqlsource.go`:
 
@@ -2906,12 +2909,12 @@ func revisionOf(ps []Provider) uint64 {
 var _ Source = (*SQLSource)(nil)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/provider/ -race -v`
 Expected: PASS, including the pre-existing `Resolve` and `YAMLSource` tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/provider/
@@ -2938,7 +2941,7 @@ block. Any one alone is insufficient — the empty-table guard in particular is
 falsified by a crash mid-import, which is why everything including the marker
 goes in one transaction.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/import_test.go`:
 
@@ -3123,12 +3126,12 @@ func TestImportAbortsOnAnEmptyCredential(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Import -v`
 Expected: FAIL — `undefined: ImportFromConfig`.
 
-- [ ] **Step 3: Write the import**
+- [x] **Step 3: Write the import**
 
 Create `internal/store/import.go`:
 
@@ -3277,12 +3280,12 @@ func StaleBlockWarning(ctx context.Context, d *DB, cfg *config.Config) (string, 
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, thirty-one tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -3316,7 +3319,7 @@ On shutdown the writer drains the channel before exiting. Without that, every
 graceful restart loses a channel's worth of records and the drop counter lies by
 omission.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/log_test.go`:
 
@@ -3490,12 +3493,12 @@ func TestLogWriterSurvivesADuplicateID(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Log -v`
 Expected: FAIL — `undefined: NewLogWriter`.
 
-- [ ] **Step 3: Write the writer**
+- [x] **Step 3: Write the writer**
 
 Create `internal/store/log.go`:
 
@@ -3760,12 +3763,12 @@ transaction still commits the first. SQLite does not abort a transaction on a
 constraint violation from a statement whose error was handled, so this works —
 but verify it in Step 4 rather than trusting the description.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, thirty-seven tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -3797,7 +3800,7 @@ Streaming needs a tap over the event sequence. Time-to-first-token is the first
 content delta, and usage arrives on a late event, so both are only observable
 by wrapping the iterator that `WriteStream` consumes.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Extend the existing helper in `internal/exec/exec_test.go` so a test can supply
 `Deps` and a short total timeout, keeping the current signature working:
@@ -3892,7 +3895,7 @@ func TestHandleLogsASuccessfulRequest(t *testing.T) {
 	if r.ID == "" || r.ID != rec.Header().Get("X-Darkrouter-Request") {
 		t.Errorf("record id %q does not match the response header", r.ID)
 	}
-	if r.Dialect != "openai" || r.Surface != "chat" {
+	if r.Dialect != "openai" || r.Surface != "llm" {
 		t.Errorf("dialect/surface = %q/%q", r.Dialect, r.Surface)
 	}
 	if r.RequestedModel != "m" || r.FinalModel != "m" || r.FinalProviderID != "fake" {
@@ -3994,12 +3997,12 @@ func TestHandleWithNoLoggerDoesNotPanic(t *testing.T) {
 Add `sync` and `github.com/darkraise/darkrouter/internal/store` to the test
 file's imports.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -v`
 Expected: FAIL — `too many arguments to New`, `undefined: Deps`.
 
-- [ ] **Step 3: Add Deps and the logging hooks**
+- [x] **Step 3: Add Deps and the logging hooks**
 
 In `internal/exec/exec.go`, add the interface and dependency struct above
 `Executor`, and thread them through `New`:
@@ -4046,7 +4049,7 @@ func (e *Executor) log(rec *store.RequestRecord) {
 }
 ```
 
-- [ ] **Step 4: Rewrite Handle to build the record**
+- [x] **Step 4: Rewrite Handle to build the record**
 
 Replace `Handle` in `internal/exec/exec.go`:
 
@@ -4060,7 +4063,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	// every exit path. Status starts as "error" so an early return that forgets
 	// to set it is recorded as a failure rather than a silent success.
 	rec := &store.RequestRecord{
-		ID: reqID, TS: start, Dialect: d.Name(), Surface: "chat", Status: "error",
+		ID: reqID, TS: start, Dialect: d.Name(), Surface: "llm", Status: "error",
 	}
 	defer func() {
 		total := time.Since(start).Milliseconds()
@@ -4233,19 +4236,19 @@ func tapStream(events iter.Seq2[ir.StreamEvent, error],
 
 Add `iter` and `github.com/darkraise/darkrouter/internal/store` to the imports.
 
-- [ ] **Step 5: Update the server's call site**
+- [x] **Step 5: Update the server's call site**
 
 In `internal/server/server.go`, the `New` function currently calls
 `exec.New(store, src, openaicompat.New())`. Change it to
 `exec.New(store, src, openaicompat.New(), exec.Deps{})`. Task 17 fills the
 `Deps` in properly; leaving it empty here keeps this task's diff to one concern.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `go test ./... -race`
 Expected: PASS across every package.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/exec/ internal/server/
@@ -4284,7 +4287,7 @@ Two rules are easy to get backwards and the spec is explicit about both:
 gets through; the rest see the candidate as unavailable rather than all becoming
 probes.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/health/breaker_test.go`:
 
@@ -4616,12 +4619,12 @@ func TestParseRetryAfter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/health/ -v`
 Expected: FAIL — `undefined: New`.
 
-- [ ] **Step 3: Write Retry-After parsing**
+- [x] **Step 3: Write Retry-After parsing**
 
 Create `internal/health/retryafter.go`:
 
@@ -4662,7 +4665,7 @@ func ParseRetryAfter(h string, now time.Time) (time.Duration, bool) {
 }
 ```
 
-- [ ] **Step 4: Write the breaker**
+- [x] **Step 4: Write the breaker**
 
 Create `internal/health/breaker.go`:
 
@@ -4946,13 +4949,13 @@ func (b *Breaker) TakeDirty() bool {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/health/ -race -v`
 Expected: PASS. `TestHalfOpenAdmitsExactlyOneProbeUnderConcurrency` is the one
 that matters most under `-race`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/health/
@@ -4978,7 +4981,7 @@ Entries disappear when a breaker closes, and an upsert would leave stale rows
 that rehydration would resurrect as phantom cooldowns. At homelab scale the row
 count is small enough that a full rewrite is the cheaper correct answer.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/health_test.go`:
 
@@ -5081,12 +5084,12 @@ func TestSaveHealthWithNoEntriesClearsTheTable(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Health -v`
 Expected: FAIL — `db.SaveHealth undefined`.
 
-- [ ] **Step 3: Write the queries**
+- [x] **Step 3: Write the queries**
 
 Create `internal/store/health.go`:
 
@@ -5174,12 +5177,12 @@ func (d *DB) LoadHealth(ctx context.Context) ([]health.Entry, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, forty tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -5207,7 +5210,7 @@ Shutdown flushes unconditionally, without consulting the dirty flag. A restart
 that dropped the last interval's changes would hand a flapping provider a clean
 slate, which is exactly what rehydration exists to prevent.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/health/persist_test.go`:
 
@@ -5352,12 +5355,12 @@ func TestRestoreRehydratesTheBreaker(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/health/ -run Persist -v`
 Expected: FAIL — `undefined: NewPersister`.
 
-- [ ] **Step 3: Write the persister**
+- [x] **Step 3: Write the persister**
 
 Create `internal/health/persist.go`:
 
@@ -5430,12 +5433,12 @@ func (p *Persister) Run(ctx context.Context) error {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/health/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/health/
@@ -5466,7 +5469,7 @@ derived context, and if the client also went away in the same instant the
 disconnect check would otherwise win and a genuine provider timeout would go
 unrecorded.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/exec/exec_test.go`:
 
@@ -5616,12 +5619,12 @@ func TestHandleWithNoHealthRecorderDoesNotPanic(t *testing.T) {
 Add `github.com/darkraise/darkrouter/internal/adapter` and
 `github.com/darkraise/darkrouter/internal/health` to the test file's imports.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/exec/ -v`
 Expected: FAIL — `unknown field Health in struct literal`.
 
-- [ ] **Step 3: Add the recorder to Deps**
+- [x] **Step 3: Add the recorder to Deps**
 
 In `internal/exec/exec.go`:
 
@@ -5645,7 +5648,7 @@ func (e *Executor) recordHealth(k health.Key, s health.Signal) {
 }
 ```
 
-- [ ] **Step 4: Fix classification and record the signal**
+- [x] **Step 4: Fix classification and record the signal**
 
 Replace `classify` in `internal/exec/exec.go`:
 
@@ -5725,12 +5728,12 @@ that cannot be read is a provider fault and must reach the breaker:
 
 Add `github.com/darkraise/darkrouter/internal/health` to the imports.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./... -race`
 Expected: PASS across every package.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/exec/
@@ -5756,7 +5759,7 @@ Finalization is recomputation rather than an incremental add, so a request that
 starts before midnight and finishes after it is counted once, in the day it
 began, no matter how many times the worker runs.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/rollup_test.go`:
 
@@ -5910,12 +5913,12 @@ func TestRollupIgnoresRequestsThatNeverReachedAProvider(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Rollup -v`
 Expected: FAIL — `db.Rollup undefined`.
 
-- [ ] **Step 3: Write the rollup**
+- [x] **Step 3: Write the rollup**
 
 Create `internal/store/rollup.go`:
 
@@ -6001,12 +6004,12 @@ func jitter(d time.Duration) time.Duration {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -6044,7 +6047,7 @@ appears in the config and the table exists, but nothing writes to it until a
 later phase. The prune is implemented and tested now so retention does not have
 to be revisited when it does.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/retention_test.go`:
 
@@ -6162,9 +6165,13 @@ func TestPruneDoesNotStarveTheLogWriter(t *testing.T) {
 		pruneDone <- err
 	}()
 
+	// Stamped now, not with rec's fixed 2023 timestamp: these records must be
+	// inside the retention window or the prune would delete them legitimately
+	// and the test would blame starvation for correct behaviour.
+	// (Correction applied during execution.)
 	const newRecords = 120
 	for i := 0; i < newRecords; i++ {
-		w.Log(rec(fmt.Sprintf("new-%04d", i)))
+		w.Log(recAt(fmt.Sprintf("new-%04d", i), time.Now()))
 		time.Sleep(time.Millisecond)
 	}
 
@@ -6197,12 +6204,12 @@ func TestPruneDoesNotStarveTheLogWriter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Prune -v`
 Expected: FAIL — `db.Prune undefined`.
 
-- [ ] **Step 3: Write the retention worker**
+- [x] **Step 3: Write the retention worker**
 
 Create `internal/store/retention.go`:
 
@@ -6354,13 +6361,13 @@ func RunRetention(ctx context.Context, d *DB, cfgStore *config.Store, interval t
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS. `TestPruneDoesNotStarveTheLogWriter` is slow by design; it must
 still finish well inside its 30-second guard.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -6391,7 +6398,7 @@ workers shared the request lifecycle context, cancelling it would stop the log
 writer while requests were still producing records, and the drain would run
 against a channel that was still being filled.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/server/run_test.go`:
 
@@ -6548,12 +6555,12 @@ func testConfigStore(t *testing.T, dir string) *config.Store {
 Its imports are `encoding/json`, `os`, `path/filepath`, `strings`, `time`, plus
 `internal/adapter`, `internal/config`, `internal/health`, and `internal/store`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/server/ -v`
 Expected: FAIL — `too many arguments to New`.
 
-- [ ] **Step 3: Rebuild the Server struct and constructor**
+- [x] **Step 3: Rebuild the Server struct and constructor**
 
 In `internal/server/server.go`, replace the struct and `New`:
 
@@ -6598,7 +6605,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 Add `internal/crypto`, `internal/health`, and `internal/store` to the imports.
 
-- [ ] **Step 4: Report the counters on healthz and metrics**
+- [x] **Step 4: Report the counters on healthz and metrics**
 
 Replace the `/healthz` and `/metrics` handlers in `AdminHandler`:
 
@@ -6645,7 +6652,7 @@ Replace the `/healthz` and `/metrics` handlers in `AdminHandler`:
 	})
 ```
 
-- [ ] **Step 5: Start the workers and fix the shutdown order**
+- [x] **Step 5: Start the workers and fix the shutdown order**
 
 In `Run`, add the worker context and goroutines before the listeners are bound,
 and stop them after the proxy has drained. Insert immediately after the existing
@@ -6706,7 +6713,7 @@ and before the final `return`, stop the workers and wait:
 
 Add `log` and `sync` to the imports.
 
-- [ ] **Step 6: Rebuild main to open the database first**
+- [x] **Step 6: Rebuild main to open the database first**
 
 In `cmd/darkrouter/main.go`, replace `runServer`:
 
@@ -6785,7 +6792,7 @@ func runServer(args []string) error {
 Add `path/filepath` and `github.com/darkraise/darkrouter/internal/store` to the
 imports.
 
-- [ ] **Step 7: Run the whole suite under the race detector**
+- [x] **Step 7: Run the whole suite under the race detector**
 
 Run: `go test ./... -race -count=1`
 Expected: PASS across every package.
@@ -6793,7 +6800,7 @@ Expected: PASS across every package.
 Run: `go vet ./...`
 Expected: no output.
 
-- [ ] **Step 8: Verify it starts, serves, and rotates**
+- [x] **Step 8: Verify it starts, serves, and rotates**
 
 ```bash
 go build ./cmd/darkrouter
@@ -6818,7 +6825,7 @@ DARKROUTER_MASTER_KEY=test-master darkrouter -config ./darkrouter.yaml
 Expected: the last command fails with the message naming `DARKROUTER_MASTER_KEY`,
 and starting with `DARKROUTER_MASTER_KEY=new-master` succeeds.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/server/ cmd/darkrouter/
@@ -6831,13 +6838,13 @@ git commit -m "feat(server): wire persistence, health, and workers"
 
 Check each against spec §11 before calling the phase complete.
 
-- [ ] Provider connections and credentials survive a restart; credentials are unreadable in the raw database file and a swapped ciphertext fails to decrypt. *(Tasks 6, 8)*
-- [ ] A wrong `DARKROUTER_MASTER_KEY` fails startup with a clear message; `darkrouter rotate-key` re-encrypts everything atomically. *(Tasks 5, 7)*
-- [ ] Every request produces one `requests` row and one `request_attempts` row per attempt, **except under log-channel saturation**, where the drop counter reports the shortfall and spend is a documented lower bound. *(Tasks 10, 11, 18)*
-- [ ] A provider returning 429 is recorded as cooling and the cooldown survives a restart; three consecutive 5xx are required before cooling, and one is not. *(Tasks 12, 13, 14, 18)*
-- [ ] A client disconnect leaves every provider healthy. *(Task 15)*
-- [ ] Log writing under sustained load does not increase request latency. *(Task 10's non-blocking `Log`, Task 17's starvation test)*
-- [ ] `go test ./... -race` passes and `go vet ./...` is clean. *(Task 18)*
+- [x] Provider connections and credentials survive a restart; credentials are unreadable in the raw database file and a swapped ciphertext fails to decrypt. *(Tasks 6, 8)*
+- [x] A wrong `DARKROUTER_MASTER_KEY` fails startup with a clear message; `darkrouter rotate-key` re-encrypts everything atomically. *(Tasks 5, 7)*
+- [x] Every request produces one `requests` row and one `request_attempts` row per attempt, **except under log-channel saturation**, where the drop counter reports the shortfall and spend is a documented lower bound. *(Tasks 10, 11, 18)*
+- [x] A provider returning 429 is recorded as cooling and the cooldown survives a restart; three consecutive 5xx are required before cooling, and one is not. *(Tasks 12, 13, 14, 18)*
+- [x] A client disconnect leaves every provider healthy. *(Task 15)*
+- [x] Log writing under sustained load does not increase request latency. *(Task 10's non-blocking `Log`, Task 17's starvation test)*
+- [x] `go test ./... -race` passes and `go vet ./...` is clean. *(Task 18)*
 
 ## Carried into Phase 3
 

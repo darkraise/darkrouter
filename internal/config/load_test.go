@@ -115,3 +115,88 @@ func TestParseWarnsOnDuplicateModelAcrossProviders(t *testing.T) {
 		t.Fatalf("warnings = %v", c.Warnings)
 	}
 }
+
+func TestParseAppliesPhase2Defaults(t *testing.T) {
+	c, err := Parse([]byte(minimal), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *c.Policy.Cooldown.TripAfter != 3 {
+		t.Errorf("TripAfter = %d, want 3", *c.Policy.Cooldown.TripAfter)
+	}
+	if c.Policy.Cooldown.Max != 15*time.Minute {
+		t.Errorf("Cooldown.Max = %s, want 15m", c.Policy.Cooldown.Max)
+	}
+	if c.Log.Retention != 720*time.Hour {
+		t.Errorf("Log.Retention = %s, want 720h", c.Log.Retention)
+	}
+	if c.Capture.Bodies {
+		t.Error("Capture.Bodies must default to false")
+	}
+	if c.Capture.MaxBytes != 256000 {
+		t.Errorf("Capture.MaxBytes = %d, want 256000", c.Capture.MaxBytes)
+	}
+	if c.Capture.Retention != 72*time.Hour {
+		t.Errorf("Capture.Retention = %s, want 72h", c.Capture.Retention)
+	}
+}
+
+func TestParseReadsExplicitPhase2Blocks(t *testing.T) {
+	body := minimal + `
+policy:
+  cooldown: { trip_after: 5, max: 30m }
+log:
+  retention: 168h
+capture:
+  bodies: true
+  max_bytes: 1024
+  retention: 1h
+`
+	c, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *c.Policy.Cooldown.TripAfter != 5 || c.Policy.Cooldown.Max != 30*time.Minute {
+		t.Errorf("cooldown = %d/%s", *c.Policy.Cooldown.TripAfter, c.Policy.Cooldown.Max)
+	}
+	if c.Log.Retention != 168*time.Hour {
+		t.Errorf("Log.Retention = %s", c.Log.Retention)
+	}
+	if !c.Capture.Bodies || c.Capture.MaxBytes != 1024 || c.Capture.Retention != time.Hour {
+		t.Errorf("capture = %+v", c.Capture)
+	}
+}
+
+func TestParseRejectsExplicitZeroTripAfter(t *testing.T) {
+	body := minimal + "\npolicy:\n  cooldown: { trip_after: 0 }\n"
+	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err == nil {
+		t.Fatal("expected trip_after: 0 to be rejected")
+	}
+}
+
+func TestParseRejectsNonPositiveRetention(t *testing.T) {
+	body := minimal + "\nlog:\n  retention: -1h\n"
+	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err == nil {
+		t.Fatal("expected a negative retention to be rejected")
+	}
+}
+
+// The shipped example is documentation that has to stay loadable. It drifted
+// once already, naming a model the provider had decommissioned.
+func TestShippedExampleParses(t *testing.T) {
+	c, err := Load("../../darkrouter.example.yaml", env(map[string]string{
+		"GROQ_KEY": "sk-x",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *c.Policy.Cooldown.TripAfter != 3 || c.Policy.Cooldown.Max != 15*time.Minute {
+		t.Errorf("cooldown = %d/%s", *c.Policy.Cooldown.TripAfter, c.Policy.Cooldown.Max)
+	}
+	if c.Log.Retention != 720*time.Hour {
+		t.Errorf("Log.Retention = %s", c.Log.Retention)
+	}
+	if c.Capture.MaxBytes != 256000 || c.Capture.Retention != 72*time.Hour {
+		t.Errorf("capture = %+v", c.Capture)
+	}
+}

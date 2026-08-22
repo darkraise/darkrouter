@@ -71,6 +71,22 @@ func applyDefaults(c *Config) {
 	if c.Policy.Timeout.Idle == 0 {
 		c.Policy.Timeout.Idle = 120 * time.Second
 	}
+	if c.Policy.Cooldown.TripAfter == nil {
+		n := 3
+		c.Policy.Cooldown.TripAfter = &n
+	}
+	if c.Policy.Cooldown.Max == 0 {
+		c.Policy.Cooldown.Max = 15 * time.Minute
+	}
+	if c.Log.Retention == 0 {
+		c.Log.Retention = 720 * time.Hour
+	}
+	if c.Capture.MaxBytes == 0 {
+		c.Capture.MaxBytes = 256000
+	}
+	if c.Capture.Retention == 0 {
+		c.Capture.Retention = 72 * time.Hour
+	}
 }
 
 // resolve replaces ${VAR} references. It reports the names it could not resolve
@@ -108,6 +124,23 @@ func interpolate(c *Config, lookup func(string) (string, bool)) error {
 }
 
 func validate(c *Config) error {
+	// Dereferencing TripAfter is safe: Parse runs applyDefaults first.
+	if *c.Policy.Cooldown.TripAfter < 1 {
+		return fmt.Errorf("policy.cooldown.trip_after must be at least 1")
+	}
+	if c.Policy.Cooldown.Max <= 0 {
+		return fmt.Errorf("policy.cooldown.max must be positive")
+	}
+	if c.Log.Retention <= 0 {
+		return fmt.Errorf("log.retention must be positive")
+	}
+	if c.Capture.Retention <= 0 {
+		return fmt.Errorf("capture.retention must be positive")
+	}
+	if c.Capture.MaxBytes < 0 {
+		return fmt.Errorf("capture.max_bytes must not be negative")
+	}
+
 	seen := make(map[string]bool, len(c.Providers))
 	models := make(map[string][]string)
 	order := []string{}

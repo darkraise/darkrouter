@@ -22,11 +22,11 @@ func newTestServer(t *testing.T, extraServer string) *Server {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store)
+	return serverBackedBy(t, cfgStore)
 }
 
 func TestHealthzReportsConfigValidity(t *testing.T) {

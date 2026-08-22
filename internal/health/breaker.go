@@ -1,0 +1,277 @@
+// Package health holds the circuit breaker. State is authoritative in memory
+// because the router consults it on every request; SQLite is a durable copy.
+package health
+
+import (
+	"sync"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+)
+
+// Key identifies a breaker entry. An empty Model is the credential-level entry,
+// used for cooldowns that apply across every model a credential serves.
+type Key struct {
+	ProviderID string
+	KeyID      string
+	Model      string
+}
+
+// Signal is one observed outcome. StatusCode is carried separately from Outcome
+// because 429 and 503 both classify as RetryableProvider but cool differently:
+// a rate limit is precise and immediate, a 5xx needs trip_after failures first.
+type Signal struct {
+	Outcome       adapter.Outcome
+	StatusCode    int
+	RetryAfter    time.Duration
+	HasRetryAfter bool
+}
+
+// Entry is a persistable view of one breaker entry.
+type Entry struct {
+	Key                 Key
+	CoolingUntil        time.Time
+	BackoffLevel        int
+	ConsecutiveFailures int
+}
+
+type state struct {
+	coolingUntil        time.Time
+	backoffLevel        int
+	consecutiveFailures int
+
+	// probing is set when a half-open probe has been admitted, so concurrent
+	// callers at expiry see the candidate as unavailable instead of all
+	// becoming probes.
+	probing bool
+
+	// retryAfterOnly marks a cooldown that came from a Retry-After header
+	// rather than the ladder. Such a cooldown closes on expiry with no probe,
+	// because nothing was ever tripped.
+	retryAfterOnly bool
+}
+
+// ladder is the escalation sequence from master design §9. It continues
+// doubling past the last entry until the configured maximum clamps it.
+var ladder = []time.Duration{
+	1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+	15 * time.Second, 30 * time.Second, 60 * time.Second, 120 * time.Second,
+}
+
+func cooldownFor(level int, max time.Duration) time.Duration {
+	if level < 0 {
+		level = 0
+	}
+	if level < len(ladder) {
+		if d := ladder[level]; d < max {
+			return d
+		}
+		return max
+	}
+	d := ladder[len(ladder)-1]
+	for i := len(ladder); i <= level; i++ {
+		// Checked before doubling so a large level cannot overflow int64.
+		if d >= max/2 {
+			return max
+		}
+		d *= 2
+	}
+	if d > max {
+		return max
+	}
+	return d
+}
+
+type Breaker struct {
+	mu        sync.Mutex
+	m         map[Key]*state
+	tripAfter int
+	max       time.Duration
+
+	// now is swappable so tests can advance time without sleeping.
+	now func() time.Time
+
+	dirty bool
+}
+
+func New(tripAfter int, max time.Duration) *Breaker {
+	if tripAfter < 1 {
+		tripAfter = 1
+	}
+	if max <= 0 {
+		max = 15 * time.Minute
+	}
+	return &Breaker{
+		m: make(map[Key]*state), tripAfter: tripAfter, max: max, now: time.Now,
+	}
+}
+
+// Available reports whether the triple may be attempted now, and performs the
+// half-open claim itself: at expiry of a ladder cooldown exactly one caller is
+// admitted as the probe.
+func (b *Breaker) Available(k Key) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// The credential-level entry gates every model the credential serves, so it
+	// is checked first and independently.
+	if k.Model != "" {
+		if !b.availableLocked(Key{ProviderID: k.ProviderID, KeyID: k.KeyID}) {
+			return false
+		}
+	}
+	return b.availableLocked(k)
+}
+
+func (b *Breaker) availableLocked(k Key) bool {
+	st, ok := b.m[k]
+	if !ok || st.coolingUntil.IsZero() {
+		return true
+	}
+	now := b.now()
+	if now.Before(st.coolingUntil) {
+		return false
+	}
+
+	// Expired.
+	if st.retryAfterOnly {
+		// No ladder was tripped, so there is nothing to probe: reopen fully.
+		st.coolingUntil = time.Time{}
+		st.retryAfterOnly = false
+		b.dirty = true
+		return true
+	}
+	if st.probing {
+		return false
+	}
+	st.probing = true
+	return true
+}
+
+// Record applies one outcome. It is the only place breaker state changes, so
+// the rules from spec §7.1 live here and nowhere else.
+func (b *Breaker) Record(k Key, s Signal) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.now()
+
+	switch s.Outcome {
+	case adapter.OutcomeClientCancelled:
+		// Never counts against any provider. Marking a provider unhealthy
+		// because someone pressed Ctrl-C is a self-inflicted outage.
+		return
+
+	case adapter.OutcomeRetryableModel:
+		// The provider is reachable and the credential is fine; only this model
+		// is wrong. Phase 6 counts these per target to surface a permanently
+		// misconfigured base URL.
+		return
+
+	case adapter.OutcomeSuccess, adapter.OutcomeFatal:
+		// Both prove the provider is reachable and functioning. A 400 says
+		// something about the request, not about the provider.
+		if _, ok := b.m[k]; ok {
+			delete(b.m, k)
+			b.dirty = true
+		}
+		return
+
+	case adapter.OutcomeRetryableCredential:
+		// Cools the credential across every model it serves. This never resets
+		// any ladder: a billing-exhausted key must not be resurrected by a
+		// client's malformed request.
+		ck := Key{ProviderID: k.ProviderID, KeyID: k.KeyID}
+		st := b.getLocked(ck)
+		b.coolLocked(st, now, st.backoffLevel)
+		return
+
+	case adapter.OutcomeRetryableProvider:
+		st := b.getLocked(k)
+		if s.StatusCode == 429 {
+			if s.HasRetryAfter {
+				d := s.RetryAfter
+				if d > b.max {
+					d = b.max
+				}
+				st.coolingUntil = now.Add(d)
+				st.retryAfterOnly = true
+				st.probing = false
+				b.dirty = true
+				return
+			}
+			b.coolLocked(st, now, st.backoffLevel)
+			return
+		}
+		// Everything else retryable: a single failure must not cool.
+		st.consecutiveFailures++
+		b.dirty = true
+		if st.consecutiveFailures >= b.tripAfter {
+			b.coolLocked(st, now, st.backoffLevel)
+		}
+		return
+	}
+}
+
+func (b *Breaker) getLocked(k Key) *state {
+	st, ok := b.m[k]
+	if !ok {
+		st = &state{}
+		b.m[k] = st
+	}
+	return st
+}
+
+// coolLocked cools at the given level and advances the ladder, so the next trip
+// escalates. consecutiveFailures is deliberately not reset: it is what makes a
+// probe failure re-trip immediately at the next level.
+func (b *Breaker) coolLocked(st *state, now time.Time, level int) {
+	st.coolingUntil = now.Add(cooldownFor(level, b.max))
+	st.backoffLevel = level + 1
+	st.retryAfterOnly = false
+	st.probing = false
+	b.dirty = true
+}
+
+// Snapshot returns every entry for the persister. It is a copy: the caller
+// writes it to SQLite without holding the lock.
+func (b *Breaker) Snapshot() []Entry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]Entry, 0, len(b.m))
+	for k, st := range b.m {
+		out = append(out, Entry{
+			Key: k, CoolingUntil: st.coolingUntil,
+			BackoffLevel: st.backoffLevel, ConsecutiveFailures: st.consecutiveFailures,
+		})
+	}
+	return out
+}
+
+// Rehydrate restores state at startup. Entries whose cooldown has passed are
+// reopened, but their failure counters are retained: a provider that was
+// flapping before a restart must not get a clean slate.
+func (b *Breaker) Rehydrate(entries []Entry) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.now()
+	for _, e := range entries {
+		st := &state{
+			backoffLevel:        e.BackoffLevel,
+			consecutiveFailures: e.ConsecutiveFailures,
+		}
+		if !e.CoolingUntil.IsZero() && now.Before(e.CoolingUntil) {
+			st.coolingUntil = e.CoolingUntil
+		}
+		b.m[e.Key] = st
+	}
+}
+
+// TakeDirty reports whether state changed since the last call and clears the
+// flag, so the persister writes only when there is something to write.
+func (b *Breaker) TakeDirty() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	d := b.dirty
+	b.dirty = false
+	return d
+}
