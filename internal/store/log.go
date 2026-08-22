@@ -33,6 +33,7 @@ type RequestRecord struct {
 	RequestedModel  string
 	ResolvedAlias   string
 	Candidates      []string
+	Skips           []string
 	FinalProviderID string
 	FinalModel      string
 	Status          string

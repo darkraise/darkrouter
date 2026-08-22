@@ -284,7 +284,6 @@ func (s *Server) Run(ctx context.Context) error {
 	go func() { errCh <- ignoreClosed(proxy.Serve(proxyLn)) }()
 	go func() { errCh <- ignoreClosed(admin.Serve(adminLn)) }()
 
-
 	select {
 	case err := <-errCh:
 		// One server stopped serving. Close the other rather than leaking its

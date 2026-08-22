@@ -55,7 +55,11 @@ func (s *YAMLSource) Providers(context.Context) ([]Provider, error) {
 	for _, p := range cfg.Providers {
 		out = append(out, Provider{
 			ID: p.ID, Kind: p.Kind, BaseURL: p.BaseURL,
-			APIKey: p.APIKey, Priority: p.Priority, Models: p.Models,
+			// A config credential has no database row, so its id is empty. The
+			// breaker keys on that empty id, which is what phase 2 already did.
+			Credentials: []Credential{{ID: "", Secret: p.APIKey, Enabled: true}},
+			APIKey:      p.APIKey,
+			Priority:    p.Priority, Models: p.Models,
 		})
 	}
 	return out, nil
