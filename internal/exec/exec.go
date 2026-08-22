@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -106,6 +107,42 @@ func New(store *config.Store, src provider.Source, adapters map[string]adapter.A
 func (e *Executor) adapterFor(kind string) (adapter.Adapter, bool) {
 	ad, ok := e.adapters[kind]
 	return ad, ok
+}
+
+// inferredWarning records that a candidate was admitted on guessed capability
+// metadata for a request that actually needed a capability.
+//
+// Master design §6.4 admits these rather than excluding them, because
+// hard-filtering on a guess would make every discovered local model refuse the
+// tool requests Claude Code always sends. The cost is that a provider's own
+// rejection looks like a Darkrouter failure, and this is what makes the trace
+// say otherwise.
+func inferredWarning(c router.Candidate, req *ir.Request) (ir.Warning, bool) {
+	if !c.Inferred {
+		return ir.Warning{}, false
+	}
+	needs := req.Needs()
+	var missing []string
+	if needs.Tools {
+		missing = append(missing, "tools")
+	}
+	if needs.Vision {
+		missing = append(missing, "vision")
+	}
+	if needs.Reasoning {
+		missing = append(missing, "reasoning")
+	}
+	if len(missing) == 0 {
+		// Warning about a plain chat request would be noise, and noise is what
+		// trains people to ignore warnings.
+		return ir.Warning{}, false
+	}
+	return ir.Warning{
+		Field:  "capabilities",
+		Target: c.ProviderID + "/" + c.Model,
+		Reason: "the request needs " + strings.Join(missing, ", ") +
+			" and this model's capabilities are unverified; routed anyway",
+	}, true
 }
 
 // modelInfo copies the catalog's view of one model into the adapter's plain
@@ -327,7 +364,12 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 		BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model,
 		Info: modelInfo(cat, c.ProviderID, c.Model),
 	}
-	hr, warns, err := ad.BuildRequest(ctx, tgt, req)
+	var warns []ir.Warning
+	if w, ok := inferredWarning(c, req); ok {
+		warns = append(warns, w)
+	}
+	hr, warns2, err := ad.BuildRequest(ctx, tgt, req)
+	warns = append(warns, warns2...)
 	if err != nil {
 		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
 	}
