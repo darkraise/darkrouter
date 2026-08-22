@@ -6,7 +6,7 @@ Last updated: 2026-08-22
 
 | Phase | Spec | Plan | Status |
 |---|---|---|---|
-| 1 — Foundation | ✅ | ✅ | **Implemented.** 86 tests, `go vet` clean, binary builds. Race verification outstanding — see below. |
+| 1 — Foundation | ✅ | ✅ | **Implemented.** Race-clean, `go vet` clean, binary builds, Docker image verified. Only the two provider-dependent manual checks remain — see below. |
 | 2 — Persistence and health | ✅ | — | Not started |
 | 3 — Routing and failover | ✅ | — | Not started |
 | 4 — Dialects | ✅ | — | Not started |
@@ -19,51 +19,87 @@ Last updated: 2026-08-22
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
 
+## Build environment
+
+The Linux machine needs Go 1.26.1 at `/usr/local/go` (add `/usr/local/go/bin` to
+`PATH`) and gcc, which `-race` requires via cgo. `CGO_ENABLED` defaults to 1
+there, unlike the original Windows machine.
+
 ## Open items
 
-### 1. Race detector has never run — highest priority
+### 1. Race detector — done, clean
 
-`go test -race` requires cgo and a C toolchain. The development machine is
-Windows with `CGO_ENABLED=0` and no gcc, so **no code in this repository has
-ever been checked for data races.** That gap covers exactly the three tasks
-scored risk 3:
-
-- `internal/config/store.go` — atomic config swap and the fsnotify watcher goroutine
-- `internal/exec/exec.go` — context cancellation across the streaming path
-- `internal/server/server.go` — shutdown ordering, the lifecycle context, three goroutines
-
-On a Linux machine this is one command:
+Run on Linux with Go 1.26.1 and `CGO_ENABLED=1`:
 
 ```bash
-go test -race ./...
+go test -race -count=1 ./...
 ```
 
-Run it before starting Phase 2. If it reports anything, fix it there — the
-server's lifecycle-context change (commit 8b0b81d) added goroutine interactions
-that no automated check has seen.
+**No data races in any package**, including the three tasks scored risk 3
+(`internal/config/store.go`, `internal/exec/exec.go`, `internal/server/server.go`).
+`internal/server` and `internal/exec` were additionally run at `-count=5` under
+`-race` because of the shutdown-lifecycle rework in 8b0b81d and ec207d2.
 
-### 2. Docker image never built
+Caveat worth carrying forward: the detector only observes interleavings the
+tests actually schedule. This says the concurrency is clean under current test
+coverage, not under load. Phase 2 adds background workers, so re-run it there.
 
-`Dockerfile` and `compose.yml` are written but unexercised; the Docker daemon was
-not running. Verify with:
+The run did surface two non-race defects, both fixed:
+
+- **`TestWatchDetectsRenameStyleSave` failed deterministically on Linux** (20/20),
+  with and without `-race`. The test started the watcher goroutine and
+  immediately saved; inotify does not replay events that predate the watch, so
+  the save was never seen. `Store.Watch` had no readiness signal, so the test
+  could not synchronize. Fixed in 223bde9 by adding an internal
+  `watch(ctx, ready)` that closes `ready` once the directory watch is
+  established. It passed on Windows only because slower file I/O let the
+  goroutine win the race.
+- **`cmd/darkrouter/main.go` did not exist.** The repository had no `main`
+  package at all, so "binary builds" was never true — `go build ./...` compiles
+  only libraries. Root cause: `.gitignore` line 1 was an unanchored
+  `darkrouter`, which matched the `cmd/darkrouter/` *directory* as well as the
+  built binary, making `git add cmd/` a silent no-op. Fixed in 72887fe
+  (anchor to `/darkrouter`) and 71a6a50 (add the entrypoint).
+
+### 2. Docker image — done, verified
+
+Image builds and serves; 28.8 MB.
 
 ```bash
 docker build -t darkrouter:dev .
-mkdir -p data && cp darkrouter.example.yaml data/darkrouter.yaml
-docker run --rm -d --name dr-smoke -p 8081:8081 -e GROQ_KEY=placeholder \
-  -v "$PWD/data:/data" darkrouter:dev
-curl -sf http://localhost:8081/readyz && echo OK
-docker rm -f dr-smoke
 ```
+
+Verified end to end: `/readyz` 200, `/healthz` reports `config_valid: true`,
+`/v1/models` returns the configured provider's models, and SIGTERM shuts the
+container down in ~1.3 s rather than hitting Docker's 10 s SIGKILL.
+
+`compose.yml` was also unexercised and is now verified, including its `wget`
+healthcheck reaching `healthy`. Note when smoke-testing on a machine that
+already serves 8080/8081: compose *appends* to `ports` rather than replacing,
+so a port override file needs the `!override` tag.
 
 ### 3. Manual checks against a real provider
 
-The plan's done criteria that no test covers:
+Two of the four are already confirmed, without a provider key, by running the
+binary against `darkrouter.example.yaml` and editing the file underneath it:
 
-- A streaming `curl` returns tokens incrementally, with time-to-first-token close to the provider's own.
-- The streamed response reports token usage (proves the `stream_options` injection works against a real upstream).
-- Editing `darkrouter.yaml` from vim changes behavior without a restart. `TestWatchDetectsRenameStyleSave` covers the mechanism; this confirms it end to end.
-- An invalid edit is rejected, the gateway keeps serving, and `/healthz` shows `config_valid: false` with the error.
+- ✅ A vim-style save (write temp file, rename over the original) hot-reloads
+  without a restart. Confirmed via a restart-only change appearing in
+  `/healthz` `warnings` within the debounce window.
+- ✅ An invalid edit is rejected, the gateway keeps serving on the previous
+  config, and `/healthz` reports `config_valid: false` with the parse error.
+  `/readyz` correctly stays 200, matching phase 1 spec §"`/readyz` fails only
+  when the process cannot serve at all".
+
+Still outstanding — these need a real upstream and an API key:
+
+- A streaming `curl` returns tokens incrementally, with time-to-first-token
+  close to the provider's own.
+- The streamed response reports token usage, proving the `stream_options`
+  injection works against a real upstream.
+
+A Groq key (`GROQ_KEY`) satisfies the example configuration as written; any
+OpenAI-compatible provider works if `base_url` and `models` are adjusted.
 
 ### 4. One design decision still open
 
