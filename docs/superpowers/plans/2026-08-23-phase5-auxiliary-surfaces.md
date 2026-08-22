@@ -564,7 +564,7 @@ git commit -m "feat(catalog): declare auxiliary surfaces on presets"
 - Consumes: nothing.
 - Produces: nothing. Two regression tests, and no production change at all.
 
-**Implementer:** dcc-superpower-companions:impl-opus-low
+**Implementer:** dcc-superpower-companions:impl-sonnet-medium
 **Evaluation:** files 0 - spec 0 - coupling 1 - risk 1 = 2
 **Approach:** inline - skip 2: both behaviors already exist in `internal/exec/exec.go` and the task only asserts them.
 
