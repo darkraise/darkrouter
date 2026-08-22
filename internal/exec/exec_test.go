@@ -14,6 +14,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -584,5 +585,88 @@ func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
 	}
 	if got := outcomeForParseError(&ir.Error{Type: ir.ErrAPI}); got != adapter.OutcomeRetryableProvider {
 		t.Errorf("generic API error = %q, want retryable", got)
+	}
+}
+
+// executorFor builds an executor over an arbitrary configuration body.
+// newExecutorWith cannot: it fixes the provider id, the kind, and the model
+// list, and the catalog cases need all three to vary.
+func executorFor(t *testing.T, body string, adapters map[string]adapter.Adapter, deps Deps) *Executor {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
+}
+
+func TestExecutorUsesTheCatalogSnapshotWhenSupplied(t *testing.T) {
+	// The router filters on what the catalog says, so a model the snapshot
+	// does not carry must not route — that is the difference between phase 3's
+	// admit-everything placeholder and a real catalog.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the upstream was called for a model the catalog does not carry")
+		w.WriteHeader(500)
+	}))
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "known", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}}, []string{"p"}))
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [known]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"unknown","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusNotFound && w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d for a model outside the catalog", w.Code)
+	}
+}
+
+func TestExecutorFallsBackWithoutACatalog(t *testing.T) {
+	// A zero Deps must behave exactly as phase 3 did: every configured model
+	// routes, with inferred capabilities.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [known]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"known","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 }

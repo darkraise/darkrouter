@@ -48,12 +48,21 @@ type Fleet interface {
 	Available(k health.Key) bool
 }
 
+// CatalogSource supplies the live catalog. It is an interface rather than
+// *catalog.Store so a test can hand over a fixed snapshot, and it is optional:
+// a nil one falls back to phase 3's provider-derived view, where every model's
+// capabilities are inferred.
+type CatalogSource interface {
+	Snapshot() *catalog.Snapshot
+}
+
 // Deps carries the optional collaborators. A zero Deps is valid and disables
 // the corresponding behavior.
 type Deps struct {
-	Log    Logger
-	Health HealthRecorder
-	Fleet  Fleet
+	Log     Logger
+	Health  HealthRecorder
+	Fleet   Fleet
+	Catalog CatalogSource
 }
 
 type Executor struct {
@@ -97,6 +106,15 @@ func New(store *config.Store, src provider.Source, adapters map[string]adapter.A
 func (e *Executor) adapterFor(kind string) (adapter.Adapter, bool) {
 	ad, ok := e.adapters[kind]
 	return ad, ok
+}
+
+// catalogFor returns the live snapshot, or phase 3's provider-derived view
+// when no catalog is wired. The fallback is what keeps a zero Deps usable.
+func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
+	if e.deps.Catalog != nil {
+		return e.deps.Catalog.Snapshot()
+	}
+	return catalog.FromProviders(providers)
 }
 
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
@@ -148,7 +166,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	snap := router.Snapshot{
 		At:        start,
 		Providers: providers,
-		Catalog:   catalog.FromProviders(providers),
+		Catalog:   e.catalogFor(providers),
 		Config:    cfg,
 	}
 	if e.deps.Fleet != nil {
