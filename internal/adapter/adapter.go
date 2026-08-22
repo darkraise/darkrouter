@@ -10,10 +10,35 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
+// ModelInfo is what the catalog knows about the model this target names.
+//
+// It is a plain struct rather than a catalog type on purpose. health imports
+// adapter, and catalog imports health so discovery can cool a credential on a
+// rejected probe; an adapter that imported catalog would close the cycle. The
+// translation happens at the exec boundary, exactly as Target already carries a
+// base URL rather than importing provider.
+//
+// The zero value means the catalog knows nothing, and every adapter reading it
+// must behave as it did before phase 6 in that case: honor what the client
+// asked for rather than acting on a half-filled guess.
+type ModelInfo struct {
+	ContextWindow   int
+	MaxOutputTokens int
+
+	// The three per-generation request-shape facts. TraitsKnown gates all
+	// three: an unrecognized or proxied model reaches here with TraitsKnown
+	// false, which is the honest answer.
+	Adaptive     bool
+	ManualBudget bool
+	FreeSampling bool
+	TraitsKnown  bool
+}
+
 type Target struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+	Info    ModelInfo
 }
 
 // Outcome is the classification that drives failover. Phase 1 has nowhere to

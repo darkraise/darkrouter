@@ -1,0 +1,170 @@
+# Hand-reviewed corrections merged over the generated presets on every
+# presetgen run. A non-zero field here wins; an id absent from the generated
+# set is added outright.
+
+anthropic:
+  models_dev_id: anthropic
+  quirks: [requires-max-tokens]
+  # models.dev lists "effort" among claude-opus-4-5's reasoning_options, but
+  # phase 4 verified live on 2026-08-22 that thinking:{type:"adaptive"} is a
+  # 400 on that model — output_config.effort and adaptive thinking are
+  # different controls sharing a word. These rules are therefore declared
+  # rather than derived. Longest match wins.
+  model_traits:
+    - {match: mythos-preview, adaptive: true, manual_budget: true}
+    - {match: opus-4-7, adaptive: true}
+    - {match: opus-4-8, adaptive: true}
+    - {match: opus-5, adaptive: true}
+    - {match: sonnet-5, adaptive: true}
+    - {match: fable-5, adaptive: true}
+    - {match: mythos-5, adaptive: true}
+    - {match: opus-4-6, adaptive: true, manual_budget: true, free_sampling: true}
+    - {match: sonnet-4-6, adaptive: true, manual_budget: true, free_sampling: true}
+    - {match: opus-4-5, manual_budget: true, free_sampling: true}
+    - {match: sonnet-4-5, manual_budget: true, free_sampling: true}
+    - {match: haiku-4-5, manual_budget: true, free_sampling: true}
+    - {match: opus-4-1, manual_budget: true, free_sampling: true}
+    - {match: opus-4, manual_budget: true, free_sampling: true}
+    - {match: sonnet-4, manual_budget: true, free_sampling: true}
+    - {match: claude-3, manual_budget: true, free_sampling: true}
+
+gemini:
+  models_dev_id: google
+  surfaces: [llm, embeddings]
+
+openai:
+  models_dev_id: openai
+  surfaces: [llm, embeddings, images, audio, moderations]
+  quirks: [max-completion-tokens-name]
+
+groq:
+  models_dev_id: groq
+  free_tier: true
+
+cohere:
+  models_dev_id: cohere
+  surfaces: [llm, embeddings, rerank]
+  quirks: [rerank-path=/v2/rerank]
+
+mistral:
+  models_dev_id: mistral
+  surfaces: [llm, embeddings]
+
+deepseek:
+  name: DeepSeek
+  kind: openaicompat
+  # OmniRoute's entry points at /responses, which Darkrouter does not speak.
+  # This is DeepSeek's OpenAI-compatible surface.
+  base_url: https://api.deepseek.com/v1
+  auth:
+    style: bearer
+  surfaces: [llm]
+  models_dev_id: deepseek
+  website: https://platform.deepseek.com
+
+cerebras:
+  models_dev_id: cerebras
+
+xai:
+  models_dev_id: xai
+
+perplexity:
+  models_dev_id: perplexity
+
+together:
+  models_dev_id: togetherai
+
+fireworks:
+  models_dev_id: fireworks-ai
+  # Fireworks prefixes every id with an account path that no other source uses.
+  model_aliases:
+    accounts/fireworks/models/llama-v3p3-70b-instruct: llama-3.3-70b
+
+openrouter:
+  models_dev_id: openrouter
+
+vercel-ai-gateway:
+  models_dev_id: vercel
+
+venice:
+  models_dev_id: venice
+
+nvidia:
+  models_dev_id: nvidia
+
+ollama:
+  name: Ollama
+  kind: openaicompat
+  base_url: http://localhost:11434/v1
+  auth:
+    style: none
+  surfaces: [llm, embeddings]
+  no_models_dev: true
+  website: https://ollama.com
+  # Ollama reports whether a model's template advertises tools, which is what
+  # makes the local story honest rather than a guess. Spec §6.
+  capability_probe: ollama
+  quirks: [usage-final-chunk-only]
+
+lmstudio:
+  name: LM Studio
+  kind: openaicompat
+  base_url: http://localhost:1234/v1
+  auth:
+    style: none
+  surfaces: [llm, embeddings]
+  no_models_dev: true
+  website: https://lmstudio.ai
+  quirks: []
+
+bedrock:
+  name: Amazon Bedrock
+  kind: bedrock
+  base_url: ""
+  auth:
+    style: sigv4
+  surfaces: [llm]
+  models_dev_id: amazon-bedrock
+  website: https://aws.amazon.com/bedrock
+  quirks: []
+
+vertex:
+  name: Google Vertex AI
+  kind: vertex
+  base_url: ""
+  auth:
+    style: gcp-sa
+  surfaces: [llm, embeddings]
+  models_dev_id: google-vertex
+  website: https://cloud.google.com/vertex-ai
+  quirks: []
+
+vertex-anthropic:
+  name: Google Vertex AI (Anthropic publisher)
+  kind: vertex
+  base_url: ""
+  auth:
+    style: gcp-sa
+  surfaces: [llm]
+  models_dev_id: google-vertex-anthropic
+  website: https://cloud.google.com/vertex-ai
+  quirks: [requires-max-tokens]
+
+anthropic-oauth:
+  name: Anthropic (Claude subscription)
+  kind: anthropic
+  base_url: https://api.anthropic.com/v1
+  auth:
+    style: oauth
+  surfaces: [llm]
+  models_dev_id: anthropic
+  website: https://claude.com
+  quirks: [requires-max-tokens]
+  oauth:
+    authorize_url: https://claude.ai/oauth/authorize
+    token_url: https://console.anthropic.com/v1/oauth/token
+    client_id: 9d1c250a-e61b-44d9-88ed-5944d1962f5e
+    scopes: [org:create_api_key, user:profile, user:inference]
+    redirect:
+      style: localhost
+      port: 54545

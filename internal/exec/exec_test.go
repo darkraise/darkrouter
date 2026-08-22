@@ -12,8 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"io"
+	"iter"
+
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -584,5 +588,317 @@ func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
 	}
 	if got := outcomeForParseError(&ir.Error{Type: ir.ErrAPI}); got != adapter.OutcomeRetryableProvider {
 		t.Errorf("generic API error = %q, want retryable", got)
+	}
+}
+
+// executorFor builds an executor over an arbitrary configuration body.
+// newExecutorWith cannot: it fixes the provider id, the kind, and the model
+// list, and the catalog cases need all three to vary.
+func executorFor(t *testing.T, body string, adapters map[string]adapter.Adapter, deps Deps) *Executor {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
+}
+
+func TestExecutorUsesTheCatalogSnapshotWhenSupplied(t *testing.T) {
+	// The router filters on what the catalog says, so a model the snapshot
+	// does not carry must not route — that is the difference between phase 3's
+	// admit-everything placeholder and a real catalog.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the upstream was called for a model the catalog does not carry")
+		w.WriteHeader(500)
+	}))
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "known", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}}, []string{"p"}))
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [known]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"unknown","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusNotFound && w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d for a model outside the catalog", w.Code)
+	}
+}
+
+func TestExecutorFallsBackWithoutACatalog(t *testing.T) {
+	// A zero Deps must behave exactly as phase 3 did: every configured model
+	// routes, with inferred capabilities.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [known]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"known","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+// captureAdapter records the Target it was built with and otherwise behaves
+// exactly as an OpenAI-compatible adapter.
+type captureAdapter struct {
+	onBuild func(*adapter.Target)
+}
+
+func (c *captureAdapter) Kind() string { return "capture" }
+
+func (c *captureAdapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
+	if c.onBuild != nil {
+		c.onBuild(t)
+	}
+	return openaicompat.New().BuildRequest(ctx, t, req)
+}
+
+func (c *captureAdapter) ParseResponse(resp *http.Response) (*ir.Response, error) {
+	return openaicompat.New().ParseResponse(resp)
+}
+
+func (c *captureAdapter) ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
+	return openaicompat.New().ParseStream(r, maxLine)
+}
+
+func (c *captureAdapter) Classify(resp *http.Response, err error) adapter.Outcome {
+	return openaicompat.New().Classify(resp, err)
+}
+
+func TestTargetCarriesTheCatalogFacts(t *testing.T) {
+	// The adapter has to learn the model's real maximum and its request shape
+	// from somewhere, and reading the name is what phase 6 exists to stop.
+	var got adapter.Target
+	capturing := &captureAdapter{onBuild: func(tgt *adapter.Target) { got = *tgt }}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces:        []ir.Surface{ir.SurfaceLLM},
+		ContextWindow:   200_000,
+		MaxOutputTokens: 64_000,
+		Traits:          catalog.Traits{Adaptive: true, FreeSampling: false, Known: true},
+	}}, []string{"p"}))
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: capture
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"capture": capturing}, Deps{Catalog: cat})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if got.Info.MaxOutputTokens != 64_000 || got.Info.ContextWindow != 200_000 {
+		t.Errorf("limits = %+v", got.Info)
+	}
+	if !got.Info.TraitsKnown || !got.Info.Adaptive || got.Info.FreeSampling {
+		t.Errorf("traits = %+v", got.Info)
+	}
+}
+
+func TestTargetInfoIsZeroWithoutACatalogEntry(t *testing.T) {
+	// A model nothing knows about must reach the adapter with an empty Info,
+	// so the adapter honors what the client asked for rather than acting on a
+	// half-filled guess.
+	var got adapter.Target
+	capturing := &captureAdapter{onBuild: func(tgt *adapter.Target) { got = *tgt }}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: capture
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"capture": capturing}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if got.Info != (adapter.ModelInfo{}) {
+		t.Errorf("Info = %+v, want the zero value", got.Info)
+	}
+}
+
+func TestInferredCandidateProducesAWarning(t *testing.T) {
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "local", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+		Source:   catalog.SourceInferred,
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [local]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+	  "model":"local",
+	  "messages":[{"role":"user","content":"hi"}],
+	  "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]
+	}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	got := rec.only(t)
+	var found bool
+	for _, s := range got.Warnings {
+		if strings.Contains(s, "capabilities") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v; the inferred-capability warning did not reach the record", got.Warnings)
+	}
+}
+
+func TestNoInferredWarningWhenNothingWasNeeded(t *testing.T) {
+	// A plain chat request against an inferred model needs no capability, so
+	// warning about it would be noise that trains people to ignore warnings.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "local", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM}, Source: catalog.SourceInferred,
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [local]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"local","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	for _, s := range rec.only(t).Warnings {
+		if strings.Contains(s, "capabilities") {
+			t.Errorf("warned about capabilities nothing asked for: %v", rec.only(t).Warnings)
+		}
+	}
+}
+
+func TestKnownCapableCandidateProducesNoWarning(t *testing.T) {
+	// The other half: once models.dev says the model has tools, the warning
+	// must stop. Otherwise every request carries it and it means nothing.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "known", State: catalog.StateLive,
+		Surfaces:     []ir.Surface{ir.SurfaceLLM},
+		Capabilities: catalog.Capabilities{Tools: true, Known: true},
+		Source:       catalog.SourceModelsDev,
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [known]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+	  "model":"known",
+	  "messages":[{"role":"user","content":"hi"}],
+	  "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]
+	}`))
+	e.Handle(w, r, openaiedge.New())
+
+	for _, s := range rec.only(t).Warnings {
+		if strings.Contains(s, "capabilities") {
+			t.Errorf("warned about a model models.dev vouched for: %v", rec.only(t).Warnings)
+		}
 	}
 }

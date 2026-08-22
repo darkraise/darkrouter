@@ -44,6 +44,12 @@ type Candidate struct {
 	Model      string
 	Kind       string
 	Publisher  string // vertex only; empty in phase 3
+
+	// Inferred marks a candidate admitted on guessed capability metadata.
+	// Master design §6.4 admits these rather than excluding them, and the
+	// executor records a warning so the trace explains why a provider's own
+	// error came back instead of a routing decision.
+	Inferred bool
 }
 
 // SkipReason explains why a target did not become a candidate.
@@ -55,6 +61,10 @@ const (
 	SkipSurface      SkipReason = "surface"
 	SkipCapability   SkipReason = "capability"
 	SkipNoCredential SkipReason = "no_credential"
+	// SkipRemoved is a model a successful listing omitted three times running.
+	// It is a durable fact about the upstream rather than a health signal,
+	// which is why it is reported ahead of cooling.
+	SkipRemoved SkipReason = "removed_upstream"
 )
 
 // Skip records a target that was considered and rejected. These are persisted

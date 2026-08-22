@@ -324,8 +324,12 @@ image source types including `file`; prompt caching's 4-breakpoint limit, `ephem
 transcription `stream=true`; Responses API statefulness and event names; `golang.org/x/oauth2/google`
 refresh behavior; SigV4 mechanics; OAuth vendor redirect-URI registration; cookie port-scoping.
 
-**Could not verify:** whether Anthropic `max_tokens` remains strictly required; whether Anthropic's
-structured-output beta is now GA. Both are flagged in the specs as implementation-time checks.
+**Could not verify at review time, both since settled during phase 4 and recorded in that spec's
+§4.6 and §4.7:** Anthropic `max_tokens` is still strictly required, and structured output is now
+generally available under `output_config.format` with no beta header. Phase 4 also found a third
+thing the review did not anticipate — extended thinking split into two mutually exclusive
+per-generation shapes — which is why phase 6 moved the shape onto the catalog entry rather than
+reading it off the model name.
 
 ---
 

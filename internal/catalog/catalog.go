@@ -51,6 +51,43 @@ func (c Capabilities) Satisfies(need Capabilities) bool {
 	return true
 }
 
+// State is a model's lifecycle position. Spec §5.1.
+type State string
+
+const (
+	StateLive            State = "live"
+	StateStale           State = "stale"
+	StateRemovedUpstream State = "removed_upstream"
+)
+
+// Traits are the per-generation request-shape facts an adapter needs and no
+// metadata source can supply.
+//
+// models.dev lists "effort" among claude-opus-4-5's reasoning_options, but
+// phase 4 verified live that thinking:{type:"adaptive"} is a 400 on that model:
+// output_config.effort and adaptive thinking are different controls sharing a
+// word. Traits are therefore declared in a preset and never derived.
+//
+// Known is what an adapter checks before letting these decide a wire shape. An
+// unknown set means the request is shaped by what the client asked for, which
+// is the right answer for a proxied or self-hosted endpoint whose name says
+// nothing about its generation.
+type Traits struct {
+	Adaptive     bool
+	ManualBudget bool
+	FreeSampling bool
+	Known        bool
+}
+
+// Pricing is micro-dollars per million tokens. Known separates a free model
+// from an unpriced one; both are zero.
+type Pricing struct {
+	InputMicrosPerMTok     int64
+	OutputMicrosPerMTok    int64
+	CacheReadMicrosPerMTok int64
+	Known                  bool
+}
+
 // Model is one model as offered by one provider.
 type Model struct {
 	ProviderID   string
@@ -59,7 +96,19 @@ type Model struct {
 	Surfaces     []ir.Surface
 	Capabilities Capabilities
 	Source       Source
+
+	State           State
+	ContextWindow   int
+	MaxOutputTokens int
+	Traits          Traits
+	Pricing         Pricing
 }
+
+// Routable reports whether the router may attempt this model. A stale model is
+// routable: the breaker rather than the catalog is what avoids a provider that
+// is actually broken, and emptying the catalog on a flaky probe would break
+// every alias pointing at it.
+func (m Model) Routable() bool { return m.State != StateRemovedUpstream }
 
 func (m Model) DeclaresSurface(s ir.Surface) bool {
 	for _, have := range m.Surfaces {
@@ -105,6 +154,7 @@ func FromProviders(ps []provider.Provider) Reader {
 				ModelID:    id,
 				Surfaces:   []ir.Surface{ir.SurfaceLLM},
 				Source:     SourceInferred,
+				State:      StateLive,
 			}
 			r.offering[id] = append(r.offering[id], p.ID)
 		}

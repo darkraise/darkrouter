@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/ir"
 )
 
 func newTestServer(t *testing.T, extraServer string) *Server {
@@ -172,5 +174,123 @@ func TestAnthropicAuthUsesItsOwnCredentialForm(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "authentication_error") {
 		t.Errorf("body = %s; the rejection is written in Anthropic's vocabulary", rec.Body.String())
+	}
+}
+
+// serverWithCatalog builds a server and pins its catalog, so the listing tests
+// do not depend on discovery having run.
+func serverWithCatalog(t *testing.T, body string, models []catalog.Model) *Server {
+	t.Helper()
+	db, key, cfgStore := serverFixtureWith(t, body)
+	srv, err := New(cfgStore, db, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Catalog().Set(catalog.NewSnapshot(models, []string{"p"}))
+	return srv
+}
+
+func TestModelsListsAliasesFirstThenTheCatalog(t *testing.T) {
+	srv := serverWithCatalog(t, `
+server:
+  proxy_listen: "127.0.0.1:0"
+  admin_listen: "127.0.0.1:0"
+catalog:
+  models_dev_url: http://127.0.0.1:1/api.json
+  sync_timeout: 200ms
+  discovery:
+    enabled: false
+aliases:
+  fast: [p/quick]
+  smart: [p/deep]
+`, []catalog.Model{
+		{ProviderID: "p", ModelID: "deep", State: catalog.StateLive, Surfaces: []ir.Surface{ir.SurfaceLLM}},
+		{ProviderID: "p", ModelID: "quick", State: catalog.StateLive, Surfaces: []ir.Surface{ir.SurfaceLLM}},
+		{ProviderID: "p", ModelID: "retired", State: catalog.StateRemovedUpstream, Surfaces: []ir.Surface{ir.SurfaceLLM}},
+		{ProviderID: "p", ModelID: "flaky", State: catalog.StateStale, Surfaces: []ir.Surface{ir.SurfaceLLM}},
+	})
+
+	w := httptest.NewRecorder()
+	srv.ProxyHandler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/models", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var out struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Object != "list" {
+		t.Errorf("object = %q", out.Object)
+	}
+
+	ids := make([]string, len(out.Data))
+	for i, d := range out.Data {
+		ids[i] = d.ID
+	}
+	// Aliases first, sorted for determinism, before anything discovered.
+	if len(ids) < 2 || ids[0] != "fast" || ids[1] != "smart" {
+		t.Errorf("ids = %v; aliases are not listed first", ids)
+	}
+	if out.Data[0].OwnedBy != "darkrouter" {
+		t.Errorf("alias owned_by = %q", out.Data[0].OwnedBy)
+	}
+	has := func(want string) bool {
+		for _, id := range ids {
+			if id == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("quick") || !has("deep") {
+		t.Errorf("ids = %v; a live model is missing", ids)
+	}
+	// Stale stays listed, retired does not.
+	if !has("flaky") {
+		t.Errorf("ids = %v; a stale model was excluded", ids)
+	}
+	if has("retired") {
+		t.Errorf("ids = %v; a removed_upstream model was listed", ids)
+	}
+}
+
+func TestGeminiModelsReadsTheCatalog(t *testing.T) {
+	srv := serverWithCatalog(t, `
+server:
+  proxy_listen: "127.0.0.1:0"
+  admin_listen: "127.0.0.1:0"
+catalog:
+  models_dev_url: http://127.0.0.1:1/api.json
+  sync_timeout: 200ms
+  discovery:
+    enabled: false
+`, []catalog.Model{
+		{ProviderID: "p", ModelID: "gemini-2.5-pro", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, ContextWindow: 1048576, MaxOutputTokens: 65536},
+		{ProviderID: "p", ModelID: "retired", State: catalog.StateRemovedUpstream,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}},
+	})
+
+	w := httptest.NewRecorder()
+	srv.ProxyHandler().ServeHTTP(w, httptest.NewRequest("GET", "/v1beta/models", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "models/gemini-2.5-pro") {
+		t.Errorf("body = %s", body)
+	}
+	if !strings.Contains(body, "1048576") {
+		t.Errorf("token limits missing from %s", body)
+	}
+	if strings.Contains(body, "retired") {
+		t.Errorf("a removed_upstream model was listed: %s", body)
 	}
 }

@@ -249,3 +249,60 @@ func TestSQLSourceExcludesDisabledCredentials(t *testing.T) {
 		t.Errorf("credentials = %+v, want only the enabled one", ps[0].Credentials)
 	}
 }
+
+func TestReloadCarriesPresetAndAuthStyle(t *testing.T) {
+	ctx := context.Background()
+	db, key := newTestDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO providers (id, preset, kind, base_url, auth_style, priority, created_at)
+		 VALUES ('p1', 'groq', 'openaicompat', 'http://x', 'bearer', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "p1", Secret: "s", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps) != 1 {
+		t.Fatalf("got %d providers", len(ps))
+	}
+	if ps[0].Preset != "groq" {
+		t.Errorf("preset = %q, want groq", ps[0].Preset)
+	}
+	if ps[0].AuthStyle != "bearer" {
+		t.Errorf("auth style = %q, want bearer", ps[0].AuthStyle)
+	}
+}
+
+func TestReloadToleratesUncataloguedProviders(t *testing.T) {
+	// An uncatalogued provider is a base URL and a key with no preset at all.
+	// It must load, not fail: master design section 6 makes that the whole
+	// point of the two-tier model.
+	ctx := context.Background()
+	db, key := newTestDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('p1', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddCredential(ctx, key, store.Credential{
+		ProviderID: "p1", Secret: "s", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps) != 1 || ps[0].Preset != "" {
+		t.Fatalf("providers = %+v", ps)
+	}
+	if ps[0].AuthStyle != "bearer" {
+		t.Errorf("auth style = %q, want the column default bearer", ps[0].AuthStyle)
+	}
+}

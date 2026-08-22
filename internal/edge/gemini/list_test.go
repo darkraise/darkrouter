@@ -6,7 +6,7 @@ import (
 )
 
 func TestListModelsUsesGeminiResourceNames(t *testing.T) {
-	raw, err := json.Marshal(ListModels([]string{"gemini-2.0-flash", "groq/llama-3.3-70b"}))
+	raw, err := json.Marshal(ListModels([]ModelEntry{{ID: "gemini-2.0-flash"}, {ID: "groq/llama-3.3-70b"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,5 +50,39 @@ func TestListModelsEmitsAnEmptyArray(t *testing.T) {
 	}
 	if string(raw) == `{"models":null}` || !json.Valid(raw) {
 		t.Fatalf("body = %s; clients range over models unconditionally", raw)
+	}
+}
+
+func TestListModelsCarriesLimitsWhenKnown(t *testing.T) {
+	raw, err := json.Marshal(ListModels([]ModelEntry{
+		{ID: "gemini-2.5-pro", ContextWindow: 1048576, MaxOutputTokens: 65536},
+		{ID: "mystery"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Models []struct {
+			Name             string `json:"name"`
+			InputTokenLimit  *int   `json:"inputTokenLimit"`
+			OutputTokenLimit *int   `json:"outputTokenLimit"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Models) != 2 {
+		t.Fatalf("models = %+v", got.Models)
+	}
+	if got.Models[0].InputTokenLimit == nil || *got.Models[0].InputTokenLimit != 1048576 {
+		t.Errorf("input limit = %v", got.Models[0].InputTokenLimit)
+	}
+	if got.Models[0].OutputTokenLimit == nil || *got.Models[0].OutputTokenLimit != 65536 {
+		t.Errorf("output limit = %v", got.Models[0].OutputTokenLimit)
+	}
+	// Absent rather than zero: a client reading a zero limit refuses to send
+	// anything at all.
+	if got.Models[1].InputTokenLimit != nil || got.Models[1].OutputTokenLimit != nil {
+		t.Errorf("an unknown limit was emitted: %+v", got.Models[1])
 	}
 }

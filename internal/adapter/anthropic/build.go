@@ -30,12 +30,12 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		body["system"] = rendered
 	}
 
-	maxTok, w := xlate.RequiredMaxTokens(req, targetName)
+	maxTok, w := xlate.RequiredMaxTokens(req, targetName, t.Info.MaxOutputTokens)
 	warns = append(warns, w...)
 	body["max_tokens"] = maxTok
 
 	outputConfig := map[string]any{}
-	traits := traitsFor(t.Model)
+	traits := traitsOf(t.Info)
 
 	// Thinking splits by model generation, and the two modes are mutually
 	// exclusive per generation: type "enabled" is a 400 on Claude 4.7 and
@@ -64,7 +64,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	case modeManual:
 		budget := req.Reasoning.Budget
 		if budget == 0 {
-			budget = xlate.EffortBudget(req.Reasoning.Effort, 0)
+			budget = xlate.EffortBudget(req.Reasoning.Effort, t.Info.MaxOutputTokens)
 		}
 		// max_tokens must be strictly greater than the budget. Clamping keeps a
 		// servable request servable; raising max_tokens instead would silently
@@ -282,46 +282,28 @@ type modelTraits struct {
 	known        bool
 }
 
-// generations maps a model-name fragment to its traits, most specific first.
+// traitsOf reads the request-shape facts off the catalog entry the executor
+// attached to the target.
 //
-// Reading the generation off the name is a heuristic, and it is here because
-// there is no catalog until Phase 6 — the same technique internal/tokenize uses
-// to pick a vocabulary. It is checked longest-first because "opus-4-5" and
-// "opus-4" would otherwise both match the same name.
-var generations = []struct {
-	fragment string
-	traits   modelTraits
-}{
-	{"mythos-preview", modelTraits{adaptive: true, manualBudget: true, known: true}},
-	{"opus-4-7", modelTraits{adaptive: true, known: true}},
-	{"opus-4-8", modelTraits{adaptive: true, known: true}},
-	{"opus-5", modelTraits{adaptive: true, known: true}},
-	{"sonnet-5", modelTraits{adaptive: true, known: true}},
-	{"fable-5", modelTraits{adaptive: true, known: true}},
-	{"mythos-5", modelTraits{adaptive: true, known: true}},
-	{"opus-4-6", modelTraits{adaptive: true, manualBudget: true, freeSampling: true, known: true}},
-	{"sonnet-4-6", modelTraits{adaptive: true, manualBudget: true, freeSampling: true, known: true}},
-	{"opus-4-5", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-	{"sonnet-4-5", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-	{"haiku-4-5", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-	{"opus-4-1", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-	{"opus-4", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-	{"sonnet-4", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-	{"claude-3", modelTraits{manualBudget: true, freeSampling: true, known: true}},
-}
-
-// traitsFor reads a model name. Dots become dashes first, because proxies spell
-// the same model "claude-sonnet-4.5" where Anthropic spells it
-// "claude-sonnet-4-5-20250929". An unrecognized name gets the permissive set,
-// so the request is shaped by what the client asked for rather than by a guess.
-func traitsFor(model string) modelTraits {
-	name := strings.ReplaceAll(strings.ToLower(model), ".", "-")
-	for _, g := range generations {
-		if strings.Contains(name, g.fragment) {
-			return g.traits
-		}
+// Phase 4 matched fragments of the model name here, because there was no
+// catalog. That table needed a new entry every time Anthropic shipped a
+// generation, and it was wrong for an aliased or proxied model whose name says
+// nothing about its generation — a gateway that renames claude-opus-4-5 to
+// "default" got the permissive fallback and a 400 on every reasoning request.
+//
+// The permissive fallback survives for a model the catalog does not know, which
+// is the honest answer for a self-hosted Anthropic-compatible endpoint: shape
+// the request the way the client asked, and warn that the shape was guessed.
+func traitsOf(info adapter.ModelInfo) modelTraits {
+	if !info.TraitsKnown {
+		return modelTraits{adaptive: true, manualBudget: true, freeSampling: true}
 	}
-	return modelTraits{adaptive: true, manualBudget: true, freeSampling: true}
+	return modelTraits{
+		adaptive:     info.Adaptive,
+		manualBudget: info.ManualBudget,
+		freeSampling: info.FreeSampling,
+		known:        true,
+	}
 }
 
 type thinkingChoice int

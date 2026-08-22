@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -47,9 +49,21 @@ type Server struct {
 	breaker *health.Breaker
 	persist *health.Persister
 
+	cat  *catalog.Store
+	disc *catalog.Discoverer
+	sync *catalog.Syncer
+
 	started  time.Time
 	warnings []string
 }
+
+// Catalog exposes the live snapshot holder. The listing handlers read it, and
+// phase 7's admin API will too.
+func (s *Server) Catalog() *catalog.Store { return s.cat }
+
+// Discoverer exposes the worker so a provider change can trigger an immediate
+// probe. It is nil when discovery is disabled.
+func (s *Server) Discoverer() *catalog.Discoverer { return s.disc }
 
 // New wires the gateway. It loads the provider set eagerly so a bad credential
 // fails startup rather than every request.
@@ -64,15 +78,49 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
 
+	// A provider whose preset this build no longer ships degrades to its
+	// stored kind and base url. The degradation is free — provider rows carry
+	// both — but losing the preset's quirks and surfaces silently on upgrade
+	// is not, so it reaches /healthz.
+	if ps, err := src.Providers(context.Background()); err == nil {
+		startupWarnings = append(startupWarnings, catalog.OrphanedPresets(ps, catalog.Embedded())...)
+	}
+
+	cat := catalog.NewStore(db, src)
+	// Rebuilt synchronously, before anything binds a listener. A request
+	// arriving in the first second must route against what the database
+	// already knows rather than against an empty snapshot.
+	if err := cat.Rebuild(context.Background()); err != nil {
+		// Not fatal: an unreadable catalog costs routing precision, and
+		// refusing to serve over it would be worse. It reaches /healthz
+		// through the same channel a bad config edit does.
+		startupWarnings = append(startupWarnings, fmt.Sprintf("catalog: %v", err))
+	}
+
+	var disc *catalog.Discoverer
+	if e := cfg.Catalog.Discovery.Enabled; e == nil || *e {
+		disc = catalog.NewDiscoverer(db, src, cat, breaker, catalog.DiscoveryOptions{
+			Interval:    cfg.Catalog.Discovery.Interval,
+			Concurrency: cfg.Catalog.Discovery.Concurrency,
+			Timeout:     cfg.Catalog.Discovery.Timeout,
+		})
+	}
+	syncer := catalog.NewSyncer(db, src, cat, catalog.SyncOptions{
+		URL:      cfg.Catalog.ModelsDevURL,
+		Interval: cfg.Catalog.SyncInterval,
+		Timeout:  cfg.Catalog.SyncTimeout,
+	})
+
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
+		cat:     cat, disc: disc, sync: syncer,
 		ex: exec.New(cfgStore, src, map[string]adapter.Adapter{
 			"openaicompat": openaicompat.New(),
 			"anthropic":    anthropicadapter.New(),
 			"gemini":       geminiadapter.New(),
 		}, exec.Deps{
-			Log: logw, Health: breaker, Fleet: breaker,
+			Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
 		}),
 		started:  time.Now(),
 		warnings: startupWarnings,
@@ -126,26 +174,14 @@ func (s *Server) handleGemini(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.src.Providers(r.Context())
-	if err != nil {
-		_ = geminiedge.New().WriteError(w, &ir.Error{
-			Type: ir.ErrDarkrouter, Message: "could not list providers",
+	entries := make([]geminiedge.ModelEntry, 0)
+	for _, m := range s.listedModels() {
+		entries = append(entries, geminiedge.ModelEntry{
+			ID: m.ID, ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens,
 		})
-		return
-	}
-	seen := map[string]bool{}
-	var models []string
-	for _, p := range ps {
-		for _, m := range p.Models {
-			if seen[m] {
-				continue
-			}
-			seen[m] = true
-			models = append(models, m)
-		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(geminiedge.ListModels(models))
+	_ = json.NewEncoder(w).Encode(geminiedge.ListModels(entries))
 }
 
 // authed enforces the optional proxy token in the route's own dialect. The
@@ -176,27 +212,59 @@ func constantTimeEqual(got, want string) bool {
 
 // handleModels lists configured models. Aliases would be listed first, but
 // Phase 1 has none; Phase 6 replaces the backing with the catalog.
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.src.Providers(r.Context())
-	if err != nil {
-		// Errors are normalized into the inbound dialect's shape, per design §14.
-		_ = openaiedge.New().WriteError(w, &ir.Error{
-			Type: ir.ErrDarkrouter, Message: "could not list providers",
-		})
-		return
-	}
+// listedModel is one row of a client-facing listing.
+type listedModel struct {
+	ID              string
+	OwnedBy         string
+	ContextWindow   int
+	MaxOutputTokens int
+}
+
+// listedModels returns the models a client should see: the configured aliases
+// first, then everything routable in the catalog.
+//
+// Aliases first is phase 1's behavior and spec §9 preserves it deliberately.
+// They are the names the operator chose for this gateway; burying them under
+// two hundred discovered ids makes it look like somebody else's catalog.
+//
+// Search excludes removed_upstream by default and keeps stale, which is the
+// asymmetry spec §5.1 exists for.
+func (s *Server) listedModels() []listedModel {
 	seen := map[string]bool{}
-	data := []any{}
-	for _, p := range ps {
-		for _, m := range p.Models {
-			if seen[m] {
-				continue
-			}
-			seen[m] = true
-			data = append(data, map[string]any{
-				"id": m, "object": "model", "owned_by": p.ID,
-			})
+	out := []listedModel{}
+
+	cfg := s.store.Current()
+	aliases := make([]string, 0, len(cfg.Aliases))
+	for name := range cfg.Aliases {
+		aliases = append(aliases, name)
+	}
+	// Map iteration is random; a listing that reorders itself between two
+	// requests looks broken in a client's model picker.
+	sort.Strings(aliases)
+	for _, name := range aliases {
+		seen[name] = true
+		out = append(out, listedModel{ID: name, OwnedBy: "darkrouter"})
+	}
+
+	for _, m := range s.cat.Snapshot().Search(catalog.Filter{Surface: ir.SurfaceLLM}) {
+		if seen[m.ModelID] {
+			continue
 		}
+		seen[m.ModelID] = true
+		out = append(out, listedModel{
+			ID: m.ModelID, OwnedBy: m.ProviderID,
+			ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens,
+		})
+	}
+	return out
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	data := []any{}
+	for _, m := range s.listedModels() {
+		data = append(data, map[string]any{
+			"id": m.ID, "object": "model", "owned_by": m.OwnedBy,
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
@@ -314,6 +382,15 @@ func (s *Server) Run(ctx context.Context) error {
 	startWorker("retention", func(c context.Context) error {
 		return store.RunRetention(c, s.db, s.store, time.Hour)
 	})
+	// Both take workerCtx rather than ctx. Run already keeps worker lifetime
+	// separate from request lifetime, and a sweep cancelled the instant
+	// SIGTERM arrives would record a provider failure that was really a
+	// shutdown — three of those mark its whole catalogue stale.
+	if s.disc != nil {
+		startWorker("discovery", s.disc.Run)
+	}
+	startWorker("models.dev sync", s.sync.Run)
+
 	startWorker("config watcher", func(c context.Context) error {
 		// A watcher that cannot start leaves hot reload silently dead, so the
 		// failure has to reach /healthz rather than being discarded.

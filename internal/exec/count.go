@@ -9,7 +9,6 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
-	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
@@ -60,7 +59,7 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 
 	snap := router.Snapshot{
 		At: start, Providers: providers,
-		Catalog: catalog.FromProviders(providers), Config: cfg,
+		Catalog: e.catalogFor(providers), Config: cfg,
 	}
 	if e.deps.Fleet != nil {
 		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
