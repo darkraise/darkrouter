@@ -207,11 +207,17 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 
 	seen := make([]store.DiscoveredModel, 0, len(models))
 	for _, m := range models {
-		seen = append(seen, store.DiscoveredModel{
+		dm := store.DiscoveredModel{
 			ModelID:         m.ModelID,
 			ContextWindow:   m.ContextWindow,
 			MaxOutputTokens: m.MaxOutputTokens,
-		})
+		}
+		if preset.CapabilityProbe == "ollama" {
+			if caps, ok := d.showCapabilities(ctx, pr, m.ModelID); ok {
+				dm.Capabilities = &caps
+			}
+		}
+		seen = append(seen, dm)
 	}
 	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, now); err != nil {
 		log.Printf("discovery: %s: record success: %v", p.ID, err)
@@ -253,6 +259,32 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		return nil, err
 	}
 	return ParseList(pr.Kind, body)
+}
+
+// showCapabilities asks a local runtime about one model. A failure is silent:
+// the listing already succeeded, and turning "this one model did not answer"
+// into a provider-wide discovery failure would retire a working catalogue.
+func (d *Discoverer) showCapabilities(ctx context.Context, pr Probe, modelID string) (store.ModelCapabilities, bool) {
+	req, err := BuildCapabilityRequest(ctx, pr, modelID)
+	if err != nil {
+		return store.ModelCapabilities{}, false
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return store.ModelCapabilities{}, false
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return store.ModelCapabilities{}, false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return store.ModelCapabilities{}, false
+	}
+	return ParseOllamaShow(body)
 }
 
 // pickCredential returns the least-recently-used credential that is not

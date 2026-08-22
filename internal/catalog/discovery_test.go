@@ -353,3 +353,38 @@ func TestRunStopsOnContextCancel(t *testing.T) {
 		t.Fatal("Run did not stop on cancel")
 	}
 }
+
+func TestSweepReadsCapabilitiesFromTheRuntime(t *testing.T) {
+	// Spec §6 and its done criterion: a local model's tool support is read
+	// from the runtime rather than guessed, so it becomes a fact the router
+	// can filter on.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"llama3.3:70b"}]}`))
+		case "/api/show":
+			_, _ = w.Write([]byte(`{"capabilities":["completion","tools"]}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "local")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "local", Kind: "openaicompat", BaseURL: srv.URL + "/v1", Preset: "ollama",
+		Credentials: []provider.Credential{{ID: "k", Secret: "", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	rows, err := db.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows", len(rows))
+	}
+	if rows[0].CapabilitiesSource != "discovered" || !rows[0].Capabilities.Tools {
+		t.Errorf("row = (%q, %+v)", rows[0].CapabilitiesSource, rows[0].Capabilities)
+	}
+}
