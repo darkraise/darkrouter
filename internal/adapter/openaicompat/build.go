@@ -12,11 +12,16 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
+// targetName labels the warnings this kind produces.
+const targetName = "openaicompat"
+
 func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	var warns []ir.Warning
+	msgs, mwarns := renderMessages(req, targetName)
+	warns = append(warns, mwarns...)
 	body := map[string]any{
 		"model":    t.Model,
-		"messages": renderMessages(req),
+		"messages": msgs,
 	}
 	if req.MaxTokens != nil {
 		body["max_tokens"] = *req.MaxTokens
@@ -59,58 +64,6 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
 	}
 	return hr, warns, nil
-}
-
-func renderMessages(req *ir.Request) []any {
-	out := make([]any, 0, len(req.Messages)+1)
-	if len(req.System) > 0 {
-		var b strings.Builder
-		for _, blk := range req.System {
-			b.WriteString(blk.Text)
-		}
-		out = append(out, map[string]any{"role": "system", "content": b.String()})
-	}
-	for _, m := range req.Messages {
-		out = append(out, map[string]any{"role": string(m.Role), "content": renderContent(m.Content)})
-	}
-	return out
-}
-
-// renderContent emits a plain string when every block is text, and the
-// multi-part form otherwise. Some compatible providers reject the multi-part
-// form for text-only messages.
-func renderContent(blocks []ir.ContentBlock) any {
-	onlyText := true
-	for _, b := range blocks {
-		if b.Type != ir.BlockText {
-			onlyText = false
-			break
-		}
-	}
-	if onlyText {
-		var b strings.Builder
-		for _, blk := range blocks {
-			b.WriteString(blk.Text)
-		}
-		return b.String()
-	}
-	parts := make([]any, 0, len(blocks))
-	for _, blk := range blocks {
-		switch blk.Type {
-		case ir.BlockText:
-			parts = append(parts, map[string]any{"type": "text", "text": blk.Text})
-		case ir.BlockImage:
-			if blk.Media == nil {
-				continue
-			}
-			url := blk.Media.URL
-			if url == "" && blk.Media.Data != "" {
-				url = "data:" + blk.Media.MIME + ";base64," + blk.Media.Data
-			}
-			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
-		}
-	}
-	return parts
 }
 
 func renderTools(tools []ir.Tool) []any {
