@@ -56,8 +56,12 @@ func New() *Adapter { return &Adapter{} }
 
 func (a *Adapter) Kind() string { return "openaicompat" }
 
-func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, error) {
+func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	return BuildRequest(ctx, t, req)
+}
+
+func (a *Adapter) ClassifyBody(resp *http.Response, body []byte, err error) adapter.Outcome {
+	return ClassifyBody(resp, body, err)
 }
 
 func (a *Adapter) ParseResponse(resp *http.Response) (*ir.Response, error) {
@@ -73,6 +77,7 @@ func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
+var _ adapter.BodyClassifier = (*Adapter)(nil)
 
 // unknownModelCodes are the error codes OpenAI-compatible providers use when a
 // 400 means "I do not have that model" rather than "your request is malformed".

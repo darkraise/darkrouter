@@ -32,9 +32,19 @@ const (
 
 type Adapter interface {
 	Kind() string
-	BuildRequest(ctx context.Context, t *Target, req *ir.Request) (*http.Request, error)
+	// BuildRequest returns the rendered HTTP request and every IR field this
+	// kind could not express. Master design §5: a dropped field is a fact the
+	// trace view must be able to show.
+	BuildRequest(ctx context.Context, t *Target, req *ir.Request) (*http.Request, []ir.Warning, error)
 	// ParseResponse takes ownership of resp.Body and always closes it.
 	ParseResponse(resp *http.Response) (*ir.Response, error)
 	ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error]
 	Classify(resp *http.Response, err error) Outcome
+}
+
+// BodyClassifier refines Classify for the one case a status line cannot
+// express: a 400 that means "I do not have that model". An adapter implements
+// it only when its upstreams distinguish the two, and exec type-asserts.
+type BodyClassifier interface {
+	ClassifyBody(resp *http.Response, body []byte, err error) Outcome
 }
