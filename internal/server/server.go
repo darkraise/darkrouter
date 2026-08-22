@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -181,9 +182,23 @@ func (s *Server) Run(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// Both listeners are bound before any goroutine starts. ListenAndServe would
+	// bind inside the goroutine, which makes a bind failure asynchronous and
+	// leaves Close racing a listener that has not been created yet — the
+	// surviving server then binds *after* Close and leaks its port.
+	proxyLn, err := net.Listen("tcp", cfg.Server.ProxyListen)
+	if err != nil {
+		return fmt.Errorf("proxy listen %s: %w", cfg.Server.ProxyListen, err)
+	}
+	adminLn, err := net.Listen("tcp", cfg.Server.AdminListen)
+	if err != nil {
+		_ = proxyLn.Close()
+		return fmt.Errorf("admin listen %s: %w", cfg.Server.AdminListen, err)
+	}
+
 	errCh := make(chan error, 2)
-	go func() { errCh <- ignoreClosed(proxy.ListenAndServe()) }()
-	go func() { errCh <- ignoreClosed(admin.ListenAndServe()) }()
+	go func() { errCh <- ignoreClosed(proxy.Serve(proxyLn)) }()
+	go func() { errCh <- ignoreClosed(admin.Serve(adminLn)) }()
 	go func() {
 		// A watcher that cannot start leaves hot reload silently dead, so the
 		// failure has to reach /healthz rather than being discarded.
@@ -192,10 +207,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case err := <-errCh:
-		// One listener died. Close the other rather than leaking its port and
-		// its goroutine.
+		// One server stopped serving. Close the other rather than leaking its
+		// port, and wait for its goroutine to confirm the listener is released.
 		_ = proxy.Close()
 		_ = admin.Close()
+		<-errCh
 		return err
 	case <-ctx.Done():
 	}
