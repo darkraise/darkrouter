@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/xlate"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -35,8 +36,45 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if len(req.StopSequences) > 0 {
 		body["stop"] = req.StopSequences
 	}
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		body["reasoning_effort"] = req.Reasoning.Effort
+	if req.TopK != nil {
+		warns = append(warns, ir.Warning{
+			Field: "top_k", Target: targetName, Reason: "no equivalent parameter",
+		})
+	}
+	if len(req.Safety) > 0 {
+		warns = append(warns, ir.Warning{
+			Field: "safety", Target: targetName, Reason: "safety settings are Gemini-only",
+		})
+	}
+	if req.Reasoning != nil {
+		switch {
+		case req.Reasoning.Effort != "":
+			body["reasoning_effort"] = req.Reasoning.Effort
+		case req.Reasoning.Budget > 0:
+			// A budget is finer-grained than an effort, so the conversion is
+			// lossy in one direction only and the loss is worth recording.
+			body["reasoning_effort"] = xlate.BudgetEffort(req.Reasoning.Budget)
+			warns = append(warns, ir.Warning{
+				Field: "reasoning.budget", Target: targetName,
+				Reason: "converted to the nearest reasoning_effort band",
+			})
+		}
+	}
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
+		body["response_format"] = map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "response",
+				"strict": true,
+				"schema": req.ResponseFormat.Schema,
+			},
+		}
+	}
+	if req.ParallelToolCalls != nil {
+		body["parallel_tool_calls"] = *req.ParallelToolCalls
+	}
+	if md := forwardableMetadata(req.Metadata); len(md) > 0 {
+		body["metadata"] = md
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = renderTools(req.Tools)
@@ -91,4 +129,23 @@ func renderToolChoice(tc *ir.ToolChoice) any {
 		return map[string]any{"type": "function", "function": map[string]any{"name": tc.Name}}
 	}
 	return "auto"
+}
+
+// forwardableMetadata strips the keys Darkrouter uses internally. The
+// anthropic_ prefix is transport state the Anthropic edge parks in Metadata so
+// the Anthropic adapter can act on it — the version header and the thinking
+// mode; forwarding either to an OpenAI upstream would be nonsense at best and a
+// rejected request at worst.
+func forwardableMetadata(md map[string]string) map[string]string {
+	if len(md) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(md))
+	for k, v := range md {
+		if strings.HasPrefix(k, "anthropic_") {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
