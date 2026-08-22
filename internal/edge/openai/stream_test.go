@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"iter"
 	"net/http/httptest"
 	"strings"
@@ -80,5 +81,94 @@ func TestWriteStreamEmitsInStreamError(t *testing.T) {
 	}
 	if !strings.HasSuffix(body, "data: [DONE]\n\n") {
 		t.Fatal("an errored stream still terminates with DONE")
+	}
+}
+
+// chunks collects the JSON payload of every SSE data line except the sentinel.
+func chunks(t *testing.T, events []ir.StreamEvent) []map[string]any {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	err := WriteStream(rec, func(yield func(ir.StreamEvent, error) bool) {
+		for _, ev := range events {
+			if !yield(ev, nil) {
+				return
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok || data == "[DONE]" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(data), &m); err != nil {
+			t.Fatalf("chunk %q: %v", data, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func delta(t *testing.T, chunk map[string]any) map[string]any {
+	t.Helper()
+	return chunk["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
+}
+
+func TestWriteStreamEmitsDenseToolCallIndices(t *testing.T) {
+	got := chunks(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "r", Model: "m"},
+		{Type: ir.EventBlockStart, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolID: "call_a", ToolName: "f"}},
+		{Type: ir.EventContentDelta, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolInput: `{"x":`}},
+		{Type: ir.EventBlockStart, Index: 1001, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolID: "call_b", ToolName: "f"}},
+		{Type: ir.EventContentDelta, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolInput: `1}`}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopToolUse},
+	})
+	if len(got) != 6 {
+		t.Fatalf("chunks = %d: %v", len(got), got)
+	}
+	first := delta(t, got[1])["tool_calls"].([]any)[0].(map[string]any)
+	if first["index"].(float64) != 0 || first["id"] != "call_a" {
+		t.Errorf("first tool call = %v", first)
+	}
+	if first["function"].(map[string]any)["name"] != "f" {
+		t.Errorf("first tool call = %v", first)
+	}
+	second := delta(t, got[3])["tool_calls"].([]any)[0].(map[string]any)
+	if second["index"].(float64) != 1 {
+		t.Errorf("second tool call index = %v; the wire index is dense, not the IR block index",
+			second["index"])
+	}
+	frag := delta(t, got[4])["tool_calls"].([]any)[0].(map[string]any)
+	if frag["index"].(float64) != 0 {
+		t.Errorf("continuation index = %v; it must return to the first call", frag["index"])
+	}
+	if frag["function"].(map[string]any)["arguments"] != "1}" {
+		t.Errorf("continuation = %v", frag)
+	}
+	if _, ok := frag["id"]; ok {
+		t.Error("a continuation must not repeat the id")
+	}
+}
+
+func TestWriteStreamEmitsReasoningDeltas(t *testing.T) {
+	got := chunks(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "r", Model: "m"},
+		{Type: ir.EventContentDelta, Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: "hmm"}},
+		{Type: ir.EventContentDelta, Delta: &ir.Delta{Type: ir.BlockText, Text: "42"}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	})
+	if delta(t, got[1])["reasoning_content"] != "hmm" {
+		t.Errorf("chunk 1 = %v", got[1])
+	}
+	if delta(t, got[2])["content"] != "42" {
+		t.Errorf("chunk 2 = %v", got[2])
 	}
 }
