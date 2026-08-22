@@ -75,7 +75,7 @@ consumer reads them from a fresh snapshot on each worker tick.
 `applyDefaults` turns both into 3 and the operator's nonsensical value is
 silently replaced instead of rejected.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/config/load_test.go`:
 
@@ -146,12 +146,12 @@ func TestParseRejectsNonPositiveRetention(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/config/ -run 'Phase2|TripAfter|Retention' -v`
 Expected: FAIL — compile error, `c.Policy.Cooldown` and `c.Log` undefined.
 
-- [ ] **Step 3: Add the types**
+- [x] **Step 3: Add the types**
 
 In `internal/config/config.go`, add two fields to `Config`:
 
@@ -199,7 +199,7 @@ type CaptureConfig struct {
 }
 ```
 
-- [ ] **Step 4: Add the defaults**
+- [x] **Step 4: Add the defaults**
 
 In `applyDefaults` in `internal/config/load.go`, append before the closing brace:
 
@@ -222,7 +222,7 @@ In `applyDefaults` in `internal/config/load.go`, append before the closing brace
 	}
 ```
 
-- [ ] **Step 5: Add the validation**
+- [x] **Step 5: Add the validation**
 
 In `validate` in `internal/config/load.go`, insert these checks at the very top
 of the function, before the provider loop:
@@ -248,12 +248,12 @@ of the function, before the provider loop:
 Dereferencing `TripAfter` here is safe: `Parse` calls `applyDefaults` before
 `validate`, so the pointer is always set by this point.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `go test ./internal/config/ -v`
 Expected: PASS, including the eight pre-existing tests.
 
-- [ ] **Step 7: Update the example configuration**
+- [x] **Step 7: Update the example configuration**
 
 Replace the `policy:` block in `darkrouter.example.yaml` and append two top-level
 blocks, so the shipped example documents every knob:
@@ -278,7 +278,7 @@ capture:
   retention: 72h
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/config/ darkrouter.example.yaml
@@ -307,18 +307,21 @@ so every mutation must share one connection or they contend and produce
 that writer. The third handle exists because `synchronous=FULL` is the right
 durability trade for credentials and the wrong one for a request log.
 
-- [ ] **Step 1: Add the SQLite dependency**
+- [x] **Step 1: Add the SQLite dependency**
 
 ```bash
 go get modernc.org/sqlite@latest
-go mod tidy
 ```
+
+Do **not** run `go mod tidy` here. Nothing imports the driver until Step 4, so
+tidy removes the requirement it was just given. Run `go get` again after Step 4
+and tidy then. *(Correction applied during execution.)*
 
 `modernc.org/sqlite` is a pure-Go translation of SQLite. It is chosen so
 `CGO_ENABLED=0` still produces a static binary, which is what the Dockerfile
 depends on. Never substitute `mattn/go-sqlite3`; it needs cgo.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `internal/store/db_test.go`:
 
@@ -443,12 +446,12 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -v`
 Expected: FAIL — `undefined: Open`, `undefined: DB`.
 
-- [ ] **Step 4: Write the database handles**
+- [x] **Step 4: Write the database handles**
 
 Create `internal/store/db.go`:
 
@@ -560,7 +563,7 @@ func (d *DB) Close() error {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, five tests.
@@ -569,7 +572,7 @@ If `TestOpenUsesWALAndIncrementalVacuum` reports `auto_vacuum = 0`, the pragma
 reached a database that already had tables. Confirm no earlier step created the
 file before `Open` ran.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add go.mod go.sum internal/store/
@@ -600,7 +603,7 @@ A database whose version is newer than the binary fails startup loudly. That
 happens on a rollback deploy, and running an old binary against a new schema
 corrupts quietly.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/migrate_test.go`:
 
@@ -708,12 +711,12 @@ func TestMigrationsAreContiguous(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Migrate -v`
 Expected: FAIL — `db.Migrate undefined`.
 
-- [ ] **Step 3: Write the schema**
+- [x] **Step 3: Write the schema**
 
 Create `internal/store/migrations/0001_init.sql`:
 
@@ -875,7 +878,7 @@ CREATE TABLE settings (
 ) STRICT;
 ```
 
-- [ ] **Step 4: Write the migrator**
+- [x] **Step 4: Write the migrator**
 
 Create `internal/store/migrate.go`:
 
@@ -1009,12 +1012,12 @@ func (d *DB) applyMigration(ctx context.Context, m migration) error {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, ten tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/
@@ -1044,7 +1047,7 @@ rows undetected.
 `crypto/pbkdf2` is in the standard library as of Go 1.24. Do not add
 `golang.org/x/crypto` for this.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/crypto/crypto_test.go`:
 
@@ -1195,12 +1198,12 @@ func TestNewSaltIsRandomAndCorrectLength(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/crypto/ -v`
 Expected: FAIL — `undefined: DeriveKey`.
 
-- [ ] **Step 3: Write the package**
+- [x] **Step 3: Write the package**
 
 Create `internal/crypto/crypto.go`:
 
@@ -1305,12 +1308,12 @@ func NewSalt() ([]byte, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/crypto/ -race -v`
 Expected: PASS, eight tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/crypto/
@@ -1344,7 +1347,7 @@ detection reliable.
 The verifier proves only that the master key is right. It does not prove every
 credential row is intact — that surfaces separately, at provider-load time.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/keyring_test.go`:
 
@@ -1491,12 +1494,12 @@ func TestOpenKeyringReportsAnIncompleteKeyring(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Keyring -v`
 Expected: FAIL — `undefined: OpenKeyring`.
 
-- [ ] **Step 3: Write the keyring**
+- [x] **Step 3: Write the keyring**
 
 Create `internal/store/keyring.go`:
 
@@ -1681,12 +1684,12 @@ func initKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, sixteen tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -1712,7 +1715,7 @@ The row id is the AAD, so the id must be generated before the secret is sealed.
 Sealing first and assigning an id afterwards would bind the ciphertext to
 nothing.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/credentials_test.go`:
 
@@ -1908,12 +1911,12 @@ func deriveForTest(ctx context.Context, d *DB, master string) (*crypto.Key, erro
 
 Its imports are `encoding/hex`, `strconv`, and `github.com/darkraise/darkrouter/internal/crypto`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Credential -v`
 Expected: FAIL — `db.AddCredential undefined`.
 
-- [ ] **Step 3: Write the credential store**
+- [x] **Step 3: Write the credential store**
 
 Create `internal/store/credentials.go`:
 
@@ -2077,12 +2080,12 @@ type sealedRow struct {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, twenty-one tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/
@@ -2113,7 +2116,7 @@ Everything happens in one `synchronous=FULL` transaction. A crash mid-rotation
 rolls back; credentials are never half-rotated. Half-rotated credentials would
 be unrecoverable, because neither key opens the whole set.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/store/rotate_test.go`:
 
@@ -2242,12 +2245,12 @@ func TestRotateWithNoCredentialsStillRewritesTheVerifier(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store/ -run Rotat -v`
 Expected: FAIL — `undefined: RotateMasterKey`.
 
-- [ ] **Step 3: Write the rotation**
+- [x] **Step 3: Write the rotation**
 
 Create `internal/store/rotate.go`:
 
@@ -2348,12 +2351,12 @@ func rotateWithHook(ctx context.Context, d *DB, oldKey *crypto.Key, newMaster st
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/ -race -v`
 Expected: PASS, twenty-five tests.
 
-- [ ] **Step 5: Add the subcommand**
+- [x] **Step 5: Add the subcommand**
 
 Rewrite `cmd/darkrouter/main.go` so a subcommand is dispatched before the
 server's flags are parsed:
@@ -2488,7 +2491,7 @@ Note the shadowing trap: the local variable `store` in `runServer` holds a
 `*config.Store` while the package `store` is also imported. Rename the local to
 `cfgStore` and update its three uses.
 
-- [ ] **Step 6: Verify the subcommand builds and reports a missing key**
+- [x] **Step 6: Verify the subcommand builds and reports a missing key**
 
 ```bash
 go build ./cmd/darkrouter
@@ -2496,7 +2499,7 @@ DARKROUTER_MASTER_KEY= ./darkrouter rotate-key -db /tmp/nonexistent.db
 ```
 Expected: exits non-zero with `rotate-key: DARKROUTER_MASTER_KEY must hold the current master key`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/store/ cmd/darkrouter/
