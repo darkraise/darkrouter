@@ -12922,6 +12922,11 @@ data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}
 
 ```
 
+**Every SSE payload must be one line.** `sse.Reader` dispatches on line breaks,
+so a JSON body split across lines inside a `data(` ... `)` helper is truncated at
+the first break and the chunk is silently skipped — the stream then yields no
+events at all. Keep each fixture's JSON on a single line however long it gets.
+
 `gemini/incremental-text/upstream.sse`:
 
 ```
