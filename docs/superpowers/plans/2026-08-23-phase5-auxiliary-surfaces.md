@@ -1676,3 +1676,392 @@ git commit -m "refactor(exec): drive the loop through a SurfaceOp"
 ```
 
 ---
+
+### Task 7: Adapters declare the surfaces they implement
+
+**Files:**
+- Modify: `internal/adapter/adapter.go`
+- Modify: `internal/adapter/openaicompat/classify.go`
+- Test: `internal/adapter/adapter_test.go`
+
+**Interfaces:**
+- Consumes: `ir.Surface` (Task 1).
+- Produces: `adapter.SurfaceSet`, `adapter.SurfaceProvider`, `adapter.SurfacesOf(Adapter) SurfaceSet`, and `openaicompat.Adapter.Surfaces()`. Task 8's filter reads them.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: `BodyClassifier` and `TokenCounter` in the same file are the established optional-interface idiom, and this follows it exactly.
+
+Master design §5.1's `Adapter.Surfaces()` is the item PROGRESS has carried since phase 3 as "still does not exist… phase 5 is where it becomes load-bearing". This is that.
+
+It is an **optional** interface, not a method on `Adapter`. That matches `BodyClassifier` and `TokenCounter` beside it, and it means an adapter that says nothing serves `llm` only — the honest default, and the one that keeps phase 8's bedrock and vertex adapters compiling untouched.
+
+The §4 matrix is the specification. `openaicompat` is the only kind that serves more than chat and embeddings, which is why it declares six here and the other two get their single addition alongside the surface that needs it.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/adapter/adapter_test.go`:
+
+```go
+package adapter
+
+import (
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// silentAdapter implements Adapter without SurfaceProvider. Only Kind is
+// exercised; the rest satisfy the interface.
+type silentAdapter struct{ Adapter }
+
+func (silentAdapter) Kind() string { return "silent" }
+
+type talkativeAdapter struct{ Adapter }
+
+func (talkativeAdapter) Kind() string { return "talkative" }
+func (talkativeAdapter) Surfaces() SurfaceSet {
+	return SurfaceSet{ir.SurfaceLLM: true, ir.SurfaceEmbedding: true}
+}
+
+func TestSurfacesOfDefaultsToChatOnly(t *testing.T) {
+	// An adapter that declares nothing serves llm. Defaulting to everything
+	// would make an unimplemented surface a runtime 404 from the provider
+	// instead of a routing decision Darkrouter can explain.
+	got := SurfacesOf(silentAdapter{})
+	if !got.Has(ir.SurfaceLLM) {
+		t.Error("the default does not include llm")
+	}
+	for _, s := range ir.AllSurfaces() {
+		if s == ir.SurfaceLLM {
+			continue
+		}
+		if got.Has(s) {
+			t.Errorf("the default claims %q", s)
+		}
+	}
+}
+
+func TestSurfacesOfReadsTheDeclaration(t *testing.T) {
+	got := SurfacesOf(talkativeAdapter{})
+	if !got.Has(ir.SurfaceLLM) || !got.Has(ir.SurfaceEmbedding) {
+		t.Errorf("surfaces = %v", got)
+	}
+	if got.Has(ir.SurfaceTTS) {
+		t.Error("an undeclared surface reported present")
+	}
+}
+
+func TestSurfaceSetHasIsNilSafe(t *testing.T) {
+	// A nil set is "nothing declared", not a panic: the zero value has to be
+	// usable because a map field is easy to leave unset.
+	var s SurfaceSet
+	if s.Has(ir.SurfaceLLM) {
+		t.Error("a nil set claimed a surface")
+	}
+}
+```
+
+Add to `internal/adapter/openaicompat/classify_test.go`:
+
+```go
+func TestOpenAICompatDeclaresTheMatrixSurfaces(t *testing.T) {
+	// Phase 5 spec §4: openaicompat is the only kind serving more than chat
+	// and embeddings. Getting this wrong makes a route unreachable with a
+	// confusing "no provider offers this" rather than a clear gap.
+	got := New().Surfaces()
+	for _, want := range []ir.Surface{
+		ir.SurfaceLLM, ir.SurfaceEmbedding, ir.SurfaceImage,
+		ir.SurfaceTTS, ir.SurfaceSTT, ir.SurfaceRerank, ir.SurfaceModeration,
+	} {
+		if !got.Has(want) {
+			t.Errorf("openaicompat does not declare %q", want)
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/... -run 'TestSurfacesOf|TestSurfaceSetHas|TestOpenAICompatDeclares' -v
+```
+
+Expected: FAIL to build — `undefined: SurfaceSet`, `undefined: SurfacesOf`, and `New().Surfaces undefined`.
+
+- [ ] **Step 3: Add the vocabulary**
+
+In `internal/adapter/adapter.go`, beside `BodyClassifier` and `TokenCounter`:
+
+```go
+// SurfaceSet is the set of surfaces an adapter implements.
+type SurfaceSet map[ir.Surface]bool
+
+// Has is nil-safe, because the zero value has to be usable — a map field is
+// easy to leave unset and a panic on the routing path is not an acceptable way
+// to find out.
+func (s SurfaceSet) Has(x ir.Surface) bool { return s[x] }
+
+// SurfaceProvider is implemented by an adapter serving more than chat.
+//
+// Optional rather than a method on Adapter, matching BodyClassifier and
+// TokenCounter above: an adapter that says nothing serves llm only, which is
+// the honest default and keeps a kind whose auxiliary support arrives in a
+// later phase compiling untouched.
+type SurfaceProvider interface {
+	Surfaces() SurfaceSet
+}
+
+// SurfacesOf reports what an adapter implements.
+//
+// The default is llm alone rather than everything. Master design §5.1 makes an
+// unimplemented surface a routing filter, not a runtime error — an operator
+// reading "no provider offers this model on this surface" learns more than one
+// reading a 404 the provider produced.
+func SurfacesOf(a Adapter) SurfaceSet {
+	if sp, ok := a.(SurfaceProvider); ok {
+		return sp.Surfaces()
+	}
+	return SurfaceSet{ir.SurfaceLLM: true}
+}
+```
+
+- [ ] **Step 4: Declare openaicompat's surfaces**
+
+In `internal/adapter/openaicompat/classify.go`, below `Kind`:
+
+```go
+// Surfaces is phase 5 spec §4's openaicompat column. It is the only kind that
+// serves more than chat and embeddings, because OpenAI's own API defines all
+// seven and every OpenAI-compatible upstream inherits the shapes.
+//
+// A provider that serves only some of them is filtered by its *preset*
+// declaration, not here: this says what the adapter can render, and the catalog
+// says what the upstream actually offers.
+func (a *Adapter) Surfaces() adapter.SurfaceSet {
+	return adapter.SurfaceSet{
+		ir.SurfaceLLM:        true,
+		ir.SurfaceEmbedding:  true,
+		ir.SurfaceImage:      true,
+		ir.SurfaceTTS:        true,
+		ir.SurfaceSTT:        true,
+		ir.SurfaceRerank:     true,
+		ir.SurfaceModeration: true,
+	}
+}
+```
+
+Add `"github.com/darkraise/darkrouter/internal/ir"` to that file's imports if it is not already there, and assert the interface beside the file's other assertions:
+
+```go
+var _ adapter.SurfaceProvider = (*Adapter)(nil)
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/... -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS. `anthropic` and `gemini` declare nothing yet and default to `llm`, which is correct for both today — gemini's `embedding` arrives with Task 12, and anthropic serves chat only in the §4 matrix and always will.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing reads `SurfacesOf` yet; Task 8 wires it into the filter.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/adapter/adapter.go internal/adapter/adapter_test.go \
+  internal/adapter/openaicompat/classify.go internal/adapter/openaicompat/classify_test.go
+git commit -m "feat(adapter): declare implemented surfaces"
+```
+
+---
+
+### Task 8: The router filters on adapter support
+
+**Files:**
+- Modify: `internal/router/types.go`
+- Modify: `internal/router/filter.go`
+- Test: `internal/router/filter_test.go`
+
+**Interfaces:**
+- Consumes: `adapter.SurfaceSet` (Task 7).
+- Produces: `router.Snapshot.AdapterSurfaces map[string]adapter.SurfaceSet` and `router.SkipAdapterSurface`. Task 9 fills the map.
+
+**Implementer:** dcc-superpower-companions:impl-opus-medium
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 2 = 5
+**Approach:** inline - skip 2: `filterTarget` already has the ordered check list this extends, and spec §4 states the rule.
+
+Spec §4: "A surface an adapter does not implement makes that provider ineligible at routing time — a filter, never a runtime error." Two facts have to agree before a candidate survives, and they are different facts:
+
+- The **catalog** says what the upstream offers — preset-declared, per model.
+- The **adapter** says what Darkrouter can render — per kind.
+
+A `bedrock` provider whose preset declares `embedding` is a real upstream capability Darkrouter cannot yet speak. Routing to it would produce a confusing runtime failure instead of a clear "no provider offers this model on this surface".
+
+**A nil `AdapterSurfaces` map means no adapter constraint.** That is what lets this task land before Task 9 fills it, and it keeps the zero `Snapshot` — which several router tests build — routing exactly as it does today. Failing open on an unset map is also the right production default: a missing map is a wiring bug, and silently routing nothing would be a far worse symptom than routing as before.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/router/filter_test.go`:
+
+```go
+func TestAnAdapterThatCannotServeTheSurfaceIsFiltered(t *testing.T) {
+	// The catalog says the upstream offers embeddings; the adapter cannot
+	// render them. Routing anyway would turn a knowable gap into a runtime
+	// failure from the provider.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}})
+	snap.AdapterSurfaces = map[string]adapter.SurfaceSet{
+		"openaicompat": {ir.SurfaceLLM: true},
+	}
+
+	cands, skips, err := Resolve(Query{Model: "m", Surface: ir.SurfaceEmbedding}, snap)
+	if len(cands) != 0 {
+		t.Fatalf("got %d candidates for a surface the adapter cannot render", len(cands))
+	}
+	if err == nil {
+		t.Error("Resolve returned no error with no candidates")
+	}
+	var found bool
+	for _, s := range skips {
+		if s.Reason == SkipAdapterSurface {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no SkipAdapterSurface recorded; skips = %+v", skips)
+	}
+}
+
+func TestAnAdapterThatServesTheSurfaceIsKept(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}})
+	snap.AdapterSurfaces = map[string]adapter.SurfaceSet{
+		"openaicompat": {ir.SurfaceLLM: true, ir.SurfaceEmbedding: true},
+	}
+	cands, _, err := Resolve(Query{Model: "m", Surface: ir.SurfaceEmbedding}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 {
+		t.Errorf("got %d candidates, want 1", len(cands))
+	}
+}
+
+func TestANilAdapterSurfacesMapImposesNoConstraint(t *testing.T) {
+	// A missing map is a wiring bug. Routing nothing would be a far worse
+	// symptom than routing as before, and every phase 3 test builds a snapshot
+	// without one.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}})
+	if snap.AdapterSurfaces != nil {
+		t.Fatal("the fixture set a map; this test needs it nil")
+	}
+	cands, _, err := Resolve(Query{Model: "m", Surface: ir.SurfaceEmbedding}, snap)
+	if err != nil || len(cands) != 1 {
+		t.Errorf("got %d candidates, err = %v; a nil map must not filter", len(cands), err)
+	}
+}
+```
+
+Add `"github.com/darkraise/darkrouter/internal/adapter"` to the file's imports.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/router/ -run 'TestAnAdapterThat|TestANilAdapterSurfaces' -v
+```
+
+Expected: FAIL to build — `unknown field AdapterSurfaces`, `undefined: SkipAdapterSurface`.
+
+- [ ] **Step 3: Extend the snapshot and the skip vocabulary**
+
+In `internal/router/types.go`, add to `Snapshot`:
+
+```go
+	// AdapterSurfaces is what each provider kind's adapter can render, keyed by
+	// kind. It is a different fact from the catalog's surfaces: the catalog
+	// says what the upstream offers, this says what Darkrouter can speak.
+	//
+	// A nil map imposes no constraint. That is deliberate — a missing map is a
+	// wiring bug, and routing nothing would be a worse symptom than routing as
+	// before.
+	AdapterSurfaces map[string]adapter.SurfaceSet
+```
+
+and to the skip reasons:
+
+```go
+	// SkipAdapterSurface is a provider whose upstream offers the surface but
+	// whose kind Darkrouter cannot speak it to. It is reported separately from
+	// SkipSurface because the fix is different: one is a catalog gap the
+	// operator can close, the other is a Darkrouter gap they cannot.
+	SkipAdapterSurface SkipReason = "adapter_surface"
+```
+
+- [ ] **Step 4: Add the check**
+
+In `internal/router/filter.go`, immediately after the `Routable` check and before the capability check — durable configuration facts before transient ones, which is the ordering the file's existing comment fixes:
+
+```go
+	// The catalog said the upstream offers this surface; this asks whether
+	// Darkrouter can render it. Spec §4 makes an unimplemented surface a
+	// routing filter rather than a runtime error, because an operator reading
+	// "no provider offers this model on this surface" learns more than one
+	// reading a 404 the provider produced.
+	if q.Surface != "" && snap.AdapterSurfaces != nil {
+		if !snap.AdapterSurfaces[p.Kind].Has(q.Surface) {
+			return nil, []Skip{{
+				ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipAdapterSurface,
+			}}, true
+		}
+	}
+```
+
+- [ ] **Step 5: Extend `emptyReason`**
+
+`emptyReason` picks the error that best explains an empty candidate list. A chain emptied by this check must not report "every provider is cooling". In `internal/router/router.go`, add `SkipAdapterSurface` to whichever branch already maps `SkipSurface` to `ErrSurfaceUnsupported` — read the function and follow its existing shape rather than adding a parallel one. Both mean the same thing to a client: nothing offers this model on this surface.
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/router/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package. The phase 3 tests build snapshots with no `AdapterSurfaces`, so the nil-map path keeps them unchanged — that is what this task's third test asserts.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/router/types.go internal/router/filter.go internal/router/router.go internal/router/filter_test.go
+git commit -m "feat(router): filter on adapter surface support"
+```
+
+---
