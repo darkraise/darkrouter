@@ -7,8 +7,15 @@ import (
 )
 
 func rec(id string) *RequestRecord {
+	return recAt(id, time.Unix(1700000000, 0).UTC())
+}
+
+// recAt stamps the record with an explicit time. Retention prunes on ts, so a
+// test that writes records while a prune runs must use a current timestamp or
+// the prune legitimately deletes them.
+func recAt(id string, ts time.Time) *RequestRecord {
 	return &RequestRecord{
-		ID: id, TS: time.Unix(1700000000, 0).UTC(),
+		ID: id, TS: ts,
 		Dialect: "openai", Surface: "chat", RequestedModel: "m",
 		FinalProviderID: "groq", FinalModel: "m", Status: "success",
 		TokensIn: 10, TokensOut: 20,
