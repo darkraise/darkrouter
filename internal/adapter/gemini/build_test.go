@@ -178,3 +178,16 @@ func TestBuildRequestWarnsOnParallelToolCallsAndMetadata(t *testing.T) {
 		t.Errorf("warnings = %+v", warns)
 	}
 }
+
+func TestBuildRequestWarnsOnSystemCacheControl(t *testing.T) {
+	_, _, warns := built(t, &ir.Request{
+		System: []ir.ContentBlock{{
+			Type: ir.BlockText, Text: "cached preamble",
+			CacheControl: &ir.CacheControl{Type: "ephemeral", TTL: "1h"},
+		}},
+		Messages: []ir.Message{userMsg("hi")},
+	})
+	if !hasWarning(warns, "system[].cache_control") {
+		t.Errorf("warnings = %+v; systemInstruction is prose and cannot carry a marker", warns)
+	}
+}

@@ -194,3 +194,16 @@ func TestRenderMessagesKeepsInlineSystemTurnsInPlace(t *testing.T) {
 		t.Errorf("warnings = %+v; nothing was lost, so nothing is warned about", warns)
 	}
 }
+
+func TestRenderMessagesWarnsOnSystemCacheControl(t *testing.T) {
+	_, warns := rendered(t, &ir.Request{
+		System: []ir.ContentBlock{{
+			Type: ir.BlockText, Text: "cached preamble",
+			CacheControl: &ir.CacheControl{Type: "ephemeral", TTL: "1h"},
+		}},
+		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+	})
+	if !hasWarning(warns, "cache_control") {
+		t.Errorf("warnings = %+v; a cached system prompt is the most valuable marker there is", warns)
+	}
+}
