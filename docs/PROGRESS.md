@@ -6,7 +6,7 @@ Last updated: 2026-08-22
 
 | Phase | Spec | Plan | Status |
 |---|---|---|---|
-| 1 — Foundation | ✅ | ✅ | **Implemented.** Race-clean, `go vet` clean, binary builds, Docker image verified. Only the two provider-dependent manual checks remain — see below. |
+| 1 — Foundation | ✅ | ✅ | **Complete.** Race-clean, `go vet` clean, Docker image verified, all four manual checks passed. |
 | 2 — Persistence and health | ✅ | — | Not started |
 | 3 — Routing and failover | ✅ | — | Not started |
 | 4 — Dialects | ✅ | — | Not started |
@@ -78,28 +78,58 @@ healthcheck reaching `healthy`. Note when smoke-testing on a machine that
 already serves 8080/8081: compose *appends* to `ports` rather than replacing,
 so a port override file needs the `!override` tag.
 
-### 3. Manual checks against a real provider
+### 3. Manual checks against a real provider — done
 
-Two of the four are already confirmed, without a provider key, by running the
-binary against `darkrouter.example.yaml` and editing the file underneath it:
+All four verified against Groq on 2026-08-22 with `openai/gpt-oss-120b`.
 
-- ✅ A vim-style save (write temp file, rename over the original) hot-reloads
-  without a restart. Confirmed via a restart-only change appearing in
-  `/healthz` `warnings` within the debounce window.
-- ✅ An invalid edit is rejected, the gateway keeps serving on the previous
-  config, and `/healthz` reports `config_valid: false` with the parse error.
-  `/readyz` correctly stays 200, matching phase 1 spec §"`/readyz` fails only
-  when the process cannot serve at all".
+- ✅ **A vim-style save hot-reloads without a restart.** Write-temp-then-rename
+  over the original; a restart-only change appeared in `/healthz` `warnings`
+  within the debounce window.
+- ✅ **An invalid edit is rejected and the gateway keeps serving** on the
+  previous config, with `/healthz` reporting `config_valid: false` and the parse
+  error. `/readyz` correctly stays 200, matching the phase 1 spec's "`/readyz`
+  fails only when the process cannot serve at all".
+- ✅ **Tokens arrive incrementally, with time-to-first-token at or below the
+  provider's own.** Three interleaved samples, same prompt and model:
 
-Still outstanding — these need a real upstream and an API key:
+  | Sample | Direct to Groq | Through gateway |
+  |---|---|---|
+  | 1 | 739 ms | 559 ms |
+  | 2 | 742 ms | 551 ms |
+  | 3 | 674 ms | 510 ms |
 
-- A streaming `curl` returns tokens incrementally, with time-to-first-token
-  close to the provider's own.
-- The streamed response reports token usage, proving the `stream_options`
-  injection works against a real upstream.
+  The gateway is *faster* because `exec`'s shared `http.Transport` keeps a warm
+  connection to Groq, while each direct call pays a fresh TLS handshake. Content
+  chunks spread over ~170 ms in both cases, so nothing is being buffered.
+- ✅ **The streamed response reports token usage, and the injection is what
+  causes it.** Verified against a local capture upstream rather than inferred:
+  a client request carrying no `stream_options` was sent upstream as
+  `{"stream": true, "stream_options": {"include_usage": true}, ...}`. This
+  matters because Groq returns usage whether or not it is asked, so a live call
+  alone cannot distinguish injection from provider default.
 
-A Groq key (`GROQ_KEY`) satisfies the example configuration as written; any
-OpenAI-compatible provider works if `base_url` and `models` are adjusted.
+Note the example configuration previously named `llama-3.3-70b-versatile`, which
+Groq has decommissioned — any new user following the README got a 404. Updated
+to `openai/gpt-oss-120b` in `darkrouter.example.yaml` and `README.md`. The
+config fixtures in `internal/config/load_test.go` still use the old name, which
+is harmless: they never leave the process.
+
+### 3b. Two wire-format notes for phase 9
+
+Neither is a phase 1 defect — phase 1's spec requires only that the adapter
+inject `stream_options` — but phase 9's differential suite compares IR output
+against passthrough byte for byte, and both will surface there.
+
+- **The IR path emits a usage chunk the client never asked for.** Master design
+  §4.2 requires the injected chunk to be stripped so "the client's view is
+  identical to what it would have received directly", but scopes that to the
+  passthrough path. On the IR path the gateway currently forwards usage
+  unconditionally. OpenAI sends that chunk only when the client sets
+  `stream_options.include_usage`.
+- **The usage chunk carries a synthesized choice.** `chunk()` in
+  `internal/edge/openai/stream.go:14` always builds `choices: [{index, delta,
+  finish_reason}]`, so the usage chunk goes out with one empty-delta choice
+  where OpenAI emits `choices: []`.
 
 ### 4. One design decision still open
 
