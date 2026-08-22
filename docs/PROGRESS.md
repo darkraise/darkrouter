@@ -7,7 +7,7 @@ Last updated: 2026-08-22
 | Phase | Spec | Plan | Status |
 |---|---|---|---|
 | 1 — Foundation | ✅ | ✅ | **Complete.** Race-clean, `go vet` clean, Docker image verified, all four manual checks passed. |
-| 2 — Persistence and health | ✅ | — | Not started |
+| 2 — Persistence and health | ✅ | ✅ | Plan written, 18 tasks. Not started |
 | 3 — Routing and failover | ✅ | — | Not started |
 | 4 — Dialects | ✅ | — | Not started |
 | 5 — Auxiliary surfaces | ✅ | — | Not started |
