@@ -108,6 +108,27 @@ func (e *Executor) adapterFor(kind string) (adapter.Adapter, bool) {
 	return ad, ok
 }
 
+// modelInfo copies the catalog's view of one model into the adapter's plain
+// struct. A miss leaves the zero value, which every adapter reads as "the
+// catalog knows nothing".
+func modelInfo(cat catalog.Reader, providerID, modelID string) adapter.ModelInfo {
+	if cat == nil {
+		return adapter.ModelInfo{}
+	}
+	m, ok := cat.Lookup(providerID, modelID)
+	if !ok {
+		return adapter.ModelInfo{}
+	}
+	return adapter.ModelInfo{
+		ContextWindow:   m.ContextWindow,
+		MaxOutputTokens: m.MaxOutputTokens,
+		Adaptive:        m.Traits.Adaptive,
+		ManualBudget:    m.Traits.ManualBudget,
+		FreeSampling:    m.Traits.FreeSampling,
+		TraitsKnown:     m.Traits.Known,
+	}
+}
+
 // catalogFor returns the live snapshot, or phase 3's provider-derived view
 // when no catalog is wired. The fallback is what keeps a zero Deps usable.
 func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
@@ -194,7 +215,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	for _, p := range providers {
 		byID[p.ID] = p
 	}
-	e.runAttempts(w, r, d, cfg, req, cands, rec, start, byID)
+	e.runAttempts(w, r, d, cfg, req, cands, rec, start, byID, snap.Catalog)
 }
 
 // runAttempts drives the chain. The ordered list is fixed at snapshot time and
@@ -202,7 +223,8 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 // tripped a breaker since the snapshot was taken.
 func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Dialect,
 	cfg *config.Config, req *ir.Request, cands []router.Candidate,
-	rec *store.RequestRecord, start time.Time, byID map[string]provider.Provider) {
+	rec *store.RequestRecord, start time.Time, byID map[string]provider.Provider,
+	cat catalog.Reader) {
 
 	bud := newBudget(cfg.Policy.Timeout, start)
 	maxAttempts := cfg.Policy.Retry.MaxAttempts
@@ -250,7 +272,7 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 		}
 
 		attempts++
-		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts, ad)
+		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts, ad, cat)
 		if aerr != nil {
 			lastErr = aerr
 		}
@@ -288,7 +310,8 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 // be the last attempt.
 func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialect,
 	cfg *config.Config, req *ir.Request, c router.Candidate, p provider.Provider,
-	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter) (adapter.Outcome, int, *ir.Error) {
+	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
+	cat catalog.Reader) (adapter.Outcome, int, *ir.Error) {
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
@@ -300,7 +323,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 	})
 	defer timer.Stop()
 
-	tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model}
+	tgt := &adapter.Target{
+		BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model,
+		Info: modelInfo(cat, c.ProviderID, c.Model),
+	}
 	hr, warns, err := ad.BuildRequest(ctx, tgt, req)
 	if err != nil {
 		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
