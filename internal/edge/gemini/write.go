@@ -2,7 +2,6 @@ package gemini
 
 import (
 	"encoding/json"
-	"iter"
 	"net/http"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -122,9 +121,4 @@ func WriteError(w http.ResponseWriter, e *ir.Error) error {
 	return json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{"code": status, "message": e.Message, "status": name},
 	})
-}
-
-// writeStream is implemented in Task 28.
-func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error], asSSE bool) error {
-	return WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: "streaming not implemented"})
 }
