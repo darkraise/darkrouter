@@ -1,6 +1,7 @@
 package xlate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -60,7 +61,7 @@ func TestEffortBudgetRoundTrips(t *testing.T) {
 
 func TestRequiredMaxTokensPassesAnExplicitCapThrough(t *testing.T) {
 	n := 512
-	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic")
+	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic", 0)
 	if got != 512 {
 		t.Errorf("max_tokens = %d, want 512", got)
 	}
@@ -70,7 +71,7 @@ func TestRequiredMaxTokensPassesAnExplicitCapThrough(t *testing.T) {
 }
 
 func TestRequiredMaxTokensSubstitutesAndWarns(t *testing.T) {
-	got, warns := RequiredMaxTokens(&ir.Request{}, "anthropic")
+	got, warns := RequiredMaxTokens(&ir.Request{}, "anthropic", 0)
 	if got != DefaultMaxTokens {
 		t.Errorf("max_tokens = %d, want %d", got, DefaultMaxTokens)
 	}
@@ -81,7 +82,7 @@ func TestRequiredMaxTokensSubstitutesAndWarns(t *testing.T) {
 
 func TestRequiredMaxTokensTreatsZeroAsAbsent(t *testing.T) {
 	n := 0
-	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic")
+	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic", 0)
 	if got != DefaultMaxTokens || len(warns) != 1 {
 		t.Fatalf("max_tokens = %d, warnings = %+v", got, warns)
 	}
@@ -93,5 +94,75 @@ func TestSyntheticToolCallIDIsStableAndPositional(t *testing.T) {
 	}
 	if SyntheticToolCallID(0, 0) == SyntheticToolCallID(0, 1) {
 		t.Error("ids for two calls in one turn must differ")
+	}
+}
+
+func TestRequiredMaxTokensUsesTheCatalogMaximum(t *testing.T) {
+	// The carried-forward debt: 4096 was a constant because nothing knew the
+	// model's real cap.
+	got, warns := RequiredMaxTokens(&ir.Request{}, "anthropic", 64_000)
+	if got != 64_000 {
+		t.Errorf("max tokens = %d, want the catalog's 64000", got)
+	}
+	if len(warns) != 1 {
+		t.Fatalf("got %d warnings, want 1", len(warns))
+	}
+	if warns[0].Field != "max_tokens" {
+		t.Errorf("warning field = %q", warns[0].Field)
+	}
+	// The substitution has to be visible, or a truncated answer looks like the
+	// model stopping early.
+	if !strings.Contains(warns[0].Reason, "64000") {
+		t.Errorf("warning does not name the substituted value: %q", warns[0].Reason)
+	}
+}
+
+func TestRequiredMaxTokensClampsAnImpossibleAsk(t *testing.T) {
+	// Forwarding this is a 400 the client cannot diagnose. Clamping keeps a
+	// servable request servable, and the warning is what makes the shorter
+	// answer traceable to the substitution.
+	n := 200_000
+	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic", 64_000)
+	if got != 64_000 {
+		t.Errorf("max tokens = %d, want the clamp to 64000", got)
+	}
+	if len(warns) != 1 {
+		t.Fatalf("got %d warnings, want 1", len(warns))
+	}
+	if !strings.Contains(warns[0].Reason, "64000") {
+		t.Errorf("warning does not name the clamp: %q", warns[0].Reason)
+	}
+}
+
+func TestRequiredMaxTokensDoesNotClampAgainstAnUnknownMaximum(t *testing.T) {
+	n := 200_000
+	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic", 0)
+	if got != 200_000 || len(warns) != 0 {
+		t.Errorf("got (%d, %v); an unknown maximum must not clamp", got, warns)
+	}
+}
+
+func TestRequiredMaxTokensKeepsAServableClientValue(t *testing.T) {
+	n := 1000
+	got, warns := RequiredMaxTokens(&ir.Request{MaxTokens: &n}, "anthropic", 64_000)
+	if got != 1000 {
+		t.Errorf("max tokens = %d, want the client's 1000", got)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warned about a request that needed no substitution: %v", warns)
+	}
+}
+
+func TestEffortBudgetClampIsLive(t *testing.T) {
+	// The parameter existed from phase 4 and every caller passed 0, which
+	// disabled it.
+	if got := EffortBudget("high", 8192); got != 8192 {
+		t.Errorf("EffortBudget(high, 8192) = %d, want the clamp to 8192", got)
+	}
+	if got := EffortBudget("high", 0); got != 32768 {
+		t.Errorf("EffortBudget(high, 0) = %d, want the unclamped 32768", got)
+	}
+	if got := EffortBudget("low", 65536); got != 4096 {
+		t.Errorf("EffortBudget(low, 65536) = %d, want 4096", got)
 	}
 }

@@ -1,5 +1,5 @@
 [
-  "max_tokens -\u003e anthropic: required by the target and absent from the request; substituted 4096",
+  "max_tokens -\u003e anthropic: required by the target and absent from the request, and the catalog does not know the model's maximum; substituted 4096",
   "model -\u003e anthropic: unrecognized Anthropic model name; the thinking mode was guessed from the request",
   "reasoning.budget -\u003e anthropic: clamped below max_tokens, which Anthropic requires to be larger"
 ]

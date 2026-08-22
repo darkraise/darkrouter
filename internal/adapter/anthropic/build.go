@@ -30,7 +30,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		body["system"] = rendered
 	}
 
-	maxTok, w := xlate.RequiredMaxTokens(req, targetName)
+	maxTok, w := xlate.RequiredMaxTokens(req, targetName, t.Info.MaxOutputTokens)
 	warns = append(warns, w...)
 	body["max_tokens"] = maxTok
 
@@ -64,7 +64,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	case modeManual:
 		budget := req.Reasoning.Budget
 		if budget == 0 {
-			budget = xlate.EffortBudget(req.Reasoning.Effort, 0)
+			budget = xlate.EffortBudget(req.Reasoning.Effort, t.Info.MaxOutputTokens)
 		}
 		// max_tokens must be strictly greater than the budget. Clamping keeps a
 		// servable request servable; raising max_tokens instead would silently
