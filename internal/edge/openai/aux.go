@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -272,3 +274,117 @@ func (d *Dialect) WriteModeration(w http.ResponseWriter, resp *ir.ModerationResp
 }
 
 var _ edge.ModerationDialect = (*Dialect)(nil)
+
+type wireRerankRequest struct {
+	Model           string            `json:"model"`
+	Query           string            `json:"query"`
+	Documents       []json.RawMessage `json:"documents"`
+	TopN            *int              `json:"top_n"`
+	ReturnDocuments bool              `json:"return_documents"`
+}
+
+func ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireRerankRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if w.Query == "" {
+		return nil, errors.New("query is required")
+	}
+	if len(w.Documents) == 0 {
+		return nil, errors.New("documents is required and must not be empty")
+	}
+	req := &ir.RerankRequest{
+		Model: w.Model, Query: w.Query, ReturnDocuments: w.ReturnDocuments,
+		Documents: make([]string, 0, len(w.Documents)),
+	}
+	if w.TopN != nil {
+		req.TopN = *w.TopN
+	}
+	for i, raw := range w.Documents {
+		text, dropped, err := rerankDocument(raw)
+		if err != nil {
+			return nil, fmt.Errorf("documents[%d]: %w", i, err)
+		}
+		req.Documents = append(req.Documents, text)
+		if len(dropped) > 0 {
+			req.Warnings = append(req.Warnings, ir.Warning{
+				Field:  fmt.Sprintf("documents[%d]", i),
+				Target: "rerank",
+				Reason: "reranked on text alone; dropped " + strings.Join(dropped, ", "),
+			})
+		}
+	}
+	return req, nil
+}
+
+// rerankDocument reads one document, which Cohere v2 allows as a string or an
+// object. An object contributes its text field; every other field is reported
+// so the trace can say the document was ranked on less than it carried.
+func rerankDocument(raw json.RawMessage) (string, []string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", nil, errors.New("document is empty")
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return "", nil, err
+		}
+		return s, nil, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return "", nil, errors.New("document must be text or an object with a text field")
+	}
+	var text string
+	if t, ok := obj["text"]; ok {
+		if err := json.Unmarshal(t, &text); err != nil {
+			return "", nil, fmt.Errorf("text: %w", err)
+		}
+	}
+	if text == "" {
+		return "", nil, errors.New("document object has no text field")
+	}
+	dropped := make([]string, 0, len(obj))
+	for k := range obj {
+		if k != "text" {
+			dropped = append(dropped, k)
+		}
+	}
+	// Sorted so the warning text is stable: map iteration order would make an
+	// otherwise identical request produce a different trace line each time.
+	sort.Strings(dropped)
+	return text, dropped, nil
+}
+
+func WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error {
+	results := make([]any, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		row := map[string]any{"index": r.Index, "relevance_score": r.RelevanceScore}
+		// The key is omitted rather than null when the client did not ask for
+		// documents: a Cohere client tests for its presence.
+		if r.Document != "" {
+			row["document"] = map[string]any{"text": r.Document}
+		}
+		results = append(results, row)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(map[string]any{
+		"id": resp.ID, "results": results,
+	})
+}
+
+func (d *Dialect) ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error) {
+	return ParseRerank(r, maxBody)
+}
+
+func (d *Dialect) WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error {
+	return WriteRerank(w, resp)
+}
+
+var _ edge.RerankDialect = (*Dialect)(nil)

@@ -135,3 +135,10 @@ type Moderator interface {
 	// ParseModeration takes ownership of resp.Body and always closes it.
 	ParseModeration(resp *http.Response) (*ir.ModerationResponse, error)
 }
+
+// Reranker is implemented by an adapter serving the rerank surface.
+type Reranker interface {
+	BuildRerank(ctx context.Context, t *Target, req *ir.RerankRequest) (*http.Request, []ir.Warning, error)
+	// ParseRerank takes ownership of resp.Body and always closes it.
+	ParseRerank(resp *http.Response) (*ir.RerankResponse, error)
+}

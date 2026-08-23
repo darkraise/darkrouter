@@ -52,6 +52,15 @@ type ModerationDialect interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// RerankDialect is the inbound wire form of the rerank surface. Its shape is
+// Cohere v2, which Darkrouter adopts because OpenAI defines no rerank endpoint.
+type RerankDialect interface {
+	Name() string
+	ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error)
+	WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
 // CountWriter is implemented by a dialect with a token-counting endpoint.
 type CountWriter interface {
 	Dialect

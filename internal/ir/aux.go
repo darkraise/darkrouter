@@ -108,3 +108,37 @@ type ModerationResponse struct {
 	// than discarded.
 	Usage Usage
 }
+
+// RerankRequest is one Cohere-v2 rerank call. OpenAI defines no rerank
+// endpoint, so this shape is both the inbound contract and the outbound one.
+type RerankRequest struct {
+	Model string
+	Query string
+	// Documents is always text. Cohere v2 accepts document objects too; the
+	// edge takes their text field and warns about the rest, because a document
+	// reranked on its text alone is not something the response reveals.
+	Documents       []string
+	TopN            int // 0 when unset; zero is not a legal value
+	ReturnDocuments bool
+	// Warnings are what the inbound parse could not express. They ride on the
+	// request because the edge, not the adapter, is where the loss happens.
+	Warnings []Warning
+}
+
+// DocumentCount is recorded on the request row per spec §9.
+func (r *RerankRequest) DocumentCount() int { return len(r.Documents) }
+
+type RerankResult struct {
+	Index          int
+	RelevanceScore float64
+	// Document is populated only when the client set return_documents.
+	Document string
+}
+
+type RerankResponse struct {
+	ID      string
+	Model   string
+	Results []RerankResult
+	// Usage is zero: Cohere bills rerank in search units, not tokens.
+	Usage Usage
+}

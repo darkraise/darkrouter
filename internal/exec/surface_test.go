@@ -130,3 +130,41 @@ providers:
 		Deps{Catalog: cat, Log: rec})
 	return e, rec
 }
+
+// failoverPairPreset is failoverPair with the same preset named on both
+// providers and one model on each. Rerank needs it: the path is preset data,
+// so a provider with no preset cannot serve the surface at all.
+func failoverPairPreset(t *testing.T, urlA, urlB, preset, model string,
+	surfaces ...ir.Surface) (*Executor, *captureLogger) {
+
+	t.Helper()
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "bad", ModelID: model, State: catalog.StateLive, Surfaces: surfaces},
+		{ProviderID: "good", ModelID: model, State: catalog.StateLive, Surfaces: surfaces},
+	}, []string{"bad", "good"}))
+
+	rec := &captureLogger{}
+	body := `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: bad
+    kind: probe
+    preset: ` + preset + `
+    base_url: ` + urlA + `
+    api_key: sk
+    priority: 10
+    models: [` + model + `]
+  - id: good
+    kind: probe
+    preset: ` + preset + `
+    base_url: ` + urlB + `
+    api_key: sk
+    priority: 1
+    models: [` + model + `]
+`
+	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()},
+		Deps{Catalog: cat, Log: rec})
+	return e, rec
+}

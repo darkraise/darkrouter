@@ -238,3 +238,94 @@ func TestWriteModerationCarriesEveryCategory(t *testing.T) {
 		t.Errorf("scores = %v", body.Results[0].Scores)
 	}
 }
+
+func TestParseRerankReadsBothDocumentForms(t *testing.T) {
+	req, err := ParseRerank(httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"rerank-v3.5","query":"q","documents":["plain",{"text":"boxed"}],
+		  "top_n":1,"return_documents":true}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "rerank-v3.5" || req.Query != "q" {
+		t.Errorf("request = %+v", req)
+	}
+	if len(req.Documents) != 2 || req.Documents[0] != "plain" || req.Documents[1] != "boxed" {
+		t.Errorf("documents = %v", req.Documents)
+	}
+	if req.TopN != 1 || !req.ReturnDocuments {
+		t.Errorf("top_n = %d, return_documents = %v", req.TopN, req.ReturnDocuments)
+	}
+	if len(req.Warnings) != 0 {
+		t.Errorf("warnings = %v; neither document lost a field", req.Warnings)
+	}
+}
+
+func TestParseRerankWarnsOnDroppedDocumentFields(t *testing.T) {
+	// A document object with structured fields is reranked on its text alone.
+	// The client cannot tell that from the response, so the trace must.
+	req, err := ParseRerank(httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"m","query":"q","documents":[{"text":"t","title":"T","url":"u"}]}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want one", req.Warnings)
+	}
+	if !strings.Contains(req.Warnings[0].Reason, "title") ||
+		!strings.Contains(req.Warnings[0].Reason, "url") {
+		t.Errorf("warning = %q; it must name the dropped fields", req.Warnings[0].Reason)
+	}
+}
+
+func TestParseRerankRejectsAnUnusableRequest(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","documents":["a"]}`,
+		`{"model":"m","query":"q"}`,
+		`{"model":"m","query":"q","documents":[]}`,
+		`{"model":"m","query":"q","documents":[{"title":"no text"}]}`,
+	} {
+		if _, err := ParseRerank(httptest.NewRequest("POST", "/v1/rerank",
+			strings.NewReader(body)), 1<<20); err == nil {
+			t.Errorf("ParseRerank(%s) accepted an unusable request", body)
+		}
+	}
+}
+
+func TestWriteRerankEmitsCohereV2(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteRerank(w, &ir.RerankResponse{
+		ID: "r-1", Model: "rerank-v3.5",
+		Results: []ir.RerankResult{
+			{Index: 2, RelevanceScore: 0.98, Document: "kept"},
+			{Index: 0, RelevanceScore: 0.11},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Results []struct {
+			Index    int     `json:"index"`
+			Score    float64 `json:"relevance_score"`
+			Document *struct {
+				Text string `json:"text"`
+			} `json:"document"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != "r-1" || len(body.Results) != 2 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if body.Results[0].Index != 2 || body.Results[0].Score != 0.98 {
+		t.Errorf("first result = %+v", body.Results[0])
+	}
+	if body.Results[0].Document == nil || body.Results[0].Document.Text != "kept" {
+		t.Errorf("document = %v; a returned document was lost", body.Results[0].Document)
+	}
+	if body.Results[1].Document != nil {
+		t.Errorf("document = %v; a result with no document must omit the key entirely",
+			body.Results[1].Document)
+	}
+}
