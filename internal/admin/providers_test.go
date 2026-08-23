@@ -1,0 +1,262 @@
+package admin
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+func TestAProviderCanBeCreatedListedAndDeleted(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P One","kind":"openaicompat",
+		  "base_url":"https://x/v1","priority":7,"enabled":true}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	w = do(t, s, cookie, token, "GET", "/api/providers", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var list struct {
+		Providers []struct {
+			ID       string `json:"id"`
+			Priority int    `json:"priority"`
+			Enabled  bool   `json:"enabled"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Providers) != 1 || list.Providers[0].ID != "p1" {
+		t.Fatalf("providers = %+v", list.Providers)
+	}
+
+	w = do(t, s, cookie, token, "DELETE", "/api/providers/p1", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreatingAProviderWithADuplicateIDIsAConflict(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	body := `{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`
+
+	if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusCreated {
+		t.Fatalf("first create = %d", w.Code)
+	}
+	w := do(t, s, cookie, token, "POST", "/api/providers", body)
+	if w.Code != http.StatusConflict {
+		t.Errorf("duplicate create = %d, want 409", w.Code)
+	}
+}
+
+func TestCreatingAProviderFromAPresetFillsTheKindAndBaseURL(t *testing.T) {
+	// Spec §4: create from preset OR raw kind+base_url. From a preset the
+	// operator supplies an id and a key and nothing else, which is the whole
+	// point of shipping presets.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "POST", "/api/providers", `{"id":"groq","preset":"groq"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	w = do(t, s, cookie, token, "GET", "/api/providers", "")
+	var list struct {
+		Providers []struct {
+			Kind    string `json:"kind"`
+			BaseURL string `json:"base_url"`
+			Preset  string `json:"preset"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &list)
+	if len(list.Providers) != 1 {
+		t.Fatalf("providers = %+v", list.Providers)
+	}
+	if list.Providers[0].Kind == "" || list.Providers[0].BaseURL == "" {
+		t.Errorf("preset did not fill the row: %+v", list.Providers[0])
+	}
+	if list.Providers[0].Preset != "groq" {
+		t.Errorf("preset = %q; the name must be recorded or nothing joins the catalog",
+			list.Providers[0].Preset)
+	}
+}
+
+func TestCreatingAProviderFromAnUnknownPresetIsRejected(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","preset":"not-a-real-preset"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreatingAProviderWithNeitherPresetNorKindIsRejected(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "POST", "/api/providers", `{"id":"p1"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestPatchingAProviderChangesOnlyWhatItNames(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	_ = do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1",
+		  "priority":7,"enabled":true}`)
+
+	w := do(t, s, cookie, token, "PATCH", "/api/providers/p1", `{"enabled":false}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	w = do(t, s, cookie, token, "GET", "/api/providers", "")
+	var list struct {
+		Providers []struct {
+			Priority int  `json:"priority"`
+			Enabled  bool `json:"enabled"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &list)
+	if list.Providers[0].Enabled {
+		t.Error("enabled did not change")
+	}
+	if list.Providers[0].Priority != 7 {
+		t.Errorf("priority = %d; an unnamed field changed", list.Providers[0].Priority)
+	}
+}
+
+func TestPatchingAnUnknownProviderIsANotFound(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PATCH", "/api/providers/nope", `{"enabled":false}`)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestACredentialCanBeAddedAndDeleted(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	_ = do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
+
+	w := do(t, s, cookie, token, "POST", "/api/providers/p1/keys",
+		`{"label":"primary","secret":"sk-abcdef123456"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	if created.ID == "" {
+		t.Fatal("the created credential has no id")
+	}
+
+	w = do(t, s, cookie, token, "GET", "/api/providers", "")
+	var list struct {
+		Providers []struct {
+			Credentials []struct {
+				ID     string `json:"id"`
+				Label  string `json:"label"`
+				Masked string `json:"masked"`
+			} `json:"credentials"`
+		} `json:"providers"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &list)
+	creds := list.Providers[0].Credentials
+	if len(creds) != 1 || creds[0].Label != "primary" {
+		t.Fatalf("credentials = %+v", creds)
+	}
+	if !strings.HasSuffix(creds[0].Masked, "3456") || strings.Contains(creds[0].Masked, "abcdef") {
+		t.Errorf("masked = %q; it must show a suffix and hide the rest", creds[0].Masked)
+	}
+
+	w = do(t, s, cookie, token, "DELETE", "/api/providers/p1/keys/"+created.ID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeletingAProviderReportsTheAliasesItStrands(t *testing.T) {
+	// Master design §7: a dangling alias is a warning, not a validation error.
+	// Spec §6: treating it as an error would mean one UI delete makes every
+	// later config reload fail, leaving the operator with a reload button that
+	// keeps failing and no way out but SSH.
+	s, _ := testServerFullWithAliases(t, "  fast:\n    - p1/m\n")
+	cookie, token := login(t, s)
+	_ = do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
+
+	w := do(t, s, cookie, token, "DELETE", "/api/providers/p1", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		DanglingAliases []string `json:"dangling_aliases"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.DanglingAliases) != 1 || body.DanglingAliases[0] != "fast" {
+		t.Errorf("dangling = %v; the operator is not told what broke", body.DanglingAliases)
+	}
+}
+
+func TestDeletingAProviderWithNoAliasesReportsAnEmptyArray(t *testing.T) {
+	// Not null: the confirm dialog ranges over it.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	_ = do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
+
+	w := do(t, s, cookie, token, "DELETE", "/api/providers/p1", "")
+	if !strings.Contains(w.Body.String(), `"dangling_aliases":[]`) {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestPresetsAreListedForTheCreateForm(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/presets", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var body struct {
+		Presets []struct {
+			ID       string   `json:"id"`
+			Name     string   `json:"name"`
+			Kind     string   `json:"kind"`
+			BaseURL  string   `json:"base_url"`
+			Surfaces []string `json:"surfaces"`
+		} `json:"presets"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Presets) < 100 {
+		t.Fatalf("got %d presets; the shipped catalog holds ~197", len(body.Presets))
+	}
+	var groq bool
+	for _, p := range body.Presets {
+		if p.ID == "groq" {
+			groq = true
+			if p.Kind == "" || p.BaseURL == "" || len(p.Surfaces) == 0 {
+				t.Errorf("groq preset is incomplete: %+v", p)
+			}
+		}
+	}
+	if !groq {
+		t.Error("groq is not in the preset list")
+	}
+}

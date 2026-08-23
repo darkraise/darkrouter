@@ -91,6 +91,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.requireCSRF(s.handleLogout))
 
+	s.mux.HandleFunc("GET /api/presets", s.requireSession(s.handlePresets))
+	s.mux.HandleFunc("GET /api/providers", s.requireSession(s.handleListProviders))
+	s.mux.HandleFunc("POST /api/providers", s.requireCSRF(s.handleCreateProvider))
+	s.mux.HandleFunc("PATCH /api/providers/{id}", s.requireCSRF(s.handlePatchProvider))
+	s.mux.HandleFunc("DELETE /api/providers/{id}", s.requireCSRF(s.handleDeleteProvider))
+	s.mux.HandleFunc("POST /api/providers/{id}/keys", s.requireCSRF(s.handleAddCredential))
+	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
+
 	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 }
