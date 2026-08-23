@@ -12,7 +12,7 @@ Last updated: 2026-08-23
 | 4 — Dialects | ✅ | ✅ | **Complete.** 37 tasks; race-clean, verified live against Groq. |
 | 5 — Auxiliary surfaces | ✅ | ✅ | **Complete.** 34 tasks; race-clean, all seven surfaces served. |
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
-| 7 — Admin API and UI | ✅ | — | Not started |
+| 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | — | Not started |
 | 9 — Passthrough fast path | ✅ | — | Not started |
 
@@ -67,6 +67,60 @@ Two items phase 3 carried forward are done:
 
 Four smaller items are listed at the end of
 `docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
+
+## Closed by phase 7
+
+- **The admin API and dashboard exist.** Nineteen of the twenty-one endpoints
+  spec §4 lists; the two OAuth ones arrive with phase 8.
+- **Sessions survive a restart.** They live in the `sessions` table with a
+  sliding thirty-day expiry and a startup sweep, so a redeploy does not log the
+  operator out mid-task.
+- **CSRF is bound to the session by HMAC**, with an `Origin`/`Sec-Fetch-Site`
+  check beside it. Naive double-submit is defeated by an attacker who can set a
+  cookie for the host, which on a plain-HTTP LAN an active network attacker can.
+- **The proxy port ignoring cookies is now pinned by a test** rather than true by
+  accident.
+- **The request log is keyset-paginated** on `(ts, id)` with the composite and
+  filter indexes that make the promise real, and a cursor carrying a filter hash
+  so one presented under different filters is rejected rather than returning
+  nonsense.
+- **A provider's cooling credentials and cooling triples are both cleared by the
+  test button.** The triple half was written against `Snapshot.Offering`, which
+  answers "which providers serve this model" rather than "which models does this
+  provider serve"; passing it a provider id returned nothing and the triple
+  cooldowns were never cleared. Fixed with a regression test that fails against
+  the old code.
+- **The image builds the dashboard.** A Node stage runs before the Go stage, so
+  a clean checkout produces a binary carrying the real bundle rather than an
+  embedded placeholder — a `go:embed` of a `.gitkeep`-only directory compiles
+  and serves a broken page, which is what the build test now catches.
+
+## Carried forward from phase 7
+
+- **Cost is still never computed**, so the overview's spend tile and the trace
+  drawer's cost field both render an em-dash and say pricing is not wired. The
+  blocker is unchanged from phase 5: `ir.Usage.InputTokens` means different
+  things across adapters.
+- **`capture.bodies` still has no writer**, so the trace drawer's bodies panel
+  always reads "not captured".
+- **The probe's completion fallback is not implemented.** Spec §4.3 allows a
+  one-token completion where a kind has no listing endpoint; every kind that
+  ships today has one, so the fallback returns an explanatory error rather than
+  spending money on a path nothing exercises.
+- **The two OAuth endpoints are absent**, as scheduled: `POST /api/providers/:id/oauth/start`
+  and `GET /api/oauth/callback` arrive with phase 8. The settings screen shows a
+  credential disabled pending reconnection but cannot yet start one.
+- **`PATCH /api/providers/:id` does not accept `region` or `project`.** Spec §4
+  lists them; they are bedrock and vertex fields and neither kind is configurable
+  from the UI until phase 8 ships their credential flows.
+- **The per-provider discovery interval phase 6 filed against the settings screen
+  is still absent.** The screen edits providers, credentials and nothing else;
+  scheduling stays a config concern.
+- **Gemini media inlining still has no UI switch**, which phase 4 filed against
+  this screen. Spec §2 keeps policy in `darkrouter.yaml` and the screen renders
+  it read-only, so the toggle belongs in the file rather than here; the item
+  moves from "phase 7 will add it" to "it is a config key, and one nothing has
+  written yet".
 
 ## Closed by phase 6
 
@@ -414,6 +468,113 @@ moderations) and a Cohere key (rerank).
   is empty. Phase 6's verification caught a mechanism that passed every test and
   did nothing in production by reading this column, which is why it is read here
   rather than trusted.
+
+Both test ports were released and no process was left running. Ports 8080 and
+8081 were never touched.
+
+### 7. Phase 7 API verification against Groq — done
+
+Run on 2026-08-23 with a static `CGO_ENABLED=0` binary on ports
+18080/18081. The frontend is not built yet; the API was exercised with `curl`.
+
+- **The API is closed before login.** `overview`, `providers`, `models`,
+  `requests`, `usage`, `config` and `presets` all returned 401.
+  `auth/status` returned 200 with `{"authenticated":false}`, which is the one
+  endpoint the SPA needs open to decide whether to render the login screen.
+- **The session cookie is shaped correctly.** `Set-Cookie:
+  darkrouter_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax`, with
+  `Secure` **absent** — this is plain HTTP, and a Secure cookie here would be
+  dropped by the browser and login would silently never work.
+- **CSRF and Origin both hold against a real client.** No token → 403; correct
+  token with `Origin: https://evil.example` → 403; correct token with neither
+  `Origin` nor `Sec-Fetch-Site` → 403; correct token with
+  `Sec-Fetch-Site: same-origin` → 200. The third is the one worth stating: a
+  client sending neither header is refused, so the check is not decorative.
+- **The proxy port ignores the admin cookie.** With `server.proxy_token` set,
+  a chat request carrying the admin session cookie and no bearer token returned
+  401; the same request with the bearer token returned 200. Cookies are not
+  port-scoped, so this is the property that keeps a logged-in operator's browser
+  from being an authenticated proxy client for any page they visit.
+- **Provider CRUD and the probe work end to end.** Created `groq2` from the
+  `groq` preset (201), added a credential (201), probed it: `ok: true`,
+  `model_count: 13`, `latency_ms: 182` against the real Groq listing endpoint.
+- **No credential material reached any response.** The key does not appear in
+  `GET /api/providers` in any form; both credentials render as a label plus
+  `…Q1um`, which is exactly the key's last four characters and nothing more.
+- **The request log and trace read correctly.** A page carried a `next_cursor`;
+  the trace carried `candidates`, `skips`, `attempts`, `warnings` and a `bodies`
+  array that is `[]` rather than `null` — `capture.bodies` has no writer, and
+  the drawer has to be able to range over it.
+
+One observation, not a phase 7 defect: `AttemptRecord.Seq` is 0-indexed at the
+source (`Seq: len(rec.Attempts)` in `exec.recordAttempt`, phase 3), so the first
+attempt of a request is attempt 0. The trace endpoint reports what is stored; the
+drawer renders it 1-based, because "Attempt 0" reads as a bug to an operator.
+
+Both test ports were released and no process was left running. Ports 8080 and
+8081 were never touched.
+
+### 8. Phase 7 full-stack verification against Groq — done
+
+Run on 2026-08-24 with a static `CGO_ENABLED=0` binary on ports 18080/18081,
+`DARKROUTER_ADMIN_PASSWORD_HASH` set from `darkrouter hash-password`. Section 7
+exercised the API with `curl`; this drives the built frontend and the real
+screens' request sequence.
+
+- **The dashboard is served from the binary and every deep link resolves.** `/`,
+  `/requests`, `/catalog`, `/playground`, `/settings` and `/requests/01ABC` all
+  returned `200 text/html`, with an `id="root"` mount point and
+  `<script type="module" crossorigin src="/assets/index-kCLcAtgC.js">` — a real
+  hashed bundle, not the placeholder a `.gitkeep`-only embed would serve.
+- **A browser-shaped login drives all five screens.** One `POST /api/auth/login`
+  with `Sec-Fetch-Site: same-origin` returned a CSRF token and a cookie; the
+  seven endpoints the screens fetch on load — `overview`, `models`, `requests`,
+  `usage`, `config`, `presets`, `providers` — all returned 200 on that session.
+- **A provider was added from a preset and its models discovered without editing
+  a file.** `POST /api/providers {"id":"groq-ui","preset":"groq"}` → 201, a
+  credential → 201, `POST .../test` → `ok: true, model_count: 13,
+  latency_ms: 247`, and `GET /api/models?q=gpt-oss` then listed three models
+  carrying both `groq` and `groq-ui` as providers.
+- **The failover trace explains every attempt.** A second provider created from
+  the same preset, then `PATCH`ed to `http://127.0.0.1:1`, was tried first on
+  priority 99. The trace carries two attempts — attempt 0 `broken` →
+  `retryable_provider` with `dial tcp 127.0.0.1:1: connect: connection refused`,
+  attempt 1 `groq` → `success` `http=200` `739ms` — and a three-entry
+  `candidates` array.
+- **A skipped candidate says why.** Ten concurrent requests tripped the breaker
+  and ten of the twelve resulting traces carry
+  `broken/<key>/openai/gpt-oss-120b:cooling` in `skips` with a single attempt.
+  Worth stating why the first sequential attempt did not produce one: the
+  cooldown ladder starts at one second and a Groq round trip is longer than
+  that, so each sequential request found the triple already reopened as the
+  half-open probe. That is the ladder working, not a missed trip.
+- **Deleting a provider names the stranded aliases and the reload still works.**
+  `DELETE /api/providers/groq` returned `{"dangling_aliases":["fast"]}`, and the
+  immediately following `POST /api/config/reload` returned `{"valid":true}`,
+  with `GET /api/config` still reporting `valid: true`. This is the criterion
+  the dangling-alias-is-a-warning rule exists for: a delete that could invalidate
+  the config would leave the operator with a reload button that keeps failing.
+- **No credential material reached any response.** The key does not appear in
+  any of the seven screen endpoints' bodies; the surviving credential renders as
+  `primary` plus `…Q1um`.
+
+Six of spec §8's seven criteria were exercised here; the seventh, `go test ./...`
+and the frontend build, is the standing gate every task ran. **One criterion was
+verified only in part:** "the overview shows a provider entering and leaving
+cooldown within one poll interval" was confirmed as data — the breaker trips and
+the router skips — but the overview's `cooling` count stayed at 0 throughout,
+because it counts credential-level cooldowns and a `retryable_provider` outcome
+cools the `(provider, key, model)` triple instead. The tile is not wrong, but a
+provider failing this way does not show as cooling on the overview. Filed as an
+observation rather than a fix: which cooldowns the tile should count is a phase 2
+question about breaker key shapes, not a rendering bug.
+
+One further observation, not a phase 7 defect: **a dangling alias created by a UI
+delete is reported once and then invisible.** The delete response names it, but
+neither `GET /api/config` nor `/healthz` carries a standing warning afterwards,
+because the loader computes that warning at parse time against the yaml
+`providers:` block — which is ignored once providers have been imported into the
+database.
 
 Both test ports were released and no process was left running. Ports 8080 and
 8081 were never touched.
