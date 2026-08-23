@@ -21,6 +21,7 @@ import (
 	bedrockadapter "github.com/darkraise/darkrouter/internal/adapter/bedrock"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/admin"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -133,6 +134,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		"anthropic":    anthropicadapter.New(),
 		"gemini":       geminiadapter.New(),
 		"bedrock":      bedrockadapter.New(),
+		"vertex":       vertexadapter.New(),
 	}, exec.Deps{
 		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
 		Auth: authManager,
