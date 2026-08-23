@@ -414,3 +414,167 @@ func responsesImageBlock(imageURL, fileID string) (ir.ContentBlock, error) {
 	}
 	return ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{URL: imageURL}}, nil
 }
+
+// responsesID marks the id as one Darkrouter cannot resolve. Master design and
+// spec §5: no resolvable ids are minted, so the prefix makes that legible in a
+// log line and store:false makes it legible to the client.
+func responsesID(upstream string) string {
+	if upstream == "" {
+		return "resp_dr_darkrouter"
+	}
+	return "resp_dr_" + upstream
+}
+
+// responsesItemID names an output item. It is derived from the response id and
+// the item's position so that the streamed events and the final object agree —
+// a client correlates deltas to items by this value.
+func responsesItemID(respID, kind string, index int) string {
+	return fmt.Sprintf("%s_%s_%d", strings.TrimPrefix(respID, "resp_dr_"), kind, index)
+}
+
+// responsesStatus maps a stop reason onto the Responses status pair. A client
+// reading "completed" stops asking, so a truncated or filtered answer must not
+// claim it.
+func responsesStatus(s ir.StopReason) (string, string) {
+	switch s {
+	case ir.StopMaxTokens:
+		return "incomplete", "max_output_tokens"
+	case ir.StopContentFilter:
+		return "incomplete", "content_filter"
+	default:
+		return "completed", ""
+	}
+}
+
+// responsesBody assembles the object both the unary path and the streamed
+// response.completed event return. It is one function so the two cannot drift
+// on the fields a client reads last.
+func responsesBody(id string, resp *ir.Response, status, incomplete string, echo *responsesEcho) map[string]any {
+	output := make([]any, 0, len(resp.Content))
+	var text strings.Builder
+	for _, b := range resp.Content {
+		idx := len(output)
+		switch b.Type {
+		case ir.BlockThinking:
+			if b.Thinking == nil || b.Thinking.Text == "" {
+				continue
+			}
+			output = append(output, map[string]any{
+				"type": "reasoning",
+				"id":   responsesItemID(id, "rs", idx),
+				"summary": []any{map[string]any{
+					"type": "summary_text", "text": b.Thinking.Text,
+				}},
+			})
+		case ir.BlockText:
+			if b.Text == "" {
+				continue
+			}
+			text.WriteString(b.Text)
+			output = append(output, map[string]any{
+				"type": "message", "id": responsesItemID(id, "msg", idx),
+				"status": "completed", "role": "assistant",
+				"content": []any{map[string]any{
+					"type": "output_text", "text": b.Text, "annotations": []any{},
+				}},
+			})
+		case ir.BlockToolUse:
+			if b.ToolUse == nil {
+				continue
+			}
+			args := string(b.ToolUse.Input)
+			if args == "" {
+				args = "{}"
+			}
+			output = append(output, map[string]any{
+				"type": "function_call", "id": responsesItemID(id, "fc", idx),
+				"call_id": b.ToolUse.ID, "name": b.ToolUse.Name,
+				"arguments": args, "status": "completed",
+			})
+		}
+	}
+
+	body := map[string]any{
+		"id":         id,
+		"object":     "response",
+		"created_at": now().Unix(),
+		"status":     status,
+		"model":      resp.Model,
+		// Darkrouter persists nothing, and this is the field a Responses client
+		// reads to learn the id cannot be referenced later.
+		"store":       false,
+		"output":      output,
+		"output_text": text.String(),
+		"usage":       responsesUsage(resp.Usage),
+	}
+	// Always present, null when there is nothing to report: an SDK reads
+	// through both without a presence check.
+	body["error"] = nil
+	body["incomplete_details"] = nil
+	if incomplete != "" {
+		body["incomplete_details"] = map[string]any{"reason": incomplete}
+	}
+	applyResponsesEcho(body, echo)
+	return body
+}
+
+// applyResponsesEcho fills the request-derived fields. tools, tool_choice and
+// parallel_tool_calls have no default in the SDK's model, so they are written
+// even when the request omitted them.
+func applyResponsesEcho(body map[string]any, echo *responsesEcho) {
+	body["tools"] = json.RawMessage("[]")
+	body["tool_choice"] = json.RawMessage(`"auto"`)
+	body["parallel_tool_calls"] = true
+	body["instructions"] = nil
+	body["metadata"] = map[string]string{}
+	body["temperature"] = nil
+	body["top_p"] = nil
+	body["max_output_tokens"] = nil
+	if echo == nil {
+		return
+	}
+	if len(echo.Tools) > 0 {
+		body["tools"] = echo.Tools
+	}
+	if len(echo.ToolChoice) > 0 {
+		body["tool_choice"] = echo.ToolChoice
+	}
+	if echo.ParallelToolCalls != nil {
+		body["parallel_tool_calls"] = *echo.ParallelToolCalls
+	}
+	if echo.Instructions != "" {
+		body["instructions"] = echo.Instructions
+	}
+	if echo.Metadata != nil {
+		body["metadata"] = echo.Metadata
+	}
+	if echo.Temperature != nil {
+		body["temperature"] = *echo.Temperature
+	}
+	if echo.TopP != nil {
+		body["top_p"] = *echo.TopP
+	}
+	if echo.MaxOutputTokens != nil {
+		body["max_output_tokens"] = *echo.MaxOutputTokens
+	}
+}
+
+func responsesUsage(u ir.Usage) map[string]any {
+	body := map[string]any{
+		"input_tokens":  u.InputTokens,
+		"output_tokens": u.OutputTokens,
+		"total_tokens":  u.InputTokens + u.OutputTokens,
+	}
+	// The details objects are always present: an SDK reads through them
+	// without a nil check, unlike chat's, where OpenAI itself omits them.
+	body["input_tokens_details"] = map[string]any{"cached_tokens": u.CacheReadTokens}
+	body["output_tokens_details"] = map[string]any{"reasoning_tokens": u.ReasoningTokens}
+	return body
+}
+
+func WriteResponses(w http.ResponseWriter, resp *ir.Response, echo *responsesEcho) error {
+	id := responsesID(resp.ID)
+	status, incomplete := responsesStatus(resp.StopReason)
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(responsesBody(id, resp, status, incomplete, echo))
+}
