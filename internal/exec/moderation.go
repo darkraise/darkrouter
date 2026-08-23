@@ -52,6 +52,16 @@ func (o *moderationOp) Respond(cw *CommitWriter, resp *http.Response, ac *Attemp
 	ac.Rec.FinalModel = ac.Cand.Model
 	ac.Rec.Warnings = warningStrings(ac.Warns)
 
+	flagged := 0
+	for _, r := range out.Results {
+		if r.Flagged {
+			flagged++
+		}
+	}
+	ac.Rec.SurfaceMeta = map[string]any{
+		"input_count": o.req.InputCount(), "flagged_count": flagged,
+	}
+
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteModeration(cw, out)
 	return adapter.OutcomeSuccess, nil
