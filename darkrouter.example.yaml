@@ -12,6 +12,10 @@ server:
 providers:
   - id: groq
     kind: openaicompat
+    # preset connects this provider to its shipped metadata: pricing, model
+    # capabilities, quirks, and the surfaces it serves. Omitting it leaves the
+    # provider a base URL and a key, with none of those applied.
+    preset: groq
     base_url: https://api.groq.com/openai/v1
     api_key: ${GROQ_KEY}
     priority: 10
