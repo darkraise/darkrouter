@@ -4006,7 +4006,7 @@ func TestAnEmbeddingRequestWithNoEmbeddingProviderIsRefused(t *testing.T) {
 Add three catalog helpers beside `catalogWith`, each returning a `*catalog.Store` holding one live snapshot:
 
 - `catalogPair(a, b, model string, surfaces ...ir.Surface)` — the same model on two providers, `a` first.
-- `catalogAlias(aProvider, aModel, bProvider, bModel string, surfaces ...ir.Surface)` — two *different* models, reached through an alias named `embed`. The alias is declared in the config `executorForTwo` builds.
+- `catalogAlias(aProvider, aModel, bProvider, bModel string, surfaces ...ir.Surface)` — two *different* models behind one alias. Aliases live in configuration as `map[string][]string` of `provider/model` strings, not in the catalog, so this helper cannot declare one on its own: have it return the store **and** the two `provider/model` strings, and have `executorForTwo` write them into the config it builds under the alias name **`embed`**. Every test that wants a cross-model failover requests the model `embed`, on whichever surface — the name is the alias, not the surface.
 - `executorForTwo(t, urlA, urlB string, cat *catalog.Store)` — `executorForOp` with two providers, both of kind `probe`, in the order given.
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -7144,7 +7144,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"mime"
 	"mime/multipart"
 	"net/http/httptest"
 	"strings"
@@ -7316,7 +7315,24 @@ func TestParseFormRejectsANonMultipartBody(t *testing.T) {
 }
 ```
 
-Add two small helpers to the same file: `reparse(t, body []byte, contentType string) *Form` builds a request from the rendered bytes and calls `ParseForm`, and `Form.File(name)`/`Form.FileName(name)` return a file part's contents and filename. `File` and `FileName` are exported methods on `Form` in Step 3, because Task 23's tests use them too. `mime.ParseMediaType` is imported for the boundary check.
+`File` and `FileName` are exported methods on `Form`, written in Step 3, because Task 23's tests use them too. Add `reparse` to the test file:
+
+```go
+// reparse reads a rendered form back, which is how a test asserts on what the
+// upstream would actually receive rather than on the writer's intentions.
+func reparse(t *testing.T, body []byte, contentType string) *Form {
+	t.Helper()
+	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", bytes.NewReader(body))
+	r.Header.Set("Content-Type", contentType)
+	f, err := ParseForm(r, 1<<20)
+	if err != nil {
+		t.Fatalf("rendered form did not parse: %v", err)
+	}
+	return f
+}
+```
+
+The test file's import block therefore needs `bytes`, `errors`, `io`, `mime/multipart`, `net/http/httptest`, `strings`, `testing` and the `ir` package. It does **not** need `mime` — that import belongs to `multipart.go`, for the boundary check.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -7339,6 +7355,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -7413,7 +7430,10 @@ func ParseForm(r *http.Request, max int64) (*Form, error) {
 		remaining -= int64(len(buf))
 		f.parts = append(f.parts, formPart{
 			name: p.FormName(), filename: p.FileName(),
-			header: p.Header.Clone(), value: buf,
+			// textproto.MIMEHeader has no Clone; only http.Header does. A
+			// shallow copy is right here because the values are never mutated,
+			// and the header must be copied because the reader reuses the part.
+			header: maps.Clone(p.Header), value: buf,
 		})
 	}
 	if len(f.parts) == 0 {
@@ -7556,7 +7576,6 @@ package openaicompat
 import (
 	"context"
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -7611,7 +7630,6 @@ func TestBuildTranscriptionIsReplayable(t *testing.T) {
 	if string(got) != "AUDIO" {
 		t.Errorf("replayed body = %q", got)
 	}
-	_ = strings.TrimSpace("")
 }
 ```
 
@@ -7759,7 +7777,7 @@ func TestATranscriptionSurvivesAFirstProviderFailure(t *testing.T) {
 	e, rec := executorForTwo(t, bad.URL, good.URL,
 		catalogAlias("bad", "whisper-1", "good", "distil-whisper", ir.SurfaceSTT))
 	w := httptest.NewRecorder()
-	body, ct := buildForm(t, [][2]string{{"model", "speech"}}, [2]string{"a.mp3", "AUDIO"}, true)
+	body, ct := buildForm(t, [][2]string{{"model", "embed"}}, [2]string{"a.mp3", "AUDIO"}, true)
 	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(body))
 	r.Header.Set("Content-Type", ct)
 	e.HandleTranscriptions(w, r, openaiedge.New())
@@ -7966,9 +7984,15 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 	ac.Rec.Warnings = warningStrings(ac.Warns)
 
 	if strings.HasPrefix(ct, "application/json") {
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTranscriptBytes))
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTranscriptBytes+1))
 		if err != nil {
 			return failedParse(ac, resp, fmt.Errorf("read transcription response: %w", err))
+		}
+		if int64(len(raw)) > maxTranscriptBytes {
+			// Forwarding the truncated prefix would send the client invalid
+			// JSON under a 200. An oversized body is a provider fault.
+			return failedParse(ac, resp,
+				fmt.Errorf("transcription response exceeds %d bytes", int64(maxTranscriptBytes)))
 		}
 		// Read for the record only. The bytes go out unchanged, because
 		// verbose_json carries per-segment timings and log-probabilities that
@@ -8077,9 +8101,9 @@ In `internal/server/server.go`, beside the images route:
 	}))
 ```
 
-- [ ] **Step 5: Declare the surface**
+- [ ] **Step 5: Confirm the surface is already declared**
 
-In `internal/adapter/openaicompat/classify.go`, add `ir.SurfaceSTT` to the `Surfaces()` set Task 7 wrote, if it is not already present. The §4 matrix gives `openaicompat` all seven surfaces except none — check the set against the matrix and correct it rather than assuming.
+Task 7 gives `openaicompat` all seven surfaces from the §4 matrix, so `ir.SurfaceSTT` is already in its `Surfaces()` set and **no edit is expected here**. Read `internal/adapter/openaicompat/classify.go` and confirm it; if the value is missing, Task 7 was implemented against the wrong matrix row and that is the bug to fix, not this line.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
@@ -11251,18 +11275,18 @@ Add to `internal/store/log_test.go`:
 
 ```go
 func TestRequestRowCarriesSurfaceDetail(t *testing.T) {
-	db := testDB(t)
+	db := migrated(t)
 	w := NewLogWriter(db, LogOptions{})
 	rec := &RequestRecord{
 		ID: "r1", TS: time.Now(), Dialect: "openai", Surface: "embedding",
 		RequestedModel: "e5", Status: "success",
 		SurfaceMeta: map[string]any{"input_count": 3, "dimensions": 256},
 	}
-	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
-	if err := db.SQL().QueryRow(
+	if err := db.Read.QueryRow(
 		`SELECT surface_meta_json FROM requests WHERE id = 'r1'`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
@@ -11278,17 +11302,17 @@ func TestRequestRowCarriesSurfaceDetail(t *testing.T) {
 func TestARecordWithNoSurfaceDetailStoresAnEmptyObject(t *testing.T) {
 	// The column is NOT NULL. A nil map must encode as {} rather than null, or
 	// every chat row fails the insert.
-	db := testDB(t)
+	db := migrated(t)
 	w := NewLogWriter(db, LogOptions{})
 	rec := &RequestRecord{
 		ID: "r2", TS: time.Now(), Dialect: "openai", Surface: "llm",
 		RequestedModel: "m", Status: "success",
 	}
-	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
-	if err := db.SQL().QueryRow(
+	if err := db.Read.QueryRow(
 		`SELECT surface_meta_json FROM requests WHERE id = 'r2'`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
@@ -11300,19 +11324,19 @@ func TestARecordWithNoSurfaceDetailStoresAnEmptyObject(t *testing.T) {
 func TestRequestRowCarriesResponseSizeAndType(t *testing.T) {
 	// Spec §7: a truncated audio body cannot be signalled in-band, so this is
 	// the only place the truncation appears.
-	db := testDB(t)
+	db := migrated(t)
 	w := NewLogWriter(db, LogOptions{})
 	rec := &RequestRecord{
 		ID: "r3", TS: time.Now(), Dialect: "openai", Surface: "tts",
 		RequestedModel: "tts-1", Status: "success",
 		ResponseBytes: 204800, ResponseContentType: "audio/mpeg",
 	}
-	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	var n int64
 	var ct string
-	if err := db.SQL().QueryRow(
+	if err := db.Read.QueryRow(
 		`SELECT response_bytes, response_content_type FROM requests WHERE id = 'r3'`).
 		Scan(&n, &ct); err != nil {
 		t.Fatal(err)
@@ -11325,9 +11349,9 @@ func TestRequestRowCarriesResponseSizeAndType(t *testing.T) {
 func TestSurfaceDetailIsQueryable(t *testing.T) {
 	// A JSON column is only defensible if phase 7 can filter on it. This is
 	// the assertion that keeps it defensible.
-	db := testDB(t)
+	db := migrated(t)
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.flush(context.Background(), []*RequestRecord{
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{
 		{ID: "a", TS: time.Now(), Dialect: "openai", Surface: "image",
 			RequestedModel: "m", Status: "success",
 			SurfaceMeta: map[string]any{"image_count": 4}},
@@ -11338,7 +11362,7 @@ func TestSurfaceDetailIsQueryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var id string
-	if err := db.SQL().QueryRow(
+	if err := db.Read.QueryRow(
 		`SELECT id FROM requests WHERE json_extract(surface_meta_json, '$.image_count') > 2`).
 		Scan(&id); err != nil {
 		t.Fatal(err)
@@ -11349,7 +11373,7 @@ func TestSurfaceDetailIsQueryable(t *testing.T) {
 }
 ```
 
-Add `"encoding/json"` to the imports if absent. If `LogWriter.flush` is spelled differently or `DB.SQL()` is not the accessor, **read `log_test.go` and `db.go` first and follow whatever they already use** — do not add an accessor for the test's convenience.
+Add `"encoding/json"` and `"context"` to the imports if absent. The names above are the real ones and were checked against the tree: the batch helper is `migrated(t)` from `migrate_test.go` (not `testDB`); the ctx-taking, `(int, error)`-returning writer is `(*LogWriter).writeBatch` (`flush` is the timer-driven wrapper, `func(batch *[]*RequestRecord)`, with no context and no returns); and `DB` exposes `Read`, `Write` and `Sync` as fields rather than an accessor method.
 
 Add to `internal/store/migrate_test.go`:
 
@@ -11374,7 +11398,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := strings.ToUpper(ms[2].SQL)
+	body := strings.ToUpper(ms[2].sql)
 	for _, forbidden := range []string{"DROP TABLE", "DROP COLUMN", "DELETE FROM"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("migration 3 contains %q", forbidden)
@@ -11386,7 +11410,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 }
 ```
 
-Match `ms[2].SQL` to whatever field `loadMigrations` actually returns — read `migrate.go` before writing this.
+The field is the unexported `sql`, which a same-package test can read; `loadMigrations` is the real function name.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -11445,7 +11469,7 @@ In `internal/store/log.go`, add to `RequestRecord` after `Warnings`:
 	ResponseContentType string
 ```
 
-Extend the `INSERT` in `flush` with the three columns and three placeholders, and in `insertOne`:
+Extend the `INSERT` in **`writeBatch`** — not in `flush`, which only drains the channel — with the three columns and three placeholders, and in `insertOne`:
 
 ```go
 	// The column is NOT NULL and defaults to an empty object, so a nil map must
@@ -11475,24 +11499,92 @@ Expected: PASS, every test in the package.
 
 A fresh database is created by running every migration in order, so a fresh-start test never exercises the upgrade path that production takes.
 
+`sqlite3` is **not installed on this machine** — checked. Write a one-off query tool once and reuse it here and in Task 34:
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+mkdir -p /tmp/dbq
+cat > /tmp/dbq/main.go <<'EOF'
+// Command dbq prints the rows of one query. It exists because sqlite3 is not
+// installed and the verification steps have to read the database.
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"os"
+	"strings"
+
+	_ "modernc.org/sqlite"
+)
+
+func main() {
+	db, err := sql.Open("sqlite", "file:"+os.Args[1]+"?mode=ro")
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	rows, err := db.Query(os.Args[2])
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	fmt.Println(strings.Join(cols, " | "))
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			panic(err)
+		}
+		out := make([]string, len(vals))
+		for i, v := range vals {
+			out[i] = fmt.Sprintf("%v", v)
+		}
+		fmt.Println(strings.Join(out, " | "))
+	}
+	if err := rows.Err(); err != nil {
+		panic(err)
+	}
+}
+EOF
+```
+
+Run it from the repository root so it resolves `modernc.org/sqlite` from this module: `go run /tmp/dbq/main.go <db-path> "<query>"`.
+
+Now exercise the **upgrade** path, which a fresh database never takes:
+
 ```bash
 export PATH=$PATH:/usr/local/go/bin
 export DARKROUTER_MASTER_KEY=throwaway-verify-key
 rm -rf /tmp/dr-migrate && mkdir -p /tmp/dr-migrate
-git stash list >/dev/null 2>&1
-git stash push -- internal/store/migrations/0003_surfaces.sql
-go run ./cmd/darkrouter --config darkrouter.example.yaml --data /tmp/dr-migrate &
-sleep 2; kill "$(ps -C darkrouter -o pid= | head -1)" 2>/dev/null
-git stash pop
-go run ./cmd/darkrouter --config darkrouter.example.yaml --data /tmp/dr-migrate &
-sleep 2; kill "$(ps -C darkrouter -o pid= | head -1)" 2>/dev/null
-sqlite3 /tmp/dr-migrate/darkrouter.db '.schema requests' | grep -E 'surface_meta|response_bytes|response_content_type'
-sqlite3 /tmp/dr-migrate/darkrouter.db 'SELECT version FROM schema_migrations ORDER BY version'
+sed -e 's/:8080/:18080/' -e 's/:8081/:18081/' darkrouter.example.yaml > /tmp/dr-migrate/dr.yaml
+
+# Build once WITHOUT the new migration, so the database lands at version 2.
+mv internal/store/migrations/0003_surfaces.sql /tmp/dr-migrate/0003.sql.hold
+go build -o /tmp/dr-migrate/dr-v2 ./cmd/darkrouter
+mv /tmp/dr-migrate/0003.sql.hold internal/store/migrations/0003_surfaces.sql
+go build -o /tmp/dr-migrate/dr-v3 ./cmd/darkrouter
+
+/tmp/dr-migrate/dr-v2 -config /tmp/dr-migrate/dr.yaml -db /tmp/dr-migrate/dr.db >/tmp/dr-migrate/v2.log 2>&1 &
+sleep 2; kill "$(ps -C dr-v2 -o pid= | head -1)" 2>/dev/null; sleep 1
+go run /tmp/dbq/main.go /tmp/dr-migrate/dr.db "SELECT version FROM schema_version"
+
+/tmp/dr-migrate/dr-v3 -config /tmp/dr-migrate/dr.yaml -db /tmp/dr-migrate/dr.db >/tmp/dr-migrate/v3.log 2>&1 &
+sleep 2; kill "$(ps -C dr-v3 -o pid= | head -1)" 2>/dev/null; sleep 1
+go run /tmp/dbq/main.go /tmp/dr-migrate/dr.db "SELECT version FROM schema_version"
+go run /tmp/dbq/main.go /tmp/dr-migrate/dr.db "SELECT surface_meta_json, response_bytes, response_content_type FROM requests LIMIT 0"
+ps -C dr-v2 -o pid= ; ps -C dr-v3 -o pid= ; echo "both stopped if nothing printed above"
 ```
 
-Expected: all three columns present, versions 1, 2 and 3 recorded. **Read the flag names off `cmd/darkrouter/main.go` first** — `--data` and `--config` are what this plan assumes and the binary is the authority. If `sqlite3` is not installed, open the database from a short Go program instead; do not skip this step, because it is the only check that runs the upgrade rather than the fresh path.
+Expected: `schema_version` holds `2` after the first run and `3` after the second — it is a **single row that is UPDATEd**, not one row per migration, and the table is `schema_version`, not `schema_migrations`. The `LIMIT 0` query prints the three new column names and no rows, which is how the columns are confirmed without needing `.schema`.
 
-The two `go run` invocations are backgrounded and killed **by binary name**. `nohup … &` inside a compound command returns the subshell's pid, not the binary's, and killing that leaves the gateway holding its port.
+Three details that will otherwise waste time: the flags are `-config` and `-db`, and `-db` names the **database file**, not a directory; `darkrouter.example.yaml` binds 8080/8081, which belong to an unrelated application, hence the `sed`; and the migration file is untracked when this step runs, so `git stash push` would fail with "did not match any file(s) known to git" — `mv` it aside instead.
+
+Each binary is backgrounded and killed **by its own distinct name**. `nohup … &` inside a compound command returns the subshell's pid, not the binary's, and the distinct names mean this never touches another `darkrouter` process.
 
 - [ ] **Step 7: Verify the whole suite and formatting**
 
@@ -12216,13 +12308,14 @@ In `README.md`, as its own short subsection under the routes — not a footnote:
 >
 > ```yaml
 > aliases:
+>   # Good: one model, two providers. A failover is invisible and harmless.
 >   embed:
->     # Good: one model, two providers. A failover is invisible and harmless.
->     - provider: openai
->       model: text-embedding-3-small
->     - provider: azure-openai
->       model: text-embedding-3-small
+>     - openai/text-embedding-3-small
+>     - azure-openai/text-embedding-3-small
 > ```
+>
+> An alias entry is a `provider/model` string, which is the shape
+> `darkrouter.example.yaml` already uses for its chat aliases.
 >
 > Darkrouter permits the other arrangement rather than refusing it — refusing
 > would make an alias useless the moment its first provider rate-limits — but
@@ -12247,6 +12340,8 @@ Add a "Carried forward from phase 5" section with these, each one or two sentenc
 - **`capture.bodies` has no writer.** The `request_bodies` table exists from phase 2 and the retention sweep prunes it, but **nothing has ever inserted a row**. The setting, its `max_bytes` and its `retention` are all inert. Spec §5's "a speech response is never captured even when `capture.bodies` is on" is therefore satisfied by construction rather than by enforcement — what phase 5 does enforce is that the body is never held whole, which is the property that matters.
 - **Per-call image pricing has no catalog source.** Spec §9 says cost should come from per-call or per-unit pricing where no usage arrives, but `catalog.Pricing` carries only per-MTok rates and models.dev supplies nothing else. A dall-e call therefore records no cost at all, which is correct but incomplete.
 - **Unmodeled Responses request fields are dropped silently.** `top_logprobs`, `truncation`, `include`, `service_tier`, `max_tool_calls` and `prompt_cache_key` are parsed away without a warning. None changes the answer's content, but `truncation` and `max_tool_calls` change its shape, and a client setting them gets behavior it did not ask for with nothing in the trace saying so.
+- **Responses fields the IR does not model are dropped rather than re-emitted.** Spec §5 says they "ride in `Extra` and are re-emitted"; `truncation`, `include`, `service_tier`, `top_logprobs` and `prompt_cache_key` are instead parsed away. The response echoes the fields the OpenAI SDK's model requires — tools, tool choice, sampling, instructions, metadata — which is what keeps a client working; the rest are a documented deviation, not an oversight. `truncation` and `max_tool_calls` change the answer's shape, so a client setting them gets behavior it did not ask for with nothing in the trace saying so.
+- **A reasoning-block indexing defect was found in shipped code and fixed here.** `internal/adapter/openaicompat/parse.go` emitted reasoning deltas with no block index — the zero value, which is the text block's — and no open or close events, while tool blocks were carefully offset by 1000 to avoid exactly that. It was invisible because every consumer until the Responses stream writer switched on the delta's type and ignored the index. Task 27 gives reasoning its own index space.
 - **Responses ids are not resolvable, by design.** Returned ids carry a `resp_dr_` prefix and `store: false`; any request echoing one back is refused. A client built around server-side conversation state will not work against Darkrouter and is told so explicitly rather than served an amnesic answer.
 - **Four of the seven surfaces have no live-verified provider.** Task 34 verifies chat, responses, transcriptions and speech against Groq. Embeddings, images, rerank and moderations are verified only as the no-provider error, because no key for a provider serving them was available. Verifying them needs an OpenAI or Cohere key.
 
@@ -12300,16 +12395,21 @@ CGO_ENABLED=0 go build -o /tmp/darkrouter-p5 ./cmd/darkrouter
 ls -la /tmp/darkrouter-p5
 ```
 
-Write a verification config at `/tmp/dr-p5.yaml` with `proxy_listen: ":18080"`, `admin_listen: ":18081"`, one provider `id: groq`, `kind: openaicompat`, **`preset: groq`** — without it nothing joins the catalog and the audio surfaces are never declared — `base_url: https://api.groq.com/openai/v1`, the key from `GROQ_KEY`, and `models: [openai/gpt-oss-120b, whisper-large-v3, playai-tts]`.
+Write a verification config at `/tmp/dr-p5.yaml` with `proxy_listen: ":18080"`, `admin_listen: ":18081"`, one provider `id: groq`, `kind: openaicompat`, **`preset: groq`** — Task 17 is what makes that key legal, and without it nothing joins the catalog and the audio surfaces are never declared — `base_url: https://api.groq.com/openai/v1`, the key from `GROQ_KEY`, and `models: [openai/gpt-oss-120b, whisper-large-v3, playai-tts]`.
+
+**Check how the config reads a secret before writing the file.** `config.NewStore` is constructed with `os.LookupEnv`, so some form of environment expansion exists; read `internal/config/load.go` for the exact syntax rather than assuming `${GROQ_KEY}` works, and fall back to pasting the literal key into the temp file — it lives in `/tmp`, not the repository.
 
 Start it in the background and record the pid **by binary name**:
 
 ```bash
-/tmp/darkrouter-p5 --config /tmp/dr-p5.yaml --data /tmp/dr-p5-data >/tmp/dr-p5.log 2>&1 &
+mkdir -p /tmp/dr-p5-data
+/tmp/darkrouter-p5 -config /tmp/dr-p5.yaml -db /tmp/dr-p5-data/darkrouter.db >/tmp/dr-p5.log 2>&1 &
 sleep 3
 ps -C darkrouter-p5 -o pid=
 curl -fsS localhost:18081/readyz && echo READY
 ```
+
+The flags are `-config` and `-db`, and `-db` names the database **file**. `sqlite3` is not installed here, so every query below runs through the `/tmp/dbq/main.go` helper written in Task 30 Step 6; run it from the repository root so it resolves `modernc.org/sqlite` from this module.
 
 `nohup … &` inside a compound command returns the subshell's pid, not the binary's. Kill by name at the end and confirm nothing is left holding the port.
 
@@ -12364,8 +12464,8 @@ curl -sS localhost:18080/v1/audio/speech -H 'content-type: application/json' \
   -d '{"model":"playai-tts","input":"Darkrouter phase five.","voice":"Fritz-PlayAI","response_format":"mp3"}' \
   -o /tmp/out.mp3 -w '%{content_type} %{size_download}\n'
 file /tmp/out.mp3 2>/dev/null || head -c 4 /tmp/out.mp3 | xxd
-sqlite3 /tmp/dr-p5-data/darkrouter.db 'SELECT count(*) FROM request_bodies'
-sqlite3 /tmp/dr-p5-data/darkrouter.db \
+go run /tmp/dbq/main.go /tmp/dr-p5-data/darkrouter.db "SELECT count(*) FROM request_bodies"
+go run /tmp/dbq/main.go /tmp/dr-p5-data/darkrouter.db \
   "SELECT surface, response_bytes, response_content_type, surface_meta_json
      FROM requests WHERE surface = 'tts' ORDER BY ts DESC LIMIT 1"
 ```
@@ -12387,7 +12487,7 @@ done
 Expected: `404` on all four, each body naming the **surface** as the reason rather than the model. Then confirm nothing was attempted:
 
 ```bash
-sqlite3 /tmp/dr-p5-data/darkrouter.db \
+go run /tmp/dbq/main.go /tmp/dr-p5-data/darkrouter.db \
   "SELECT r.surface, r.error_code, count(a.seq)
      FROM requests r LEFT JOIN request_attempts a ON a.request_id = r.id
     WHERE r.surface IN ('embedding','image','rerank','moderation')
@@ -12399,7 +12499,7 @@ Expected: four rows, each with `not_found` and **zero attempts**. A non-zero cou
 - [ ] **Step 7: Read the request rows rather than trusting the responses**
 
 ```bash
-sqlite3 -header -column /tmp/dr-p5-data/darkrouter.db \
+go run /tmp/dbq/main.go /tmp/dr-p5-data/darkrouter.db \
   "SELECT dialect, surface, status, tokens_in, tokens_out, response_bytes,
           substr(surface_meta_json,1,60) AS meta, substr(warnings_json,1,80) AS warn
      FROM requests ORDER BY ts"
