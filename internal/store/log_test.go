@@ -233,3 +233,101 @@ func TestLogWriterWritesEmptyArraysNotNull(t *testing.T) {
 		t.Errorf("candidates_json = %s, want empty arrays rather than null", raw)
 	}
 }
+
+func TestRequestRowCarriesSurfaceDetail(t *testing.T) {
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{})
+	rec := &RequestRecord{
+		ID: "r1", TS: time.Now(), Dialect: "openai", Surface: "embedding",
+		RequestedModel: "e5", Status: "success",
+		SurfaceMeta: map[string]any{"input_count": 3, "dimensions": 256},
+	}
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.Read.QueryRow(
+		`SELECT surface_meta_json FROM requests WHERE id = 'r1'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("surface_meta_json is not JSON: %q", raw)
+	}
+	if got["input_count"].(float64) != 3 || got["dimensions"].(float64) != 256 {
+		t.Errorf("surface meta = %v", got)
+	}
+}
+
+func TestARecordWithNoSurfaceDetailStoresAnEmptyObject(t *testing.T) {
+	// The column is NOT NULL. A nil map must encode as {} rather than null, or
+	// every chat row fails the insert.
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{})
+	rec := &RequestRecord{
+		ID: "r2", TS: time.Now(), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", Status: "success",
+	}
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.Read.QueryRow(
+		`SELECT surface_meta_json FROM requests WHERE id = 'r2'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != "{}" {
+		t.Errorf("surface_meta_json = %q, want {}", raw)
+	}
+}
+
+func TestRequestRowCarriesResponseSizeAndType(t *testing.T) {
+	// Spec §7: a truncated audio body cannot be signalled in-band, so this is
+	// the only place the truncation appears.
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{})
+	rec := &RequestRecord{
+		ID: "r3", TS: time.Now(), Dialect: "openai", Surface: "tts",
+		RequestedModel: "tts-1", Status: "success",
+		ResponseBytes: 204800, ResponseContentType: "audio/mpeg",
+	}
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	var ct string
+	if err := db.Read.QueryRow(
+		`SELECT response_bytes, response_content_type FROM requests WHERE id = 'r3'`).
+		Scan(&n, &ct); err != nil {
+		t.Fatal(err)
+	}
+	if n != 204800 || ct != "audio/mpeg" {
+		t.Errorf("bytes = %d, content type = %q", n, ct)
+	}
+}
+
+func TestSurfaceDetailIsQueryable(t *testing.T) {
+	// A JSON column is only defensible if phase 7 can filter on it. This is
+	// the assertion that keeps it defensible.
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(context.Background(), []*RequestRecord{
+		{ID: "a", TS: time.Now(), Dialect: "openai", Surface: "image",
+			RequestedModel: "m", Status: "success",
+			SurfaceMeta: map[string]any{"image_count": 4}},
+		{ID: "b", TS: time.Now(), Dialect: "openai", Surface: "image",
+			RequestedModel: "m", Status: "success",
+			SurfaceMeta: map[string]any{"image_count": 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := db.Read.QueryRow(
+		`SELECT id FROM requests WHERE json_extract(surface_meta_json, '$.image_count') > 2`).
+		Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if id != "a" {
+		t.Errorf("id = %q", id)
+	}
+}
