@@ -84,6 +84,12 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
 
+	// Static styles need nothing here; the manager serves them by returning a
+	// nil authorizer. Its collaborators arrive as the OAuth tasks land. It is
+	// built above both the discoverer and the executor because each resolves
+	// credentials through it.
+	authManager := auth.NewManager(auth.Deps{})
+
 	// A provider whose preset this build no longer ships degrades to its
 	// stored kind and base url. The degradation is free — provider rows carry
 	// both — but losing the preset's quirks and surfaces silently on upgrade
@@ -109,6 +115,11 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 			Interval:    cfg.Catalog.Discovery.Interval,
 			Concurrency: cfg.Catalog.Discovery.Concurrency,
 			Timeout:     cfg.Catalog.Discovery.Timeout,
+			// Bedrock's model list comes from two signed control-plane calls
+			// rather than one GET. Registered here because the server already
+			// imports both halves and catalog must not import an adapter.
+			Listers: map[string]catalog.KindLister{"bedrock": bedrockadapter.NewLister(nil)},
+			Auth:    authManager,
 		})
 	}
 	syncer := catalog.NewSyncer(db, src, cat, catalog.SyncOptions{
@@ -116,10 +127,6 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Interval: cfg.Catalog.SyncInterval,
 		Timeout:  cfg.Catalog.SyncTimeout,
 	})
-
-	// Static styles need nothing here; the manager serves them by returning a
-	// nil authorizer. Its collaborators arrive as the OAuth tasks land.
-	authManager := auth.NewManager(auth.Deps{})
 
 	ex := exec.New(cfgStore, src, map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
