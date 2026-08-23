@@ -60,6 +60,10 @@ type Server struct {
 
 	adm *admin.Server
 
+	// refresher renews OAuth tokens ahead of expiry. It drives the same
+	// authorizer a request would, under the same per-account mutex.
+	refresher *auth.RefreshWorker
+
 	started  time.Time
 	warnings []string
 }
@@ -85,11 +89,15 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
 
-	// Static styles need nothing here; the manager serves them by returning a
-	// nil authorizer. Its collaborators arrive as the OAuth tasks land. It is
-	// built above both the discoverer and the executor because each resolves
-	// credentials through it.
-	authManager := auth.NewManager(auth.Deps{})
+	// Built above both the discoverer and the executor because each resolves
+	// credentials through it. Static styles need none of these collaborators:
+	// the manager serves them by returning a nil authorizer.
+	tokens := tokenStore{db: db, key: key}
+	authManager := auth.NewManager(auth.Deps{
+		Tokens: tokens,
+		OAuth:  presetOAuth{presets: catalog.Embedded()},
+	})
+	refresher := auth.NewRefreshWorker(authManager, tokens, auth.RefreshOptions{})
 
 	// In-progress OAuth connect attempts. In memory deliberately: a flow lives
 	// for the minute or two an operator spends in a consent screen, and
@@ -174,9 +182,10 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
-		ex:       ex,
-		started:  time.Now(),
-		warnings: startupWarnings,
+		refresher: refresher,
+		ex:        ex,
+		started:   time.Now(),
+		warnings:  startupWarnings,
 	}, nil
 }
 
@@ -462,6 +471,7 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	})
 
+	startWorker("token refresh", s.refresher.Run)
 	startWorker("log writer", s.logw.Run)
 	startWorker("health persister", s.persist.Run)
 	startWorker("rollup", func(c context.Context) error {

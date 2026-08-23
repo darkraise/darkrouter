@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -159,4 +160,124 @@ func describe(w wireToken) string {
 		return w.Error
 	}
 	return "no error detail"
+}
+
+// oauthAccount is one credential's refresh state. The mutex is what makes
+// concurrent requests wait for one refresh rather than each starting their own
+// — and the credential probe takes the same mutex, spec §5.2, because it goes
+// through this same path rather than a private one.
+type oauthAccount struct {
+	mu  sync.Mutex
+	tok Token
+	// dead marks a credential whose refresh was terminally refused. Checked
+	// before the endpoint is called again, so "no retries" holds within the
+	// process as well as across ticks.
+	dead bool
+}
+
+func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authorizer, error) {
+	if m.deps.OAuth == nil {
+		return nil, fmt.Errorf("provider %q uses oauth but no preset data is available", t.ProviderID)
+	}
+	cfg, ok := m.deps.OAuth.OAuthFor(t.Preset)
+	if !ok || cfg.TokenURL == "" {
+		return nil, fmt.Errorf("preset %q declares no oauth endpoints", t.Preset)
+	}
+	tok, err := ParseToken([]byte(c.Secret))
+	if err != nil {
+		return nil, fmt.Errorf("credential %s: %w", c.ID, err)
+	}
+
+	m.mu.Lock()
+	acct, ok := m.oauth[c.ID]
+	if !ok {
+		acct = &oauthAccount{tok: tok}
+		m.oauth[c.ID] = acct
+	}
+	m.mu.Unlock()
+
+	return func(ctx context.Context, r *http.Request) error {
+		header, err := m.accessToken(ctx, acct, cfg, c.ID)
+		if err != nil {
+			return err
+		}
+		r.Header.Set("Authorization", header)
+		return nil
+	}, nil
+}
+
+// accessToken returns a usable Authorization value, refreshing under the
+// account mutex when the stored one is inside its expiry delta.
+func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
+	cfg OAuthConfig, credID string) (string, error) {
+
+	acct.mu.Lock()
+	defer acct.mu.Unlock()
+
+	if acct.dead {
+		return "", fmt.Errorf("%w: credential %s", ErrNeedsReconnect, credID)
+	}
+	if !acct.tok.Expired(time.Now(), DefaultRefreshDelta) && acct.tok.AccessToken != "" {
+		return acct.tok.Header(), nil
+	}
+	if acct.tok.RefreshToken == "" {
+		acct.dead = true
+		m.disable(ctx, credID)
+		return "", fmt.Errorf("%w: credential %s has no refresh token", ErrNeedsReconnect, credID)
+	}
+
+	next, err := refreshToken(ctx, m.deps.HTTP, cfg, acct.tok.RefreshToken)
+	if err != nil {
+		if errors.Is(err, ErrNeedsReconnect) {
+			acct.dead = true
+			m.disable(ctx, credID)
+		}
+		// A transient failure leaves the stored pair alone: the old refresh
+		// token is still the only one that exists.
+		return "", err
+	}
+	// Many vendors rotate on every refresh and some invalidate the old token
+	// immediately, so a response with no new refresh token means "keep using
+	// the one you have" rather than "you now have none".
+	if next.RefreshToken == "" {
+		next.RefreshToken = acct.tok.RefreshToken
+	}
+	// The account name is not reissued on a refresh; carrying it forward keeps
+	// the dashboard from blanking the label on the first renewal.
+	if next.Account == "" {
+		next.Account = acct.tok.Account
+	}
+
+	// Persisted BEFORE the in-memory pair is replaced. A crash between the two
+	// then loses a refresh rather than the account: the durable row already
+	// names the token the vendor now expects.
+	if err := m.persist(ctx, credID, next); err != nil {
+		return "", err
+	}
+	acct.tok = next
+	return next.Header(), nil
+}
+
+func (m *Manager) persist(ctx context.Context, credID string, tok Token) error {
+	if m.deps.Tokens == nil {
+		return nil
+	}
+	raw, err := tok.Marshal()
+	if err != nil {
+		return err
+	}
+	// WithoutCancel: this runs on a request's context, and a client that hangs
+	// up mid-refresh must not leave the rotated pair unpersisted.
+	if err := m.deps.Tokens.ReplaceCredentialSecret(
+		context.WithoutCancel(ctx), credID, string(raw), tok.Unix()); err != nil {
+		return fmt.Errorf("persist refreshed credential: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) disable(ctx context.Context, credID string) {
+	if m.deps.Tokens == nil {
+		return
+	}
+	_ = m.deps.Tokens.DisableCredential(context.WithoutCancel(ctx), credID, reconnectReason)
 }
