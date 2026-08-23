@@ -61,6 +61,14 @@ type RerankDialect interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// ImageDialect is the inbound wire form of the image surface.
+type ImageDialect interface {
+	Name() string
+	ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error)
+	WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
 // CountWriter is implemented by a dialect with a token-counting endpoint.
 type CountWriter interface {
 	Dialect

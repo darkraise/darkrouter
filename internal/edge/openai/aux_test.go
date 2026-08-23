@@ -329,3 +329,102 @@ func TestWriteRerankEmitsCohereV2(t *testing.T) {
 			body.Results[1].Document)
 	}
 }
+
+func TestParseImageReadsTheOptionals(t *testing.T) {
+	req, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations", strings.NewReader(
+		`{"model":"gpt-image-1","prompt":"a cat","n":2,"size":"1024x1024",
+		  "quality":"high","style":"vivid","response_format":"b64_json",
+		  "background":"transparent","output_format":"png","user":"u"}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "gpt-image-1" || req.Prompt != "a cat" || req.N != 2 {
+		t.Errorf("request = %+v", req)
+	}
+	if req.Size != "1024x1024" || req.Quality != "high" || req.Style != "vivid" {
+		t.Errorf("request = %+v", req)
+	}
+	if req.ResponseFormat != "b64_json" || req.Background != "transparent" ||
+		req.OutputFormat != "png" || req.User != "u" {
+		t.Errorf("request = %+v", req)
+	}
+}
+
+func TestParseImageRejectsStreaming(t *testing.T) {
+	// The op parses a JSON body. Accepting stream:true would fail on the first
+	// SSE event with an error that says nothing useful.
+	_, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"gpt-image-1","prompt":"a cat","stream":true}`)), 1<<20)
+	if err == nil {
+		t.Fatal("a streamed image request was accepted")
+	}
+	if !strings.Contains(err.Error(), "stream") {
+		t.Errorf("err = %v; it must name what is unsupported", err)
+	}
+}
+
+func TestParseImageRejectsAnEmptyPrompt(t *testing.T) {
+	if _, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"m"}`)), 1<<20); err == nil {
+		t.Error("a promptless generation request was accepted")
+	}
+}
+
+func TestWriteImageEmitsBothPayloadForms(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteImage(w, &ir.ImageResponse{
+		Created: 1700000000,
+		Images: []ir.Image{
+			{URL: "https://example.invalid/a.png", RevisedPrompt: "a revised cat"},
+			{Base64: "aGVsbG8="},
+		},
+		Usage: ir.Usage{InputTokens: 11, OutputTokens: 22}, UsageReported: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Created int64 `json:"created"`
+		Data    []struct {
+			URL           string `json:"url"`
+			B64           string `json:"b64_json"`
+			RevisedPrompt string `json:"revised_prompt"`
+		} `json:"data"`
+		Usage *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Created != 1700000000 || len(body.Data) != 2 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if body.Data[0].URL == "" || body.Data[0].RevisedPrompt != "a revised cat" {
+		t.Errorf("first image = %+v", body.Data[0])
+	}
+	if body.Data[0].B64 != "" {
+		t.Errorf("a URL image carried a b64_json key: %+v", body.Data[0])
+	}
+	if body.Data[1].B64 != "aGVsbG8=" || body.Data[1].URL != "" {
+		t.Errorf("second image = %+v", body.Data[1])
+	}
+	if body.Usage == nil || body.Usage.TotalTokens != 33 {
+		t.Errorf("usage = %+v", body.Usage)
+	}
+}
+
+func TestWriteImageOmitsUsageWhenTheProviderReportedNone(t *testing.T) {
+	// The dall-e models return no usage object. Emitting a zeroed one would
+	// tell the client the call was free.
+	w := httptest.NewRecorder()
+	if err := WriteImage(w, &ir.ImageResponse{
+		Created: 1, Images: []ir.Image{{URL: "https://example.invalid/a.png"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(w.Body.String(), "usage") {
+		t.Errorf("body = %s; a usage object was invented", w.Body.String())
+	}
+}
