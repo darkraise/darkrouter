@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -54,6 +56,13 @@ type CatalogSource interface {
 	Snapshot() *catalog.Snapshot
 }
 
+// AuthResolver turns a credential into an authorization applied to the built
+// request. It is an interface rather than *auth.Manager so a test can hand over
+// a fixed authorizer without constructing a signer.
+type AuthResolver interface {
+	For(ctx context.Context, t auth.Target, c auth.Credential) (auth.Authorizer, error)
+}
+
 // Deps carries the optional collaborators. A zero Deps is valid and disables
 // the corresponding behavior.
 type Deps struct {
@@ -61,6 +70,10 @@ type Deps struct {
 	Health  HealthRecorder
 	Fleet   Fleet
 	Catalog CatalogSource
+
+	// Auth resolves a non-static credential into an authorizer. Nil serves
+	// static styles only, which is every provider before phase 8.
+	Auth AuthResolver
 }
 
 type Executor struct {
@@ -332,10 +345,16 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	})
 	defer timer.Stop()
 
+	apiKey, authorizer, credErr := e.credentialFor(ctx, p, c)
+	if credErr != nil {
+		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: credErr.Error()}
+	}
 	tgt := &adapter.Target{
-		BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model,
+		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
 		Info:       modelInfo(cat, c.ProviderID, c.Model),
 		RerankPath: rerankPath(p.Preset),
+		Region:     p.Region, Project: p.Project, Location: p.Location,
+		Publisher: c.Publisher,
 	}
 	var warns []ir.Warning
 	if iw, ok := inferredWarningFor(c, op.Query()); ok {
@@ -348,6 +367,13 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	}
 	if err := makeReplayable(hr); err != nil {
 		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+	}
+	if err := applyAuthorizer(ctx, hr, authorizer); err != nil {
+		// A credential that cannot be produced is a credential failure, not a
+		// provider one: an expired OAuth grant must cool the account rather
+		// than the upstream, which is serving everyone else fine.
+		return adapter.OutcomeRetryableCredential, 0,
+			&ir.Error{Type: ir.ErrAuthentication, Message: err.Error()}
 	}
 
 	attemptStart := time.Now()
@@ -631,6 +657,63 @@ func makeReplayable(hr *http.Request) error {
 		return io.NopCloser(bytes.NewReader(buf)), nil
 	}
 	return nil
+}
+
+// applyAuthorizer runs the authorizer against a request whose body is already
+// materialized. Split out so the ordering — materialize, then authorize, then
+// send — is one named thing a test can hold rather than three lines in the
+// middle of the attempt loop.
+func applyAuthorizer(ctx context.Context, hr *http.Request, a auth.Authorizer) error {
+	if a == nil {
+		return nil
+	}
+	return a(ctx, hr)
+}
+
+// credentialFor returns the target's authorizer and the api key the adapter
+// should write. Exactly one of them is ever non-zero: a non-static style leaves
+// the key empty so no adapter writes a token document into its own header.
+func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
+	c router.Candidate) (string, auth.Authorizer, error) {
+
+	style := p.AuthStyle
+	if style == "" {
+		style = presetStyle(p.Preset)
+	}
+	secret := secretOf(p, c.KeyID)
+	if auth.IsStatic(style) {
+		return secret, nil, nil
+	}
+	if e.deps.Auth == nil {
+		return "", nil, fmt.Errorf("provider %q needs the %s strategy, which is not wired",
+			p.ID, style)
+	}
+	az, err := e.deps.Auth.For(ctx, auth.Target{
+		ProviderID: p.ID, Style: style, Preset: p.Preset,
+		Region: p.Region, Project: p.Project, Location: p.Location,
+	}, auth.Credential{ID: c.KeyID, Kind: credentialKind(p, c.KeyID), Secret: secret})
+	if err != nil {
+		return "", nil, err
+	}
+	return "", az, nil
+}
+
+func credentialKind(p provider.Provider, keyID string) string {
+	for _, c := range p.Credentials {
+		if c.ID == keyID {
+			return c.Kind
+		}
+	}
+	return ""
+}
+
+// presetStyle reads the shipped style for a provider whose row does not
+// override it. It mirrors rerankPath, which already reaches presets from here.
+func presetStyle(preset string) string {
+	if preset == "" {
+		return ""
+	}
+	return catalog.Embedded()[preset].Auth.Style
 }
 
 func secretOf(p provider.Provider, keyID string) string {

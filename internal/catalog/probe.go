@@ -44,6 +44,46 @@ type Probe struct {
 	AuthStyle      string
 	AuthHeader     string
 	AuthQueryParam string
+
+	// Region and Authorize are what a signed control-plane listing needs. Both
+	// are empty for every kind whose listing is an unsigned GET with a bearer
+	// token, which is all of them before phase 8.
+	Region    string
+	Authorize func(context.Context, *http.Request) error
+
+	// Lister replaces the generic /models call for a kind that has none.
+	// Bedrock needs two calls against a different host; vertex has no listing
+	// at all and registers nothing, so it stays undiscoverable.
+	Lister KindLister
+}
+
+// KindLister discovers a kind whose model list does not come from one GET.
+//
+// An interface rather than a switch on kind because catalog must not import
+// internal/adapter/bedrock: the concrete lister is registered by the server,
+// which already imports both.
+type KindLister interface {
+	List(ctx context.Context, p Probe) ([]Discovered, error)
+}
+
+// ProbeForKind is ProbeFor with the lister registry consulted first.
+//
+// ProbeFor stays as it is and is what every existing caller and test keeps
+// using, so nothing before phase 8 changes behavior.
+func ProbeForKind(p provider.Provider, preset Preset, apiKey string,
+	listers map[string]KindLister) (Probe, error) {
+
+	if l, ok := listers[p.Kind]; ok {
+		base := p.BaseURL
+		if base == "" {
+			base = preset.BaseURL
+		}
+		return Probe{
+			ProviderID: p.ID, Kind: p.Kind, BaseURL: base,
+			Region: p.Region, Lister: l,
+		}, nil
+	}
+	return ProbeFor(p, preset, apiKey)
 }
 
 // ProbeFor resolves a provider and its preset into a probe. The provider row

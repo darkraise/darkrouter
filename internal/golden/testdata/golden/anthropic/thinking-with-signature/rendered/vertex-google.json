@@ -1,0 +1,36 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Is 91 prime?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "91 = 7 * 13",
+          "thought": true,
+          "thoughtSignature": "ErUBCkYIBRgCIkA="
+        },
+        {
+          "text": "No."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "Show the factors."
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  }
+}

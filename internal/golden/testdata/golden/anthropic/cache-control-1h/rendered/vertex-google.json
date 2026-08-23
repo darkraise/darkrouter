@@ -1,0 +1,22 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Review this."
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are a careful reviewer."
+      }
+    ]
+  }
+}

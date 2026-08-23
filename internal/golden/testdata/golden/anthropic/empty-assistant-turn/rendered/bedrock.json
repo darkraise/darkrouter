@@ -1,0 +1,23 @@
+{
+  "inferenceConfig": {
+    "maxTokens": 1024
+  },
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Say nothing."
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Now say something."
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

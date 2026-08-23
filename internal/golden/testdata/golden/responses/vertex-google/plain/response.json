@@ -1,0 +1,7 @@
+{
+  "candidates": [
+    {"content": {"parts": [{"text": "From the Google publisher."}], "role": "model"},
+     "finishReason": "STOP"}
+  ],
+  "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 5, "totalTokenCount": 12}
+}

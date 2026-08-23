@@ -22,6 +22,11 @@ type Credential struct {
 	Secret     string
 	Enabled    bool
 	Scope      string
+
+	// ExpiresAt mirrors the token's expiry into its own column. It is not a
+	// secret, and the refresh worker has to find rows expiring soon without
+	// decrypting every credential in the database on every tick.
+	ExpiresAt *int64
 }
 
 // newID returns a ULID. Application-generated ids matter here for the same
@@ -76,9 +81,9 @@ func insertCredentialTx(ctx context.Context, e execer, key *crypto.Key, c Creden
 		enabled = 1
 	}
 	_, err = e.ExecContext(ctx,
-		`INSERT INTO provider_keys (id, provider_id, label, kind, ciphertext, nonce, scope, enabled)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, c.ProviderID, c.Label, kind, ciphertext, nonce, c.Scope, enabled)
+		`INSERT INTO provider_keys (id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, c.ProviderID, c.Label, kind, ciphertext, nonce, c.Scope, enabled, c.ExpiresAt)
 	if err != nil {
 		return "", fmt.Errorf("insert credential for provider %q: %w", c.ProviderID, err)
 	}
@@ -91,7 +96,7 @@ func insertCredentialTx(ctx context.Context, e execer, key *crypto.Key, c Creden
 // is indistinguishable from one that was never configured.
 func (d *DB) Credentials(ctx context.Context, key *crypto.Key, providerID string) ([]Credential, error) {
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled
+		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at
 		   FROM provider_keys
 		  WHERE provider_id = ?
 		  ORDER BY id`, providerID)
@@ -99,7 +104,13 @@ func (d *DB) Credentials(ctx context.Context, key *crypto.Key, providerID string
 		return nil, fmt.Errorf("list credentials for %q: %w", providerID, err)
 	}
 	defer rows.Close()
+	return scanCredentials(rows, key)
+}
 
+// scanCredentials decrypts one result set. A row that fails authentication is
+// an error rather than a skip: silently dropping it would present as a provider
+// with no credentials, which is indistinguishable from one never configured.
+func scanCredentials(rows *sql.Rows, key *crypto.Key) ([]Credential, error) {
 	var out []Credential
 	for rows.Next() {
 		var (
@@ -109,13 +120,13 @@ func (d *DB) Credentials(ctx context.Context, key *crypto.Key, providerID string
 			enabled    int
 		)
 		if err := rows.Scan(&c.ID, &c.ProviderID, &c.Label, &c.Kind,
-			&ciphertext, &nonce, &c.Scope, &enabled); err != nil {
+			&ciphertext, &nonce, &c.Scope, &enabled, &c.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("scan credential: %w", err)
 		}
 		plaintext, err := key.Open(ciphertext, nonce, []byte(c.ID))
 		if err != nil {
 			return nil, fmt.Errorf("credential %s on provider %q could not be decrypted: %w",
-				c.ID, providerID, err)
+				c.ID, c.ProviderID, err)
 		}
 		c.Secret = string(plaintext)
 		c.Enabled = enabled == 1
@@ -125,6 +136,74 @@ func (d *DB) Credentials(ctx context.Context, key *crypto.Key, providerID string
 		return nil, fmt.Errorf("iterate credentials: %w", err)
 	}
 	return out, nil
+}
+
+// ReplaceCredentialSecret rewrites one credential's sealed payload in place.
+//
+// In place matters: the ciphertext is bound to the credential id as additional
+// authenticated data, so a rotation that inserted a new row and deleted the old
+// would change the AAD and produce something nothing can open. It is also what
+// makes spec §5.2's ordering hold — one row, one column, one write, so a crash
+// leaves either the old pair or the new one and never a mixture.
+func (d *DB) ReplaceCredentialSecret(ctx context.Context, key *crypto.Key,
+	id, secret string, expiresAt *int64) error {
+
+	if secret == "" {
+		return fmt.Errorf("refusing to store an empty credential for %s", id)
+	}
+	ciphertext, nonce, err := key.Seal([]byte(secret), []byte(id))
+	if err != nil {
+		return fmt.Errorf("seal credential %s: %w", id, err)
+	}
+	res, err := d.Sync.ExecContext(ctx,
+		`UPDATE provider_keys SET ciphertext = ?, nonce = ?, expires_at = ? WHERE id = ?`,
+		ciphertext, nonce, expiresAt, id)
+	if err != nil {
+		return fmt.Errorf("replace credential %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		// The credential was deleted while a refresh was in flight. Silently
+		// succeeding would leave the worker believing it had persisted a token
+		// that does not exist.
+		return fmt.Errorf("credential %s no longer exists", id)
+	}
+	return nil
+}
+
+// ExpiringCredentials returns every enabled credential of one kind whose expiry
+// is at or before before, decrypted, oldest first.
+func (d *DB) ExpiringCredentials(ctx context.Context, key *crypto.Key,
+	kind string, before int64) ([]Credential, error) {
+
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at
+		   FROM provider_keys
+		  WHERE kind = ? AND enabled = 1 AND expires_at IS NOT NULL AND expires_at <= ?
+		  ORDER BY expires_at`, kind, before)
+	if err != nil {
+		return nil, fmt.Errorf("list expiring credentials: %w", err)
+	}
+	defer rows.Close()
+	return scanCredentials(rows, key)
+}
+
+// DisableCredential takes a credential out of rotation and records why.
+//
+// The reason lands in scope, which is the column master design §11 already
+// gives to per-credential text and which nothing else writes for an OAuth row.
+// Adding a column for a string the dashboard renders once would be schema churn
+// for a display concern.
+func (d *DB) DisableCredential(ctx context.Context, id, reason string) error {
+	_, err := d.Sync.ExecContext(ctx,
+		`UPDATE provider_keys SET enabled = 0, scope = ? WHERE id = ?`, reason, id)
+	if err != nil {
+		return fmt.Errorf("disable credential %s: %w", id, err)
+	}
+	return nil
 }
 
 type sealedRow struct {

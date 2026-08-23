@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -50,9 +51,27 @@ type Deps struct {
 	// itself.
 	Exec *exec.Executor
 
+	// Flows holds in-progress OAuth connect attempts. Nil disables the two
+	// OAuth routes, which is what every test that does not exercise them wants.
+	Flows *auth.FlowStore
+
+	// HTTP is the client used for token exchange and credential probes. Nil
+	// uses http.DefaultClient.
+	HTTP *http.Client
+
+	// Auth resolves a non-static credential into an authorizer, so the probe
+	// can exercise a signed or subscription credential the way a request does.
+	Auth AuthResolver
+
 	// Dev, when non-empty, is the Vite dev server to reverse-proxy unmatched
 	// paths to. It is empty in production.
 	Dev string
+}
+
+// AuthResolver mirrors exec.AuthResolver, declared here so a test can hand over
+// a fixed authorizer without constructing a signer.
+type AuthResolver interface {
+	For(ctx context.Context, t auth.Target, c auth.Credential) (auth.Authorizer, error)
 }
 
 type Server struct {
@@ -60,6 +79,12 @@ type Server struct {
 	csrf   *CSRF
 	mux    *http.ServeMux
 	probes probeLocks
+
+	// listeners are the temporary loopback servers receiving OAuth redirects,
+	// keyed by provider so a second flow replaces the first rather than failing
+	// to bind a port the first still holds.
+	listenerMu sync.Mutex
+	listeners  map[string]*redirectListener
 }
 
 // New builds the admin server and sweeps expired sessions.
@@ -105,6 +130,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/providers/{id}/test", s.requireCSRF(s.handleProbe))
 	s.mux.HandleFunc("POST /api/providers/{id}/keys", s.requireCSRF(s.handleAddCredential))
 	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
+
+	s.mux.HandleFunc("POST /api/providers/{id}/oauth/start", s.requireCSRF(s.handleOAuthStart))
+	s.mux.HandleFunc("POST /api/providers/{id}/oauth/complete", s.requireCSRF(s.handleOAuthComplete))
+	// requireSession rather than requireCSRF: a top-level navigation carries no
+	// header to check. State does that work — see handleOAuthCallback.
+	s.mux.HandleFunc("GET /api/oauth/callback", s.requireSession(s.handleOAuthCallback))
 
 	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
 

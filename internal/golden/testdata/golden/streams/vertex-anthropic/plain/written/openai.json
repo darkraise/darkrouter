@@ -1,0 +1,94 @@
+[
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "role": "assistant"
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_v",
+      "model": "claude-sonnet-4-5",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_v",
+      "model": "claude-sonnet-4-5",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 0,
+        "prompt_tokens": 7,
+        "total_tokens": 7
+      }
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {
+            "content": "From Anthropic."
+          },
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_v",
+      "model": "claude-sonnet-4-5",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": null,
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_v",
+      "model": "claude-sonnet-4-5",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 4,
+        "prompt_tokens": 7,
+        "total_tokens": 11
+      }
+    }
+  },
+  {
+    "data": {
+      "choices": [
+        {
+          "delta": {},
+          "finish_reason": "stop",
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "msg_v",
+      "model": "claude-sonnet-4-5",
+      "object": "chat.completion.chunk"
+    }
+  },
+  {
+    "data": "[DONE]"
+  }
+]

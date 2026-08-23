@@ -104,6 +104,14 @@ func streamCaseDirs(t *testing.T, kind string) []string {
 	t.Helper()
 	root := filepath.Join("testdata", "golden", "streams", kind)
 	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		// A kind with no SSE fixtures. bedrock is the one: its stream is AWS
+		// binary eventstream framing, which a .sse text file cannot hold. It is
+		// covered in internal/adapter/bedrock by frames the SDK's own encoder
+		// builds, which is stronger than a checked-in blob a reader cannot
+		// inspect. TestEveryKindHasStreamFixtures pins the exemption.
+		return nil
+	}
 	if err != nil {
 		t.Fatalf("read %s: %v", root, err)
 	}

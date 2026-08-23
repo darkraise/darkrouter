@@ -1,0 +1,20 @@
+{
+  "inferenceConfig": {
+    "maxTokens": 1024
+  },
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Review this."
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "system": [
+    {
+      "text": "You are a careful reviewer."
+    }
+  ]
+}

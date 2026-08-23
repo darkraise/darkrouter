@@ -13,7 +13,7 @@ Last updated: 2026-08-23
 | 5 — Auxiliary surfaces | ✅ | ✅ | **Complete.** 34 tasks; race-clean, all seven surfaces served. |
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
-| 8 — Signed and OAuth credentials | ✅ | — | Not started |
+| 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
 | 9 — Passthrough fast path | ✅ | — | Not started |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
@@ -67,6 +67,32 @@ Two items phase 3 carried forward are done:
 
 Four smaller items are listed at the end of
 `docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
+
+## Closed by phase 8
+
+- **Three credential strategies exist**, composing with adapter kinds rather than being kinds. `internal/auth` resolves a credential into an authorizer applied after the body is materialized, which is the only point at which SigV4 can hash a payload that will not change. A non-static style leaves `Target.APIKey` empty, so no adapter can write a token document into its own header by forgetting a step.
+- **SigV4 is pinned by known-answer vectors** generated from the real signer rather than transcribed. `SignedHeaders` includes `content-length`, so a refactor that signed before materializing the body fails the vector instead of producing an opaque 403.
+- **`url.PathEscape` is not usable for a Bedrock model id.** It leaves the colon alone, which is legal in a path segment and is not what AWS signs — smithy-go's own `EscapePath` escapes everything outside RFC 3986's unreserved set. Every inference-profile id contains a colon, so the difference is a 403 on every request.
+- **Bedrock discovery catalogues inference profile ids.** `ListFoundationModels` alone would store precisely the identifiers that fail; `PROVISIONED`-only and `LEGACY` models are left out for the same reason.
+- **Eventstream framing is decoded with the SDK's decoder**, including a frame split across single-byte reads and a mid-stream exception. The tests build their frames with the SDK's own encoder rather than checking in a binary blob a reader cannot inspect.
+- **Vertex dispatches per publisher**, reusing phase 4's Gemini and Anthropic renderers rather than growing a third. Parsing dispatches on payload shape, because neither parser is handed a target.
+- **`router.Candidate.Publisher` is populated.** It was declared in phase 3 and never read; without it every Vertex request would take the Google builder and every Claude call would 400.
+- **OAuth state is single-use, expiring and session-bound**, and a session mismatch deliberately does not consume it — letting a blocked attack invalidate the operator's own callback would turn the block into a denial of service.
+- **Rotation is persisted before the in-memory pair is replaced**, so a crash mid-refresh loses a refresh rather than the account. The refresh worker drives the same authorizer a request does, under the same per-account mutex, so the two cannot drift or race.
+- **The probe names what failed** — signature, permission, region, expiry or reachability — for all three strategies.
+- **`provider_keys` needed no migration.** `kind`, `expires_at` and `scope`, and `providers.region/project/location`, have all been columns since migration 0001: master design §11 wrote the column list for the whole product, not for phase 2.
+- **Two gaps the phase found in existing code.** `POST /api/providers` ignored `auth_style`, so a provider created for a signed kind was never signed; and the Bedrock builder rendered an inbound `developer` turn as a `user` message, silently stripping its status on a payload whose `messages` array admits only user and assistant. The golden regeneration is what exposed the second.
+
+## Carried forward from phase 8
+
+- **Nothing in this phase was verified against a real vendor.** There is no AWS account, no GCP service account and no Claude subscription in this environment, and the user chose fake-backed verification knowing that. Every test runs against a known-answer vector, an SDK-encoded frame, or an `httptest` server. **The Converse and `rawPredict` field names are the specific risk**: they come from vendor documentation and are pinned by golden files, so a correction later is a visible diff rather than a silent behavior change.
+- **Bedrock serves `llm` only.** Its embedding API is a different shape, and claiming the surface would route embeddings to a Converse endpoint that answers 400. The `vertex` preset declares `embedding` and the adapter does not serve it, for the same reason.
+- **Llama and Mistral MaaS on Vertex are not served**, per spec §4.1: they use a third, OpenAI-compatible route that is out of scope for v1.
+- **Bedrock has no `.sse` golden fixture**, and a recorded exemption instead: its stream is binary framing a text file cannot hold. `TestEveryKindHasStreamFixtures` fails for any other kind that goes uncovered.
+- **The refresh worker is per-process.** Darkrouter is single-instance by design and nothing here makes two instances safe to run against one OAuth account; two sharing a grant trip rotation-reuse detection.
+- **`presets.yaml` carries two lines by hand.** `presetgen` needs an OmniRoute checkout this environment does not have, so the `publisher:` field was added to the generated file directly. The override file and the generator both carry it, so a regeneration reproduces it, and a guard test fails if either vertex preset loses one.
+- **The API has twenty-two endpoints, not master design §10's twenty-one.** The extra is `POST /api/providers/:id/oauth/complete`, which the design's list does not name: spec §5.1 requires the manual-paste path and a paste needs a POST of its own, since `GET /api/oauth/callback` exists for the listener. Recorded as a deliberate addition rather than left as an off-by-one against the design.
+- **`providers.location` is set at creation and not patchable.** Changing it moves every catalogued model to a different endpoint, which is a new provider rather than an edit. `region` and `project` are patchable, closing the phase 7 carry-forward.
 
 ## Closed by phase 7
 
@@ -578,6 +604,62 @@ database.
 
 Both test ports were released and no process was left running. Ports 8080 and
 8081 were never touched.
+
+### 9. Phase 8 verification against fakes — done
+
+Run on 2026-08-24. **No vendor was contacted.** This environment has no AWS
+account, no GCP service account and no Claude subscription, and that limitation
+was accepted deliberately before the phase was planned. Every upstream below is
+an `httptest` server; what these results prove is that the wiring holds end to
+end, not that a real vendor accepts the payload.
+
+Eight cases in `internal/e2e`, driving an assembled `server.Server` over a
+temporary database through both its handlers:
+
+- **A Bedrock request leaves signed.** The fake saw
+  `AWS4-HMAC-SHA256 Credential=…/us-east-1/bedrock/aws4_request`, a path ending
+  `…-v2%3A0/converse` — the escaped form the signature covers — and a
+  Converse-shaped body. The completion reached the client.
+- **A Bedrock stream decodes.** Six SDK-encoded eventstream frames became SSE
+  carrying the reassembled text.
+- **A signed provider fails over like any other.** A bedrock provider at
+  `127.0.0.1:1` on priority 99 with an openaicompat provider behind it:
+  `X-Darkrouter-Attempts: 2`, `X-Darkrouter-Provider: back`.
+- **Vertex routes each publisher to its own URL.** Two models on one provider:
+  `…:generateContent` with a `contents` body, and `…:rawPredict` with
+  `anthropic_version: vertex-2023-10-16` and no `model` key.
+- **An OAuth account serves.** The upstream saw `Authorization: Bearer at-0`
+  and no `x-api-key` beside it.
+- **A rotated refresh survives a restart.** After one refresh, the server was
+  torn down and rebuilt over the same database file; the stored credential named
+  `rt-1`, the token the vendor now expects.
+- **An `invalid_grant` shows as needing reconnection.** The probe reported
+  `ok: false` naming reconnection, and `GET /api/overview` reported
+  `needs_reauth: true` for the provider.
+- **No credential material leaves the process.** Six admin endpoints and a proxy
+  error response swept for the AWS secret and access key id.
+
+The image builds and stays static: **57.1 MB**, against phase 7's 53.3 MB. The
+3.8 MB is `aws-sdk-go-v2` and `golang.org/x/oauth2`; Node never reaches the
+final stage and `CGO_ENABLED=0` still produces one binary.
+
+Of spec §8's seven criteria, **six were exercised against fakes** and the
+seventh — `go test ./...` with golden files — is the standing gate every task
+ran. **None was exercised live.** The two that a fake can least stand in for are
+the first and the third: whether real Bedrock accepts this Converse body, and
+whether real Vertex accepts this `rawPredict` body. Those field names come from
+vendor documentation and are pinned by golden files, so a correction is a
+visible diff rather than a silent behavior change — but they are unverified.
+
+Two defects were found by this task rather than by a unit test, both fixed:
+**the Vertex adapter ignored `Target.BaseURL` entirely**, so it could only ever
+address googleapis.com — no private service endpoint, and no test above the unit
+level; and **a credential written directly to the database never reached the
+provider source**, which is why the harness forces a reload. The second is a
+test-harness fact rather than a product defect: every path that writes a
+credential through the API already reloads.
+
+No process was left running and no port was held.
 
 ## Review history
 

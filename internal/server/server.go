@@ -18,9 +18,12 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	bedrockadapter "github.com/darkraise/darkrouter/internal/adapter/bedrock"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/admin"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -57,6 +60,10 @@ type Server struct {
 
 	adm *admin.Server
 
+	// refresher renews OAuth tokens ahead of expiry. It drives the same
+	// authorizer a request would, under the same per-account mutex.
+	refresher *auth.RefreshWorker
+
 	started  time.Time
 	warnings []string
 }
@@ -71,7 +78,26 @@ func (s *Server) Discoverer() *catalog.Discoverer { return s.disc }
 
 // New wires the gateway. It loads the provider set eagerly so a bad credential
 // fails startup rather than every request.
-func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings []string) (*Server, error) {
+// Option adjusts what New builds. There is exactly one, and it exists because
+// the shipped preset set is embedded: without a seam, nothing above this package
+// can point an OAuth token endpoint at a fake, and the assembled refresh path
+// would be untestable.
+type Option func(*options)
+
+type options struct{ presets catalog.Presets }
+
+// WithPresets replaces the shipped preset set.
+func WithPresets(p catalog.Presets) Option {
+	return func(o *options) { o.presets = p }
+}
+
+func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings []string,
+	opts ...Option) (*Server, error) {
+
+	o := options{presets: catalog.Embedded()}
+	for _, fn := range opts {
+		fn(&o)
+	}
 	cfg := cfgStore.Current()
 
 	src := provider.NewSQLSource(db, key)
@@ -81,6 +107,21 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
+
+	// Built above both the discoverer and the executor because each resolves
+	// credentials through it. Static styles need none of these collaborators:
+	// the manager serves them by returning a nil authorizer.
+	tokens := tokenStore{db: db, key: key}
+	authManager := auth.NewManager(auth.Deps{
+		Tokens: tokens,
+		OAuth:  presetOAuth{presets: o.presets},
+	})
+	refresher := auth.NewRefreshWorker(authManager, tokens, auth.RefreshOptions{})
+
+	// In-progress OAuth connect attempts. In memory deliberately: a flow lives
+	// for the minute or two an operator spends in a consent screen, and
+	// persisting it would put a PKCE verifier on disk for no benefit.
+	flows := auth.NewFlowStore(10 * time.Minute)
 
 	// A provider whose preset this build no longer ships degrades to its
 	// stored kind and base url. The degradation is free — provider rows carry
@@ -107,6 +148,11 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 			Interval:    cfg.Catalog.Discovery.Interval,
 			Concurrency: cfg.Catalog.Discovery.Concurrency,
 			Timeout:     cfg.Catalog.Discovery.Timeout,
+			// Bedrock's model list comes from two signed control-plane calls
+			// rather than one GET. Registered here because the server already
+			// imports both halves and catalog must not import an adapter.
+			Listers: map[string]catalog.KindLister{"bedrock": bedrockadapter.NewLister(nil)},
+			Auth:    authManager,
 		})
 	}
 	syncer := catalog.NewSyncer(db, src, cat, catalog.SyncOptions{
@@ -119,8 +165,11 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),
 		"gemini":       geminiadapter.New(),
+		"bedrock":      bedrockadapter.New(),
+		"vertex":       vertexadapter.New(),
 	}, exec.Deps{
 		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
+		Auth: authManager,
 	})
 
 	// The dashboard is always mounted. A missing password hash closes it — the
@@ -140,8 +189,10 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		DB: db, PasswordHash: passwordHash,
 		Config: cfgStore, Src: src, Key: key,
 		Catalog: cat, Disc: disc, Breaker: breaker,
-		Presets: catalog.Embedded(), Exec: ex,
+		Presets: o.presets, Exec: ex,
 		Warnings: startupWarnings,
+		Flows:    flows,
+		Auth:     authManager,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
@@ -151,9 +202,10 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
-		ex:       ex,
-		started:  time.Now(),
-		warnings: startupWarnings,
+		refresher: refresher,
+		ex:        ex,
+		started:   time.Now(),
+		warnings:  startupWarnings,
 	}, nil
 }
 
@@ -325,6 +377,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
 }
 
+// CloseAdmin stops any temporary OAuth redirect listener. Run() does this on
+// its own shutdown path; it is exported for a caller that builds a Server
+// without running it, which a test does.
+func (s *Server) CloseAdmin() { s.adm.Close() }
+
 func (s *Server) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -394,6 +451,10 @@ func (s *Server) Run(ctx context.Context) error {
 	defer func() {
 		stopWorkers()
 		workers.Wait()
+		// Temporary OAuth redirect listeners hold a loopback port. Leaving one
+		// bound after the gateway is gone is exactly the leak the operator
+		// notices next time they run the vendor's own CLI.
+		s.adm.Close()
 	}()
 	startWorker := func(name string, fn func(context.Context) error) {
 		workers.Add(1)
@@ -435,6 +496,7 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	})
 
+	startWorker("token refresh", s.refresher.Run)
 	startWorker("log writer", s.logw.Run)
 	startWorker("health persister", s.persist.Run)
 	startWorker("rollup", func(c context.Context) error {

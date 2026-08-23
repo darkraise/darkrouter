@@ -1,0 +1,28 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "From the Google publisher."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "",
+    "responseId": "",
+    "usageMetadata": {
+      "cachedContentTokenCount": 0,
+      "candidatesTokenCount": 5,
+      "promptTokenCount": 7,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 12
+    }
+  },
+  "status": 200
+}

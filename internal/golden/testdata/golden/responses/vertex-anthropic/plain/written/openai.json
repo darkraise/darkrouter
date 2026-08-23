@@ -1,0 +1,24 @@
+{
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "From the Anthropic publisher.",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 0,
+    "id": "msg_vertex_1",
+    "model": "claude-sonnet-4-5",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 5,
+      "prompt_tokens": 7,
+      "total_tokens": 12
+    }
+  },
+  "status": 200
+}

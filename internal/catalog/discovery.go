@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -37,6 +38,21 @@ type DiscoveryOptions struct {
 	Concurrency int
 	// Timeout bounds one probe.
 	Timeout time.Duration
+
+	// Listers supplies a per-kind discoverer for a kind with no listing
+	// endpoint. A kind absent here keeps phase 6's behavior: undiscoverable
+	// kinds are a silent skip, not a failure.
+	Listers map[string]KindLister
+
+	// Auth resolves a non-static credential into an authorizer, so a signed
+	// control-plane listing can be made. Nil serves static styles only.
+	Auth AuthResolver
+}
+
+// AuthResolver mirrors exec.AuthResolver. Declared here rather than imported so
+// catalog does not depend on exec, which depends on catalog.
+type AuthResolver interface {
+	For(ctx context.Context, t auth.Target, c auth.Credential) (auth.Authorizer, error)
 }
 
 func (o DiscoveryOptions) withDefaults() DiscoveryOptions {
@@ -65,6 +81,28 @@ type Discoverer struct {
 	// what makes the cap fleet-wide rather than per provider.
 	sem     chan struct{}
 	trigger chan string
+}
+
+// authorizerFor resolves a provider's non-static credential for the discovery
+// path. A static style resolves to nil, which is the generic listing's normal
+// state.
+func (d *Discoverer) authorizerFor(ctx context.Context, p provider.Provider,
+	cred provider.Credential) (auth.Authorizer, error) {
+
+	style := p.AuthStyle
+	if style == "" {
+		style = Embedded()[p.Preset].Auth.Style
+	}
+	if auth.IsStatic(style) {
+		return nil, nil
+	}
+	if d.opts.Auth == nil {
+		return nil, fmt.Errorf("provider %q needs the %s strategy, which is not wired", p.ID, style)
+	}
+	return d.opts.Auth.For(ctx, auth.Target{
+		ProviderID: p.ID, Style: style, Preset: p.Preset,
+		Region: p.Region, Project: p.Project, Location: p.Location,
+	}, auth.Credential{ID: cred.ID, Kind: cred.Kind, Secret: cred.Secret})
 }
 
 func NewDiscoverer(db *store.DB, src provider.Source, cat *Store,
@@ -182,7 +220,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 		return
 	}
 
-	pr, err := ProbeFor(p, preset, cred.Secret)
+	pr, err := ProbeForKind(p, preset, cred.Secret, d.opts.Listers)
 	if err != nil {
 		// An undiscoverable kind is a permanent, known fact rather than a
 		// failure. Counting it would retire Vertex's catalogue on the third
@@ -191,6 +229,30 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	}
 
 	now := time.Now().UTC()
+
+	// A kind with no listing endpoint is seeded from models.dev rather than
+	// probed. Spec §4.3: no credential is spent and no request is made, which
+	// is what "discovery is not pretended" means in practice. The credential
+	// probe confirms reachability separately, on the operator's schedule.
+	if seeded := SeedFromPreset(preset, FallbackDoc()); len(seeded) > 0 {
+		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, now); err != nil {
+			log.Printf("discovery: %s: seed: %v", p.ID, err)
+		}
+		return
+	}
+
+	// A signed listing needs the credential turned into a signature. Unlike an
+	// undiscoverable kind, a strategy that cannot be resolved is a
+	// misconfiguration the operator can fix, so it is recorded rather than
+	// skipped in silence.
+	if az, aerr := d.authorizerFor(ctx, p, cred); aerr != nil {
+		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, aerr.Error()); rerr != nil {
+			log.Printf("discovery: %s: record failure: %v", p.ID, rerr)
+		}
+		return
+	} else {
+		pr.Authorize = az
+	}
 	d.health.MarkUsed(health.CredKey{ProviderID: p.ID, KeyID: cred.ID}, now)
 
 	models, err := d.list(ctx, pr, p.ID, cred.ID)
@@ -226,6 +288,11 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 
 // list performs the request and classifies the response.
 func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID string) ([]Discovered, error) {
+	if pr.Lister != nil {
+		// A kind whose model list does not come from one GET. Bedrock needs
+		// two signed calls against the control-plane host.
+		return pr.Lister.List(ctx, pr)
+	}
 	req, err := BuildListRequest(ctx, pr)
 	if err != nil {
 		return nil, err

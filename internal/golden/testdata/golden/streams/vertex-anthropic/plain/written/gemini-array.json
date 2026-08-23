@@ -1,0 +1,42 @@
+[
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "From Anthropic."
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": "claude-sonnet-4-5"
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [],
+            "role": "model"
+          },
+          "finishReason": "STOP",
+          "index": 0
+        }
+      ],
+      "modelVersion": "claude-sonnet-4-5",
+      "usageMetadata": {
+        "cachedContentTokenCount": 0,
+        "candidatesTokenCount": 4,
+        "promptTokenCount": 7,
+        "thoughtsTokenCount": 0,
+        "totalTokenCount": 11
+      }
+    }
+  }
+]

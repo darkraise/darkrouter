@@ -147,8 +147,8 @@ marked), **Playground** (send a prompt, watch it stream, jump to its trace), and
 
 Aliases and policy are **not** editable in the UI. They live in
 `darkrouter.yaml` and get rendered read-only with a reload button, which is the
-structural reason the API stays at nineteen endpoints instead of growing without
-bound.
+structural reason the API stays at twenty-two endpoints instead of growing
+without bound.
 
 **Credentials are never returned by the API** — not for editing, not for export.
 The dashboard shows a label and a masked suffix. Replacing a key means adding a
@@ -158,6 +158,55 @@ new one and deleting the old.
 port-scoped, so a browser logged into the admin port sends that cookie to the
 proxy port too; only `server.proxy_token` authenticates there.
 
+
+## Signed and subscription credentials
+
+Beyond a static API key, Darkrouter carries three credential strategies. Each
+composes with an adapter kind rather than being one: a Claude subscription
+speaks Anthropic Messages and an OpenAI one does not, so OAuth cannot be a
+provider kind of its own.
+
+| Style | Used by | What Darkrouter stores |
+|---|---|---|
+| `sigv4` | `bedrock` | An access key and secret, or nothing — the AWS chain covers environment, shared config and instance role |
+| `gcp-sa` | `vertex` | The service-account JSON, encrypted, exchanged for a short-lived token |
+| `oauth` | `anthropic`, and any other kind an OAuth preset declares | A refresh token, encrypted, rotated on every refresh |
+
+**Bedrock** speaks Converse, not InvokeModel, so one message shape covers every
+model family. Its region is a provider property rather than part of the model
+id; what carries a `us.` or `eu.` prefix is the cross-region inference profile,
+and discovery catalogues **profile ids** because those are what an invocation
+must name. Streaming arrives as AWS binary eventstream framing rather than SSE.
+
+**Vertex** is one kind with two request builders. A `publishers/google` model
+goes to `:generateContent` with a Gemini payload; a `publishers/anthropic` one
+goes to `:rawPredict` with an Anthropic Messages payload carrying
+`anthropic_version`. Vertex has no usable listing API, so its catalog is seeded
+from the preset and models.dev and the credential probe confirms reachability.
+Llama and Mistral MaaS use a third route and are not served.
+
+**OAuth accounts** connect from Settings. The dashboard shows an authorize link
+and a box to paste the redirected URL back into — the paste path always works,
+because vendors register `localhost` redirect URIs that a homelab admin origin
+cannot satisfy. Where the vendor's registered URI is a localhost callback and
+Darkrouter runs on your own machine, a temporary listener receives the redirect
+directly instead.
+
+Tokens refresh in the background ahead of expiry. Many vendors rotate the
+refresh token on every refresh, so **run one Darkrouter against one account**:
+two instances sharing a grant trip rotation-reuse detection, which some vendors
+treat as theft and answer by revoking the grant. A refresh the provider refuses
+outright disables the credential and shows "needs reconnection" on the overview
+— it is not retried, because hammering a refused endpoint is how an account gets
+locked rather than recovered.
+
+**No credential material is ever returned by the API**, for any of the three.
+
+**These three have not been verified against a real vendor.** This build has no
+AWS account, no GCP service account and no Claude subscription behind it: every
+test runs against a known-answer vector, an SDK-encoded frame, or a fake server.
+The Converse and `rawPredict` field names in particular come from vendor
+documentation rather than from a live call.
 
 ## The model catalog
 
