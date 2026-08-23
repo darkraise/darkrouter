@@ -91,23 +91,35 @@ Findings ledger O1 applied Cohere v2 provisionally and said to revisit "if the a
 
 | Path | Responsibility |
 |---|---|
-| `internal/ir/ir.go` | The seven-surface vocabulary; `ParseSurface` |
-| `internal/ir/aux.go` | The narrow per-surface IR types: embedding, image, speech, transcription, rerank, moderation |
-| `internal/adapter/adapter.go` | `SurfaceSet` and `Adapter.Surfaces()`; the per-surface build and parse interfaces |
-| `internal/exec/surface.go` | `SurfaceOp`, `CommitWriter`, and `runAttempts` re-parameterized over it |
-| `internal/exec/resolve.go` | The request prologue — record, providers, snapshot, resolve, candidate trace — shared by every route |
-| `internal/exec/chat.go` | Chat as the first `SurfaceOp`; behavior identical to phase 4 |
-| `internal/exec/aux.go` | The generic auxiliary `SurfaceOp`: build, send, respond |
+| `internal/ir/ir.go` | The seven-surface vocabulary; `ParseSurface`; `ErrPayloadTooLarge`; `Request.Warnings` |
+| `internal/ir/aux.go` | The narrow per-surface IR types: embedding, image, speech, rerank, moderation |
+| `internal/adapter/adapter.go` | `SurfaceSet`, `Adapter.Surfaces()`, `Target.RerankPath`, and the six optional per-surface interfaces |
+| `internal/exec/surface.go` | `SurfaceOp`, `chatOp`, `RunSurface`, `RunAux` |
+| `internal/exec/commitwriter.go` | `CommitWriter`: the loop's own answer to "did bytes go out" |
+| `internal/exec/resolve.go` | The request prologue shared by every route |
+| `internal/exec/aux.go` | The generic auxiliary scaffold, `DecodeJSON`, `ReadCapped` |
 | `internal/exec/multipart.go` | Buffering and in-form model rewriting for transcriptions |
-| `internal/adapter/openaicompat/embed.go` | Embeddings, images, speech, transcriptions, moderations against an OpenAI-compatible upstream |
+| `internal/exec/embed.go` | The embedding op, its route, and spec §8's cross-model warning |
+| `internal/exec/moderation.go` | The moderation op and route |
+| `internal/exec/rerank.go` | The rerank op and route |
+| `internal/exec/image.go` | The image op and route |
+| `internal/exec/transcription.go` | The stt op, its route, and `copyFlushing` |
+| `internal/exec/speech.go` | The tts op and route: binary through, never held |
+| `internal/adapter/openaicompat/embed.go` | Embeddings against an OpenAI-compatible upstream |
+| `internal/adapter/openaicompat/moderation.go` | Moderations |
 | `internal/adapter/openaicompat/rerank.go` | Cohere v2 rerank, at the preset-declared path |
-| `internal/adapter/gemini/embed.go` | `embedContent` |
+| `internal/adapter/openaicompat/image.go` | Image generation |
+| `internal/adapter/openaicompat/audio.go` | Transcriptions: the rendered form onto the wire |
+| `internal/adapter/openaicompat/speech.go` | Speech |
+| `internal/edge/edge.go` | The five auxiliary inbound dialect interfaces |
 | `internal/edge/openai/aux.go` | Parsing and writing the six auxiliary shapes |
-| `internal/edge/openai/responses.go` | The Responses API: request parsing, item-based body, semantic stream writer |
+| `internal/edge/openai/responses.go` | The Responses request, its refusals, and the item body |
+| `internal/edge/openai/responses_stream.go` | The Responses semantic stream writer |
+| `internal/edge/openai/dialect.go` | `ResponsesDialect`, the fourth `edge.Dialect` |
 | `internal/catalog/presets.overrides.yaml` | Widened surface declarations |
 | `internal/server/server.go` | The seven new routes |
-| `internal/store/log.go` | Surface-specific log fields |
-| `internal/store/migrations/0003_surfaces.sql` | The columns those fields need |
+| `internal/store/log.go` | `SurfaceMeta`, `ResponseBytes`, `ResponseContentType` |
+| `internal/store/migrations/0003_surfaces.sql` | The three columns those fields need |
 
 ## What this phase deliberately does not do
 
@@ -10221,3 +10233,863 @@ git commit -m "feat(server): serve the responses API"
 ```
 
 ---
+
+### Task 28: Migration 0003 and the surface log columns
+
+**Files:**
+- Create: `internal/store/migrations/0003_surfaces.sql`
+- Modify: `internal/store/log.go`
+- Test: `internal/store/log_test.go`, `internal/store/migrate_test.go`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `store.RequestRecord.SurfaceMeta map[string]any`, `.ResponseBytes int64`, `.ResponseContentType string`, and the three columns behind them. Task 29 fills them.
+
+**Implementer:** dcc-superpower-companions:impl-opus-high
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 3 = 6
+**Approach:** inline - skip 2: `0002_catalog.sql` is the pattern, the loader asserts contiguity already, and the three columns are stated below.
+
+Risk is 3 because this is a schema migration against a database that already holds production rows. Two things make it safe and both are load-bearing: every column is added with a non-null default, which is what `ALTER TABLE ADD COLUMN` requires on a `STRICT` table and what keeps existing rows valid; and nothing is dropped or rebuilt, so a failed run leaves the phase 2 schema exactly as it was.
+
+**One JSON column, not nine.** Spec §9 asks for input item count and dimensions on embeddings, image count and size on images, duration and voice on audio, document count on rerank. **No two surfaces share a single one of those fields.** Nine columns would be nine mostly-NULL columns, and the tenth surface would mean a tenth migration. `candidates_json` beside it is the precedent for exactly this shape, and SQLite's `json_extract` keeps the column queryable for phase 7's trace view.
+
+**Two things do get real columns**, because they apply to every surface and one of them is load-bearing. Spec §7: a truncated binary body cannot be signalled in-band and there is no in-stream error vocabulary for audio, so **the byte count on the request row is the only place the truncation appears**. A field buried in a JSON blob is not where an operator finds that. Content type sits beside it because it is what tells a reader whether a row is audio, a subtitle file or JSON at all.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/store/log_test.go`:
+
+```go
+func TestRequestRowCarriesSurfaceDetail(t *testing.T) {
+	db := testDB(t)
+	w := NewLogWriter(db, LogOptions{})
+	rec := &RequestRecord{
+		ID: "r1", TS: time.Now(), Dialect: "openai", Surface: "embedding",
+		RequestedModel: "e5", Status: "success",
+		SurfaceMeta:    map[string]any{"input_count": 3, "dimensions": 256},
+	}
+	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.SQL().QueryRow(
+		`SELECT surface_meta_json FROM requests WHERE id = 'r1'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("surface_meta_json is not JSON: %q", raw)
+	}
+	if got["input_count"].(float64) != 3 || got["dimensions"].(float64) != 256 {
+		t.Errorf("surface meta = %v", got)
+	}
+}
+
+func TestARecordWithNoSurfaceDetailStoresAnEmptyObject(t *testing.T) {
+	// The column is NOT NULL. A nil map must encode as {} rather than null, or
+	// every chat row fails the insert.
+	db := testDB(t)
+	w := NewLogWriter(db, LogOptions{})
+	rec := &RequestRecord{
+		ID: "r2", TS: time.Now(), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", Status: "success",
+	}
+	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.SQL().QueryRow(
+		`SELECT surface_meta_json FROM requests WHERE id = 'r2'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != "{}" {
+		t.Errorf("surface_meta_json = %q, want {}", raw)
+	}
+}
+
+func TestRequestRowCarriesResponseSizeAndType(t *testing.T) {
+	// Spec §7: a truncated audio body cannot be signalled in-band, so this is
+	// the only place the truncation appears.
+	db := testDB(t)
+	w := NewLogWriter(db, LogOptions{})
+	rec := &RequestRecord{
+		ID: "r3", TS: time.Now(), Dialect: "openai", Surface: "tts",
+		RequestedModel: "tts-1", Status: "success",
+		ResponseBytes:  204800, ResponseContentType: "audio/mpeg",
+	}
+	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	var ct string
+	if err := db.SQL().QueryRow(
+		`SELECT response_bytes, response_content_type FROM requests WHERE id = 'r3'`).
+		Scan(&n, &ct); err != nil {
+		t.Fatal(err)
+	}
+	if n != 204800 || ct != "audio/mpeg" {
+		t.Errorf("bytes = %d, content type = %q", n, ct)
+	}
+}
+
+func TestSurfaceDetailIsQueryable(t *testing.T) {
+	// A JSON column is only defensible if phase 7 can filter on it. This is
+	// the assertion that keeps it defensible.
+	db := testDB(t)
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.flush(context.Background(), []*RequestRecord{
+		{ID: "a", TS: time.Now(), Dialect: "openai", Surface: "image",
+			RequestedModel: "m", Status: "success",
+			SurfaceMeta:    map[string]any{"image_count": 4}},
+		{ID: "b", TS: time.Now(), Dialect: "openai", Surface: "image",
+			RequestedModel: "m", Status: "success",
+			SurfaceMeta:    map[string]any{"image_count": 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := db.SQL().QueryRow(
+		`SELECT id FROM requests WHERE json_extract(surface_meta_json, '$.image_count') > 2`).
+		Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if id != "a" {
+		t.Errorf("id = %q", id)
+	}
+}
+```
+
+Add `"encoding/json"` to the imports if absent. If `LogWriter.flush` is spelled differently or `DB.SQL()` is not the accessor, **read `log_test.go` and `db.go` first and follow whatever they already use** — do not add an accessor for the test's convenience.
+
+Add to `internal/store/migrate_test.go`:
+
+```go
+func TestMigrationsReachVersionThree(t *testing.T) {
+	// The loader asserts contiguity from 1, so a mis-numbered file fails here
+	// rather than at a customer's first start.
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 3 {
+		t.Fatalf("loaded %d migrations, want 3", len(ms))
+	}
+}
+
+func TestMigrationThreeIsAdditive(t *testing.T) {
+	// Nothing is dropped or rebuilt, so a failed run leaves the phase 2 schema
+	// exactly as it was. Every added column carries a non-null default, which
+	// ALTER TABLE ADD COLUMN requires on a STRICT table.
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.ToUpper(ms[2].SQL)
+	for _, forbidden := range []string{"DROP TABLE", "DROP COLUMN", "DELETE FROM"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("migration 3 contains %q", forbidden)
+		}
+	}
+	if strings.Count(body, "ADD COLUMN") != 3 {
+		t.Errorf("migration 3 adds %d columns, want 3", strings.Count(body, "ADD COLUMN"))
+	}
+}
+```
+
+Match `ms[2].SQL` to whatever field `loadMigrations` actually returns — read `migrate.go` before writing this.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/store/ -run 'TestRequestRowCarries|TestSurfaceDetail|TestMigration|TestARecordWithNo' -v
+```
+
+Expected: FAIL to build on `rec.SurfaceMeta`, and `TestMigrationsReachVersionThree` reporting 2.
+
+- [ ] **Step 3: Write the migration**
+
+Create `internal/store/migrations/0003_surfaces.sql`:
+
+```sql
+-- Phase 5 schema, per spec section 9.
+--
+-- Additive only: every column carries a non-null default, which is what
+-- ALTER TABLE ADD COLUMN requires on a STRICT table and what keeps the rows
+-- already in the table valid. Nothing is dropped or rebuilt, so a failed run
+-- leaves the phase 2 schema exactly as it was.
+--
+-- surface_meta_json is one column rather than nine because no two surfaces
+-- share a field: embeddings record an input count and a dimension count,
+-- images a count and a size, audio a duration and a voice, rerank a document
+-- count. Nine mostly-NULL columns would also mean a tenth migration for a
+-- tenth surface. candidates_json is the precedent, and json_extract keeps the
+-- column queryable for phase 7's trace view.
+ALTER TABLE requests ADD COLUMN surface_meta_json TEXT NOT NULL DEFAULT '{}';
+
+-- These two are real columns because they apply to every surface, and because
+-- spec section 7 makes the byte count load-bearing: a provider that returns a
+-- fast 200 and then truncates a binary body cannot be failed over and there is
+-- no in-stream error vocabulary to warn the client, so this is the only place
+-- the truncation is recorded. A field inside a JSON blob is not where an
+-- operator finds that.
+ALTER TABLE requests ADD COLUMN response_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE requests ADD COLUMN response_content_type TEXT NOT NULL DEFAULT '';
+```
+
+- [ ] **Step 4: Extend the record and the insert**
+
+In `internal/store/log.go`, add to `RequestRecord` after `Warnings`:
+
+```go
+	// SurfaceMeta is the surface-specific detail spec §9 asks for: input count
+	// and dimensions for embeddings, image count and size, audio duration and
+	// voice, document count for rerank. One JSON column rather than nine,
+	// because no two surfaces share a field.
+	SurfaceMeta map[string]any
+
+	// ResponseBytes and ResponseContentType apply to every surface. Spec §7:
+	// a truncated binary body cannot be signalled in-band, so the byte count on
+	// this row is the only place the truncation appears.
+	ResponseBytes       int64
+	ResponseContentType string
+```
+
+Extend the `INSERT` in `flush` with the three columns and three placeholders, and in `insertOne`:
+
+```go
+	// The column is NOT NULL and defaults to an empty object, so a nil map must
+	// encode as {} rather than null — otherwise every chat row fails to insert.
+	meta := r.SurfaceMeta
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	surfaceMeta, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+```
+
+and append `string(surfaceMeta), r.ResponseBytes, r.ResponseContentType` to the `ExecContext` argument list, in the same order as the column list.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/store/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 6: Verify the migration against a phase 2 database, not only a fresh one**
+
+A fresh database is created by running every migration in order, so a fresh-start test never exercises the upgrade path that production takes.
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+export DARKROUTER_MASTER_KEY=throwaway-verify-key
+rm -rf /tmp/dr-migrate && mkdir -p /tmp/dr-migrate
+git stash list >/dev/null 2>&1
+git stash push -- internal/store/migrations/0003_surfaces.sql
+go run ./cmd/darkrouter --config darkrouter.example.yaml --data /tmp/dr-migrate &
+sleep 2; kill "$(ps -C darkrouter -o pid= | head -1)" 2>/dev/null
+git stash pop
+go run ./cmd/darkrouter --config darkrouter.example.yaml --data /tmp/dr-migrate &
+sleep 2; kill "$(ps -C darkrouter -o pid= | head -1)" 2>/dev/null
+sqlite3 /tmp/dr-migrate/darkrouter.db '.schema requests' | grep -E 'surface_meta|response_bytes|response_content_type'
+sqlite3 /tmp/dr-migrate/darkrouter.db 'SELECT version FROM schema_migrations ORDER BY version'
+```
+
+Expected: all three columns present, versions 1, 2 and 3 recorded. **Read the flag names off `cmd/darkrouter/main.go` first** — `--data` and `--config` are what this plan assumes and the binary is the authority. If `sqlite3` is not installed, open the database from a short Go program instead; do not skip this step, because it is the only check that runs the upgrade rather than the fresh path.
+
+The two `go run` invocations are backgrounded and killed **by binary name**. `nohup … &` inside a compound command returns the subshell's pid, not the binary's, and killing that leaves the gateway holding its port.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/store/migrations/0003_surfaces.sql internal/store/log.go \
+        internal/store/log_test.go internal/store/migrate_test.go
+git commit -m "feat(store): record surface detail on the request row"
+```
+
+---
+
+### Task 29: Each surface records its own detail
+
+**Files:**
+- Modify: `internal/exec/embed.go`, `internal/exec/image.go`, `internal/exec/rerank.go`, `internal/exec/transcription.go`, `internal/exec/speech.go`, `internal/exec/moderation.go`
+- Test: `internal/exec/surfacemeta_test.go`
+
+**Interfaces:**
+- Consumes: `store.RequestRecord.SurfaceMeta`, `.ResponseBytes`, `.ResponseContentType` (Task 28); `CommitWriter.Bytes()` (Task 5).
+- Produces: nothing new.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
+**Approach:** inline - skip 2: the fields per surface are enumerated by spec §9 and listed below, and each is two lines in a `Respond` that already exists.
+
+Spec §9 names what each surface records. The values come from the request for anything the client asked for and from the response for anything the provider reported, which is why they are assigned in `Respond` rather than at parse time — a request that never reached a provider should not claim an image count it never generated.
+
+| Surface | `surface_meta_json` | `response_bytes` | `response_content_type` |
+|---|---|---|---|
+| embedding | `input_count`, `dimensions`, `encoding` | — | — |
+| image | `image_count`, `size`, `quality` | — | — |
+| rerank | `document_count`, `top_n` | — | — |
+| moderation | `input_count`, `flagged_count` | — | — |
+| stt | `file_name` | yes | yes |
+| tts | `voice`, `response_format` | yes | yes |
+
+`ResponseBytes` is taken from `cw.Bytes()` **after** the copy, which is the wrapper's count of what actually reached the client rather than what the provider claimed to send. That distinction is the point: a truncated audio body has a byte count lower than the provider's `Content-Length`, and this is where that shows up.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/exec/surfacemeta_test.go`:
+
+```go
+package exec
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestEmbeddingsRecordTheirInputCount(t *testing.T) {
+	upstream := httptest.NewServer(embedUpstream())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "e5", ir.SurfaceEmbedding))
+	e.HandleEmbeddings(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"e5","input":["a","b","c"],"dimensions":256,"encoding_format":"base64"}`)),
+		openaiedge.New())
+
+	got := rec.only(t).SurfaceMeta
+	if got["input_count"] != 3 || got["dimensions"] != 256 || got["encoding"] != "base64" {
+		t.Errorf("surface meta = %v", got)
+	}
+}
+
+func TestImagesRecordTheirCountAndSize(t *testing.T) {
+	upstream := httptest.NewServer(imageUpstream(true))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "gpt-image-1", ir.SurfaceImage))
+	e.HandleImages(httptest.NewRecorder(),
+		httptest.NewRequest("POST", "/v1/images/generations", strings.NewReader(
+			`{"model":"gpt-image-1","prompt":"a cat","n":2,"size":"1024x1024","quality":"high"}`)),
+		openaiedge.New())
+
+	got := rec.only(t).SurfaceMeta
+	if got["image_count"] != 2 || got["size"] != "1024x1024" || got["quality"] != "high" {
+		t.Errorf("surface meta = %v", got)
+	}
+}
+
+func TestRerankRecordsItsDocumentCount(t *testing.T) {
+	upstream := httptest.NewServer(rerankUpstream(nil))
+	defer upstream.Close()
+
+	e, rec := executorForPreset(t, upstream.URL, "cohere",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	e.HandleRerank(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/rerank",
+		strings.NewReader(`{"model":"rerank-v3.5","query":"q","documents":["a","b"],"top_n":1}`)),
+		openaiedge.New())
+
+	got := rec.only(t).SurfaceMeta
+	if got["document_count"] != 2 || got["top_n"] != 1 {
+		t.Errorf("surface meta = %v", got)
+	}
+}
+
+func TestModerationsRecordTheirFlaggedCount(t *testing.T) {
+	upstream := httptest.NewServer(moderationUpstream())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "omni", ir.SurfaceModeration))
+	e.HandleModerations(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/moderations",
+		strings.NewReader(`{"model":"omni","input":["a","b"]}`)), openaiedge.New())
+
+	got := rec.only(t).SurfaceMeta
+	if got["input_count"] != 2 || got["flagged_count"] != 0 {
+		t.Errorf("surface meta = %v", got)
+	}
+}
+
+func TestSpeechRecordsWhatActuallyReachedTheClient(t *testing.T) {
+	// Not the provider's Content-Length. A truncated body has a lower count,
+	// and spec §7 makes this the only place that appears.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("0123456789"))
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "tts-1", ir.SurfaceTTS))
+	e.HandleSpeech(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/audio/speech",
+		strings.NewReader(`{"model":"tts-1","input":"hi","voice":"alloy","response_format":"mp3"}`)),
+		openaiedge.New())
+
+	got := rec.only(t)
+	if got.ResponseBytes != 10 {
+		t.Errorf("response bytes = %d, want 10", got.ResponseBytes)
+	}
+	if got.ResponseContentType != "audio/mpeg" {
+		t.Errorf("content type = %q", got.ResponseContentType)
+	}
+	if got.SurfaceMeta["voice"] != "alloy" || got.SurfaceMeta["response_format"] != "mp3" {
+		t.Errorf("surface meta = %v", got.SurfaceMeta)
+	}
+}
+
+func TestTranscriptionsRecordTheirContentTypeAndSize(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("hello there"))
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "whisper-1", ir.SurfaceSTT))
+	e.HandleTranscriptions(httptest.NewRecorder(), transcriptionRequest(t, "whisper-1"), openaiedge.New())
+
+	got := rec.only(t)
+	if got.ResponseBytes != 11 {
+		t.Errorf("response bytes = %d, want 11", got.ResponseBytes)
+	}
+	if !strings.HasPrefix(got.ResponseContentType, "text/plain") {
+		t.Errorf("content type = %q", got.ResponseContentType)
+	}
+	if got.SurfaceMeta["file_name"] != "a.mp3" {
+		t.Errorf("surface meta = %v", got.SurfaceMeta)
+	}
+}
+
+func TestAChatRequestRecordsNoSurfaceDetail(t *testing.T) {
+	// The column defaults to {}. A chat row inventing keys would make the
+	// trace view show fields that mean nothing for that surface.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "m", ir.SurfaceLLM))
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceLLM}}
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op)
+
+	if got := rec.only(t).SurfaceMeta; len(got) != 0 {
+		t.Errorf("surface meta = %v, want empty", got)
+	}
+}
+```
+
+Add `"github.com/darkraise/darkrouter/internal/router"` to the imports.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'RecordTheir|RecordsIts|RecordsWhat|RecordsNoSurface' -v
+```
+
+Expected: FAIL — every `SurfaceMeta` lookup returns nil and `ResponseBytes` is 0.
+
+- [ ] **Step 3: Fill the fields in each op**
+
+In `internal/exec/embed.go`, in `Respond` before `writeDiagnostics`:
+
+```go
+	ac.Rec.SurfaceMeta = map[string]any{
+		"input_count": o.req.InputCount(),
+		"encoding":    o.req.EncodingOrDefault(),
+	}
+	// Omitted rather than zero: dimensions has no legal zero, so recording one
+	// would claim the client asked for a value it did not send.
+	if o.req.Dimensions > 0 {
+		ac.Rec.SurfaceMeta["dimensions"] = o.req.Dimensions
+	}
+```
+
+In `internal/exec/image.go`:
+
+```go
+	ac.Rec.SurfaceMeta = map[string]any{"image_count": o.req.ImageCount()}
+	for k, v := range map[string]string{"size": o.req.Size, "quality": o.req.Quality} {
+		if v != "" {
+			ac.Rec.SurfaceMeta[k] = v
+		}
+	}
+```
+
+In `internal/exec/rerank.go`:
+
+```go
+	ac.Rec.SurfaceMeta = map[string]any{"document_count": o.req.DocumentCount()}
+	if o.req.TopN > 0 {
+		ac.Rec.SurfaceMeta["top_n"] = o.req.TopN
+	}
+```
+
+In `internal/exec/moderation.go`, after the parse so the flagged count is real:
+
+```go
+	flagged := 0
+	for _, r := range out.Results {
+		if r.Flagged {
+			flagged++
+		}
+	}
+	ac.Rec.SurfaceMeta = map[string]any{
+		"input_count": o.req.InputCount(), "flagged_count": flagged,
+	}
+```
+
+In `internal/exec/speech.go`, after the copy so the count is what reached the client:
+
+```go
+	n, err := copyFlushing(cw, resp.Body)
+	// cw.Bytes() rather than n or the provider's Content-Length: the wrapper
+	// counts what actually reached the client, and a truncated body's count is
+	// lower than what the provider claimed. Spec §7 makes this the only place
+	// that truncation appears.
+	ac.Rec.ResponseBytes = cw.Bytes()
+	ac.Rec.ResponseContentType = resp.Header.Get("Content-Type")
+	ac.Rec.SurfaceMeta = map[string]any{"voice": o.req.Voice}
+	if o.req.ResponseFormat != "" {
+		ac.Rec.SurfaceMeta["response_format"] = o.req.ResponseFormat
+	}
+	_ = n
+	if err != nil && !cw.Committed() {
+		return adapter.OutcomeRetryableProvider, errorFor(adapter.OutcomeRetryableProvider, err)
+	}
+	return adapter.OutcomeSuccess, nil
+```
+
+Drop the now-unused `n` binding rather than assigning it to `_` if the implementer prefers; `copyFlushing`'s count and `cw.Bytes()` agree on the success path and only `cw.Bytes()` is right on the truncated one, so the wrapper is the one to keep.
+
+In `internal/exec/transcription.go`, on **both** branches:
+
+```go
+	ac.Rec.SurfaceMeta = map[string]any{"file_name": o.form.FileName("file")}
+	ac.Rec.ResponseContentType = ct
+```
+
+and set `ac.Rec.ResponseBytes = cw.Bytes()` after the write on each — after `cw.Write(raw)` on the JSON branch and after `copyFlushing` on the other.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/exec/embed.go internal/exec/image.go internal/exec/rerank.go \
+        internal/exec/moderation.go internal/exec/transcription.go internal/exec/speech.go \
+        internal/exec/surfacemeta_test.go
+git commit -m "feat(exec): record each surface's own detail"
+```
+
+---
+
+### Task 30: Documentation
+
+**Files:**
+- Modify: `README.md`, `darkrouter.example.yaml`, `docs/PROGRESS.md`
+- Modify: `docs/superpowers/specs/README.md`
+
+**Interfaces:**
+- Consumes: everything.
+- Produces: nothing code depends on.
+
+**Implementer:** dcc-superpower-companions:impl-sonnet-medium
+**Evaluation:** files 2 - spec 0 - coupling 0 - risk 0 = 2
+**Approach:** inline - skip 2: the content is enumerated below and the three documents already have the sections it belongs in.
+
+Spec §8 makes one of these a **requirement rather than a courtesy**: "The documentation states plainly that embedding aliases should list same-model targets across providers, not different models." That sentence is the entire mitigation for a hazard that silently corrupts a vector index, so it is not a nice-to-have paragraph.
+
+- [ ] **Step 1: Document the routes**
+
+In `README.md`, beside the existing endpoint list, add the seven routes with what each needs:
+
+| Route | Surface | Notes |
+|---|---|---|
+| `POST /v1/embeddings` | `embedding` | Batched input; `float` or `base64`; optional `dimensions`. Pre-tokenized input is forwarded as token ids. |
+| `POST /v1/responses` | `llm` | Stateless only. `previous_response_id`, `conversation` and `background` are refused, not degraded. |
+| `POST /v1/images/generations` | `image` | URLs or base64. `gpt-image-1` reports usage; the dall-e models report none and their cost stays unrecorded. |
+| `POST /v1/audio/speech` | `tts` | Binary or SSE, streamed through and never stored. |
+| `POST /v1/audio/transcriptions` | `stt` | Multipart in; JSON, plain text or SSE out, chosen by the response `Content-Type`. |
+| `POST /v1/rerank` | `rerank` | Cohere v2 schema, at the path the provider's preset declares. |
+| `POST /v1/moderations` | `moderation` | Category flags forwarded whole, including categories added after this was written. |
+
+Note in the same section that these routes speak the **OpenAI dialect only**. The Anthropic and Gemini inbound dialects serve chat and token counting; neither vendor defines a rerank or moderations endpoint, and a client speaking those dialects reaches the auxiliary surfaces by calling the OpenAI routes with its existing token.
+
+Note also that `/v1/audio/translations` is **permanently absent** per master design §2. Whisper clients do call it, so its absence should be findable in the README rather than discovered as a 404.
+
+- [ ] **Step 2: Write the embedding failover hazard where an operator will read it**
+
+In `README.md`, as its own short subsection under the routes — not a footnote:
+
+> **Embedding aliases must point at the same model.**
+>
+> An alias exists so a request can fail over. For chat that is unambiguously
+> good. For embeddings it is a hazard: two models produce vectors in different
+> vector spaces, so a failover to a different model returns vectors that are
+> not comparable to the ones already in your index — and **nothing in the
+> response says so**. The call succeeds, the vector looks fine, and similarity
+> search quietly degrades.
+>
+> So an embedding alias should list the *same* model across *different*
+> providers, never different models:
+>
+> ```yaml
+> aliases:
+>   embed:
+>     # Good: one model, two providers. A failover is invisible and harmless.
+>     - provider: openai
+>       model: text-embedding-3-small
+>     - provider: azure-openai
+>       model: text-embedding-3-small
+> ```
+>
+> Darkrouter permits the other arrangement rather than refusing it — refusing
+> would make an alias useless the moment its first provider rate-limits — but
+> it records a warning on the request row naming both models, and always sets
+> `X-Darkrouter-Model` to the model that actually served. Check that header if
+> you index across a failover.
+
+Add the same alias to `darkrouter.example.yaml` as a commented block, with the one-line version of the warning above it.
+
+- [ ] **Step 3: Update the progress document**
+
+In `docs/PROGRESS.md`, set phase 5 to complete in the status table, and add a "Closed by phase 5" section recording:
+
+- **`Adapter.Surfaces()` exists**, closing the item phase 3 carried and phase 4 and 6 both deferred. Routing now excludes a provider whose kind Darkrouter cannot speak the surface to, as a filter rather than a runtime error.
+- **The surface vocabulary matches master design §6.** Seven values, `tts` and `stt` separate, and every shipped preset declares them in the corrected spelling.
+- **A phase 6 merge defect was fixed on the branch** (`f6ae00c`): `merge.surfaces` resolved override → row → preset, but discovery hardcodes `'["llm"]'` into every row it inserts and the sync echoes it, so the row always shadowed the preset and widening a preset had no effect on any discovered model. The preset now outranks the row; an operator override still wins.
+
+Add a "Carried forward from phase 5" section with these, each one or two sentences:
+
+- **Cost is still never computed.** `applyUsage` leaves `CostMicros` nil on every surface including chat, although phase 6 shipped `catalog.Pricing` with real per-MTok numbers. Nothing in phase 5 changed that, and the item below is why it was not simply switched on.
+- **`ir.Usage.InputTokens` does not mean the same thing across adapters.** Anthropic's `input_tokens` **excludes** cache read and write tokens; OpenAI's `prompt_tokens` and Gemini's `promptTokenCount` **include** them. Each adapter copies its provider's own convention into the same field. Any cost formula written today is therefore wrong for at least one family — it either double-charges cached input or under-charges it — so the IR has to normalize before pricing can be turned on. This is the blocker for the item above, and it is a real defect in the existing usage plumbing rather than a phase 5 omission.
+- **`capture.bodies` has no writer.** The `request_bodies` table exists from phase 2 and the retention sweep prunes it, but **nothing has ever inserted a row**. The setting, its `max_bytes` and its `retention` are all inert. Spec §5's "a speech response is never captured even when `capture.bodies` is on" is therefore satisfied by construction rather than by enforcement — what phase 5 does enforce is that the body is never held whole, which is the property that matters.
+- **Per-call image pricing has no catalog source.** Spec §9 says cost should come from per-call or per-unit pricing where no usage arrives, but `catalog.Pricing` carries only per-MTok rates and models.dev supplies nothing else. A dall-e call therefore records no cost at all, which is correct but incomplete.
+- **Unmodeled Responses request fields are dropped silently.** `top_logprobs`, `truncation`, `include`, `service_tier`, `max_tool_calls` and `prompt_cache_key` are parsed away without a warning. None changes the answer's content, but `truncation` and `max_tool_calls` change its shape, and a client setting them gets behavior it did not ask for with nothing in the trace saying so.
+- **Responses ids are not resolvable, by design.** Returned ids carry a `resp_dr_` prefix and `store: false`; any request echoing one back is refused. A client built around server-side conversation state will not work against Darkrouter and is told so explicitly rather than served an amnesic answer.
+- **Four of the seven surfaces have no live-verified provider.** Task 31 verifies chat, responses, transcriptions and speech against Groq. Embeddings, images, rerank and moderations are verified only as the no-provider error, because no key for a provider serving them was available. Verifying them needs an OpenAI or Cohere key.
+
+- [ ] **Step 4: Update the spec index**
+
+In `docs/superpowers/specs/README.md`, the "Open decisions" section still says the rerank wire shape may be revisited. Replace it with the settled statement: exactly one shipped preset declares a `rerank` surface, `cohere`, and neither Jina nor Voyage is a preset at all, so Cohere v2 is not merely the recommendation but the only shape any shipped provider serves. **No revisit is planned.**
+
+- [ ] **Step 5: Verify the documents say what the code does**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+grep -c 'v1/embeddings\|v1/responses\|v1/images/generations\|v1/audio/speech\|v1/audio/transcriptions\|v1/rerank\|v1/moderations' README.md
+grep -n 'HandleFunc("POST /v1' internal/server/server.go
+```
+
+Expected: the README names all seven, and every route in `server.go` appears in the README. **Read both lists side by side** — a route documented but not wired, or wired but not documented, is exactly the drift this step exists to catch.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add README.md darkrouter.example.yaml docs/PROGRESS.md docs/superpowers/specs/README.md
+git commit -m "docs: document the auxiliary surfaces"
+```
+
+---
+
+### Task 31: Live verification against a real provider
+
+**Files:**
+- Modify: `docs/PROGRESS.md`
+
+**Interfaces:**
+- Consumes: everything.
+- Produces: the verification record.
+
+**Implementer:** dcc-superpower-companions:impl-sonnet-medium
+**Evaluation:** files 1 - spec 1 - coupling 0 - risk 0 = 2
+**Approach:** inline - skip 2: every command is given below; only the judgement of what the output should say is prose.
+
+The unit suite proves the shapes. It cannot prove that a real provider accepts them, and phase 6's verification is the reason to insist: reading `warnings_json` after a live request is what caught a mechanism that passed every test and did nothing in production.
+
+**What Groq can and cannot verify, stated up front.** Groq serves chat, `/v1/audio/transcriptions` and `/v1/audio/speech` on one OpenAI-compatible base URL. It serves no embeddings, images, rerank or moderations endpoint. So four of the seven routes are verified as the **no-provider error**, which is itself a done criterion — "a request for a surface no configured provider offers returns a clear error naming that fact" — and is a real check rather than a skipped one. Say so in the record; do not imply seven live surfaces.
+
+- [ ] **Step 1: Build and start**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+set -a; . ./.env; set +a
+export DARKROUTER_MASTER_KEY=throwaway-phase5-verify
+CGO_ENABLED=0 go build -o /tmp/darkrouter-p5 ./cmd/darkrouter
+ls -la /tmp/darkrouter-p5
+```
+
+Write a verification config at `/tmp/dr-p5.yaml` with `proxy_listen: ":18080"`, `admin_listen: ":18081"`, one provider `id: groq`, `kind: openaicompat`, **`preset: groq`** — without it nothing joins the catalog and the audio surfaces are never declared — `base_url: https://api.groq.com/openai/v1`, the key from `GROQ_KEY`, and `models: [openai/gpt-oss-120b, whisper-large-v3, playai-tts]`.
+
+Start it in the background and record the pid **by binary name**:
+
+```bash
+/tmp/darkrouter-p5 --config /tmp/dr-p5.yaml --data /tmp/dr-p5-data >/tmp/dr-p5.log 2>&1 &
+sleep 3
+ps -C darkrouter-p5 -o pid=
+curl -fsS localhost:18081/readyz && echo READY
+```
+
+`nohup … &` inside a compound command returns the subshell's pid, not the binary's. Kill by name at the end and confirm nothing is left holding the port.
+
+- [ ] **Step 2: Verify chat still works**
+
+The `runAttempts` refactor is the largest change in this phase and chat is what must not have moved.
+
+```bash
+curl -sS -D /tmp/h.txt localhost:18080/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"say hi"}]}' | head -c 400
+grep -i 'x-darkrouter' /tmp/h.txt
+```
+
+Expected: a completion, and `X-Darkrouter-Request`, `-Provider`, `-Model` and `-Attempts: 1` all present.
+
+- [ ] **Step 3: Verify the Responses API, unary and streamed**
+
+```bash
+curl -sS localhost:18080/v1/responses -H 'content-type: application/json' \
+  -d '{"model":"openai/gpt-oss-120b","input":"say hi in three words"}' | head -c 600
+echo
+curl -sS -N localhost:18080/v1/responses -H 'content-type: application/json' \
+  -d '{"model":"openai/gpt-oss-120b","input":"count to three","stream":true}' | head -40
+echo
+curl -sS -o /dev/null -w '%{http_code}\n' localhost:18080/v1/responses \
+  -H 'content-type: application/json' \
+  -d '{"model":"openai/gpt-oss-120b","input":"hi","previous_response_id":"resp_dr_x"}'
+```
+
+Expected, and **read the streamed output rather than only checking the exit code**: the unary body has `"object":"response"`, `"status":"completed"`, `"store":false`, an `output` array with a `message` item, and an `output_text`. The stream shows `event:` lines with names matching each frame's `data.type`, sequence numbers running from 0 with no gaps, `response.output_item.done` **before** `response.completed`, and **no `[DONE]`**. The stateful request is `400`.
+
+- [ ] **Step 4: Verify transcriptions, including the in-form rewrite**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+ffmpeg -f lavfi -i 'sine=frequency=440:duration=2' -ar 16000 /tmp/tone.mp3 -y 2>/dev/null || \
+  echo "no ffmpeg: use any small mp3/wav at /tmp/tone.mp3"
+curl -sS localhost:18080/v1/audio/transcriptions \
+  -F file=@/tmp/tone.mp3 -F model=whisper-large-v3 -F response_format=json
+echo
+curl -sS localhost:18080/v1/audio/transcriptions \
+  -F file=@/tmp/tone.mp3 -F response_format=text -F model=whisper-large-v3 -w '\n%{content_type}\n'
+```
+
+The second call puts `model` **after** `response_format` deliberately; a client that puts it after the file part is the case spec §6 calls out. Expected: JSON with a `text` field on the first, `text/plain` content type on the second, and both 200. A tone transcribes to little or nothing — an empty `text` is a pass, a 400 is not.
+
+- [ ] **Step 5: Verify speech streams and is not stored**
+
+```bash
+curl -sS localhost:18080/v1/audio/speech -H 'content-type: application/json' \
+  -d '{"model":"playai-tts","input":"Darkrouter phase five.","voice":"Fritz-PlayAI","response_format":"mp3"}' \
+  -o /tmp/out.mp3 -w '%{content_type} %{size_download}\n'
+file /tmp/out.mp3 2>/dev/null || head -c 4 /tmp/out.mp3 | xxd
+sqlite3 /tmp/dr-p5-data/darkrouter.db 'SELECT count(*) FROM request_bodies'
+sqlite3 /tmp/dr-p5-data/darkrouter.db \
+  "SELECT surface, response_bytes, response_content_type, surface_meta_json
+     FROM requests WHERE surface = 'tts' ORDER BY ts DESC LIMIT 1"
+```
+
+Expected: an `audio/mpeg` body of non-trivial size, `request_bodies` empty, and the request row's `response_bytes` **equal to the downloaded size** with `response_content_type` `audio/mpeg` and a `voice` in the surface meta. If `playai-tts` requires terms acceptance on the account and returns a 400, record that and verify the surface reached the provider — the point of this step is that the route routes and streams, and a provider-side entitlement error still proves both.
+
+- [ ] **Step 6: Verify the no-provider error on the four surfaces Groq does not serve**
+
+```bash
+for route in v1/embeddings v1/images/generations v1/rerank v1/moderations; do
+  printf '%s -> ' "$route"
+  curl -sS -o /tmp/body.json -w '%{http_code} ' localhost:18080/$route \
+    -H 'content-type: application/json' \
+    -d '{"model":"openai/gpt-oss-120b","input":"x","prompt":"x","query":"q","documents":["a"]}'
+  cat /tmp/body.json; echo
+done
+```
+
+Expected: `404` on all four, each body naming the **surface** as the reason rather than the model. Then confirm nothing was attempted:
+
+```bash
+sqlite3 /tmp/dr-p5-data/darkrouter.db \
+  "SELECT r.surface, r.error_code, count(a.seq)
+     FROM requests r LEFT JOIN request_attempts a ON a.request_id = r.id
+    WHERE r.surface IN ('embedding','image','rerank','moderation')
+    GROUP BY r.id ORDER BY r.ts"
+```
+
+Expected: four rows, each with `not_found` and **zero attempts**. A non-zero count means the surface filter ran after the provider was contacted, which is the failure spec §4 exists to prevent.
+
+- [ ] **Step 7: Read the request rows rather than trusting the responses**
+
+```bash
+sqlite3 -header -column /tmp/dr-p5-data/darkrouter.db \
+  "SELECT dialect, surface, status, tokens_in, tokens_out, response_bytes,
+          substr(surface_meta_json,1,60) AS meta, substr(warnings_json,1,80) AS warn
+     FROM requests ORDER BY ts"
+```
+
+Expected: a `openai-responses` dialect row distinct from the `openai` chat rows; `stt` and `tts` rows carrying `response_bytes` and their surface meta; `warnings_json` `[]` everywhere nothing was lost. Phase 6's verification found a mechanism that passed every test and did nothing in production by reading this column — read it, do not assume it.
+
+- [ ] **Step 8: Stop the gateway and confirm nothing is left running**
+
+```bash
+kill "$(ps -C darkrouter-p5 -o pid= | head -1)" 2>/dev/null
+sleep 1
+ps -C darkrouter-p5 -o pid= || echo "stopped"
+ss -ltnp 2>/dev/null | grep -E ':1808[01]' || echo "ports free"
+```
+
+Expected: no process and no listener on 18080 or 18081. Ports 8080 and 8081 belong to an unrelated application and must never be touched.
+
+- [ ] **Step 9: Record the result**
+
+Add a numbered section to `docs/PROGRESS.md`'s "Open items" recording what was verified, with the real numbers — the actual `response_bytes` for the speech call, the actual token counts, the streamed event names in order. State plainly that four surfaces were verified only as the no-provider error and name the key that would be needed to do better. A verification note that overstates its coverage is worse than none.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add docs/PROGRESS.md
+git commit -m "docs: record phase 5 live verification"
+```
+
+---
+
+## Finishing
+
+With Task 31 committed, use superpowers:finishing-a-development-branch. The merge is `--no-ff` onto `master`, so the phase stays legible as a unit in the history:
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+git checkout master
+git merge --no-ff phase5-auxiliary-surfaces -m "feat: phase 5 auxiliary surfaces"
+```
+
+Do not push. Master is already far ahead of origin and pushing is the operator's call.
