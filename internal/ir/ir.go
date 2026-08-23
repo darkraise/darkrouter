@@ -95,6 +95,11 @@ const (
 	ErrAPI            ErrorType = "api_error"
 	ErrContentFilter  ErrorType = "content_filter"
 	ErrDarkrouter     ErrorType = "darkrouter"
+	// ErrPayloadTooLarge is an inbound body over the configured cap. It is
+	// distinct from ErrInvalidRequest because the two tell a client different
+	// things: one says the request is malformed and retrying is pointless, the
+	// other says send something smaller.
+	ErrPayloadTooLarge ErrorType = "payload_too_large"
 )
 
 type Media struct {
