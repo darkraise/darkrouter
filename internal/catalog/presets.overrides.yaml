@@ -30,11 +30,11 @@ anthropic:
 
 gemini:
   models_dev_id: google
-  surfaces: [llm, embeddings]
+  surfaces: [llm, embedding]
 
 openai:
   models_dev_id: openai
-  surfaces: [llm, embeddings, images, audio, moderations]
+  surfaces: [llm, embedding, image, tts, stt, moderation]
   quirks: [max-completion-tokens-name]
 
 groq:
@@ -43,12 +43,12 @@ groq:
 
 cohere:
   models_dev_id: cohere
-  surfaces: [llm, embeddings, rerank]
+  surfaces: [llm, embedding, rerank]
   quirks: [rerank-path=/v2/rerank]
 
 mistral:
   models_dev_id: mistral
-  surfaces: [llm, embeddings]
+  surfaces: [llm, embedding]
 
 deepseek:
   name: DeepSeek
@@ -98,7 +98,7 @@ ollama:
   base_url: http://localhost:11434/v1
   auth:
     style: none
-  surfaces: [llm, embeddings]
+  surfaces: [llm, embedding]
   no_models_dev: true
   website: https://ollama.com
   # Ollama reports whether a model's template advertises tools, which is what
@@ -112,7 +112,7 @@ lmstudio:
   base_url: http://localhost:1234/v1
   auth:
     style: none
-  surfaces: [llm, embeddings]
+  surfaces: [llm, embedding]
   no_models_dev: true
   website: https://lmstudio.ai
   quirks: []
@@ -134,7 +134,7 @@ vertex:
   base_url: ""
   auth:
     style: gcp-sa
-  surfaces: [llm, embeddings]
+  surfaces: [llm, embedding]
   models_dev_id: google-vertex
   website: https://cloud.google.com/vertex-ai
   quirks: []

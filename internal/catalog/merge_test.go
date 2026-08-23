@@ -13,7 +13,7 @@ func mergeInput() MergeInput {
 		Providers: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: "acme"}},
 		Presets: Presets{"acme": {
 			Name: "Acme", Kind: "openaicompat", ModelsDevID: "acme",
-			Surfaces: []string{"llm", "embeddings"},
+			Surfaces: []string{"llm", "embedding"},
 			ModelTraits: []TraitRule{
 				{Match: "big", Adaptive: true},
 				{Match: "big-v2", Adaptive: true, ManualBudget: true, FreeSampling: true},
@@ -125,7 +125,7 @@ func TestMergeFallsBackToInferred(t *testing.T) {
 
 func TestMergeTakesSurfacesFromThePreset(t *testing.T) {
 	m := find(t, Merge(mergeInput()), "big")
-	if len(m.Surfaces) != 2 || m.Surfaces[0] != ir.SurfaceLLM || m.Surfaces[1] != ir.SurfaceEmbeddings {
+	if len(m.Surfaces) != 2 || m.Surfaces[0] != ir.SurfaceLLM || m.Surfaces[1] != ir.SurfaceEmbedding {
 		t.Errorf("surfaces = %v", m.Surfaces)
 	}
 }
@@ -208,7 +208,7 @@ func TestPresetSurfacesAreNotShadowedByADiscoveredRow(t *testing.T) {
 	in := mergeInput()
 	in.Presets["acme"] = Preset{
 		Name: "Acme", Kind: "openaicompat", ModelsDevID: "acme",
-		Surfaces: []string{"llm", "embeddings"},
+		Surfaces: []string{"llm", "embedding"},
 	}
 	in.Rows = []store.ModelRow{{
 		ProviderID: "p", ModelID: "text-embedding-3-small",
@@ -217,7 +217,7 @@ func TestPresetSurfacesAreNotShadowedByADiscoveredRow(t *testing.T) {
 	}}
 
 	m := find(t, Merge(in), "text-embedding-3-small")
-	if !m.DeclaresSurface(ir.SurfaceEmbeddings) {
+	if !m.DeclaresSurface(ir.SurfaceEmbedding) {
 		t.Errorf("surfaces = %v; the discovered row's constant shadowed the preset", m.Surfaces)
 	}
 }
@@ -229,7 +229,7 @@ func TestAnOverrideStillBeatsThePreset(t *testing.T) {
 	in := mergeInput()
 	in.Presets["acme"] = Preset{
 		Name: "Acme", Kind: "openaicompat", ModelsDevID: "acme",
-		Surfaces: []string{"llm", "embeddings"},
+		Surfaces: []string{"llm", "embedding"},
 	}
 	in.Overrides = []store.ModelOverride{{
 		ProviderID: "p", ModelID: "big", Surfaces: []string{"llm"},

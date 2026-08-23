@@ -97,7 +97,7 @@ func TestResolveUnknownModel(t *testing.T) {
 }
 
 func TestResolveWrongSurfaceIsDistinguishable(t *testing.T) {
-	_, skips, err := Resolve(Query{Model: "shared", Surface: ir.SurfaceEmbeddings},
+	_, skips, err := Resolve(Query{Model: "shared", Surface: ir.SurfaceEmbedding},
 		fullSnap(twoProviders(), nil, health.Availability{}))
 	if !errors.Is(err, ErrSurfaceUnsupported) {
 		t.Fatalf("err = %v, want ErrSurfaceUnsupported", err)
