@@ -72,7 +72,7 @@ func emptyReason(skips []Skip) error {
 	for _, s := range skips {
 		switch s.Reason {
 		case SkipCooling:
-		case SkipSurface:
+		case SkipSurface, SkipAdapterSurface:
 			allCooling, sawSurface = false, true
 		case SkipCapability:
 			allCooling, sawCapability = false, true

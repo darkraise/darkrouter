@@ -5,6 +5,7 @@ package router
 import (
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -35,6 +36,15 @@ type Snapshot struct {
 	Config    *config.Config
 	Health    health.Availability
 	LastUsed  map[health.CredKey]time.Time
+
+	// AdapterSurfaces is what each provider kind's adapter can render, keyed by
+	// kind. It is a different fact from the catalog's surfaces: the catalog
+	// says what the upstream offers, this says what Darkrouter can speak.
+	//
+	// A nil map imposes no constraint. That is deliberate — a missing map is a
+	// wiring bug, and routing nothing would be a worse symptom than routing as
+	// before.
+	AdapterSurfaces map[string]adapter.SurfaceSet
 }
 
 // Candidate is one attemptable target.
@@ -65,6 +75,11 @@ const (
 	// It is a durable fact about the upstream rather than a health signal,
 	// which is why it is reported ahead of cooling.
 	SkipRemoved SkipReason = "removed_upstream"
+	// SkipAdapterSurface is a provider whose upstream offers the surface but
+	// whose kind Darkrouter cannot speak it to. It is reported separately from
+	// SkipSurface because the fix is different: one is a catalog gap the
+	// operator can close, the other is a Darkrouter gap they cannot.
+	SkipAdapterSurface SkipReason = "adapter_surface"
 )
 
 // Skip records a target that was considered and rejected. These are persisted

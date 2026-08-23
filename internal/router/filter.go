@@ -38,6 +38,19 @@ func filterTarget(t target, q Query, snap Snapshot,
 		return nil, []Skip{{ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipRemoved}}, true
 	}
 
+	// The catalog said the upstream offers this surface; this asks whether
+	// Darkrouter can render it. Spec §4 makes an unimplemented surface a
+	// routing filter rather than a runtime error, because an operator reading
+	// "no provider offers this model on this surface" learns more than one
+	// reading a 404 the provider produced.
+	if q.Surface != "" && snap.AdapterSurfaces != nil {
+		if !snap.AdapterSurfaces[p.Kind].Has(q.Surface) {
+			return nil, []Skip{{
+				ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipAdapterSurface,
+			}}, true
+		}
+	}
+
 	if !m.Capabilities.Satisfies(catalog.Capabilities{
 		Tools: q.NeedsTools, Vision: q.NeedsVision, Reasoning: q.NeedsReasoning,
 	}) {

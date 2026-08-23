@@ -277,3 +277,67 @@ func TestKnownCapableModelsAreNotFlagged(t *testing.T) {
 		t.Error("a models.dev-sourced candidate was flagged inferred")
 	}
 }
+
+func TestAnAdapterThatCannotServeTheSurfaceIsFiltered(t *testing.T) {
+	// The catalog says the upstream offers embeddings; the adapter cannot
+	// render them. Routing anyway would turn a knowable gap into a runtime
+	// failure from the provider.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}})
+	snap.AdapterSurfaces = map[string]adapter.SurfaceSet{
+		"openaicompat": {ir.SurfaceLLM: true},
+	}
+
+	cands, skips, err := Resolve(Query{Model: "m", Surface: ir.SurfaceEmbedding}, snap)
+	if len(cands) != 0 {
+		t.Fatalf("got %d candidates for a surface the adapter cannot render", len(cands))
+	}
+	if err == nil {
+		t.Error("Resolve returned no error with no candidates")
+	}
+	var found bool
+	for _, s := range skips {
+		if s.Reason == SkipAdapterSurface {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no SkipAdapterSurface recorded; skips = %+v", skips)
+	}
+}
+
+func TestAnAdapterThatServesTheSurfaceIsKept(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}})
+	snap.AdapterSurfaces = map[string]adapter.SurfaceSet{
+		"openaicompat": {ir.SurfaceLLM: true, ir.SurfaceEmbedding: true},
+	}
+	cands, _, err := Resolve(Query{Model: "m", Surface: ir.SurfaceEmbedding}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 {
+		t.Errorf("got %d candidates, want 1", len(cands))
+	}
+}
+
+func TestANilAdapterSurfacesMapImposesNoConstraint(t *testing.T) {
+	// A missing map is a wiring bug. Routing nothing would be a far worse
+	// symptom than routing as before, and every phase 3 test builds a snapshot
+	// without one.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}})
+	if snap.AdapterSurfaces != nil {
+		t.Fatal("the fixture set a map; this test needs it nil")
+	}
+	cands, _, err := Resolve(Query{Model: "m", Surface: ir.SurfaceEmbedding}, snap)
+	if err != nil || len(cands) != 1 {
+		t.Errorf("got %d candidates, err = %v; a nil map must not filter", len(cands), err)
+	}
+}
