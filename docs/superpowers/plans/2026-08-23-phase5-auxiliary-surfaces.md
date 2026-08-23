@@ -8605,9 +8605,19 @@ import (
 
 func parseResponses(t *testing.T, body string) (*ir.Request, error) {
 	t.Helper()
-	req, _, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
+	req, _, _, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
 		strings.NewReader(body)), 1<<20)
 	return req, err
+}
+
+func parseResponsesEcho(t *testing.T, body string) *responsesEcho {
+	t.Helper()
+	_, _, echo, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(body)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return echo
 }
 
 func TestParseResponsesTurnsABareInputIntoAUserTurn(t *testing.T) {
@@ -8721,7 +8731,39 @@ func TestParseResponsesReadsSamplingAndFormat(t *testing.T) {
 		t.Errorf("reasoning = %+v", req.Reasoning)
 	}
 	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_schema" {
-		t.Errorf("response format = %+v", req.ResponseFormat)
+		t.Fatalf("response format = %+v", req.ResponseFormat)
+	}
+	// The schema, not only its type. Responses flattens text.format while chat
+	// nests it under json_schema, so decoding with chat's struct leaves this
+	// nil and the request reaches the provider with no schema at all.
+	if !strings.Contains(string(req.ResponseFormat.Schema), `"object"`) {
+		t.Errorf("schema = %q; the flattened text.format was not read",
+			req.ResponseFormat.Schema)
+	}
+}
+
+func TestParseResponsesCarriesAReplayedRefusal(t *testing.T) {
+	// An assistant turn that refused is replayed on the next turn. Rejecting
+	// it would 400 a legitimate agent loop.
+	req, err := parseResponses(t, `{"model":"m","input":[
+	  {"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I cannot"}]},
+	  {"role":"user","content":"why?"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 2 || req.Messages[0].Content[0].Text != "I cannot" {
+		t.Errorf("messages = %+v", req.Messages)
+	}
+}
+
+func TestParseResponsesWarnsOnStrictTools(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi","tools":[
+	  {"type":"function","name":"f","parameters":{"type":"object"},"strict":true}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Warnings) != 1 || !strings.Contains(req.Warnings[0].Reason, "strict") {
+		t.Errorf("warnings = %+v; a guarantee the client asked for is not forwarded", req.Warnings)
 	}
 }
 
@@ -8789,7 +8831,7 @@ func TestParseResponsesDropsReasoningItemsWithAWarning(t *testing.T) {
 func TestParseResponsesReportsTheSurface(t *testing.T) {
 	// The passthrough carries the surface so the executor's record says llm
 	// rather than guessing from the route.
-	_, pt, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
+	_, pt, _, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
 		strings.NewReader(`{"model":"m","input":"hi"}`)), 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -8837,10 +8879,14 @@ import (
 )
 
 type wireResponsesRequest struct {
-	Model             string          `json:"model"`
-	Input             json.RawMessage `json:"input"`
-	Instructions      string          `json:"instructions"`
-	Tools             []wireRespTool  `json:"tools"`
+	Model        string          `json:"model"`
+	Input        json.RawMessage `json:"input"`
+	Instructions string          `json:"instructions"`
+	Tools        []wireRespTool  `json:"tools"`
+	// RawTools is the same array undecoded, echoed verbatim into the response
+	// object. Re-rendering from the decoded form would drop whatever the IR
+	// does not model and quietly change what the client is told it sent.
+	RawTools          json.RawMessage `json:"-"`
 	ToolChoice        json.RawMessage `json:"tool_choice"`
 	MaxOutputTokens   *int            `json:"max_output_tokens"`
 	Temperature       *float64        `json:"temperature"`
@@ -8851,7 +8897,7 @@ type wireResponsesRequest struct {
 		Effort string `json:"effort"`
 	} `json:"reasoning"`
 	Text *struct {
-		Format *wireResponseFormat `json:"format"`
+		Format *wireRespFormat `json:"format"`
 	} `json:"text"`
 	Metadata map[string]string `json:"metadata"`
 
@@ -8867,6 +8913,20 @@ type wireRespTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+	Strict      *bool           `json:"strict"`
+}
+
+// wireRespFormat is flat, and that is the whole reason it exists rather than
+// reusing chat's wireResponseFormat. Chat nests the schema under a json_schema
+// key; Responses puts name, schema and strict at the top level of text.format.
+// Decoding the flat shape into the nested struct leaves the schema nil and
+// ships a structured-output request with no schema at all — a silent drop the
+// client cannot see.
+type wireRespFormat struct {
+	Type   string          `json:"type"`
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict *bool           `json:"strict"`
 }
 
 // wireRespItem is one element of the input array. The vocabulary is a union
@@ -8885,37 +8945,51 @@ type wireRespItem struct {
 type wireRespPart struct {
 	Type     string `json:"type"`
 	Text     string `json:"text"`
+	Refusal  string `json:"refusal"`
 	ImageURL string `json:"image_url"`
+	FileURL  string `json:"file_url"`
+	FileData string `json:"file_data"`
+	Filename string `json:"filename"`
 	FileID   string `json:"file_id"`
 }
 
-func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
+// ParseResponses returns the echo alongside the request. The echo is what the
+// response object must repeat back, and the dialect is constructed per request
+// so it can hold it between ParseRequest and the writer.
+func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, *responsesEcho, error) {
 	body, err := readCappedBody(r, maxBody)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var w wireResponsesRequest
 	if err := json.Unmarshal(body, &w); err != nil {
-		return nil, nil, fmt.Errorf("invalid JSON body: %w", err)
+		return nil, nil, nil, fmt.Errorf("invalid JSON body: %w", err)
 	}
+	// Decoded twice on purpose: once into the typed shape the IR needs, once
+	// raw so the response can echo the tools array exactly as it arrived.
+	var rawTop struct {
+		Tools json.RawMessage `json:"tools"`
+	}
+	_ = json.Unmarshal(body, &rawTop)
+	w.RawTools = rawTop.Tools
 
 	// Refused before anything else is read: an answer built from a body that
 	// carries only the newest turn is fluent, confident and amnesic, and the
 	// client cannot tell it apart from a correct one.
 	if w.PreviousResponseID != "" {
-		return nil, nil, errors.New(
+		return nil, nil, nil, errors.New(
 			"previous_response_id is not supported: Darkrouter stores no conversations, " +
 				"so send the full input each turn and use stateless requests")
 	}
 	if len(w.Conversation) > 0 && string(w.Conversation) != "null" {
-		return nil, nil, errors.New(
+		return nil, nil, nil, errors.New(
 			"conversation is not supported: Darkrouter stores no conversations, " +
 				"so send the full input each turn and use stateless requests")
 	}
 	if w.Background {
 		// Answering with a finished response would leave the client polling an
 		// id that will never exist.
-		return nil, nil, errors.New(
+		return nil, nil, nil, errors.New(
 			"background is not supported: Darkrouter has no queue and mints no " +
 				"resolvable ids, so use a stateless foreground request")
 	}
@@ -8935,18 +9009,33 @@ func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthro
 	if w.Reasoning != nil && w.Reasoning.Effort != "" {
 		req.Reasoning = &ir.Reasoning{Effort: w.Reasoning.Effort}
 	}
-	if w.Text != nil && w.Text.Format != nil {
-		req.ResponseFormat = responseFormatOf(w.Text.Format)
+	if f := w.Text; f != nil && f.Format != nil && f.Format.Type == "json_schema" {
+		req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: f.Format.Schema}
 	}
 	if err := applyResponsesTools(req, w.Tools, w.ToolChoice); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := applyResponsesInput(req, w.Input); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	echo := &responsesEcho{
+		Instructions: w.Instructions, Tools: rawArray(w.RawTools),
+		ToolChoice: w.ToolChoice, ParallelToolCalls: w.ParallelToolCalls,
+		Temperature: w.Temperature, TopP: w.TopP,
+		MaxOutputTokens: w.MaxOutputTokens, Metadata: w.Metadata,
 	}
 	return req, &edge.Passthrough{
 		Body: body, ModelField: "model", Surface: ir.SurfaceLLM,
-	}, nil
+	}, echo, nil
+}
+
+// rawArray keeps a nil tools array out of the response body, where the field is
+// required and null would fail the SDK's model.
+func rawArray(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return raw
 }
 
 // applyResponsesTools reads the function tools and refuses every built-in.
@@ -8955,6 +9044,7 @@ func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthro
 // silently answering without the stored conversation: the response looks
 // entirely successful and nothing in it says the tool never ran.
 func applyResponsesTools(req *ir.Request, tools []wireRespTool, choice json.RawMessage) error {
+	var warns []ir.Warning
 	for _, t := range tools {
 		if t.Type != "" && t.Type != "function" {
 			return fmt.Errorf(
@@ -8964,10 +9054,20 @@ func applyResponsesTools(req *ir.Request, tools []wireRespTool, choice json.RawM
 		if t.Name == "" {
 			return errors.New("a function tool has no name")
 		}
+		if t.Strict != nil && *t.Strict {
+			// The IR has no strict flag and no adapter renders one, so the
+			// model may return arguments that do not validate against the
+			// schema. The client asked for a guarantee it will not get.
+			warns = append(warns, ir.Warning{
+				Field: "tools." + t.Name + ".strict", Target: "responses",
+				Reason: "strict schema adherence is not forwarded; arguments may not validate",
+			})
+		}
 		req.Tools = append(req.Tools, ir.Tool{
 			Name: t.Name, Description: t.Description, Schema: t.Parameters,
 		})
 	}
+	req.Warnings = append(req.Warnings, warns...)
 	req.ToolChoice = parseResponsesToolChoice(choice)
 	return nil
 }
@@ -9115,6 +9215,12 @@ func responsesContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 		switch p.Type {
 		case "input_text", "output_text", "text", "summary_text":
 			out = append(out, ir.ContentBlock{Type: ir.BlockText, Text: p.Text})
+		case "refusal":
+			// A replayed assistant turn that refused carries one of these. It
+			// is history, not a new refusal, so it is carried as text rather
+			// than rejected — 400ing a legitimate agent-loop replay would be
+			// the worse failure.
+			out = append(out, ir.ContentBlock{Type: ir.BlockText, Text: p.Refusal})
 		case "input_image", "image":
 			blk, err := imageBlockFrom(p.ImageURL, p.FileID)
 			if err != nil {
@@ -9122,9 +9228,10 @@ func responsesContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 			}
 			out = append(out, blk)
 		case "input_file", "file":
-			out = append(out, ir.ContentBlock{
-				Type: ir.BlockDocument, Media: &ir.Media{FileID: p.FileID, URL: p.ImageURL},
-			})
+			// A file part carries file_url or inline file_data, not image_url.
+			// Reading only the latter would drop the document silently.
+			m := &ir.Media{FileID: p.FileID, URL: p.FileURL, Data: p.FileData}
+			out = append(out, ir.ContentBlock{Type: ir.BlockDocument, Media: m})
 		default:
 			return nil, fmt.Errorf("content part type %q is not supported", p.Type)
 		}
@@ -9159,7 +9266,7 @@ func imageBlockFrom(imageURL, fileID string) (ir.ContentBlock, error) {
 }
 ```
 
-`responseFormatOf` is the existing helper `parse.go` already uses to turn a `wireResponseFormat` into an `*ir.ResponseFormat`. If that logic is inline in `ParseRequest` rather than a function, extract it first as its own step and leave chat's behavior identical — the two dialects must not drift on the schema shape.
+**Do not reuse chat's `wireResponseFormat` here.** It is `{Type string; JSONSchema *struct{Name, Schema}}` and expects the schema nested under a `json_schema` key, because that is chat's shape. Responses flattens it: `text.format` is `{"type":"json_schema","name":…,"schema":…,"strict":…}`. Decoding the flat shape into the nested struct leaves `JSONSchema` nil, the conversion produces nothing, and every structured-output Responses request reaches the provider **with no schema** — succeeding, returning free-form text, and giving the client nothing to notice. That is why `wireRespFormat` above is its own type and why the test below asserts the schema survives rather than only its type.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -9206,6 +9313,8 @@ Responses returns an **item-based** body: an `output` array of `reasoning`, `mes
 
 **`responsesBody` is factored out on purpose.** The streamed `response.completed` event carries the same object the unary path returns, and two independently-written assemblers would drift on exactly the fields a client reads last. Task 28 accumulates its deltas into an `ir.Response` and calls this.
 
+**The response object must echo the request, and three of those fields are required.** In `openai-python`'s `Response` model, `tools`, `tool_choice` and `parallel_tool_calls` are declared with **no default**, and `error`, `incomplete_details`, `instructions`, `metadata`, `temperature` and `top_p` are always present though nullable. A body omitting them survives the SDK's lenient `construct()` path and misbehaves on any strict one — and the Agents SDK reads `response.tools` directly. So `ParseResponses` keeps what it needs to echo, verbatim as raw JSON rather than re-rendered, and hands it to the writer. Echoing the client's own bytes cannot drift from what the client sent.
+
 **Ids are marked non-resumable, and `store: false` is how.** Darkrouter mints no resolvable ids, and a Responses client reads `store: false` as "this response was not persisted and cannot be referenced". The `resp_dr_` prefix makes the same fact legible to a human reading a log line. Task 25 already refuses any request that carries one back.
 
 - [ ] **Step 1: Write the failing test**
@@ -9225,7 +9334,7 @@ func TestWriteResponsesEmitsItems(t *testing.T) {
 		},
 		StopReason: ir.StopToolUse,
 		Usage:      ir.Usage{InputTokens: 5, OutputTokens: 7, ReasoningTokens: 3},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9308,7 +9417,7 @@ func TestWriteResponsesReportsATruncatedAnswerAsIncomplete(t *testing.T) {
 		ID: "x", Model: "m",
 		Content:    []ir.ContentBlock{{Type: ir.BlockText, Text: "half an ans"}},
 		StopReason: ir.StopMaxTokens,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var body struct {
@@ -9333,7 +9442,7 @@ func TestWriteResponsesReportsAFilteredAnswerAsIncomplete(t *testing.T) {
 	if err := WriteResponses(w, &ir.Response{
 		ID: "x", Model: "m", StopReason: ir.StopContentFilter,
 		Content: []ir.ContentBlock{{Type: ir.BlockText, Text: ""}},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var body struct {
@@ -9349,10 +9458,63 @@ func TestWriteResponsesReportsAFilteredAnswerAsIncomplete(t *testing.T) {
 	}
 }
 
+func TestWriteResponsesEchoesTheRequiredRequestFields(t *testing.T) {
+	// tools, tool_choice and parallel_tool_calls have no default in the SDK's
+	// Response model; a body omitting them fails strict validation, and the
+	// Agents SDK reads response.tools directly.
+	echo := parseResponsesEcho(t, `{"model":"m","input":"hi","instructions":"be terse",
+	  "temperature":0.25,"top_p":0.9,"parallel_tool_calls":false,
+	  "tools":[{"type":"function","name":"f","parameters":{"type":"object"}}],
+	  "tool_choice":"required"}`)
+
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}, echo); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"tools", "tool_choice", "parallel_tool_calls",
+		"error", "incomplete_details", "instructions", "metadata", "temperature", "top_p"} {
+		if _, present := body[k]; !present {
+			t.Errorf("response omits %q, which the SDK model requires", k)
+		}
+	}
+	tools, _ := body["tools"].([]any)
+	if len(tools) != 1 {
+		t.Errorf("tools = %v; the client's own array must be echoed", body["tools"])
+	}
+	if body["tool_choice"] != "required" {
+		t.Errorf("tool_choice = %v; it must be echoed verbatim, not translated", body["tool_choice"])
+	}
+	if body["parallel_tool_calls"] != false || body["instructions"] != "be terse" {
+		t.Errorf("body = %s", w.Body.String())
+	}
+	if body["temperature"].(float64) != 0.25 || body["top_p"].(float64) != 0.9 {
+		t.Errorf("sampling echo = %v / %v", body["temperature"], body["top_p"])
+	}
+}
+
+func TestWriteResponsesWithNoEchoStillCarriesTheRequiredFields(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["parallel_tool_calls"] != true || body["tool_choice"] != "auto" {
+		t.Errorf("defaults = %v / %v", body["parallel_tool_calls"], body["tool_choice"])
+	}
+	if tools, ok := body["tools"].([]any); !ok || len(tools) != 0 {
+		t.Errorf("tools = %v, want an empty array rather than null", body["tools"])
+	}
+}
+
 func TestWriteResponsesEmitsAnEmptyOutputArrayNotNull(t *testing.T) {
 	// An SDK ranges over output. null there is a crash rather than no items.
 	w := httptest.NewRecorder()
-	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}); err != nil {
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(w.Body.String(), `"output":[]`) {
@@ -9377,6 +9539,24 @@ Expected: FAIL to build — `undefined: WriteResponses`.
 Append to `internal/edge/openai/responses.go`:
 
 ```go
+// responsesEcho is what the response object repeats back to the client.
+//
+// tools, tool_choice and parallel_tool_calls are required fields with no
+// default in the OpenAI SDK's Response model, so omitting them breaks strict
+// validation; the rest are always present though nullable. The tool fields are
+// held as raw JSON and echoed verbatim, which cannot drift from what the client
+// sent the way a re-rendering would.
+type responsesEcho struct {
+	Instructions      string
+	Tools             json.RawMessage
+	ToolChoice        json.RawMessage
+	ParallelToolCalls *bool
+	Temperature       *float64
+	TopP              *float64
+	MaxOutputTokens   *int
+	Metadata          map[string]string
+}
+
 // responsesID marks the id as one Darkrouter cannot resolve. Master design and
 // spec §5: no resolvable ids are minted, so the prefix makes that legible in a
 // log line and store:false makes it legible to the client.
@@ -9411,7 +9591,7 @@ func responsesStatus(s ir.StopReason) (string, string) {
 // responsesBody assembles the object both the unary path and the streamed
 // response.completed event return. It is one function so the two cannot drift
 // on the fields a client reads last.
-func responsesBody(id string, resp *ir.Response, status, incomplete string) map[string]any {
+func responsesBody(id string, resp *ir.Response, status, incomplete string, echo *responsesEcho) map[string]any {
 	output := make([]any, 0, len(resp.Content))
 	var text strings.Builder
 	for _, b := range resp.Content {
@@ -9469,10 +9649,56 @@ func responsesBody(id string, resp *ir.Response, status, incomplete string) map[
 		"output_text": text.String(),
 		"usage":       responsesUsage(resp.Usage),
 	}
+	// Always present, null when there is nothing to report: an SDK reads
+	// through both without a presence check.
+	body["error"] = nil
+	body["incomplete_details"] = nil
 	if incomplete != "" {
 		body["incomplete_details"] = map[string]any{"reason": incomplete}
 	}
+	applyResponsesEcho(body, echo)
 	return body
+}
+
+// applyResponsesEcho fills the request-derived fields. tools, tool_choice and
+// parallel_tool_calls have no default in the SDK's model, so they are written
+// even when the request omitted them.
+func applyResponsesEcho(body map[string]any, echo *responsesEcho) {
+	body["tools"] = json.RawMessage("[]")
+	body["tool_choice"] = json.RawMessage(`"auto"`)
+	body["parallel_tool_calls"] = true
+	body["instructions"] = nil
+	body["metadata"] = map[string]string{}
+	body["temperature"] = nil
+	body["top_p"] = nil
+	body["max_output_tokens"] = nil
+	if echo == nil {
+		return
+	}
+	if len(echo.Tools) > 0 {
+		body["tools"] = echo.Tools
+	}
+	if len(echo.ToolChoice) > 0 {
+		body["tool_choice"] = echo.ToolChoice
+	}
+	if echo.ParallelToolCalls != nil {
+		body["parallel_tool_calls"] = *echo.ParallelToolCalls
+	}
+	if echo.Instructions != "" {
+		body["instructions"] = echo.Instructions
+	}
+	if echo.Metadata != nil {
+		body["metadata"] = echo.Metadata
+	}
+	if echo.Temperature != nil {
+		body["temperature"] = *echo.Temperature
+	}
+	if echo.TopP != nil {
+		body["top_p"] = *echo.TopP
+	}
+	if echo.MaxOutputTokens != nil {
+		body["max_output_tokens"] = *echo.MaxOutputTokens
+	}
 }
 
 func responsesUsage(u ir.Usage) map[string]any {
@@ -9488,11 +9714,11 @@ func responsesUsage(u ir.Usage) map[string]any {
 	return body
 }
 
-func WriteResponses(w http.ResponseWriter, resp *ir.Response) error {
+func WriteResponses(w http.ResponseWriter, resp *ir.Response, echo *responsesEcho) error {
 	id := responsesID(resp.ID)
 	status, incomplete := responsesStatus(resp.StopReason)
 	w.Header().Set("Content-Type", "application/json")
-	return json.NewEncoder(w).Encode(responsesBody(id, resp, status, incomplete))
+	return json.NewEncoder(w).Encode(responsesBody(id, resp, status, incomplete, echo))
 }
 ```
 
@@ -9728,6 +9954,10 @@ Spec §5 calls this "effectively a fourth edge stream writer, not a thin adaptat
 - **Items are opened and closed explicitly.** A client does not treat an item as final until it sees `response.output_item.done`, so a stream that ends mid-item leaves the client waiting forever. Whatever the provider left open is closed before `response.completed`.
 - **The terminal event carries the whole response object**, the same one the unary path returns. That is why the writer accumulates into an `ir.Response` and calls Task 26's `responsesBody` rather than assembling a second time.
 
+**The terminal event waits for the end of the sequence, not for `message_stop`.** OpenAI-compatible upstreams send the usage chunk *after* the chunk carrying `finish_reason`, and `internal/adapter/openaicompat/build.go` always injects `stream_options.include_usage`, so the IR yields `EventMessageStop` and only then `EventMessageDelta` with the usage. Completing on `message_stop` would report **zero usage on every streamed Responses call**. `message_stop` therefore closes the open items and records the stop reason; the terminal event goes out when the iterator is exhausted.
+
+**The terminal event's name follows the status.** `response.completed` always carries status `completed`; a truncated or filtered answer ends with `response.incomplete`. A client switching on the event type — which is the normal way to consume this stream — would otherwise treat a half answer as a whole one.
+
 **There is no `[DONE]` sentinel.** Chat's SSE ends with one; the Responses stream ends at `response.completed`. Sending it would put an unparseable line in front of a client that reads every `data:` as JSON.
 
 **Output index is not the IR block index.** `openaicompat` offsets tool blocks by 1000 to keep them clear of the text block, so the two are mapped exactly as chat's writer maps `toolIndex` — and the mapping has a second job here, because the item ids the deltas carry must match the ids `responsesBody` derives from position in the final object.
@@ -9782,7 +10012,9 @@ func respEvents(t *testing.T, evs []ir.StreamEvent, final error) []map[string]an
 		}
 	}
 	w := httptest.NewRecorder()
-	if err := WriteResponsesStream(w, iter.Seq2[ir.StreamEvent, error](seq)); err != nil {
+	// A nil echo is the no-request case and must produce a valid object: the
+	// required fields fall back to their SDK defaults.
+	if err := WriteResponsesStream(w, iter.Seq2[ir.StreamEvent, error](seq), nil); err != nil {
 		t.Fatalf("WriteResponsesStream: %v", err)
 	}
 	var out []map[string]any
@@ -9814,14 +10046,17 @@ func types(evs []map[string]any) []string {
 	return out
 }
 
+// textTurn puts the usage event AFTER message_stop, which is the real order:
+// OpenAI-compatible upstreams send the usage chunk after the finish chunk and
+// Darkrouter always asks for it.
 func textTurn() []ir.StreamEvent {
 	return []ir.StreamEvent{
 		{Type: ir.EventMessageStart, ID: "chatcmpl-1", Model: "gpt-4o"},
 		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "he"}},
 		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "llo"}},
 		{Type: ir.EventBlockStop, Index: 0},
-		{Type: ir.EventMessageDelta, Usage: &ir.Usage{InputTokens: 3, OutputTokens: 2}},
 		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+		{Type: ir.EventMessageDelta, Usage: &ir.Usage{InputTokens: 3, OutputTokens: 2}},
 	}
 }
 
@@ -9870,7 +10105,7 @@ func TestResponsesStreamNeverSendsTheChatSentinel(t *testing.T) {
 			}
 		}
 	}
-	if err := WriteResponsesStream(w, iter.Seq2[ir.StreamEvent, error](seq)); err != nil {
+	if err := WriteResponsesStream(w, iter.Seq2[ir.StreamEvent, error](seq), nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(w.Body.String(), "[DONE]") {
@@ -10026,13 +10261,45 @@ func TestResponsesStreamReportsTruncationAsIncomplete(t *testing.T) {
 		{Type: ir.EventBlockStop, Index: 0},
 		{Type: ir.EventMessageStop, StopReason: ir.StopMaxTokens},
 	}, nil)
-	resp := evs[len(evs)-1]["response"].(map[string]any)
+	last := evs[len(evs)-1]
+	// The event NAME, not only the status inside it. A client switching on the
+	// terminal event type would treat response.completed as a whole answer.
+	if last["type"] != "response.incomplete" {
+		t.Errorf("terminal event = %v, want response.incomplete", last["type"])
+	}
+	resp := last["response"].(map[string]any)
 	if resp["status"] != "incomplete" {
 		t.Errorf("status = %v", resp["status"])
 	}
 	det, _ := resp["incomplete_details"].(map[string]any)
 	if det == nil || det["reason"] != "max_output_tokens" {
 		t.Errorf("incomplete_details = %v", det)
+	}
+}
+
+func TestResponsesStreamReportsUsageThatArrivesAfterTheStop(t *testing.T) {
+	// This is the real order on every OpenAI-compatible upstream. Completing on
+	// message_stop would report zero usage on every streamed response.
+	evs := respEvents(t, textTurn(), nil)
+	resp := evs[len(evs)-1]["response"].(map[string]any)
+	usage, _ := resp["usage"].(map[string]any)
+	if usage == nil || usage["input_tokens"].(float64) != 3 || usage["output_tokens"].(float64) != 2 {
+		t.Errorf("usage = %v; the post-stop usage event was not waited for", usage)
+	}
+}
+
+func TestResponsesStreamEmitsExactlyOneTerminalEvent(t *testing.T) {
+	// A reader error after the finish chunk must not append a second one.
+	evs := respEvents(t, textTurn(), &ir.Error{Type: ir.ErrAPI, Message: "trailing garbage"})
+	terminal := 0
+	for _, e := range evs {
+		switch e["type"] {
+		case "response.completed", "response.incomplete", "response.failed":
+			terminal++
+		}
+	}
+	if terminal != 1 {
+		t.Errorf("%d terminal events in %v", terminal, types(evs))
 	}
 }
 
@@ -10118,16 +10385,26 @@ type responsesStream struct {
 	open map[int]*responsesItem
 	next int
 
+	echo *responsesEcho
+
 	started   bool
 	completed bool
+	// stopped records that the provider sent its finish reason. The terminal
+	// event is not emitted there: OpenAI-compatible upstreams send the usage
+	// chunk AFTER the finish chunk, and Darkrouter always asks for it, so
+	// completing on message_stop would report zero usage on every streamed
+	// response. The terminal event goes out when the sequence ends.
+	stopped bool
 }
 
 // WriteResponsesStream converts canonical stream events into Responses semantic
 // events. There is no DONE sentinel: the Responses stream ends at
 // response.completed, and chat's sentinel would put an unparseable line in
 // front of a client that reads every data: line as JSON.
-func WriteResponsesStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error {
-	rs := &responsesStream{s: sse.NewWriter(w), open: map[int]*responsesItem{}}
+func WriteResponsesStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
+	echo *responsesEcho) error {
+
+	rs := &responsesStream{s: sse.NewWriter(w), open: map[int]*responsesItem{}, echo: echo}
 	for ev, err := range events {
 		if err != nil {
 			return rs.fail(err)
@@ -10174,8 +10451,12 @@ func (rs *responsesStream) handle(ev ir.StreamEvent) error {
 		}
 		return nil
 	case ir.EventMessageStop:
+		// Close the items but do not finish: the usage chunk arrives after the
+		// finish chunk on every OpenAI-compatible upstream, and Darkrouter
+		// always requests it. Completing here would report zero usage.
 		rs.acc.StopReason = ev.StopReason
-		return rs.complete()
+		rs.stopped = true
+		return rs.closeAll()
 	default:
 		return nil
 	}
@@ -10190,12 +10471,12 @@ func (rs *responsesStream) ensureStarted() error {
 		rs.id = responsesID(rs.acc.ID)
 	}
 	if err := rs.send("response.created", map[string]any{
-		"response": responsesBody(rs.id, &rs.acc, "in_progress", ""),
+		"response": responsesBody(rs.id, &rs.acc, "in_progress", "", rs.echo),
 	}); err != nil {
 		return err
 	}
 	return rs.send("response.in_progress", map[string]any{
-		"response": responsesBody(rs.id, &rs.acc, "in_progress", ""),
+		"response": responsesBody(rs.id, &rs.acc, "in_progress", "", rs.echo),
 	})
 }
 
@@ -10430,8 +10711,16 @@ func (rs *responsesStream) complete() error {
 	}
 	rs.completed = true
 	status, incomplete := responsesStatus(rs.acc.StopReason)
-	return rs.send("response.completed", map[string]any{
-		"response": responsesBody(rs.id, &rs.acc, status, incomplete),
+	// The terminal event name follows the status. response.completed always
+	// carries status "completed"; a truncated or filtered answer ends with
+	// response.incomplete, and a client switching on the event type would
+	// otherwise treat a half answer as a whole one.
+	name := "response.completed"
+	if status == "incomplete" {
+		name = "response.incomplete"
+	}
+	return rs.send(name, map[string]any{
+		"response": responsesBody(rs.id, &rs.acc, status, incomplete, rs.echo),
 	})
 }
 
@@ -10439,6 +10728,11 @@ func (rs *responsesStream) complete() error {
 // received content and cannot be given a different response, so the least
 // wrong thing is to tell it plainly that this one did not complete.
 func (rs *responsesStream) fail(err error) error {
+	// A reader error after the terminal event — trailing bytes, a reset after
+	// [DONE] went out — must not produce a second terminal event.
+	if rs.completed {
+		return nil
+	}
 	var e *ir.Error
 	if !errors.As(err, &e) {
 		e = &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
@@ -10450,7 +10744,7 @@ func (rs *responsesStream) fail(err error) error {
 		return serr
 	}
 	rs.completed = true
-	body := responsesBody(rs.id, &rs.acc, "failed", "")
+	body := responsesBody(rs.id, &rs.acc, "failed", "", rs.echo)
 	body["error"] = map[string]any{"code": string(e.Type), "message": e.Message}
 	return rs.send("response.failed", map[string]any{"response": body})
 }
@@ -10512,11 +10806,13 @@ Responses is chat-shaped, so it becomes a **fourth `edge.Dialect`** rather than 
 
 `Name()` is `"openai-responses"` rather than `"openai"`. The request row's `dialect` column is how an operator tells a Responses client from a chat client, and both speak OpenAI over the same auth.
 
+**A fresh dialect per request, and that is not incidental.** `ParseRequest` produces the echo the writers need, so the value has to hold state between them. `Handle` calls both on the same instance within one request, so a per-request value is correct and a route-scoped one is a data race under concurrency. `authed` keeps a shared instance because `ProxyToken` and `WriteError` touch no state.
+
 **One thing has to be fixed here or the parse warnings vanish.** `chatOp.Build` returns only the adapter's warnings. Task 25's parser is the first inbound parse that produces any, and without appending them the reasoning-item drop is recorded nowhere.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `internal/edge/openai/dialect_test.go`:
+Add to `internal/edge/openai/dialect_test.go`. It currently imports only `httptest` and `testing`, so add `strings` and `github.com/darkraise/darkrouter/internal/edge`:
 
 ```go
 func TestResponsesDialectIsDistinguishableInTheLog(t *testing.T) {
@@ -10540,6 +10836,26 @@ func TestResponsesDialectReadsTheSameBearer(t *testing.T) {
 
 func TestResponsesDialectSatisfiesEdgeDialect(t *testing.T) {
 	var _ edge.Dialect = NewResponses()
+}
+
+func TestEachResponsesDialectHoldsItsOwnEcho(t *testing.T) {
+	// A route-scoped instance would race on this field and answer one client
+	// with another's tools.
+	a, b := NewResponses(), NewResponses()
+	if _, _, err := a.ParseRequest(httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"m","input":"hi","instructions":"first"}`)), 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := b.ParseRequest(httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"m","input":"hi","instructions":"second"}`)), 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if a.echo == nil || b.echo == nil || a.echo.Instructions != "first" {
+		t.Errorf("first dialect echo = %+v", a.echo)
+	}
+	if b.echo.Instructions != "second" {
+		t.Errorf("second dialect echo = %+v", b.echo)
+	}
 }
 ```
 
@@ -10709,7 +11025,17 @@ Append to `internal/edge/openai/dialect.go`:
 // than a seventh SurfaceOp because Responses is chat-shaped: making it a
 // dialect is what lets it inherit the attempt loop, the commit rule, the budget
 // gate and the request log without a word of new executor code.
-type ResponsesDialect struct{}
+// ResponsesDialect is constructed per request, not once per route.
+//
+// The response object has to echo the request — tools, tool_choice and
+// parallel_tool_calls are required fields with no default in the OpenAI SDK's
+// model — and only ParseRequest sees the request while only the writers build
+// the response. A route-scoped instance would have to hold that echo across
+// concurrent requests, which is a data race and a wrong answer. Gemini's
+// NewFor(r) already establishes this shape for the same reason.
+type ResponsesDialect struct {
+	echo *responsesEcho
+}
 
 func NewResponses() *ResponsesDialect { return &ResponsesDialect{} }
 
@@ -10723,15 +11049,18 @@ func (d *ResponsesDialect) ProxyToken(r *http.Request) string {
 }
 
 func (d *ResponsesDialect) ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
-	return ParseResponses(r, maxBody)
+	req, pt, echo, err := ParseResponses(r, maxBody)
+	// Held for the writers. Safe because this value serves exactly one request.
+	d.echo = echo
+	return req, pt, err
 }
 
 func (d *ResponsesDialect) WriteResponse(w http.ResponseWriter, resp *ir.Response) error {
-	return WriteResponses(w, resp)
+	return WriteResponses(w, resp, d.echo)
 }
 
 func (d *ResponsesDialect) WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error {
-	return WriteResponsesStream(w, events)
+	return WriteResponsesStream(w, events, d.echo)
 }
 
 // WriteError is chat's. The Responses error body has the same shape, and
@@ -10762,9 +11091,12 @@ func (o *chatOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adap
 In `internal/server/server.go`, beside the chat route:
 
 ```go
-	rd := openaiedge.NewResponses()
-	mux.HandleFunc("POST /v1/responses", s.authed(rd, func(w http.ResponseWriter, r *http.Request) {
-		s.ex.Handle(w, r, rd)
+	// One shared instance for the auth check, which is stateless, and a fresh
+	// one per request for the handler, which holds the response echo. Sharing
+	// the handler's instance across requests would race on that field.
+	rdAuth := openaiedge.NewResponses()
+	mux.HandleFunc("POST /v1/responses", s.authed(rdAuth, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, openaiedge.NewResponses())
 	}))
 ```
 
