@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/darkraise/darkrouter/internal/admin"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/server"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -25,6 +27,12 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "rotate-key" {
 		if err := runRotateKey(os.Args[2:]); err != nil {
 			log.Fatalf("rotate-key: %v", err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
+		if err := runHashPassword(os.Args[2:]); err != nil {
+			log.Fatalf("hash-password: %v", err)
 		}
 		return
 	}
@@ -100,6 +108,37 @@ func runServer(args []string) error {
 		return fmt.Errorf("server: %w", err)
 	}
 	log.Print("darkrouter stopped")
+	return nil
+}
+
+// runHashPassword prints a bcrypt hash for DARKROUTER_ADMIN_PASSWORD_HASH.
+//
+// It exists so an operator can produce one with the binary they already have
+// rather than installing a second tool, which is the difference between the
+// dashboard being usable on a fresh box and not.
+func runHashPassword(args []string) error {
+	fs := flag.NewFlagSet("hash-password", flag.ExitOnError)
+	password := fs.String("password", "", "the password to hash; read from stdin when empty")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	pw := *password
+	if pw == "" {
+		// Read from stdin so the password does not land in shell history.
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read password: %w", err)
+		}
+		pw = strings.TrimSpace(string(b))
+	}
+	h, err := admin.HashPassword(pw)
+	if err != nil {
+		return err
+	}
+	// The hash alone on stdout, so the value can be piped straight into an
+	// environment file without a sed to strip a label.
+	fmt.Println(h)
 	return nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/admin"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -52,6 +54,8 @@ type Server struct {
 	cat  *catalog.Store
 	disc *catalog.Discoverer
 	sync *catalog.Syncer
+
+	adm *admin.Server
 
 	started  time.Time
 	warnings []string
@@ -111,17 +115,43 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Timeout:  cfg.Catalog.SyncTimeout,
 	})
 
+	ex := exec.New(cfgStore, src, map[string]adapter.Adapter{
+		"openaicompat": openaicompat.New(),
+		"anthropic":    anthropicadapter.New(),
+		"gemini":       geminiadapter.New(),
+	}, exec.Deps{
+		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
+	})
+
+	// The dashboard is always mounted. A missing password hash closes it — the
+	// API refuses every login — rather than making startup fail: the gateway's
+	// job is proxying, and refusing to start over an optional dashboard would
+	// take a working proxy down for a feature the operator may not use.
+	//
+	// The warning is appended before admin.New because startupWarnings is
+	// passed by value, and the same slice is what /healthz reads.
+	passwordHash := os.Getenv("DARKROUTER_ADMIN_PASSWORD_HASH")
+	if passwordHash == "" {
+		startupWarnings = append(startupWarnings,
+			"DARKROUTER_ADMIN_PASSWORD_HASH is not set; the admin dashboard will refuse "+
+				"every login. Generate one with: darkrouter hash-password")
+	}
+	adm, err := admin.New(admin.Deps{
+		DB: db, PasswordHash: passwordHash,
+		Config: cfgStore, Src: src, Key: key,
+		Catalog: cat, Disc: disc, Breaker: breaker,
+		Presets: catalog.Embedded(), Exec: ex,
+		Warnings: startupWarnings,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("admin: %w", err)
+	}
+
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
-		cat:     cat, disc: disc, sync: syncer,
-		ex: exec.New(cfgStore, src, map[string]adapter.Adapter{
-			"openaicompat": openaicompat.New(),
-			"anthropic":    anthropicadapter.New(),
-			"gemini":       geminiadapter.New(),
-		}, exec.Deps{
-			Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
-		}),
+		cat:     cat, disc: disc, sync: syncer, adm: adm,
+		ex:       ex,
 		started:  time.Now(),
 		warnings: startupWarnings,
 	}, nil
@@ -337,6 +367,12 @@ func (s *Server) AdminHandler() http.Handler {
 				"darkrouter_log_records_written_total %d\n",
 			s.logw.Dropped(), s.logw.Written())
 	})
+
+	// Everything else goes to the admin API, which owns its own auth. Mounted
+	// last and at the root so the three endpoints above win their exact paths:
+	// an orchestrator and a Prometheus scrape read them, and a session in front
+	// of either breaks it.
+	mux.Handle("/", s.adm.Handler())
 	return mux
 }
 

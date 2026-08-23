@@ -1,0 +1,593 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+)
+
+func TestASessionRoundTrips(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "sess-1", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := db.TouchSession(ctx, "sess-1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Error("a live session did not validate")
+	}
+}
+
+func TestAnUnknownSessionIsAMissRatherThanAnError(t *testing.T) {
+	// The two mean different things to the caller: a miss renders the login
+	// screen, an error is a 500. Collapsing them makes an outage look like a
+	// logout.
+	db := migrated(t)
+	ok, err := db.TouchSession(context.Background(), "never-existed", time.Hour)
+	if err != nil {
+		t.Fatalf("a miss was reported as an error: %v", err)
+	}
+	if ok {
+		t.Error("an unknown session validated")
+	}
+}
+
+func TestTouchExtendsTheExpiry(t *testing.T) {
+	// Spec §3: the expiry slides. Without this an operator is logged out
+	// thirty days after logging in regardless of use.
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "sess-2", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	var before int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT expires_at FROM sessions WHERE id = 'sess-2'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.TouchSession(ctx, "sess-2", 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var after int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT expires_at FROM sessions WHERE id = 'sess-2'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after <= before {
+		t.Errorf("expiry did not slide: %d -> %d", before, after)
+	}
+}
+
+func TestAnExpiredSessionDoesNotValidate(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "sess-3", -time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := db.TouchSession(ctx, "sess-3", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Error("an expired session validated")
+	}
+}
+
+func TestAnExpiredSessionIsNotResurrectedByTouch(t *testing.T) {
+	// The expiry check lives in the UPDATE's WHERE. A read-then-write would
+	// extend the row it just decided was dead.
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "sess-4", -time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.TouchSession(ctx, "sess-4", 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := db.TouchSession(ctx, "sess-4", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Error("an expired session came back to life")
+	}
+}
+
+func TestDeleteSessionRemovesTheRow(t *testing.T) {
+	// Spec §3: logout deletes the row rather than only clearing the cookie.
+	// A cleared cookie leaves a valid session id in the database for anyone
+	// who copied it.
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "sess-5", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteSession(ctx, "sess-5"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*) FROM sessions WHERE id = 'sess-5'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d rows remain after logout", n)
+	}
+}
+
+func TestSweepRemovesOnlyExpiredSessions(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "live", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateSession(ctx, "dead", -time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	n, err := db.SweepSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("swept %d rows, want 1", n)
+	}
+	ok, _ := db.TouchSession(ctx, "live", time.Hour)
+	if !ok {
+		t.Error("the sweep removed a live session")
+	}
+}
+
+func TestCreateAndReadAProvider(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P One", Preset: "groq", Kind: "openaicompat",
+		BaseURL: "https://x/v1", Priority: 7, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ProviderRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != "p1" || rows[0].Preset != "groq" {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if rows[0].Priority != 7 || !rows[0].Enabled {
+		t.Errorf("row = %+v", rows[0])
+	}
+	if rows[0].AuthStyle != "bearer" {
+		t.Errorf("auth style = %q; a row created here must match one from the importer",
+			rows[0].AuthStyle)
+	}
+}
+
+func TestCreatingADuplicateProviderIsAnError(t *testing.T) {
+	// The settings screen turns this into "that id is taken" rather than a
+	// silent overwrite of a working provider.
+	db := migrated(t)
+	ctx := context.Background()
+	p := ProviderRow{ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1"}
+	if err := db.CreateProvider(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateProvider(ctx, p); err == nil {
+		t.Error("a duplicate id was accepted")
+	}
+}
+
+func TestUpdateTouchesOnlyWhatThePatchNames(t *testing.T) {
+	// A value struct cannot tell "set priority to 0" from "leave it alone",
+	// and 0 is a legal priority meaning last resort.
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat",
+		BaseURL: "https://x/v1", Priority: 7, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	zero := 0
+	if err := db.UpdateProvider(ctx, "p1", ProviderPatch{Priority: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := db.ProviderRows(ctx)
+	if rows[0].Priority != 0 {
+		t.Errorf("priority = %d, want 0", rows[0].Priority)
+	}
+	if rows[0].BaseURL != "https://x/v1" {
+		t.Errorf("base url = %q; an untouched field changed", rows[0].BaseURL)
+	}
+	if !rows[0].Enabled {
+		t.Error("enabled changed; the patch did not name it")
+	}
+}
+
+func TestAnEmptyPatchIsAnError(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateProvider(ctx, "p1", ProviderPatch{}); err == nil {
+		t.Error("an empty patch succeeded; the UI sent a form it did not fill in")
+	}
+}
+
+func TestUpdatingAnUnknownProviderIsAnError(t *testing.T) {
+	db := migrated(t)
+	enabled := false
+	if err := db.UpdateProvider(context.Background(), "nope",
+		ProviderPatch{Enabled: &enabled}); err == nil {
+		t.Error("patching a provider that does not exist succeeded")
+	}
+}
+
+func TestDeleteCascadesToCredentialsAndModels(t *testing.T) {
+	// A provider row without its credentials cannot serve; a credential
+	// without its provider is a decryptable secret nobody can account for.
+	// The schema's ON DELETE CASCADE does this, which foreign keys being on
+	// makes real — this is the test that proves the pragma is actually set.
+	db := migrated(t)
+	ctx := context.Background()
+	key, err := OpenKeyring(ctx, db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddCredential(ctx, key, Credential{
+		ProviderID: "p1", Label: "k", Secret: "sk-x", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id, state, last_seen_at)
+		 VALUES ('p1','m','live',1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.DeleteProvider(ctx, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`SELECT count(*) FROM providers WHERE id = 'p1'`,
+		`SELECT count(*) FROM provider_keys WHERE provider_id = 'p1'`,
+		`SELECT count(*) FROM models WHERE provider_id = 'p1'`,
+	} {
+		var n int
+		if err := db.Read.QueryRowContext(ctx, q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s left %d rows", q, n)
+		}
+	}
+}
+
+func TestDeletingAnUnknownProviderIsAnError(t *testing.T) {
+	if err := migrated(t).DeleteProvider(context.Background(), "nope"); err == nil {
+		t.Error("deleting a provider that does not exist succeeded")
+	}
+}
+
+func TestDeleteCredentialLeavesTheProvider(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	key, err := OpenKeyring(ctx, db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := db.AddCredential(ctx, key, Credential{
+		ProviderID: "p1", Label: "k", Secret: "sk-x", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteCredential(ctx, "p1", id); err != nil {
+		t.Fatal(err)
+	}
+	creds, err := db.Credentials(ctx, key, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creds) != 0 {
+		t.Errorf("credentials = %+v", creds)
+	}
+	rows, _ := db.ProviderRows(ctx)
+	if len(rows) != 1 {
+		t.Error("deleting a credential removed its provider")
+	}
+}
+
+func seedRequests(t *testing.T, db *DB, n int) {
+	t.Helper()
+	batch := make([]*RequestRecord, 0, n)
+	for i := 0; i < n; i++ {
+		batch = append(batch, &RequestRecord{
+			ID: fmt.Sprintf("01REQ%08d", i),
+			// Distinct milliseconds so the ordering is unambiguous except
+			// where a test deliberately collides them.
+			TS:              time.UnixMilli(int64(1700000000000 + i)),
+			Dialect:         "openai",
+			Surface:         "llm",
+			RequestedModel:  "m",
+			FinalProviderID: "groq",
+			FinalModel:      "m",
+			Status:          "success",
+		})
+	}
+	db.WriteBatchForTest(t, batch)
+}
+
+func TestListRequestsReturnsNewestFirst(t *testing.T) {
+	db := migrated(t)
+	seedRequests(t, db, 5)
+	got, err := db.ListRequests(context.Background(), RequestQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("got %d rows", len(got))
+	}
+	if got[0].ID != "01REQ00000004" {
+		t.Errorf("first row = %q, want the newest", got[0].ID)
+	}
+}
+
+func TestAPageBoundaryNeitherRepeatsNorSkips(t *testing.T) {
+	db := migrated(t)
+	seedRequests(t, db, 10)
+	ctx := context.Background()
+
+	first, err := db.ListRequests(ctx, RequestQuery{Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := first[len(first)-1]
+	second, err := db.ListRequests(ctx, RequestQuery{
+		Limit: 4, AfterTS: last.TSMs, AfterID: last.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, r := range append(append([]RequestSummary{}, first...), second...) {
+		if seen[r.ID] {
+			t.Errorf("row %q appeared twice across the boundary", r.ID)
+		}
+		seen[r.ID] = true
+	}
+	if len(seen) != 8 {
+		t.Errorf("saw %d distinct rows across two pages of 4", len(seen))
+	}
+}
+
+func TestAnInsertMidScrollDoesNotShiftThePages(t *testing.T) {
+	// Spec §7 names this case. Offset pagination gets it wrong: a row inserted
+	// at the head shifts every later page by one, so the reader sees a row
+	// twice and never sees another. Keyset does not.
+	db := migrated(t)
+	seedRequests(t, db, 10)
+	ctx := context.Background()
+
+	first, err := db.ListRequests(ctx, RequestQuery{Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A brand-new request lands at the head while the operator reads page one.
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01REQZZZZZZZZ", TS: time.UnixMilli(1700000099999),
+		Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "success",
+	}})
+
+	last := first[len(first)-1]
+	second, err := db.ListRequests(ctx, RequestQuery{
+		Limit: 4, AfterTS: last.TSMs, AfterID: last.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range second {
+		for _, f := range first {
+			if r.ID == f.ID {
+				t.Errorf("row %q repeated after an insert landed mid-scroll", r.ID)
+			}
+		}
+		if r.ID == "01REQZZZZZZZZ" {
+			t.Error("the newly inserted row appeared on page two")
+		}
+	}
+}
+
+func TestIdenticalTimestampsStillOrderTotally(t *testing.T) {
+	// ULIDs are lexicographically ordered, which is what makes the tie-break
+	// total. Without it a page boundary on a busy millisecond repeats forever.
+	db := migrated(t)
+	ctx := context.Background()
+	var batch []*RequestRecord
+	for _, id := range []string{"01AAA", "01BBB", "01CCC"} {
+		batch = append(batch, &RequestRecord{
+			ID: id, TS: time.UnixMilli(1700000000000),
+			Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "success",
+		})
+	}
+	db.WriteBatchForTest(t, batch)
+
+	got, err := db.ListRequests(ctx, RequestQuery{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "01CCC" || got[1].ID != "01BBB" {
+		t.Fatalf("page one = %+v", got)
+	}
+	next, err := db.ListRequests(ctx, RequestQuery{
+		Limit: 2, AfterTS: got[1].TSMs, AfterID: got[1].ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next) != 1 || next[0].ID != "01AAA" {
+		t.Errorf("page two = %+v", next)
+	}
+}
+
+func TestFiltersNarrowTheResult(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{
+		{ID: "01A", TS: time.UnixMilli(3), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "groq", Status: "success"},
+		{ID: "01B", TS: time.UnixMilli(2), Dialect: "openai", Surface: "embedding",
+			RequestedModel: "e", FinalProviderID: "openai", Status: "error"},
+	})
+	got, err := db.ListRequests(ctx, RequestQuery{Limit: 10, Provider: "groq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "01A" {
+		t.Errorf("provider filter = %+v", got)
+	}
+	got, err = db.ListRequests(ctx, RequestQuery{Limit: 10, Surface: "embedding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "01B" {
+		t.Errorf("surface filter = %+v", got)
+	}
+}
+
+func TestAnOversizedLimitIsClamped(t *testing.T) {
+	// Refusing would make a UI bug look like a server outage; an unbounded
+	// page would build a million-row array in memory.
+	db := migrated(t)
+	seedRequests(t, db, 5)
+	got, err := db.ListRequests(context.Background(), RequestQuery{Limit: 1_000_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Errorf("got %d rows", len(got))
+	}
+}
+
+func TestTheAttemptCountIsPerRequest(t *testing.T) {
+	db := migrated(t)
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01A", TS: time.UnixMilli(1), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", Status: "success",
+		Attempts: []AttemptRecord{
+			{Seq: 1, ProviderID: "a", Model: "m", Outcome: "retryable_provider"},
+			{Seq: 2, ProviderID: "b", Model: "m", Outcome: "success"},
+		},
+	}})
+	got, err := db.ListRequests(context.Background(), RequestQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Attempts != 2 {
+		t.Errorf("attempts = %+v; a failover is what an operator scans for", got)
+	}
+}
+
+func TestRequestTraceCarriesCandidatesSkipsAndAttempts(t *testing.T) {
+	db := migrated(t)
+	db.SeedFailoverTraceForTest(t, "01TRACE")
+
+	tr, ok, err := db.RequestTrace(context.Background(), "01TRACE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("the trace was not found")
+	}
+	if len(tr.Candidates) != 3 {
+		t.Errorf("candidates = %v", tr.Candidates)
+	}
+	if len(tr.Skips) != 2 || tr.Skips[0] != "c/m3:cooling" {
+		t.Errorf("skips = %v; the drawer cannot say why a target was not tried", tr.Skips)
+	}
+	if len(tr.Attempts) != 2 {
+		t.Fatalf("attempts = %+v", tr.Attempts)
+	}
+	if tr.Attempts[0].Seq != 1 || tr.Attempts[1].Outcome != "success" {
+		t.Errorf("attempts are out of order or wrong: %+v", tr.Attempts)
+	}
+	if len(tr.Warnings) != 1 {
+		t.Errorf("warnings = %v", tr.Warnings)
+	}
+	if tr.SurfaceMeta["input_count"].(float64) != 3 {
+		t.Errorf("surface meta = %v", tr.SurfaceMeta)
+	}
+	if tr.Bodies == nil {
+		t.Error("bodies is nil; it must be an empty slice so the drawer can range over it")
+	}
+}
+
+func TestAnUnknownTraceIsAMissRatherThanAnError(t *testing.T) {
+	db := migrated(t)
+	_, ok, err := db.RequestTrace(context.Background(), "does-not-exist")
+	if err != nil {
+		t.Fatalf("a miss was reported as an error: %v", err)
+	}
+	if ok {
+		t.Error("an unknown id was found")
+	}
+}
+
+func TestATraceWithNoCandidatesReturnsEmptySlices(t *testing.T) {
+	// Every list the drawer ranges over must be an array, never null.
+	db := migrated(t)
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01BARE", TS: time.UnixMilli(1), Dialect: "openai",
+		Surface: "llm", RequestedModel: "m", Status: "error",
+	}})
+	tr, ok, err := db.RequestTrace(context.Background(), "01BARE")
+	if err != nil || !ok {
+		t.Fatalf("ok = %v, err = %v", ok, err)
+	}
+	if tr.Candidates == nil || tr.Skips == nil || tr.Warnings == nil ||
+		tr.Attempts == nil || tr.Bodies == nil {
+		t.Errorf("a nil list would render as null: %+v", tr)
+	}
+}
+
+func TestCapturedBodiesAreReadWhenPresent(t *testing.T) {
+	// capture.bodies has no writer, so this inserts directly. The query has to
+	// work the day one lands, and nothing else would exercise it.
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01BODY", TS: time.UnixMilli(1), Dialect: "openai",
+		Surface: "llm", RequestedModel: "m", Status: "success",
+	}})
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO request_bodies (request_id, request_json, response_json, expires_at)
+		 VALUES ('01BODY', '{"in":1}', '{"out":2}', 9999999999999)`); err != nil {
+		t.Fatal(err)
+	}
+	tr, _, err := db.RequestTrace(ctx, "01BODY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Bodies) != 2 {
+		t.Fatalf("bodies = %+v", tr.Bodies)
+	}
+	if tr.Bodies[0].Kind != "request" || tr.Bodies[1].Kind != "response" {
+		t.Errorf("bodies = %+v", tr.Bodies)
+	}
+}

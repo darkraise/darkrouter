@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/admin"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -292,5 +293,108 @@ catalog:
 	}
 	if strings.Contains(body, "retired") {
 		t.Errorf("a removed_upstream model was listed: %s", body)
+	}
+}
+
+func TestTheProxyPortIgnoresASessionCookie(t *testing.T) {
+	// Cookies are not port-scoped: a browser logged into the admin port sends
+	// that cookie to the proxy port too. If the proxy ever honored one, every
+	// logged-in operator's browser would be an authenticated proxy client for
+	// any page they visited. Nothing reads cookies here today; this is what
+	// keeps it that way.
+	s := newTestServer(t, "  proxy_token: secret\n")
+
+	r := httptest.NewRequest("GET", "/v1/models", nil)
+	r.AddCookie(&http.Cookie{Name: "darkrouter_session", Value: "a-valid-looking-session"})
+	rec := httptest.NewRecorder()
+	s.ProxyHandler().ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code = %d, want 401; a cookie authenticated a proxy request", rec.Code)
+	}
+}
+
+func TestTheProxyPortStillAcceptsItsBearerToken(t *testing.T) {
+	// The other half: refusing the cookie must not refuse the token.
+	s := newTestServer(t, "  proxy_token: secret\n")
+
+	r := httptest.NewRequest("GET", "/v1/models", nil)
+	r.Header.Set("Authorization", "Bearer secret")
+	r.AddCookie(&http.Cookie{Name: "darkrouter_session", Value: "irrelevant"})
+	rec := httptest.NewRecorder()
+	s.ProxyHandler().ServeHTTP(rec, r)
+
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("code = %d; the bearer token was refused", rec.Code)
+	}
+}
+
+func TestTheAdminPortServesTheAPIClosed(t *testing.T) {
+	// One request proves both that the API is mounted and that it is closed.
+	s := newTestServer(t, "")
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/overview", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
+	}
+}
+
+func TestHealthEndpointsStayUnauthenticated(t *testing.T) {
+	// A container orchestrator and a Prometheus scraper read these. Putting
+	// them behind a session breaks both, and the admin mux is mounted at the
+	// root so nothing else may shadow their exact paths.
+	s := newTestServer(t, "")
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
+		rec := httptest.NewRecorder()
+		s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s code = %d, want 200", path, rec.Code)
+		}
+	}
+}
+
+func TestAMissingPasswordHashWarnsRatherThanFailingStartup(t *testing.T) {
+	// The gateway's job is proxying. Refusing to start because the optional
+	// dashboard has no password would take a working proxy down over a feature
+	// the operator may not use.
+	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", "")
+	s := newTestServer(t, "")
+
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	var body struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, w := range body.Warnings {
+		if strings.Contains(w, "PASSWORD_HASH") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v; an operator cannot tell the dashboard is closed", body.Warnings)
+	}
+}
+
+func TestALoginWorksAgainstAConfiguredHash(t *testing.T) {
+	// The other half: a configured hash opens the dashboard, so the warning
+	// above is about configuration rather than a permanently closed port.
+	hash, err := admin.HashPassword("hunter2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", hash)
+	s := newTestServer(t, "")
+
+	r := httptest.NewRequest("POST", "/api/auth/login",
+		strings.NewReader(`{"password":"hunter2"}`))
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }

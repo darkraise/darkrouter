@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 3 {
-			t.Errorf("run %d: version = %d, want 3", i, v)
+		if v != 4 {
+			t.Errorf("run %d: version = %d, want 4", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -202,18 +202,6 @@ func TestMigration0002CreatesProviderDiscovery(t *testing.T) {
 	}
 }
 
-func TestMigrationsReachVersionThree(t *testing.T) {
-	// The loader asserts contiguity from 1, so a mis-numbered file fails here
-	// rather than at a customer's first start.
-	ms, err := loadMigrations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ms) != 3 {
-		t.Fatalf("loaded %d migrations, want 3", len(ms))
-	}
-}
-
 func TestMigrationThreeIsAdditive(t *testing.T) {
 	// Nothing is dropped or rebuilt, so a failed run leaves the phase 2 schema
 	// exactly as it was. Every added column carries a non-null default, which
@@ -230,5 +218,64 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	}
 	if strings.Count(body, "ADD COLUMN") != 3 {
 		t.Errorf("migration 3 adds %d columns, want 3", strings.Count(body, "ADD COLUMN"))
+	}
+}
+
+func TestMigrationsReachVersionFour(t *testing.T) {
+	// The loader asserts contiguity from 1, so a mis-numbered file fails here
+	// rather than at a customer's first start. One assertion rather than one
+	// per phase: the count is a fact about this build, not about a phase.
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 4 {
+		t.Fatalf("loaded %d migrations, want 4", len(ms))
+	}
+}
+
+func TestTheKeysetIndexExists(t *testing.T) {
+	// Spec §4.2: the keyset promise is theoretical without this. A query
+	// planner check is the only assertion that cannot pass by accident.
+	db := migrated(t)
+	var plan string
+	row := db.Read.QueryRow(
+		`EXPLAIN QUERY PLAN
+		 SELECT id FROM requests WHERE (ts, id) < (?, ?) ORDER BY ts DESC, id DESC LIMIT 50`,
+		1, "z")
+	var a, b, c int
+	if err := row.Scan(&a, &b, &c, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "idx_requests_keyset") {
+		t.Errorf("query plan = %q; the keyset query is not using its index", plan)
+	}
+}
+
+func TestTheFilterIndexesExist(t *testing.T) {
+	// Spec §4.2 names provider, model, status, surface as filter columns.
+	// An index missing here turns a filtered page into a full scan.
+	db := migrated(t)
+	rows, err := db.Read.Query(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'requests'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		have[n] = true
+	}
+	for _, want := range []string{
+		"idx_requests_keyset", "idx_requests_provider", "idx_requests_model",
+		"idx_requests_status", "idx_requests_surface",
+	} {
+		if !have[want] {
+			t.Errorf("index %s is missing; have %v", want, have)
+		}
 	}
 }
