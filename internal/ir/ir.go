@@ -218,6 +218,11 @@ type Request struct {
 	Safety         []SafetySetting
 	Metadata       map[string]string
 	Extra          map[string]json.RawMessage
+
+	// Warnings are losses the inbound parse discovered. Until phase 5 every
+	// warning came from an adapter rendering outbound; a dialect that drops
+	// something on the way in had nowhere to say so.
+	Warnings []Warning
 }
 
 type Usage struct {

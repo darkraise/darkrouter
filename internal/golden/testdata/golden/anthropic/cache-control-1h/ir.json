@@ -48,5 +48,6 @@
   "ResponseFormat": null,
   "Safety": null,
   "Metadata": null,
-  "Extra": null
+  "Extra": null,
+  "Warnings": null
 }
