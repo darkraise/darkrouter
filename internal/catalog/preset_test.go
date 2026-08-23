@@ -3,6 +3,8 @@ package catalog
 import (
 	"strings"
 	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
 )
 
 func TestEmbeddedPresetsValidate(t *testing.T) {
@@ -97,5 +99,67 @@ func TestBareQuirkWithValueIsRejected(t *testing.T) {
 	// configure nothing.
 	if knownQuirk("no-system-role=true") {
 		t.Error("a bare quirk accepted a value")
+	}
+}
+
+func TestEveryDeclaredSurfaceParses(t *testing.T) {
+	// merge.parseSurfaces drops what ir.ParseSurface rejects, so a preset
+	// spelling a surface wrong loses it silently: the model serves chat only
+	// and nothing reports the loss. This is the guard for that.
+	ps, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, p := range ps {
+		for _, s := range p.Surfaces {
+			if _, ok := ir.ParseSurface(s); !ok {
+				t.Errorf("%s: surface %q is not in the vocabulary", id, s)
+			}
+		}
+	}
+}
+
+func TestAuxiliarySurfacesAreDeclaredSomewhere(t *testing.T) {
+	// Phase 5's done criterion is that each of the seven routes reaches a real
+	// provider. A surface no preset declares cannot, and the failure would be
+	// a confusing "no provider offers this" at request time rather than here.
+	ps, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]int{}
+	for _, p := range ps {
+		for _, s := range p.Surfaces {
+			declared[s]++
+		}
+	}
+	for _, s := range ir.AllSurfaces() {
+		if declared[string(s)] == 0 {
+			t.Errorf("no shipped preset declares the %q surface", s)
+		}
+	}
+}
+
+func TestRerankPresetsDeclareAPath(t *testing.T) {
+	// Spec §3.1: each preset declares its own rerank path, because providers
+	// expose it at differing URLs. A rerank surface without one would build a
+	// request against the chat path.
+	ps, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, p := range ps {
+		serves := false
+		for _, s := range p.Surfaces {
+			if s == string(ir.SurfaceRerank) {
+				serves = true
+			}
+		}
+		if !serves {
+			continue
+		}
+		if _, ok := p.QuirkValue("rerank-path"); !ok {
+			t.Errorf("%s declares the rerank surface with no rerank-path quirk", id)
+		}
 	}
 }

@@ -567,6 +567,7 @@ deepinfra:
     style: bearer
   surfaces:
     - llm
+    - embedding
   models_dev_id: deepinfra
   free_tier: true
   website: https://deepinfra.com
@@ -701,6 +702,8 @@ fireworks:
     style: bearer
   surfaces:
     - llm
+    - embedding
+    - image
   models_dev_id: fireworks-ai
   free_tier: true
   website: https://fireworks.ai
@@ -909,6 +912,8 @@ groq:
     style: bearer
   surfaces:
     - llm
+    - stt
+    - tts
   models_dev_id: groq
   free_tier: true
   website: https://groq.com
@@ -1951,6 +1956,8 @@ together:
     style: bearer
   surfaces:
     - llm
+    - embedding
+    - image
   models_dev_id: togetherai
   website: https://www.together.ai
 token-kiosk:
@@ -2119,6 +2126,16 @@ volcengine:
     - llm
   no_models_dev: true
   website: https://www.volcengine.com
+voyage:
+  name: Voyage AI
+  kind: openaicompat
+  base_url: https://api.voyageai.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - embedding
+  no_models_dev: true
+  website: https://docs.voyageai.com
 wafer:
   name: Wafer AI
   kind: anthropic
