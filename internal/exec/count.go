@@ -48,39 +48,15 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
-	rec.RequestedModel = req.Model
-
-	providers, perr := e.src.Providers(r.Context())
-	if perr != nil {
-		rec.ErrorCode = string(ir.ErrDarkrouter)
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: perr.Error()})
-		return
-	}
-
-	snap := router.Snapshot{
-		At: start, Providers: providers,
-		Catalog: e.catalogFor(providers), Config: cfg,
-	}
-	if e.deps.Fleet != nil {
-		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
-		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
-	}
 	needs := req.Needs()
-	cands, _, rerr := router.Resolve(router.Query{
+	res, ok := e.resolve(r.Context(), w, d, router.Query{
 		Model: req.Model, Surface: ir.SurfaceLLM,
 		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
-	}, snap)
-	if rerr != nil {
-		e2 := routerError(rerr)
-		rec.ErrorCode = string(e2.Type)
-		_ = d.WriteError(w, e2)
+	}, rec, cfg, start)
+	if !ok {
 		return
 	}
-
-	byID := make(map[string]provider.Provider, len(providers))
-	for _, p := range providers {
-		byID[p.ID] = p
-	}
+	cands, byID := res.Candidates, res.ByID
 
 	model := req.Model
 	if len(cands) > 0 {
