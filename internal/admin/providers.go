@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -164,7 +165,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.reloadProviders(r)
+	s.reloadProviders(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]any{"id": row.ID})
 }
 
@@ -185,7 +186,7 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.reloadProviders(r)
+	s.reloadProviders(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
@@ -203,7 +204,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.reloadProviders(r)
+	s.reloadProviders(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "dangling_aliases": dangling,
 	})
@@ -238,14 +239,14 @@ func (s *Server) danglingAliases(providerID string) []string {
 // reloadProviders pushes the mutation into the running router. Without it the
 // change is in the database and the gateway keeps serving the old provider set
 // until something else happens to reload.
-func (s *Server) reloadProviders(r *http.Request) {
+func (s *Server) reloadProviders(ctx context.Context) {
 	if s.deps.Src == nil {
 		return
 	}
 	// A reload failure is not reported to the caller: the mutation succeeded
 	// and the database is the source of truth. The next natural reload picks it
 	// up, and reporting a 500 for a write that landed would be worse.
-	_ = s.deps.Src.Reload(r.Context())
+	_ = s.deps.Src.Reload(ctx)
 }
 
 type addCredentialBody struct {
@@ -278,7 +279,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.reloadProviders(r)
+	s.reloadProviders(r.Context())
 	// The id and the label, never the secret — not even the one just supplied.
 	// Echoing it back would put it in a response body, a proxy log and a
 	// browser's network panel for no reason.
@@ -295,7 +296,7 @@ func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.reloadProviders(r)
+	s.reloadProviders(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("keyId")})
 }
 

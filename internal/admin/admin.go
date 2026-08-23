@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -49,6 +50,13 @@ type Deps struct {
 	// requests through it so what it verifies is the gateway rather than
 	// itself.
 	Exec *exec.Executor
+
+	// Flows holds in-progress OAuth connect attempts. Nil disables the two
+	// OAuth routes, which is what every test that does not exercise them wants.
+	Flows *auth.FlowStore
+
+	// HTTP is the client used for token exchange. Nil uses http.DefaultClient.
+	HTTP *http.Client
 
 	// Dev, when non-empty, is the Vite dev server to reverse-proxy unmatched
 	// paths to. It is empty in production.
@@ -105,6 +113,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/providers/{id}/test", s.requireCSRF(s.handleProbe))
 	s.mux.HandleFunc("POST /api/providers/{id}/keys", s.requireCSRF(s.handleAddCredential))
 	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
+
+	s.mux.HandleFunc("POST /api/providers/{id}/oauth/start", s.requireCSRF(s.handleOAuthStart))
+	s.mux.HandleFunc("POST /api/providers/{id}/oauth/complete", s.requireCSRF(s.handleOAuthComplete))
 
 	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
 
