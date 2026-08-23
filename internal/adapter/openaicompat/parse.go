@@ -118,6 +118,12 @@ type wireChunk struct {
 // the text block's.
 const toolBlockBase = 1000
 
+// reasoningBlockBase does for reasoning what toolBlockBase does for tool calls.
+// A block index identifies a block, and a consumer that keys items by index —
+// the responses stream writer is the first — cannot tell a thinking delta from
+// a text delta when both arrive at zero.
+const reasoningBlockBase = 2000
+
 // ParseStream reconstructs block structure from OpenAI's flat deltas. The state
 // machine opens a block when a delta first carries a given kind and closes it
 // when the stream ends or a finish reason arrives. Tool calls are indexed, so
@@ -127,6 +133,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		reader := sse.NewReader(r, maxLine)
 		open := make(map[int]bool)
 		textIdx := -1
+		reasoningIdx := -1
 		started := false
 
 		// closeAll emits stops in ascending index order so the event sequence is
@@ -144,6 +151,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			}
 			open = map[int]bool{}
 			textIdx = -1
+			reasoningIdx = -1
 			return true
 		}
 
@@ -202,7 +210,15 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					}
 				}
 				if d.Reasoning != "" {
-					if !yield(ir.StreamEvent{Type: ir.EventContentDelta,
+					if reasoningIdx < 0 {
+						reasoningIdx = reasoningBlockBase
+						open[reasoningIdx] = true
+						if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: reasoningIdx,
+							Delta: &ir.Delta{Type: ir.BlockThinking}}, nil) {
+							return
+						}
+					}
+					if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: reasoningIdx,
 						Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: d.Reasoning}}, nil) {
 						return
 					}
