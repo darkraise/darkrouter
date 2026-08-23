@@ -152,23 +152,62 @@ func (o *chatOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) 
 	return adapter.OutcomeSuccess, nil
 }
 
-// RunSurface is the entry point every route shares: prologue, then the loop.
-// Handle and the six auxiliary routes are each a few lines of parsing followed
-// by one call to this.
+// RunSurface is the entry point for a route whose request is already parsed.
+// Handle uses it; the seam tests drive an op through it directly.
 //
 // cfg is passed rather than fetched because every caller already holds one: it
 // needs max_body_bytes to parse. Taking a second snapshot here would break the
 // one-config-per-request-lifetime rule the chat path has held since phase 3.
 func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op SurfaceOp, cfg *config.Config) {
 	start := time.Now()
-	q := op.Query()
-	rec, done := e.newRecord(start, op.Dialect(), string(q.Surface))
+	rec, done := e.newRecord(start, op.Dialect(), string(op.Query().Surface))
 	defer done()
+	e.beginResponse(w, rec)
+	e.runOp(w, r, op, rec, start, cfg)
+}
 
+// RunAux is RunSurface with the parse step moved inside the record's lifetime.
+//
+// A route that parsed first would produce no request row for a malformed body,
+// and chat does not behave that way: Handle opens its record before parsing so
+// that a 400 is a request the gateway received and refused rather than one that
+// never happened. Six routes dropping their 400s from the log would be a real
+// regression in the only place an operator can see them.
+//
+// ew rather than the op writes the error, because on a parse failure there is
+// no op yet — the dialect is what knows the client's error shape.
+func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
+	dialect string, surface ir.Surface, ew errorWriter,
+	build func(cfg *config.Config) (SurfaceOp, error)) {
+
+	start := time.Now()
+	rec, done := e.newRecord(start, dialect, string(surface))
+	defer done()
+	e.beginResponse(w, rec)
+
+	cfg := e.store.Current() // one snapshot for this request's whole lifetime
+	op, err := build(cfg)
+	if err != nil {
+		rec.ErrorCode = string(ir.ErrInvalidRequest)
+		_ = ew.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	e.runOp(w, r, op, rec, start, cfg)
+}
+
+// beginResponse sets the two headers every route emits before it knows whether
+// it will succeed. Attempts is overwritten by the diagnostics on both the
+// success and the error path; the zero here is what a response that never
+// attempted anything carries.
+func (e *Executor) beginResponse(w http.ResponseWriter, rec *store.RequestRecord) {
 	w.Header().Set("X-Darkrouter-Request", rec.ID)
 	w.Header().Set("X-Darkrouter-Attempts", "0")
+}
 
-	res, ok := e.resolve(r.Context(), w, op, q, rec, cfg, start)
+func (e *Executor) runOp(w http.ResponseWriter, r *http.Request, op SurfaceOp,
+	rec *store.RequestRecord, start time.Time, cfg *config.Config) {
+
+	res, ok := e.resolve(r.Context(), w, op, op.Query(), rec, cfg, start)
 	if !ok {
 		return
 	}
