@@ -490,3 +490,75 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	}
 	return &tr, true, nil
 }
+
+// UsageDay is one row of the usage chart.
+type UsageDay struct {
+	Day        string
+	Requests   int64
+	TokensIn   int64
+	TokensOut  int64
+	CostMicros *int64
+}
+
+// UsageByDay rolls usage_daily up across providers and models, oldest first
+// because a chart reads left to right.
+func (d *DB) UsageByDay(ctx context.Context, days int) ([]UsageDay, error) {
+	if days <= 0 || days > 365 {
+		days = 30
+	}
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT day, sum(requests), sum(tokens_in), sum(tokens_out), sum(cost_micros)
+		   FROM usage_daily GROUP BY day ORDER BY day DESC LIMIT ?`, days)
+	if err != nil {
+		return nil, fmt.Errorf("usage by day: %w", err)
+	}
+	defer rows.Close()
+
+	out := []UsageDay{}
+	for rows.Next() {
+		var u UsageDay
+		if err := rows.Scan(&u.Day, &u.Requests, &u.TokensIn, &u.TokensOut, &u.CostMicros); err != nil {
+			return nil, fmt.Errorf("usage by day: %w", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reversed after the LIMIT: the query takes the newest N, the chart shows
+	// them oldest first.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// RecentStats is the overview's headline numbers over a window.
+type RecentStats struct {
+	Requests  int64
+	Errors    int64
+	WindowSec int64
+	// PricedRows counts rows carrying a cost. Zero means nothing computes
+	// pricing, which the overview reports rather than showing a confident zero.
+	PricedRows int64
+	CostMicros int64
+}
+
+func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats, error) {
+	since := time.Now().Add(-window).UnixMilli()
+	var s RecentStats
+	s.WindowSec = int64(window.Seconds())
+	// coalesce on the sums: SUM over no rows is NULL, and scanning that into an
+	// int64 fails rather than yielding zero.
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT count(*),
+		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0),
+		        coalesce(sum(CASE WHEN cost_micros IS NOT NULL THEN 1 ELSE 0 END), 0),
+		        coalesce(sum(cost_micros), 0)
+		   FROM requests WHERE ts >= ?`, since).
+		Scan(&s.Requests, &s.Errors, &s.PricedRows, &s.CostMicros)
+	if err != nil {
+		return s, fmt.Errorf("recent stats: %w", err)
+	}
+	return s, nil
+}
