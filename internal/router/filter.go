@@ -43,8 +43,12 @@ func filterTarget(t target, q Query, snap Snapshot,
 	// routing filter rather than a runtime error, because an operator reading
 	// "no provider offers this model on this surface" learns more than one
 	// reading a 404 the provider produced.
-	if q.Surface != "" && snap.AdapterSurfaces != nil {
-		if !snap.AdapterSurfaces[p.Kind].Has(q.Surface) {
+	if q.Surface != "" {
+		// A kind with no entry is one whose adapter is not registered at all.
+		// That is a different fact — the executor reports it as no_adapter once
+		// it reaches the loop — and answering it here would relabel it as a
+		// surface gap the operator cannot act on.
+		if ss, known := snap.AdapterSurfaces[p.Kind]; known && !ss.Has(q.Surface) {
 			return nil, []Skip{{
 				ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipAdapterSurface,
 			}}, true

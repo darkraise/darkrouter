@@ -341,3 +341,25 @@ func TestANilAdapterSurfacesMapImposesNoConstraint(t *testing.T) {
 		t.Errorf("got %d candidates, err = %v; a nil map must not filter", len(cands), err)
 	}
 }
+
+func TestAKindAbsentFromTheMapIsNotASurfaceSkip(t *testing.T) {
+	// An unregistered kind is a no_adapter fact the executor reports from the
+	// loop. Answering it here would relabel it as a surface gap, which points
+	// the operator at a catalog they cannot fix.
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}})
+	snap.AdapterSurfaces = map[string]adapter.SurfaceSet{
+		"some-other-kind": {ir.SurfaceLLM: true},
+	}
+	cands, skips, err := Resolve(Query{Model: "m", Surface: ir.SurfaceLLM}, snap)
+	if err != nil || len(cands) != 1 {
+		t.Fatalf("got %d candidates, err = %v; an absent kind must not filter", len(cands), err)
+	}
+	for _, s := range skips {
+		if s.Reason == SkipAdapterSurface {
+			t.Errorf("an absent kind was recorded as a surface skip: %+v", s)
+		}
+	}
+}

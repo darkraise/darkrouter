@@ -41,9 +41,9 @@ type Snapshot struct {
 	// kind. It is a different fact from the catalog's surfaces: the catalog
 	// says what the upstream offers, this says what Darkrouter can speak.
 	//
-	// A nil map imposes no constraint. That is deliberate — a missing map is a
-	// wiring bug, and routing nothing would be a worse symptom than routing as
-	// before.
+	// A nil map imposes no constraint, and neither does a kind absent from a
+	// populated one. That is deliberate — a missing entry is a wiring gap, and
+	// routing nothing would be a worse symptom than routing as before.
 	AdapterSurfaces map[string]adapter.SurfaceSet
 }
 

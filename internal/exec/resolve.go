@@ -54,7 +54,10 @@ func (e *Executor) resolve(ctx context.Context, w http.ResponseWriter, ew errorW
 	}
 
 	cat := e.catalogFor(providers)
-	snap := router.Snapshot{At: start, Providers: providers, Catalog: cat, Config: cfg}
+	snap := router.Snapshot{
+		At: start, Providers: providers, Catalog: cat, Config: cfg,
+		AdapterSurfaces: e.adapterSurfaces,
+	}
 	if e.deps.Fleet != nil {
 		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
 		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
