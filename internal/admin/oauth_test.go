@@ -63,6 +63,12 @@ func newFakeAuthServer(t *testing.T) (*fakeAuthServer, *httptest.Server) {
 	return f, srv
 }
 
+func (f *fakeAuthServer) refreshCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.refreshes
+}
+
 // oauthPresets is the shipped preset set with anthropic-oauth's endpoints
 // redirected at the fake. Copying rather than mutating Embedded() matters: the
 // embedded map is process-wide and shared with every other test.
