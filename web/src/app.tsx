@@ -5,8 +5,9 @@ import { SidebarLayout } from "darkraise-ui/layout"
 import { themeConfig } from "./theme.config"
 import { api, onUnauthorized, setCsrfToken } from "./lib/api"
 import { ApiError } from "./lib/api"
+import { RouterProvider } from "@tanstack/react-router"
 import { LoginScreen } from "./routes/login"
-import { OverviewScreen } from "./routes/overview"
+import { router } from "./lib/router"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,7 +70,7 @@ function Shell() {
       ]}
       showThemeSwitcher
     >
-      <OverviewScreen />
+      <RouterProvider router={router} />
     </SidebarLayout>
   )
 }
