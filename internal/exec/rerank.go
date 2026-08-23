@@ -68,6 +68,11 @@ func (o *rerankOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 	ac.Rec.FinalModel = ac.Cand.Model
 	ac.Rec.Warnings = warningStrings(ac.Warns)
 
+	ac.Rec.SurfaceMeta = map[string]any{"document_count": o.req.DocumentCount()}
+	if o.req.TopN > 0 {
+		ac.Rec.SurfaceMeta["top_n"] = o.req.TopN
+	}
+
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteRerank(cw, out)
 	return adapter.OutcomeSuccess, nil

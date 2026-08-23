@@ -57,6 +57,13 @@ func (o *imageOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 	ac.Rec.FinalModel = ac.Cand.Model
 	ac.Rec.Warnings = warningStrings(ac.Warns)
 
+	ac.Rec.SurfaceMeta = map[string]any{"image_count": o.req.ImageCount()}
+	for k, v := range map[string]string{"size": o.req.Size, "quality": o.req.Quality} {
+		if v != "" {
+			ac.Rec.SurfaceMeta[k] = v
+		}
+	}
+
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteImage(cw, out)
 	return adapter.OutcomeSuccess, nil

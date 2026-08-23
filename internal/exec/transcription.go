@@ -61,6 +61,8 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 	ac.Rec.FinalProviderID = ac.Cand.ProviderID
 	ac.Rec.FinalModel = ac.Cand.Model
 	ac.Rec.Warnings = warningStrings(ac.Warns)
+	ac.Rec.SurfaceMeta = map[string]any{"file_name": o.form.FileName("file")}
+	ac.Rec.ResponseContentType = ct
 
 	if strings.HasPrefix(ct, "application/json") {
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTranscriptBytes+1))
@@ -82,6 +84,7 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 		ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 		cw.Header().Set("Content-Type", ct)
 		_, _ = cw.Write(raw)
+		ac.Rec.ResponseBytes = cw.Bytes()
 		return adapter.OutcomeSuccess, nil
 	}
 
@@ -94,8 +97,10 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 	if ct != "" {
 		cw.Header().Set("Content-Type", ct)
 	}
-	if _, err := copyFlushing(cw, resp.Body); err != nil && !cw.Committed() {
-		return failedParse(ac, resp, err)
+	cerr := copyErr(copyFlushing(cw, resp.Body))
+	ac.Rec.ResponseBytes = cw.Bytes()
+	if cerr != nil && !cw.Committed() {
+		return failedParse(ac, resp, cerr)
 	}
 	// Once bytes have gone out the chain ends whatever happened next. The loop
 	// enforces this by consulting the writer, and the byte count is what the
@@ -159,6 +164,10 @@ func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
 		}
 	}
 }
+
+// copyErr drops copyFlushing's byte count. Callers record cw.Bytes() instead,
+// which is what reached the client rather than what the copy read.
+func copyErr(_ int64, err error) error { return err }
 
 // HandleTranscriptions serves POST /v1/audio/transcriptions.
 func (e *Executor) HandleTranscriptions(w http.ResponseWriter, r *http.Request, d edge.Dialect) {

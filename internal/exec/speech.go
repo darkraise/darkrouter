@@ -52,7 +52,18 @@ func (o *speechOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		cw.Header().Set("Content-Type", ct)
 	}
-	if _, err := copyFlushing(cw, resp.Body); err != nil && !cw.Committed() {
+	err := copyErr(copyFlushing(cw, resp.Body))
+	// cw.Bytes() rather than the copy's own count or the provider's
+	// Content-Length: the wrapper counts what actually reached the client, and
+	// a truncated body's count is lower than what the provider claimed. Spec §7
+	// makes this the only place that truncation appears.
+	ac.Rec.ResponseBytes = cw.Bytes()
+	ac.Rec.ResponseContentType = resp.Header.Get("Content-Type")
+	ac.Rec.SurfaceMeta = map[string]any{"voice": o.req.Voice}
+	if o.req.ResponseFormat != "" {
+		ac.Rec.SurfaceMeta["response_format"] = o.req.ResponseFormat
+	}
+	if err != nil && !cw.Committed() {
 		// Nothing reached the client, so the chain may still continue.
 		return adapter.OutcomeRetryableProvider, errorFor(adapter.OutcomeRetryableProvider, err)
 	}

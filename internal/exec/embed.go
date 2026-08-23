@@ -78,6 +78,16 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 	// client received, not every attempt abandoned on the way there.
 	ac.Rec.Warnings = warningStrings(warns)
 
+	ac.Rec.SurfaceMeta = map[string]any{
+		"input_count": o.req.InputCount(),
+		"encoding":    o.req.EncodingOrDefault(),
+	}
+	// Omitted rather than zero: dimensions has no legal zero, so recording one
+	// would claim the client asked for a value it did not send.
+	if o.req.Dimensions > 0 {
+		ac.Rec.SurfaceMeta["dimensions"] = o.req.Dimensions
+	}
+
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteEmbedding(cw, out)
 	return adapter.OutcomeSuccess, nil
