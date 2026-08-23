@@ -12,7 +12,7 @@ func snapModels() []Model {
 		{ProviderID: "a", ModelID: "shared", State: StateLive, Surfaces: []ir.Surface{ir.SurfaceLLM}},
 		{ProviderID: "b", ModelID: "shared", State: StateStale, Surfaces: []ir.Surface{ir.SurfaceLLM}},
 		{ProviderID: "b", ModelID: "gone", State: StateRemovedUpstream, Surfaces: []ir.Surface{ir.SurfaceLLM}},
-		{ProviderID: "b", ModelID: "embed", State: StateLive, Surfaces: []ir.Surface{ir.SurfaceEmbeddings}},
+		{ProviderID: "b", ModelID: "embed", State: StateLive, Surfaces: []ir.Surface{ir.SurfaceEmbedding}},
 	}
 }
 
@@ -52,7 +52,7 @@ func TestOfferingIsInProviderOrderAndExcludesRemoved(t *testing.T) {
 
 func TestSearchFilters(t *testing.T) {
 	s := NewSnapshot(snapModels(), []string{"a", "b"})
-	if got := s.Search(Filter{Surface: ir.SurfaceEmbeddings}); len(got) != 1 || got[0].ModelID != "embed" {
+	if got := s.Search(Filter{Surface: ir.SurfaceEmbedding}); len(got) != 1 || got[0].ModelID != "embed" {
 		t.Errorf("surface filter = %v", got)
 	}
 	if got := s.Search(Filter{ProviderID: "a"}); len(got) != 1 || got[0].ProviderID != "a" {

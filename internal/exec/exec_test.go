@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,13 +17,16 @@ import (
 	"iter"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -900,5 +904,491 @@ providers:
 		if strings.Contains(s, "capabilities") {
 			t.Errorf("warned about a model models.dev vouched for: %v", rec.only(t).Warnings)
 		}
+	}
+}
+
+func TestEmptyStreamSucceedsWithoutFailover(t *testing.T) {
+	// A 200 SSE that ends with no content-bearing event is a legitimate empty
+	// completion, not a failure: exec.go flushes the buffer, succeeds, and does
+	// not fail over. Nothing pinned that, and a refactor moving the
+	// stream-ended-cleanly break across the op boundary would silently turn
+	// every instantly-stopping model into a full-chain retry.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// A well-formed stream carrying no delta.
+		_, _ = w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: a
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+  - id: b
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("upstream called %d times; an empty stream must not fail over", got)
+	}
+	if got := rec.only(t); got.Status != "success" {
+		t.Errorf("status = %q, want success", got.Status)
+	}
+	// The buffered events still reach the client.
+	if !strings.Contains(w.Body.String(), "finish_reason") {
+		t.Errorf("the buffered stream was not flushed: %q", w.Body.String())
+	}
+}
+
+func TestAnAbandonedAttemptsWarningsDoNotReachTheRecord(t *testing.T) {
+	// exec.go assigns warnings per served attempt rather than appending across
+	// the chain. A loop-level accumulator is the natural refactor mistake, and
+	// it would leak a dropped-field warning from an attempt nobody was served
+	// into the record for the one they were.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The first provider fails pre-commit; the second serves.
+		if hits.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	rec := &captureLogger{}
+	// The anthropic adapter warns about a missing max_tokens; the openaicompat
+	// one does not. Attempt 1 therefore produces a warning and is abandoned.
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: first
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    priority: 10
+    models: [m]
+  - id: second
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    priority: 1
+    models: [m]
+`, map[string]adapter.Adapter{
+		"anthropic":    anthropicadapter.New(),
+		"openaicompat": openaicompat.New(),
+	}, Deps{Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	got := rec.only(t)
+	if got.FinalProviderID != "second" {
+		t.Fatalf("served by %q, want second", got.FinalProviderID)
+	}
+	for _, warn := range got.Warnings {
+		if strings.Contains(warn, "max_tokens") {
+			t.Errorf("warnings = %v; an abandoned attempt's warning reached the served record", got.Warnings)
+		}
+	}
+}
+
+func TestResolveRecordsTheTraceForEveryRoute(t *testing.T) {
+	// HandleCount discarded its skips, so a count request that routed to
+	// nothing was undiagnosable. Sharing the prologue fixes that as a side
+	// effect, and this is what pins it.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "chat-only", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [chat-only]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"nonexistent","messages":[{"role":"user","content":"hi"}]}`))
+	e.HandleCount(w, r, anthropicedge.New(), "anthropic")
+
+	got := rec.only(t)
+	if got.RequestedModel != "nonexistent" {
+		t.Errorf("requested model = %q", got.RequestedModel)
+	}
+	if got.ErrorCode == "" {
+		t.Error("a count that resolved to nothing recorded no error code")
+	}
+}
+
+func TestACountThatRoutesToNothingRecordsItsSkips(t *testing.T) {
+	// The trace, not just the error code, is what says *why* nothing routed.
+	// An unknown model produces no skips at all, so only a model that exists
+	// and is rejected exercises the path HandleCount used to discard.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "embed-only", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceEmbedding},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [embed-only]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"embed-only","messages":[{"role":"user","content":"hi"}]}`))
+	e.HandleCount(w, r, anthropicedge.New(), "anthropic")
+
+	got := rec.only(t)
+	if got.ErrorCode == "" {
+		t.Error("a count that resolved to nothing recorded no error code")
+	}
+	if len(got.Skips) == 0 {
+		t.Error("the skips explaining the empty candidate list were discarded")
+	}
+}
+
+// probeOp is a SurfaceOp that records what the loop handed it. It exists to
+// pin the contract between the loop and an op, which no chat test can: chat is
+// the one implementation whose behavior the rest of the suite already fixes.
+type probeOp struct {
+	q          router.Query
+	builds     int
+	responds   int
+	lastInfo   adapter.ModelInfo
+	lastTarget adapter.Target
+	buildWarn  string
+	onRespond  func(cw *CommitWriter) (adapter.Outcome, *ir.Error)
+}
+
+func (p *probeOp) Query() router.Query { return p.q }
+
+func (p *probeOp) Dialect() string { return "probe" }
+
+func (p *probeOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	p.builds++
+	p.lastInfo = tgt.Info
+	p.lastTarget = *tgt
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(tgt.BaseURL, "/")+"/probe",
+		strings.NewReader(`{}`))
+	if err != nil {
+		return nil, nil, err
+	}
+	var warns []ir.Warning
+	if p.buildWarn != "" {
+		warns = append(warns, ir.Warning{Field: p.buildWarn, Target: "probe", Reason: "test"})
+	}
+	return req, warns, nil
+}
+
+func (p *probeOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	p.responds++
+	defer resp.Body.Close()
+	if p.onRespond != nil {
+		return p.onRespond(cw)
+	}
+	_, _ = cw.Write([]byte("ok"))
+	return adapter.OutcomeSuccess, nil
+}
+
+func (p *probeOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = w.Write([]byte(e.Message))
+	return nil
+}
+
+// executorForOp builds an executor over one provider of the "probe" kind. The
+// op renders its own request, so the adapter registered under that kind is
+// there only to satisfy adapterFor.
+func executorForOp(t *testing.T, url string, cat *catalog.Store) (*Executor, *captureLogger) {
+	t.Helper()
+	rec := &captureLogger{}
+	// Assigned only when non-nil: a typed nil in the interface field reads as
+	// present and would be dereferenced on the routing path.
+	deps := Deps{Log: rec}
+	if cat != nil {
+		deps.Catalog = cat
+	}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: probe
+    base_url: `+url+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	return e, rec
+}
+
+// executorForOpWithTwoProviders gives a retry somewhere to go.
+func executorForOpWithTwoProviders(t *testing.T, url string) (*Executor, *captureLogger) {
+	t.Helper()
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: probe
+    base_url: `+url+`
+    api_key: sk
+    priority: 10
+    models: [m]
+  - id: q
+    kind: probe
+    base_url: `+url+`
+    api_key: sk
+    priority: 1
+    models: [m]
+`, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Log: rec})
+	return e, rec
+}
+
+func TestTheLoopGivesAnOpTheCatalogFacts(t *testing.T) {
+	// The loop owns Target construction, so an op must receive the catalog's
+	// view without doing its own lookup.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM}, MaxOutputTokens: 4242,
+	}}, []string{"p"}))
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceLLM}}
+	e, rec := executorForOp(t, upstream.URL, cat)
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if op.builds != 1 || op.responds != 1 {
+		t.Fatalf("builds = %d, responds = %d, want 1 and 1", op.builds, op.responds)
+	}
+	if op.lastInfo.MaxOutputTokens != 4242 {
+		t.Errorf("Info = %+v; the loop did not supply the catalog facts", op.lastInfo)
+	}
+	if got := rec.only(t); got.Status != "success" {
+		t.Errorf("status = %q", got.Status)
+	}
+}
+
+func TestAnOpThatCommittedCannotRestartTheChain(t *testing.T) {
+	// The op detects commit; the loop enforces it. An op reporting a retryable
+	// outcome after bytes went out must not produce a second attempt, or a
+	// client would receive two half-responses concatenated.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	op := &probeOp{
+		q: router.Query{Model: "m", Surface: ir.SurfaceLLM},
+		onRespond: func(cw *CommitWriter) (adapter.Outcome, *ir.Error) {
+			_, _ = cw.Write([]byte("partial"))
+			// A lie the loop must not believe.
+			return adapter.OutcomeRetryableProvider, &ir.Error{Type: ir.ErrAPI, Message: "boom"}
+		},
+	}
+	e, _ := executorForOpWithTwoProviders(t, upstream.URL)
+	w := httptest.NewRecorder()
+	e.RunSurface(w, httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if got := hits.Load(); got != 1 {
+		t.Errorf("upstream called %d times; a committed attempt restarted the chain", got)
+	}
+	if !strings.Contains(w.Body.String(), "partial") {
+		t.Errorf("body = %q; the committed bytes were lost", w.Body.String())
+	}
+}
+
+func TestAnEmbeddingRequestSkipsAChatOnlyAdapter(t *testing.T) {
+	// anthropic declares no surfaces, so it defaults to llm. Its preset could
+	// still claim embeddings — the catalog describes the upstream, not what
+	// Darkrouter can speak — and routing there would fail at the provider.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
+	w := httptest.NewRecorder()
+	e.RunSurface(w, httptest.NewRequest("POST", "/v1/embeddings", nil), op, e.store.Current())
+
+	if op.builds != 0 {
+		t.Errorf("the op built %d requests; a chat-only adapter must be filtered before any attempt", op.builds)
+	}
+	got := rec.only(t)
+	var found bool
+	for _, s := range got.Skips {
+		if strings.Contains(s, "adapter_surface") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("skips = %v; the trace does not explain why nothing routed", got.Skips)
+	}
+}
+
+func TestAChatRequestStillRoutesToAChatOnlyAdapter(t *testing.T) {
+	// The obvious regression: constraining the map must not exclude the kind
+	// that only ever served llm.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+// executorForPreset is executorForOp with a preset named on the provider row.
+// The model is a parameter because the provider's own models list gates
+// routing, and each caller declares a different one in its catalog.
+func executorForPreset(t *testing.T, url, preset, model string, cat *catalog.Store) (*Executor, *captureLogger) {
+	t.Helper()
+	rec := &captureLogger{}
+	deps := Deps{Log: rec}
+	if cat != nil {
+		deps.Catalog = cat
+	}
+	body := `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: probe
+`
+	if preset != "" {
+		body += "    preset: " + preset + "\n"
+	}
+	body += `    base_url: ` + url + `
+    api_key: sk
+    models: [` + model + `]
+`
+	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	return e, rec
+}
+
+func TestTheTargetCarriesThePresetRerankPath(t *testing.T) {
+	// Spec §3.1: providers expose rerank at differing URLs, so the path is
+	// data. The adapter is handed a resolved target and must not have to reach
+	// into the shipped preset file to build a URL.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	op := &probeOp{q: router.Query{Model: "rerank-v3.5", Surface: ir.SurfaceRerank}}
+	e, _ := executorForPreset(t, upstream.URL, "cohere", "rerank-v3.5",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if op.lastTarget.RerankPath != "/v2/rerank" {
+		t.Errorf("RerankPath = %q, want the cohere preset's quirk value", op.lastTarget.RerankPath)
+	}
+}
+
+func TestAProviderWithNoPresetCarriesNoRerankPath(t *testing.T) {
+	// An uncatalogued provider is a base URL and a key. Guessing a rerank path
+	// for it would post a rerank body at whatever URL the guess produced.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceRerank}}
+	e, _ := executorForPreset(t, upstream.URL, "", "m", catalogWith("p", "m", ir.SurfaceRerank))
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if op.lastTarget.RerankPath != "" {
+		t.Errorf("RerankPath = %q, want empty", op.lastTarget.RerankPath)
 	}
 }

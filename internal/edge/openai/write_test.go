@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -181,5 +182,20 @@ func TestWriteResponseUsesTheClockSeam(t *testing.T) {
 	})
 	if got["created"].(float64) != 1700000000 {
 		t.Errorf("created = %v", got["created"])
+	}
+}
+
+func TestAnOversizedPayloadIs413(t *testing.T) {
+	// 400 tells a client its request is malformed and retrying is pointless.
+	// 413 tells it to send a smaller file. An audio client has no other signal
+	// to tell those apart.
+	w := httptest.NewRecorder()
+	if err := WriteError(w, &ir.Error{
+		Type: ir.ErrPayloadTooLarge, Message: "upload exceeds the configured maximum",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", w.Code)
 	}
 }

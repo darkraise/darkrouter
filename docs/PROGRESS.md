@@ -10,7 +10,7 @@ Last updated: 2026-08-23
 | 2 — Persistence and health | ✅ | ✅ | **Merged to master.** 18 tasks, all done criteria met. |
 | 3 — Routing and failover | ✅ | ✅ | **Merged to master.** 20 tasks, all done criteria met. |
 | 4 — Dialects | ✅ | ✅ | **Complete.** 37 tasks; race-clean, verified live against Groq. |
-| 5 — Auxiliary surfaces | ✅ | — | Not started |
+| 5 — Auxiliary surfaces | ✅ | ✅ | **Complete.** 34 tasks; race-clean, all seven surfaces served. |
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | — | Not started |
 | 8 — Signed and OAuth credentials | ✅ | — | Not started |
@@ -132,6 +132,74 @@ still required and now substitutes the catalog's value. The findings ledger's
 - **Failed attempts still burn tokens invisibly.** `request_attempts` carries no
   usage columns, so tokens spent by failed pre-commit attempts never reach
   `usage_daily`. Untouched by phase 6.
+
+## Closed by phase 5
+
+- **`Adapter.Surfaces()` exists**, closing the item phase 3 carried and phases 4
+  and 6 both deferred. Routing now excludes a provider whose kind Darkrouter
+  cannot speak the surface to, as a filter rather than a runtime error. An
+  adapter that declares nothing serves `llm` only, which is the honest default.
+- **The surface vocabulary matches master design §6.** Seven values, with `tts`
+  and `stt` separate rather than collapsed into one `audio`, and every shipped
+  preset declares them in the corrected spelling.
+- **A YAML-configured provider can reach its preset.** `providers.preset` has
+  existed since migration 0001 and nothing had ever written it: the loader
+  rejected the key, `YAMLSource` dropped it, and `ImportFromConfig` omitted the
+  column. Phase 6 recorded the symptom and filed it as a phase 7 UI concern; it
+  was three lines of plumbing, and rerank could not be served by any configured
+  provider without it. Fixing it also activated `catalog.OrphanedPresets`, which
+  could never fire for a YAML provider before.
+- **A phase 6 merge defect was fixed on the branch** (`f6ae00c`):
+  `merge.surfaces` resolved override → row → preset, but discovery hardcodes
+  `'["llm"]'` into every row it inserts and the sync echoes it, so the row always
+  shadowed the preset and widening a preset had no effect on any discovered
+  model. The preset now outranks the row; an operator override still wins.
+- **A reasoning-block indexing defect in shipped code was fixed.**
+  `internal/adapter/openaicompat/parse.go` emitted reasoning deltas with no
+  block index — the zero value, which is the text block's — and no open or close
+  events, while tool blocks were carefully offset by 1000 to avoid exactly that.
+  It was invisible because every consumer until the Responses stream writer
+  switched on the delta's type and ignored the index.
+
+## Carried forward from phase 5
+
+- **Cost is still never computed.** `applyUsage` leaves `CostMicros` nil on
+  every surface including chat, although phase 6 shipped `catalog.Pricing` with
+  real per-MTok numbers. Nothing in phase 5 changed that, and the item below is
+  why it was not simply switched on.
+- **`ir.Usage.InputTokens` does not mean the same thing across adapters.**
+  Anthropic's `input_tokens` **excludes** cache read and write tokens; OpenAI's
+  `prompt_tokens` and Gemini's `promptTokenCount` **include** them. Each adapter
+  copies its provider's own convention into the same field. Any cost formula
+  written today is therefore wrong for at least one family — it either
+  double-charges cached input or under-charges it — so the IR has to normalize
+  before pricing can be turned on. This is the blocker for the item above, and a
+  real defect in the existing usage plumbing rather than a phase 5 omission.
+- **`capture.bodies` has no writer.** The `request_bodies` table exists from
+  phase 2 and the retention sweep prunes it, but nothing has ever inserted a
+  row. The setting, its `max_bytes` and its `retention` are all inert. Spec §5's
+  "a speech response is never captured even when `capture.bodies` is on" is
+  therefore satisfied by construction rather than by enforcement — what phase 5
+  does enforce is that the body is never held whole, which is the property that
+  matters.
+- **Per-call image pricing has no catalog source.** Spec §9 says cost should
+  come from per-call or per-unit pricing where no usage arrives, but
+  `catalog.Pricing` carries only per-MTok rates and models.dev supplies nothing
+  else. A dall-e call therefore records no cost at all, which is correct but
+  incomplete.
+- **Responses fields the IR does not model are dropped rather than re-emitted.**
+  Spec §5 says they "ride in `Extra` and are re-emitted"; `truncation`,
+  `include`, `service_tier`, `top_logprobs`, `max_tool_calls` and
+  `prompt_cache_key` are instead parsed away without a warning. The response
+  echoes the fields the OpenAI SDK's model requires — tools, tool choice,
+  sampling, instructions, metadata — which is what keeps a client working; the
+  rest are a documented deviation, not an oversight. `truncation` and
+  `max_tool_calls` change the answer's shape, so a client setting them gets
+  behavior it did not ask for with nothing in the trace saying so.
+- **Responses ids are not resolvable, by design.** Returned ids carry a
+  `resp_dr_` prefix and `store: false`; any request echoing one back is refused.
+  A client built around server-side conversation state will not work against
+  Darkrouter and is told so explicitly rather than served an amnesic answer.
 
 ## Open items
 
@@ -279,10 +347,13 @@ command returns the subshell's pid, not the binary's, so `kill "$!"` leaves the
 gateway holding its port and the next start fails to bind. Kill by binary name
 (`ps -C darkrouter -o pid=`) instead.
 
-### 4. One design decision still open
+### 4. One design decision, now settled
 
-The rerank wire shape (findings ledger §2.3). Specs currently adopt Cohere v2
-with a preset-declared path. Revisit before Phase 5.
+The rerank wire shape (findings ledger §2.3). Settled in phase 5: exactly one
+shipped preset declares a `rerank` surface, `cohere`, and neither Jina nor
+Voyage is a preset at all. Cohere v2 is therefore not merely the recommendation
+but the only shape any shipped provider serves, at the path its preset
+declares. No revisit is planned.
 
 ## Phase 1 deviations from spec
 
@@ -292,6 +363,60 @@ Recorded so Phase 2 does not trip over them:
 - **`connect` and `first_byte` are restart-only.** They configure a shared `http.Transport` built once in `exec.New`, which cannot vary them per request. `max_body_bytes` is *not* restart-only — the executor reads it from a per-request snapshot.
 - **The lossy-field warning mechanism does not exist yet.** Master design §5 requires dropped fields to be recorded; `requests.warnings` arrives in Phase 2 and the mechanism in Phase 4. Phase 1's adapter drops silently.
 - **No request logging at all.** The done criterion "a client disconnect is distinguishable from a timeout in logs" is unmet: nothing in the request path logs. Phase 2 owns this.
+
+### 6. Phase 5 verification against Groq — done
+
+Run on 2026-08-23 with a static `CGO_ENABLED=0` binary (30 MB) on ports
+18080/18081, one `groq` provider carrying `preset: groq`.
+
+**Groq serves three of the seven surfaces.** It offers chat and
+`/v1/audio/transcriptions` on its OpenAI-compatible base URL, and no
+embeddings, images, rerank or moderations endpoint. Those four were verified
+only as the no-provider error, which is itself a done criterion rather than a
+skipped check. Verifying them live needs an OpenAI key (embeddings, images,
+moderations) and a Cohere key (rerank).
+
+- **Chat is unmoved by the `runAttempts` refactor.** A completion came back with
+  `X-Darkrouter-Attempts: 1`, `-Provider: groq`, `-Model: openai/gpt-oss-120b`
+  and a request id. 73 input tokens, 66 output.
+- **The Responses API serves unary and streamed.** The unary body carried
+  `"object":"response"`, `"status":"completed"`, `"store":false`, one `message`
+  item and an `output_text`, with a `resp_dr_`-prefixed id. The stateful case
+  returned 400 naming `previous_response_id`.
+- **The streamed Responses events are well-formed against a real provider.**
+  Thirteen frames, sequence numbers contiguous 0..12, every `event:` name
+  matching its `data.type`, `response.output_item.done` before
+  `response.completed`, and no `[DONE]`. The terminal event carried
+  `input_tokens: 74, output_tokens: 66` — non-zero, which is the check that
+  matters: Groq sends its usage chunk after the finish chunk, so completing on
+  `message_stop` would have reported zero here and passed every unit test.
+- **Transcriptions serve both response shapes.** `response_format=json` returned
+  `application/json` with a `text` field; `response_format=text` returned
+  `text/plain; charset=UTF-8`. The second call sent `model` after the file part,
+  which is the placement spec §6 calls out, and the in-form rewrite handled it.
+  Both request rows carry `file_name: tone.mp3` and a real `response_bytes`.
+- **Speech could not be verified end to end, for a provider reason.** Groq has
+  decommissioned `playai-tts` and its models list now offers no TTS model at
+  all, so the surface has no live target. What was verified is that the route
+  routes: the request reached the provider (one attempt, status 400, outcome
+  `fatal`), and the upstream error was normalized into the inbound dialect. A
+  direct call to Groq with the same body returns the same 400
+  (`model_decommissioned`), so this is not a Darkrouter fault. The streaming
+  behavior remains covered by `TestSpeechIsNeverHeldWhole`, which deadlocks
+  rather than passes if the body is buffered.
+- **The four unserved surfaces return 404 and attempt nothing.** Each body reads
+  "no configured provider offers this model on this surface", and the request
+  rows show `not_found` with **zero attempts** — the filter runs before any
+  provider is contacted, which is what spec §4 exists to guarantee.
+- **The request rows were read, not assumed.** `openai-responses` appears as a
+  dialect distinct from `openai`; the `stt` rows carry `response_bytes` and
+  their surface meta; `warnings_json` is `[]` on every row, and `request_bodies`
+  is empty. Phase 6's verification caught a mechanism that passed every test and
+  did nothing in production by reading this column, which is why it is read here
+  rather than trusted.
+
+Both test ports were released and no process was left running. Ports 8080 and
+8081 were never touched.
 
 ## Review history
 

@@ -57,7 +57,7 @@ func (s *YAMLSource) Providers(context.Context) ([]Provider, error) {
 	out := make([]Provider, 0, len(cfg.Providers))
 	for _, p := range cfg.Providers {
 		out = append(out, Provider{
-			ID: p.ID, Kind: p.Kind, BaseURL: p.BaseURL,
+			ID: p.ID, Kind: p.Kind, BaseURL: p.BaseURL, Preset: p.Preset,
 			// A config credential has no database row, so its id is empty. The
 			// breaker keys on that empty id, which is what phase 2 already did.
 			Credentials: []Credential{{ID: "", Secret: p.APIKey, Enabled: true}},

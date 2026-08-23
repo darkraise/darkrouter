@@ -31,6 +31,52 @@ type Dialect interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// EmbeddingDialect is the inbound wire form of the embedding surface.
+//
+// It is a separate interface rather than more methods on Dialect because the
+// two shapes share nothing — an embedding request has no messages and its
+// response has no content blocks — and Anthropic and Gemini would each stub
+// four methods to say they do not serve it.
+type EmbeddingDialect interface {
+	Name() string
+	ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error)
+	WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
+// ModerationDialect is the inbound wire form of the moderation surface.
+type ModerationDialect interface {
+	Name() string
+	ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error)
+	WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
+// RerankDialect is the inbound wire form of the rerank surface. Its shape is
+// Cohere v2, which Darkrouter adopts because OpenAI defines no rerank endpoint.
+type RerankDialect interface {
+	Name() string
+	ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error)
+	WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
+// ImageDialect is the inbound wire form of the image surface.
+type ImageDialect interface {
+	Name() string
+	ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error)
+	WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
+// SpeechDialect is the inbound wire form of the tts surface. It has no writer:
+// the response is forwarded byte for byte.
+type SpeechDialect interface {
+	Name() string
+	ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error)
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
 // CountWriter is implemented by a dialect with a token-counting endpoint.
 type CountWriter interface {
 	Dialect

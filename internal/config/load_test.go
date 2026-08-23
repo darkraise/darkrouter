@@ -339,3 +339,26 @@ func TestUnknownCatalogFieldIsRejected(t *testing.T) {
 		t.Fatal("a misspelled catalog field parsed cleanly")
 	}
 }
+
+func TestAProviderCanNameItsPreset(t *testing.T) {
+	// Without the field the loader rejects the key outright: KnownFields(true)
+	// makes an unknown key a validation failure, so a YAML provider could
+	// never reach its preset at all.
+	c, err := Parse([]byte(`
+server:
+  proxy_listen: ":0"
+providers:
+  - id: cohere
+    kind: openaicompat
+    preset: cohere
+    base_url: https://api.cohere.com/compatibility/v1
+    api_key: sk
+    models: [rerank-v3.5]
+`), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Providers) != 1 || c.Providers[0].Preset != "cohere" {
+		t.Fatalf("providers = %+v", c.Providers)
+	}
+}

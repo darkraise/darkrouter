@@ -36,6 +36,13 @@ terminal.
 | Route | Dialect |
 |---|---|
 | `POST /v1/chat/completions` | OpenAI |
+| `POST /v1/responses` | OpenAI |
+| `POST /v1/embeddings` | OpenAI |
+| `POST /v1/images/generations` | OpenAI |
+| `POST /v1/audio/speech` | OpenAI |
+| `POST /v1/audio/transcriptions` | OpenAI |
+| `POST /v1/rerank` | OpenAI |
+| `POST /v1/moderations` | OpenAI |
 | `GET /v1/models` | OpenAI |
 | `POST /v1/messages` | Anthropic |
 | `POST /v1/messages/count_tokens` | Anthropic |
@@ -43,6 +50,60 @@ terminal.
 | `POST /v1beta/models/{model}:streamGenerateContent` | Gemini |
 | `POST /v1beta/models/{model}:countTokens` | Gemini |
 | `GET /v1beta/models` | Gemini |
+
+### The auxiliary surfaces
+
+Beyond chat, Darkrouter serves six more surfaces. Each routes through the same
+attempt loop as chat, so each inherits failover, the budget gate, credential
+rotation and the request log.
+
+| Route | Surface | Notes |
+|---|---|---|
+| `POST /v1/embeddings` | `embedding` | Batched input; `float` or `base64`; optional `dimensions`. Pre-tokenized input is forwarded as token ids rather than rendered back to text. |
+| `POST /v1/responses` | `llm` | Stateless only. `previous_response_id`, `conversation` and `background` are refused, not degraded. |
+| `POST /v1/images/generations` | `image` | URLs or base64. `gpt-image-1` reports usage; the dall-e models report none, and their cost stays unrecorded rather than recorded as zero. |
+| `POST /v1/audio/speech` | `tts` | Binary or SSE, streamed through and never stored. |
+| `POST /v1/audio/transcriptions` | `stt` | Multipart in; JSON, plain text or SSE out, chosen by the response `Content-Type`. |
+| `POST /v1/rerank` | `rerank` | Cohere v2 schema, at the path the provider's preset declares. |
+| `POST /v1/moderations` | `moderation` | Category flags forwarded whole, including categories added after this was written. |
+
+**These routes speak the OpenAI dialect only.** The Anthropic and Gemini inbound
+dialects serve chat and token counting; neither vendor defines a rerank or
+moderations endpoint. A client speaking those dialects reaches the auxiliary
+surfaces by calling the OpenAI routes with its existing token, which
+`server.proxy_token` accepts in any of the three credential forms.
+
+**`/v1/audio/translations` is permanently absent.** Whisper clients do call it.
+Darkrouter does not serve it and will not; transcribe and translate separately.
+
+### Embedding aliases must point at the same model
+
+An alias exists so a request can fail over. For chat that is unambiguously
+good. For embeddings it is a hazard: two models produce vectors in different
+vector spaces, so a failover to a different model returns vectors that are not
+comparable to the ones already in your index — and **nothing in the response
+says so**. The call succeeds, the vector looks fine, and similarity search
+quietly degrades.
+
+So an embedding alias should list the *same* model across *different*
+providers, never different models:
+
+```yaml
+aliases:
+  # Good: one model, two providers. A failover is invisible and harmless.
+  embed:
+    - openai/text-embedding-3-small
+    - azure-openai/text-embedding-3-small
+```
+
+An alias entry is a `provider/model` string, which is the shape
+`darkrouter.example.yaml` already uses for its chat aliases.
+
+Darkrouter permits the other arrangement rather than refusing it — refusing
+would make an alias useless the moment its first provider rate-limits — but it
+records a warning on the request row naming both models, and always sets
+`X-Darkrouter-Model` to the model that actually served. Check that header if
+you index across a failover.
 
 **Any inbound dialect routes to any provider kind.** An Anthropic client can be
 served by a Groq model and a Gemini client by an Anthropic one; the response

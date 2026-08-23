@@ -113,6 +113,8 @@ func statusFor(t ir.ErrorType) int {
 		return http.StatusForbidden
 	case ir.ErrNotFound:
 		return http.StatusNotFound
+	case ir.ErrPayloadTooLarge:
+		return http.StatusRequestEntityTooLarge
 	case ir.ErrRateLimit:
 		return http.StatusTooManyRequests
 	case ir.ErrOverloaded:

@@ -43,11 +43,12 @@ func TestParseSurface(t *testing.T) {
 		wantOK bool
 	}{
 		{"llm", SurfaceLLM, true},
-		{"embeddings", SurfaceEmbeddings, true},
-		{"images", SurfaceImages, true},
-		{"audio", SurfaceAudio, true},
+		{"embedding", SurfaceEmbedding, true},
+		{"image", SurfaceImage, true},
+		{"tts", SurfaceTTS, true},
+		{"stt", SurfaceSTT, true},
 		{"rerank", SurfaceRerank, true},
-		{"moderations", SurfaceModerations, true},
+		{"moderation", SurfaceModeration, true},
 		{"", "", false},
 		{"nonsense", "", false},
 		// Surfaces come from stored catalog rows and inbound routes, both of
@@ -118,5 +119,60 @@ func TestNeedsFindsVisionInsideAToolResult(t *testing.T) {
 	}}}
 	if !r.Needs().Vision {
 		t.Error("Needs().Vision = false; an image inside a tool result still needs vision")
+	}
+}
+
+func TestSurfaceVocabularyMatchesTheMasterDesign(t *testing.T) {
+	// Master design §6 fixes these seven. Phase 1 shipped six, with speech and
+	// transcription collapsed into one "audio" — which cannot express a
+	// provider that serves one and not the other, and phase 5's adapter matrix
+	// has a row for each.
+	want := []Surface{
+		SurfaceLLM, SurfaceEmbedding, SurfaceImage,
+		SurfaceTTS, SurfaceSTT, SurfaceRerank, SurfaceModeration,
+	}
+	got := AllSurfaces()
+	if len(got) != len(want) {
+		t.Fatalf("AllSurfaces has %d entries, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("AllSurfaces()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSurfaceSpellings(t *testing.T) {
+	// The exact strings are what presets declare and the models.surfaces
+	// column stores, so they are data, not just identifiers.
+	cases := map[Surface]string{
+		SurfaceLLM:        "llm",
+		SurfaceEmbedding:  "embedding",
+		SurfaceImage:      "image",
+		SurfaceTTS:        "tts",
+		SurfaceSTT:        "stt",
+		SurfaceRerank:     "rerank",
+		SurfaceModeration: "moderation",
+	}
+	for s, want := range cases {
+		if string(s) != want {
+			t.Errorf("surface = %q, want %q", s, want)
+		}
+	}
+}
+
+func TestParseSurfaceAcceptsEveryValueAndNothingElse(t *testing.T) {
+	for _, s := range AllSurfaces() {
+		if got, ok := ParseSurface(string(s)); !ok || got != s {
+			t.Errorf("ParseSurface(%q) = (%q, %v)", s, got, ok)
+		}
+	}
+	// The retired plural spellings must not parse. A preset still carrying one
+	// would otherwise be silently dropped by the merge and the model would
+	// serve chat only, with nothing saying why.
+	for _, bad := range []string{"embeddings", "images", "audio", "moderations", "chat", ""} {
+		if _, ok := ParseSurface(bad); ok {
+			t.Errorf("ParseSurface(%q) accepted a value that is not in the vocabulary", bad)
+		}
 	}
 }

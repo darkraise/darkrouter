@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
 )
 
 func TestClassifyStatusCodes(t *testing.T) {
@@ -110,6 +111,21 @@ func TestClassifyBodyDefersToClassifyForEveryOtherStatus(t *testing.T) {
 		want := Classify(resp, nil)
 		if got := ClassifyBody(resp, []byte(`{"error":{"code":"model_not_found"}}`), nil); got != want {
 			t.Errorf("status %d: ClassifyBody = %q, want %q", code, got, want)
+		}
+	}
+}
+
+func TestOpenAICompatDeclaresTheMatrixSurfaces(t *testing.T) {
+	// Phase 5 spec §4: openaicompat is the only kind serving more than chat
+	// and embeddings. Getting this wrong makes a route unreachable with a
+	// confusing "no provider offers this" rather than a clear gap.
+	got := New().Surfaces()
+	for _, want := range []ir.Surface{
+		ir.SurfaceLLM, ir.SurfaceEmbedding, ir.SurfaceImage,
+		ir.SurfaceTTS, ir.SurfaceSTT, ir.SurfaceRerank, ir.SurfaceModeration,
+	} {
+		if !got.Has(want) {
+			t.Errorf("openaicompat does not declare %q", want)
 		}
 	}
 }
