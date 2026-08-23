@@ -8,6 +8,12 @@ services:
     environment:
       GROQ_KEY: ${GROQ_KEY}
       DARKROUTER_PROXY_TOKEN: ${DARKROUTER_PROXY_TOKEN:-}
+      # Required: it unlocks the keyring the stored credentials are encrypted
+      # with, so the binary refuses to start without it.
+      DARKROUTER_MASTER_KEY: ${DARKROUTER_MASTER_KEY}
+      # Optional, and unsetting it closes the dashboard rather than opening it:
+      # every login is refused. Produce a value with `darkrouter hash-password`.
+      DARKROUTER_ADMIN_PASSWORD_HASH: ${DARKROUTER_ADMIN_PASSWORD_HASH:-}
     volumes:
       - ./data:/data
     restart: unless-stopped

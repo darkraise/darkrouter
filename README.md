@@ -123,6 +123,42 @@ locally rather than forwarding to the provider's own counting endpoint. The
 estimate uses a bundled BPE for OpenAI-family models and
 characters-divided-by-four otherwise, and it does not count images.
 
+## The dashboard
+
+The admin port serves an operator dashboard at `/`, and the REST API it runs on
+at `/api/*`. Both require a session; `/healthz`, `/readyz` and `/metrics` do
+not, so an orchestrator and a Prometheus scrape keep working.
+
+Set a password before starting:
+
+```bash
+export DARKROUTER_ADMIN_PASSWORD_HASH="$(echo -n 'your-password' | darkrouter hash-password)"
+```
+
+Without it the gateway still proxies — that is its job — but every login is
+refused and `/healthz` carries a warning saying so.
+
+Four screens plus settings: **Overview** (provider health, error rate, requests
+per minute), **Requests** (a filterable log; selecting a row opens the full
+trace), **Catalog** (every model across every provider, with inferred metadata
+marked), **Playground** (send a prompt, watch it stream, jump to its trace), and
+**Settings** (provider and credential CRUD, plus a read-only view of
+`darkrouter.yaml`).
+
+Aliases and policy are **not** editable in the UI. They live in
+`darkrouter.yaml` and get rendered read-only with a reload button, which is the
+structural reason the API stays at nineteen endpoints instead of growing without
+bound.
+
+**Credentials are never returned by the API** — not for editing, not for export.
+The dashboard shows a label and a masked suffix. Replacing a key means adding a
+new one and deleting the old.
+
+**The proxy port never honors the dashboard's cookie.** Cookies are not
+port-scoped, so a browser logged into the admin port sends that cookie to the
+proxy port too; only `server.proxy_token` authenticates there.
+
+
 ## The model catalog
 
 Darkrouter ships a catalog of provider presets, so adding a known provider is a
