@@ -37,6 +37,7 @@ type Provider = {
   preset: string
   kind: string
   base_url: string
+  auth_style: string
   priority: number
   enabled: boolean
   credentials: Credential[]
@@ -179,7 +180,12 @@ export function SettingsScreen() {
                       {c.masked}
                     </span>
                     {c.cooling ? <Badge variant="amber">cooling</Badge> : null}
-                    {!c.enabled ? <Badge variant="amber">needs reconnection</Badge> : null}
+                    {!c.enabled ? (
+                      // The one state only the operator can resolve. Saying so
+                      // without offering the way out would leave them reading
+                      // a manual.
+                      <Badge variant="amber">needs reconnection</Badge>
+                    ) : null}
                     <Button
                       variant="ghost"
                       onClick={() =>
@@ -193,11 +199,15 @@ export function SettingsScreen() {
                     </Button>
                   </div>
                 ))}
-                <AddCredential
-                  providerID={p.id}
-                  onAdded={invalidate}
-                  onError={setError}
-                />
+                {p.auth_style === "oauth" ? (
+                  <ConnectAccount provider={p} onConnected={invalidate} onError={setError} />
+                ) : (
+                  <AddCredential
+                    providerID={p.id}
+                    onAdded={invalidate}
+                    onError={setError}
+                  />
+                )}
               </div>
             </Card>
           ))}
@@ -370,6 +380,105 @@ function AddCredential({
       >
         Add key
       </Button>
+    </div>
+  )
+}
+
+type StartResponse = {
+  authorize_url: string
+  state: string
+  redirect_uri: string
+  style: string
+  listener_error?: string
+}
+
+/**
+ * ConnectAccount runs the OAuth flow spec §5.1 describes.
+ *
+ * The paste box is always shown, even when the preset declares a localhost
+ * redirect. The listener only works when Darkrouter and the browser are on the
+ * same machine, and hiding the box would strand every operator whose gateway
+ * runs somewhere else — which is the normal homelab case.
+ */
+function ConnectAccount({
+  provider,
+  onConnected,
+  onError,
+}: {
+  provider: Provider
+  onConnected: () => void
+  onError: (m: string) => void
+}) {
+  const [start, setStart] = useState<StartResponse | null>(null)
+  const [label, setLabel] = useState("")
+  const [pasted, setPasted] = useState("")
+
+  const needsReconnect = provider.credentials.some((c) => !c.enabled)
+
+  const begin = useMutation({
+    mutationFn: () =>
+      api.post<StartResponse>(`/api/providers/${provider.id}/oauth/start`, { label }),
+    onSuccess: setStart,
+    onError: (e: Error) => onError(e.message),
+  })
+  const finish = useMutation({
+    mutationFn: () =>
+      api.post(`/api/providers/${provider.id}/oauth/complete`, { redirected_url: pasted }),
+    onSuccess: () => {
+      setStart(null)
+      setPasted("")
+      onConnected()
+    },
+    onError: (e: Error) => onError(e.message),
+  })
+
+  if (start === null) {
+    return (
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <Input
+          placeholder="label"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+        <Button variant="secondary" onClick={() => begin.mutate()}>
+          {needsReconnect ? "Reconnect" : "Connect"}
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 rounded border p-3 text-sm">
+      <p>
+        <a
+          href={start.authorize_url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+        >
+          Authorize in your browser
+        </a>
+        , then paste the URL it lands on below.
+      </p>
+      {start.listener_error ? (
+        <p className="text-muted-foreground text-xs">
+          The local listener could not start ({start.listener_error}); pasting is the
+          only way to finish this one.
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-end gap-2">
+        <Input
+          placeholder="paste the redirected URL"
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+        />
+        <Button disabled={!pasted} onClick={() => finish.mutate()}>
+          Finish
+        </Button>
+        <Button variant="ghost" onClick={() => setStart(null)}>
+          Cancel
+        </Button>
+      </div>
     </div>
   )
 }
