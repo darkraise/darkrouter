@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 2 {
-			t.Errorf("run %d: version = %d, want 2", i, v)
+		if v != 3 {
+			t.Errorf("run %d: version = %d, want 3", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -199,5 +199,36 @@ func TestMigration0002CreatesProviderDiscovery(t *testing.T) {
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='provider_discovery'`).Scan(&name)
 	if err != nil {
 		t.Fatalf("provider_discovery missing: %v", err)
+	}
+}
+
+func TestMigrationsReachVersionThree(t *testing.T) {
+	// The loader asserts contiguity from 1, so a mis-numbered file fails here
+	// rather than at a customer's first start.
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 3 {
+		t.Fatalf("loaded %d migrations, want 3", len(ms))
+	}
+}
+
+func TestMigrationThreeIsAdditive(t *testing.T) {
+	// Nothing is dropped or rebuilt, so a failed run leaves the phase 2 schema
+	// exactly as it was. Every added column carries a non-null default, which
+	// ALTER TABLE ADD COLUMN requires on a STRICT table.
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.ToUpper(ms[2].sql)
+	for _, forbidden := range []string{"DROP TABLE", "DROP COLUMN", "DELETE FROM"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("migration 3 contains %q", forbidden)
+		}
+	}
+	if strings.Count(body, "ADD COLUMN") != 3 {
+		t.Errorf("migration 3 adds %d columns, want 3", strings.Count(body, "ADD COLUMN"))
 	}
 }

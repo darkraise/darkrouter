@@ -53,6 +53,18 @@ type RequestRecord struct {
 	ErrorCode string
 	Warnings  []string
 
+	// SurfaceMeta is the surface-specific detail spec §9 asks for: input count
+	// and dimensions for embeddings, image count and size, audio duration and
+	// voice, document count for rerank. One JSON column rather than nine,
+	// because no two surfaces share a field.
+	SurfaceMeta map[string]any
+
+	// ResponseBytes and ResponseContentType apply to every surface. Spec §7:
+	// a truncated binary body cannot be signalled in-band, so the byte count on
+	// this row is the only place the truncation appears.
+	ResponseBytes       int64
+	ResponseContentType string
+
 	Attempts []AttemptRecord
 }
 
@@ -192,8 +204,9 @@ func (w *LogWriter) writeBatch(ctx context.Context, batch []*RequestRecord) (int
 		    id, ts, dialect, surface, requested_model, resolved_alias, candidates_json,
 		    final_provider_id, final_model, status,
 		    tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, reasoning_tokens,
-		    cost_micros, ttft_ms, total_ms, error_code, warnings_json
-		 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		    cost_micros, ttft_ms, total_ms, error_code, warnings_json,
+		    surface_meta_json, response_bytes, response_content_type
+		 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -238,11 +251,22 @@ func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord
 	if err != nil {
 		return err
 	}
+	// The column is NOT NULL and defaults to an empty object, so a nil map must
+	// encode as {} rather than null — otherwise every chat row fails to insert.
+	meta := r.SurfaceMeta
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	surfaceMeta, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
 	if _, err := reqStmt.ExecContext(ctx,
 		r.ID, r.TS.UnixMilli(), r.Dialect, r.Surface, r.RequestedModel, r.ResolvedAlias,
 		string(trace), r.FinalProviderID, r.FinalModel, r.Status,
 		r.TokensIn, r.TokensOut, r.CacheReadTokens, r.CacheWriteTokens, r.ReasoningTokens,
 		r.CostMicros, r.TTFTMs, r.TotalMs, r.ErrorCode, string(warnings),
+		string(surfaceMeta), r.ResponseBytes, r.ResponseContentType,
 	); err != nil {
 		return err
 	}
