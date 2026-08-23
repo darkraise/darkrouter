@@ -418,6 +418,48 @@ moderations) and a Cohere key (rerank).
 Both test ports were released and no process was left running. Ports 8080 and
 8081 were never touched.
 
+### 7. Phase 7 API verification against Groq — done
+
+Run on 2026-08-23 with a static `CGO_ENABLED=0` binary on ports
+18080/18081. The frontend is not built yet; the API was exercised with `curl`.
+
+- **The API is closed before login.** `overview`, `providers`, `models`,
+  `requests`, `usage`, `config` and `presets` all returned 401.
+  `auth/status` returned 200 with `{"authenticated":false}`, which is the one
+  endpoint the SPA needs open to decide whether to render the login screen.
+- **The session cookie is shaped correctly.** `Set-Cookie:
+  darkrouter_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax`, with
+  `Secure` **absent** — this is plain HTTP, and a Secure cookie here would be
+  dropped by the browser and login would silently never work.
+- **CSRF and Origin both hold against a real client.** No token → 403; correct
+  token with `Origin: https://evil.example` → 403; correct token with neither
+  `Origin` nor `Sec-Fetch-Site` → 403; correct token with
+  `Sec-Fetch-Site: same-origin` → 200. The third is the one worth stating: a
+  client sending neither header is refused, so the check is not decorative.
+- **The proxy port ignores the admin cookie.** With `server.proxy_token` set,
+  a chat request carrying the admin session cookie and no bearer token returned
+  401; the same request with the bearer token returned 200. Cookies are not
+  port-scoped, so this is the property that keeps a logged-in operator's browser
+  from being an authenticated proxy client for any page they visit.
+- **Provider CRUD and the probe work end to end.** Created `groq2` from the
+  `groq` preset (201), added a credential (201), probed it: `ok: true`,
+  `model_count: 13`, `latency_ms: 182` against the real Groq listing endpoint.
+- **No credential material reached any response.** The key does not appear in
+  `GET /api/providers` in any form; both credentials render as a label plus
+  `…Q1um`, which is exactly the key's last four characters and nothing more.
+- **The request log and trace read correctly.** A page carried a `next_cursor`;
+  the trace carried `candidates`, `skips`, `attempts`, `warnings` and a `bodies`
+  array that is `[]` rather than `null` — `capture.bodies` has no writer, and
+  the drawer has to be able to range over it.
+
+One observation, not a phase 7 defect: `AttemptRecord.Seq` is 0-indexed at the
+source (`Seq: len(rec.Attempts)` in `exec.recordAttempt`, phase 3), so the first
+attempt of a request is attempt 0. The trace endpoint reports what is stored; the
+drawer renders it 1-based, because "Attempt 0" reads as a bug to an operator.
+
+Both test ports were released and no process was left running. Ports 8080 and
+8081 were never touched.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |
