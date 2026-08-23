@@ -13,6 +13,7 @@ import { OverviewScreen } from "../routes/overview"
 import { RequestsScreen } from "../routes/requests"
 import { CatalogScreen } from "../routes/catalog"
 import { PlaygroundScreen } from "../routes/playground"
+import { SettingsScreen } from "../routes/settings"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -81,6 +82,11 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: "/playground",
     component: PlaygroundScreen,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/settings",
+    component: SettingsScreen,
   }),
   createRoute({
     // A deep link into one trace. The drawer opens from the table, but a
