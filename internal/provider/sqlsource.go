@@ -35,7 +35,7 @@ func NewSQLSource(db *store.DB, key *crypto.Key) *SQLSource {
 // applies to a broken edit.
 func (s *SQLSource) Reload(ctx context.Context) error {
 	rows, err := s.db.Read.QueryContext(ctx,
-		`SELECT id, preset, kind, base_url, auth_style, priority
+		`SELECT id, preset, kind, base_url, auth_style, priority, region, project, location
 		   FROM providers
 		  WHERE enabled = 1
 		  ORDER BY priority DESC, id`)
@@ -47,11 +47,13 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 	type row struct {
 		id, preset, kind, baseURL, authStyle string
 		priority                             int
+		region, project, location            string
 	}
 	var raw []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.id, &r.preset, &r.kind, &r.baseURL, &r.authStyle, &r.priority); err != nil {
+		if err := rows.Scan(&r.id, &r.preset, &r.kind, &r.baseURL, &r.authStyle,
+			&r.priority, &r.region, &r.project, &r.location); err != nil {
 			return fmt.Errorf("scan provider: %w", err)
 		}
 		raw = append(raw, r)
@@ -80,6 +82,7 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 		out = append(out, Provider{
 			ID: r.id, Kind: r.kind, BaseURL: r.baseURL,
 			Preset: r.preset, AuthStyle: r.authStyle,
+			Region: r.region, Project: r.project, Location: r.location,
 			Credentials: enabled,
 			Priority:    r.priority, Models: models,
 		})
@@ -126,7 +129,7 @@ func enabledOnly(creds []store.Credential) []Credential {
 		if !c.Enabled {
 			continue
 		}
-		out = append(out, Credential{ID: c.ID, Secret: c.Secret, Enabled: true})
+		out = append(out, Credential{ID: c.ID, Secret: c.Secret, Kind: c.Kind, Enabled: true})
 	}
 	return out
 }

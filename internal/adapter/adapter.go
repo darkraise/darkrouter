@@ -45,6 +45,17 @@ type Target struct {
 	// about presets. Empty for a provider with no preset, which is a
 	// misconfiguration for this surface rather than a licence to guess a URL.
 	RerankPath string
+
+	// Region, Project and Location are endpoint properties rather than parts
+	// of the model identifier. Phase 8 spec §3.3 is explicit for Bedrock — what
+	// carries a geo prefix is the inference profile, not the region — and §4.2
+	// puts Vertex's project and location on the provider row.
+	Region   string
+	Project  string
+	Location string
+
+	// Publisher selects Vertex's request builder. Empty for every other kind.
+	Publisher string
 }
 
 // Outcome is the classification that drives failover. Phase 1 has nowhere to
