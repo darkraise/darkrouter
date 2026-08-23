@@ -27,3 +27,17 @@ func MigratedForTest(t *testing.T) *DB {
 	}
 	return db
 }
+
+// WriteBatchForTest persists request records synchronously.
+//
+// It exists because internal/admin's tests need a populated request log and the
+// normal path is an asynchronous channel drained by a worker — a test that
+// enqueued and slept would be timing-dependent for no reason. It is the same
+// code path the worker uses, so what it writes is what production writes.
+func (d *DB) WriteBatchForTest(t *testing.T, rows []*RequestRecord) {
+	t.Helper()
+	w := NewLogWriter(d, LogOptions{})
+	if _, err := w.writeBatch(context.Background(), rows); err != nil {
+		t.Fatal(err)
+	}
+}

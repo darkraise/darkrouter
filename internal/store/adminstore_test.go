@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -310,5 +311,195 @@ func TestDeleteCredentialLeavesTheProvider(t *testing.T) {
 	rows, _ := db.ProviderRows(ctx)
 	if len(rows) != 1 {
 		t.Error("deleting a credential removed its provider")
+	}
+}
+
+func seedRequests(t *testing.T, db *DB, n int) {
+	t.Helper()
+	batch := make([]*RequestRecord, 0, n)
+	for i := 0; i < n; i++ {
+		batch = append(batch, &RequestRecord{
+			ID: fmt.Sprintf("01REQ%08d", i),
+			// Distinct milliseconds so the ordering is unambiguous except
+			// where a test deliberately collides them.
+			TS:              time.UnixMilli(int64(1700000000000 + i)),
+			Dialect:         "openai",
+			Surface:         "llm",
+			RequestedModel:  "m",
+			FinalProviderID: "groq",
+			FinalModel:      "m",
+			Status:          "success",
+		})
+	}
+	db.WriteBatchForTest(t, batch)
+}
+
+func TestListRequestsReturnsNewestFirst(t *testing.T) {
+	db := migrated(t)
+	seedRequests(t, db, 5)
+	got, err := db.ListRequests(context.Background(), RequestQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("got %d rows", len(got))
+	}
+	if got[0].ID != "01REQ00000004" {
+		t.Errorf("first row = %q, want the newest", got[0].ID)
+	}
+}
+
+func TestAPageBoundaryNeitherRepeatsNorSkips(t *testing.T) {
+	db := migrated(t)
+	seedRequests(t, db, 10)
+	ctx := context.Background()
+
+	first, err := db.ListRequests(ctx, RequestQuery{Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := first[len(first)-1]
+	second, err := db.ListRequests(ctx, RequestQuery{
+		Limit: 4, AfterTS: last.TSMs, AfterID: last.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, r := range append(append([]RequestSummary{}, first...), second...) {
+		if seen[r.ID] {
+			t.Errorf("row %q appeared twice across the boundary", r.ID)
+		}
+		seen[r.ID] = true
+	}
+	if len(seen) != 8 {
+		t.Errorf("saw %d distinct rows across two pages of 4", len(seen))
+	}
+}
+
+func TestAnInsertMidScrollDoesNotShiftThePages(t *testing.T) {
+	// Spec §7 names this case. Offset pagination gets it wrong: a row inserted
+	// at the head shifts every later page by one, so the reader sees a row
+	// twice and never sees another. Keyset does not.
+	db := migrated(t)
+	seedRequests(t, db, 10)
+	ctx := context.Background()
+
+	first, err := db.ListRequests(ctx, RequestQuery{Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A brand-new request lands at the head while the operator reads page one.
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01REQZZZZZZZZ", TS: time.UnixMilli(1700000099999),
+		Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "success",
+	}})
+
+	last := first[len(first)-1]
+	second, err := db.ListRequests(ctx, RequestQuery{
+		Limit: 4, AfterTS: last.TSMs, AfterID: last.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range second {
+		for _, f := range first {
+			if r.ID == f.ID {
+				t.Errorf("row %q repeated after an insert landed mid-scroll", r.ID)
+			}
+		}
+		if r.ID == "01REQZZZZZZZZ" {
+			t.Error("the newly inserted row appeared on page two")
+		}
+	}
+}
+
+func TestIdenticalTimestampsStillOrderTotally(t *testing.T) {
+	// ULIDs are lexicographically ordered, which is what makes the tie-break
+	// total. Without it a page boundary on a busy millisecond repeats forever.
+	db := migrated(t)
+	ctx := context.Background()
+	var batch []*RequestRecord
+	for _, id := range []string{"01AAA", "01BBB", "01CCC"} {
+		batch = append(batch, &RequestRecord{
+			ID: id, TS: time.UnixMilli(1700000000000),
+			Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "success",
+		})
+	}
+	db.WriteBatchForTest(t, batch)
+
+	got, err := db.ListRequests(ctx, RequestQuery{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "01CCC" || got[1].ID != "01BBB" {
+		t.Fatalf("page one = %+v", got)
+	}
+	next, err := db.ListRequests(ctx, RequestQuery{
+		Limit: 2, AfterTS: got[1].TSMs, AfterID: got[1].ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next) != 1 || next[0].ID != "01AAA" {
+		t.Errorf("page two = %+v", next)
+	}
+}
+
+func TestFiltersNarrowTheResult(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{
+		{ID: "01A", TS: time.UnixMilli(3), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "groq", Status: "success"},
+		{ID: "01B", TS: time.UnixMilli(2), Dialect: "openai", Surface: "embedding",
+			RequestedModel: "e", FinalProviderID: "openai", Status: "error"},
+	})
+	got, err := db.ListRequests(ctx, RequestQuery{Limit: 10, Provider: "groq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "01A" {
+		t.Errorf("provider filter = %+v", got)
+	}
+	got, err = db.ListRequests(ctx, RequestQuery{Limit: 10, Surface: "embedding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "01B" {
+		t.Errorf("surface filter = %+v", got)
+	}
+}
+
+func TestAnOversizedLimitIsClamped(t *testing.T) {
+	// Refusing would make a UI bug look like a server outage; an unbounded
+	// page would build a million-row array in memory.
+	db := migrated(t)
+	seedRequests(t, db, 5)
+	got, err := db.ListRequests(context.Background(), RequestQuery{Limit: 1_000_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Errorf("got %d rows", len(got))
+	}
+}
+
+func TestTheAttemptCountIsPerRequest(t *testing.T) {
+	db := migrated(t)
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01A", TS: time.UnixMilli(1), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", Status: "success",
+		Attempts: []AttemptRecord{
+			{Seq: 1, ProviderID: "a", Model: "m", Outcome: "retryable_provider"},
+			{Seq: 2, ProviderID: "b", Model: "m", Outcome: "success"},
+		},
+	}})
+	got, err := db.ListRequests(context.Background(), RequestQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Attempts != 2 {
+		t.Errorf("attempts = %+v; a failover is what an operator scans for", got)
 	}
 }
