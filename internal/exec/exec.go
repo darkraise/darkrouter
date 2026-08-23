@@ -5,7 +5,6 @@ package exec
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"io"
 	"iter"
@@ -14,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -70,8 +67,13 @@ type Executor struct {
 	store    *config.Store
 	src      provider.Source
 	adapters map[string]adapter.Adapter
-	client   *http.Client
-	deps     Deps
+	// adapterSurfaces is what each kind can render, derived from adapters at
+	// construction. It cannot change afterwards, so recomputing it per request
+	// would allocate for a constant — and the router snapshot is meant to hold
+	// frozen inputs rather than derived work.
+	adapterSurfaces map[string]adapter.SurfaceSet
+	client          *http.Client
+	deps            Deps
 }
 
 // New builds the executor. Transport-level timeouts (connect, first_byte) are
@@ -79,8 +81,12 @@ type Executor struct {
 // are documented restart-only. The total timeout is read per request.
 func New(store *config.Store, src provider.Source, adapters map[string]adapter.Adapter, deps Deps) *Executor {
 	t := store.Current().Policy.Timeout
+	surfaces := make(map[string]adapter.SurfaceSet, len(adapters))
+	for kind, ad := range adapters {
+		surfaces[kind] = adapter.SurfacesOf(ad)
+	}
 	return &Executor{
-		store: store, src: src, adapters: adapters, deps: deps,
+		store: store, src: src, adapters: adapters, adapterSurfaces: surfaces, deps: deps,
 		client: &http.Client{
 			// Go follows redirects by default, silently turning a redirected
 			// POST into a body-less GET.
@@ -109,27 +115,29 @@ func (e *Executor) adapterFor(kind string) (adapter.Adapter, bool) {
 	return ad, ok
 }
 
-// inferredWarning records that a candidate was admitted on guessed capability
-// metadata for a request that actually needed a capability.
+// inferredWarningFor records that a candidate was admitted on guessed
+// capability metadata for a request that actually needed a capability.
 //
 // Master design §6.4 admits these rather than excluding them, because
 // hard-filtering on a guess would make every discovered local model refuse the
 // tool requests Claude Code always sends. The cost is that a provider's own
 // rejection looks like a Darkrouter failure, and this is what makes the trace
 // say otherwise.
-func inferredWarning(c router.Candidate, req *ir.Request) (ir.Warning, bool) {
+//
+// It takes the query rather than the request because an auxiliary surface has
+// no ir.Request — and needs no capability, so it never warns.
+func inferredWarningFor(c router.Candidate, q router.Query) (ir.Warning, bool) {
 	if !c.Inferred {
 		return ir.Warning{}, false
 	}
-	needs := req.Needs()
 	var missing []string
-	if needs.Tools {
+	if q.NeedsTools {
 		missing = append(missing, "tools")
 	}
-	if needs.Vision {
+	if q.NeedsVision {
 		missing = append(missing, "vision")
 	}
-	if needs.Reasoning {
+	if q.NeedsReasoning {
 		missing = append(missing, "reasoning")
 	}
 	if len(missing) == 0 {
@@ -166,6 +174,22 @@ func modelInfo(cat catalog.Reader, providerID, modelID string) adapter.ModelInfo
 	}
 }
 
+// rerankPath returns the provider's preset-declared rerank path, or "" when it
+// has no preset or the preset declares none. Spec §3.1: providers expose rerank
+// at differing URLs, so the path is preset data rather than an adapter
+// constant.
+func rerankPath(preset string) string {
+	if preset == "" {
+		return ""
+	}
+	p, ok := catalog.Embedded()[preset]
+	if !ok {
+		return ""
+	}
+	v, _ := p.QuirkValue("rerank-path")
+	return v
+}
+
 // catalogFor returns the live snapshot, or phase 3's provider-derived view
 // when no catalog is wired. The fallback is what keeps a zero Deps usable.
 func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
@@ -176,92 +200,40 @@ func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
 }
 
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
-	start := time.Now()
 	cfg := e.store.Current() // one snapshot for this request's whole lifetime
-	reqID := ulid.MustNew(ulid.Timestamp(start), rand.Reader).String()
 
-	// The record is built as the request proceeds and emitted exactly once, on
-	// every exit path. Status starts as "error" so an early return that forgets
-	// to set it is recorded as a failure rather than a silent success.
-	rec := &store.RequestRecord{
-		ID: reqID, TS: start, Dialect: d.Name(), Surface: string(ir.SurfaceLLM), Status: "error",
-	}
-	defer func() {
-		total := time.Since(start).Milliseconds()
-		rec.TotalMs = &total
-		e.log(rec)
-	}()
-
-	w.Header().Set("X-Darkrouter-Request", reqID)
-	w.Header().Set("X-Darkrouter-Attempts", "0")
-
-	req, pt, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
+	req, _, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
 	if err != nil {
+		// The row is opened and closed here rather than in RunSurface: a body
+		// that never parsed has no op to name the surface it was asking for,
+		// and the operator is still owed the record.
+		start := time.Now()
+		rec, done := e.newRecord(start, d.Name(), string(ir.SurfaceLLM))
+		defer done()
+		w.Header().Set("X-Darkrouter-Request", rec.ID)
+		w.Header().Set("X-Darkrouter-Attempts", "0")
 		rec.ErrorCode = string(ir.ErrInvalidRequest)
 		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
-	// A dialect that returns no passthrough, or leaves the surface unset, is
-	// serving chat. Parsing a string here was Phase 3 checking at runtime what
-	// the type system can check at compile time.
-	surface := ir.SurfaceLLM
-	if pt != nil && pt.Surface != "" {
-		surface = pt.Surface
-	}
-	rec.Surface = string(surface)
-	rec.RequestedModel = req.Model
-
-	providers, err := e.src.Providers(r.Context())
-	if err != nil {
-		rec.ErrorCode = string(ir.ErrDarkrouter)
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()})
-		return
-	}
-
-	// The snapshot freezes every input the router is allowed to read. Health is
-	// resolved to booleans here rather than inside Resolve, which is what keeps
-	// the router a pure function of its arguments.
-	snap := router.Snapshot{
-		At:        start,
-		Providers: providers,
-		Catalog:   e.catalogFor(providers),
-		Config:    cfg,
-	}
-	if e.deps.Fleet != nil {
-		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
-		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
-	}
-
-	needs := req.Needs()
-	cands, skips, rerr := router.Resolve(router.Query{
-		Model: req.Model, Surface: surface,
-		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
-	}, snap)
-
-	rec.Candidates = traceCandidates(cands)
-	rec.Skips = traceSkips(skips)
-
-	if rerr != nil {
-		e2 := routerError(rerr)
-		rec.ErrorCode = string(e2.Type)
-		_ = d.WriteError(w, e2)
-		return
-	}
-
-	byID := make(map[string]provider.Provider, len(providers))
-	for _, p := range providers {
-		byID[p.ID] = p
-	}
-	e.runAttempts(w, r, d, cfg, req, cands, rec, start, byID, snap.Catalog)
+	e.RunSurface(w, r, &chatOp{d: d, req: req}, cfg)
 }
 
 // runAttempts drives the chain. The ordered list is fixed at snapshot time and
 // never re-ordered; only skipping is dynamic, because another request may have
 // tripped a breaker since the snapshot was taken.
-func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Dialect,
-	cfg *config.Config, req *ir.Request, cands []router.Candidate,
+func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op SurfaceOp,
+	cfg *config.Config, cands []router.Candidate,
 	rec *store.RequestRecord, start time.Time, byID map[string]provider.Provider,
 	cat catalog.Reader) {
+
+	// The first candidate the router produced, captured before the loop so a
+	// candidate skipped by the live health re-check is still "first". Spec §8's
+	// embedding warning depends on this distinction.
+	var firstModel string
+	if len(cands) > 0 {
+		firstModel = cands[0].Model
+	}
 
 	bud := newBudget(cfg.Policy.Timeout, start)
 	maxAttempts := cfg.Policy.Retry.MaxAttempts
@@ -309,7 +281,7 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 		}
 
 		attempts++
-		outcome, status, aerr := e.attempt(w, r, d, cfg, req, c, byID[c.ProviderID], bud, rec, attempts, ad, cat)
+		outcome, status, aerr := e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel)
 		if aerr != nil {
 			lastErr = aerr
 		}
@@ -326,7 +298,7 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 			if lastErr != nil {
 				rec.ErrorCode = string(lastErr.Type)
 				e.writeErrorDiagnostics(w, rec, attempts)
-				_ = d.WriteError(w, lastErr)
+				_ = op.WriteError(w, lastErr)
 			}
 			return
 		default:
@@ -339,16 +311,16 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, d edge.Di
 	}
 	rec.ErrorCode = string(lastErr.Type)
 	e.writeErrorDiagnostics(w, rec, attempts)
-	_ = d.WriteError(w, lastErr)
+	_ = op.WriteError(w, lastErr)
 }
 
 // attempt performs one upstream call and records it. It returns the outcome,
 // the upstream status code, and the dialect error to serve if this turns out to
 // be the last attempt.
-func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialect,
-	cfg *config.Config, req *ir.Request, c router.Candidate, p provider.Provider,
+func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
+	cfg *config.Config, c router.Candidate, p provider.Provider,
 	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
-	cat catalog.Reader) (adapter.Outcome, int, *ir.Error) {
+	cat catalog.Reader, firstModel string) (adapter.Outcome, int, *ir.Error) {
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
@@ -362,14 +334,15 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 
 	tgt := &adapter.Target{
 		BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model,
-		Info: modelInfo(cat, c.ProviderID, c.Model),
+		Info:       modelInfo(cat, c.ProviderID, c.Model),
+		RerankPath: rerankPath(p.Preset),
 	}
 	var warns []ir.Warning
-	if w, ok := inferredWarning(c, req); ok {
-		warns = append(warns, w)
+	if iw, ok := inferredWarningFor(c, op.Query()); ok {
+		warns = append(warns, iw)
 	}
-	hr, warns2, err := ad.BuildRequest(ctx, tgt, req)
-	warns = append(warns, warns2...)
+	hr, buildWarns, err := op.Build(ctx, tgt, ad)
+	warns = append(warns, buildWarns...)
 	if err != nil {
 		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
 	}
@@ -408,42 +381,20 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 		return outcome, statusCode, errorFor(outcome, doErr)
 	}
 
-	if req.Stream {
-		return e.attemptStream(w, d, cfg, c, resp, statusCode, rec, seq, timer, warns, ad)
+	cw := NewCommitWriter(w)
+	outcome, aerr := op.Respond(cw, resp, &AttemptCtx{
+		Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: seq, Timer: timer,
+		Warns: warns, Adapter: ad, FirstModel: firstModel,
+	})
+	// The loop asks the writer, not the op. An op that reports a retryable
+	// outcome after bytes have gone out is describing a post-commit failure,
+	// and phase 3's rule says the chain ends there regardless — a second
+	// attempt would concatenate two half-responses on one connection.
+	if cw.Committed() && outcome != adapter.OutcomeSuccess {
+		rec.ErrorCode = string(ir.ErrAPI)
+		return adapter.OutcomeSuccess, statusCode, nil
 	}
-
-	out, perr := ad.ParseResponse(resp)
-	if perr != nil {
-		outcome := outcomeForParseError(perr)
-		last := len(rec.Attempts) - 1
-		rec.Attempts[last].Outcome = string(outcome)
-		rec.Attempts[last].Error = perr.Error()
-		if outcome != adapter.OutcomeFatal {
-			// A 2xx that cannot be read is a provider fault, so it rejoins the
-			// outcome path. A refusal is not: recording it would trip the
-			// breaker on a healthy provider, and failing over would re-ask a
-			// question every model in the chain will refuse.
-			e.recordHealthFor(c, outcome, resp)
-		}
-		var ie *ir.Error
-		if errors.As(perr, &ie) {
-			return outcome, statusCode, ie
-		}
-		return outcome, statusCode, errorFor(outcome, perr)
-	}
-
-	ttft := time.Since(rec.TS).Milliseconds()
-	rec.TTFTMs = &ttft
-	applyUsage(rec, &out.Usage)
-	rec.FinalProviderID = c.ProviderID
-	rec.FinalModel = c.Model
-	// Assigned, not appended: the request is re-rendered per attempt, and the
-	// record must describe the translation the client actually received rather
-	// than every attempt that was abandoned on the way there.
-	rec.Warnings = warningStrings(append(warns, out.Warnings...))
-	e.writeDiagnostics(w, rec.ID, c, seq)
-	_ = d.WriteResponse(w, out)
-	return adapter.OutcomeSuccess, statusCode, nil
+	return outcome, statusCode, aerr
 }
 
 // attemptStream buffers the upstream's events until one of them commits the
@@ -453,10 +404,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, d edge.Dialec
 // failure invisible: the buffered events are simply discarded and the loop
 // tries the next candidate. The dialect writer is not even constructed until
 // commit, because building it mutates the response headers.
-func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
-	cfg *config.Config, c router.Candidate, resp *http.Response, statusCode int,
+func (e *Executor) attemptStream(d edge.Dialect,
+	cfg *config.Config, c router.Candidate, resp *http.Response,
 	rec *store.RequestRecord, seq int, timer *time.Timer,
-	warns []ir.Warning, ad adapter.Adapter) (adapter.Outcome, int, *ir.Error) {
+	warns []ir.Warning, ad adapter.Adapter, cw *CommitWriter) (adapter.Outcome, *ir.Error) {
 
 	defer resp.Body.Close()
 
@@ -486,7 +437,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 			// A 2xx whose stream fails before commit is classified from the
 			// stream error, not the status line. Anthropic delivers
 			// overloaded_error as an in-stream event under a 200.
-			return adapter.OutcomeRetryableProvider, statusCode,
+			return adapter.OutcomeRetryableProvider,
 				e.reclassifyStream(c, resp, rec, err.Error())
 		}
 		if ev.Usage != nil {
@@ -500,7 +451,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 		if berr := buf.add(ev); berr != nil {
 			// A cap breach is an attempt failure, not a client error: the
 			// provider is misbehaving and another one may not.
-			return adapter.OutcomeRetryableProvider, statusCode,
+			return adapter.OutcomeRetryableProvider,
 				e.reclassifyStream(c, resp, rec, berr.Error())
 		}
 	}
@@ -514,7 +465,7 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 	rec.FinalProviderID = c.ProviderID
 	rec.FinalModel = c.Model
 	rec.Warnings = warningStrings(warns)
-	e.writeDiagnostics(w, rec.ID, c, seq)
+	e.writeDiagnostics(cw, rec.ID, c, seq)
 
 	// Post-commit, policy.timeout.total stops applying and policy.timeout.idle
 	// bounds the gap between events instead: a legitimate ten-minute reasoning
@@ -558,9 +509,9 @@ func (e *Executor) attemptStream(w http.ResponseWriter, d edge.Dialect,
 			}
 		}
 	}
-	_ = d.WriteStream(w, events)
+	_ = d.WriteStream(cw, events)
 	rec.Warnings = warningStrings(append(warns, streamWarns...))
-	return adapter.OutcomeSuccess, statusCode, nil
+	return adapter.OutcomeSuccess, nil
 }
 
 // reclassifyStream records a pre-commit stream failure against health and the

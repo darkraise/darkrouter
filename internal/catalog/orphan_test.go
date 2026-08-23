@@ -1,9 +1,13 @@
 package catalog
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/provider"
 )
 
@@ -56,5 +60,37 @@ func TestOrphanWarningsAreDeterministic(t *testing.T) {
 		if first[i] != second[i] {
 			t.Errorf("warning %d differs between runs: %q and %q", i, first[i], second[i])
 		}
+	}
+}
+
+func TestAYAMLProviderWithAnUnknownPresetIsAnOrphan(t *testing.T) {
+	// The warning already existed; nothing configured in YAML could ever
+	// trigger it, because the preset name was dropped between the file and
+	// provider.Provider. This is the whole chain, not just the last link.
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	if err := os.WriteFile(path, []byte(`
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    preset: not-a-real-preset
+    base_url: https://x/v1
+    api_key: sk
+    models: [m]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := provider.NewYAMLSource(cfgStore).Providers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	warns := OrphanedPresets(ps, Embedded())
+	if len(warns) != 1 || !strings.Contains(warns[0], "not-a-real-preset") {
+		t.Fatalf("warnings = %v; the warning must name the preset", warns)
 	}
 }

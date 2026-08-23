@@ -12,6 +12,10 @@ server:
 providers:
   - id: groq
     kind: openaicompat
+    # preset connects this provider to its shipped metadata: pricing, model
+    # capabilities, quirks, and the surfaces it serves. Omitting it leaves the
+    # provider a base URL and a key, with none of those applied.
+    preset: groq
     base_url: https://api.groq.com/openai/v1
     api_key: ${GROQ_KEY}
     priority: 10
@@ -23,6 +27,13 @@ providers:
 aliases:
   fast:
     - groq/openai/gpt-oss-120b
+
+  # An embedding alias must list the SAME model across DIFFERENT providers.
+  # Two models produce vectors in different vector spaces, so a failover to a
+  # different model corrupts an index and nothing in the response says so.
+  # embed:
+  #   - openai/text-embedding-3-small
+  #   - azure-openai/text-embedding-3-small
 
 policy:
   cooldown:

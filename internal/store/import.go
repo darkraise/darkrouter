@@ -81,9 +81,9 @@ func importWithHook(ctx context.Context, d *DB, key *crypto.Key, cfg *config.Con
 
 	for i, p := range cfg.Providers {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO providers (id, name, kind, base_url, priority, enabled, created_at)
-			 VALUES (?, ?, ?, ?, ?, 1, ?)`,
-			p.ID, p.ID, p.Kind, p.BaseURL, p.Priority, now.UnixMilli()); err != nil {
+			`INSERT INTO providers (id, name, preset, kind, base_url, priority, enabled, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+			p.ID, p.ID, p.Preset, p.Kind, p.BaseURL, p.Priority, now.UnixMilli()); err != nil {
 			return ImportResult{}, fmt.Errorf("import provider %q: %w", p.ID, err)
 		}
 		for _, m := range p.Models {

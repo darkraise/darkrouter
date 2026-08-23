@@ -146,11 +146,20 @@ func state(s string) State {
 	}
 }
 
-// surfaces resolves the override, then the row, then the preset, then llm.
-// A model that declares nothing still serves chat, which is what every
-// discovery probe that reports a bare id has actually told us.
+// surfaces resolves the override, then the preset, then the row, then llm.
+//
+// The preset outranks the row because the row's surfaces carry no information:
+// discovery hardcodes '["llm"]' on insert and never updates the column
+// (store.RecordDiscoverySuccess), and the models.dev sync echoes that value
+// back unchanged. With the row winning, a widened preset had no effect on any
+// discovered model — an embedding request against a provider whose discovery
+// works was skipped as SkipSurface and reported "no provider offers this".
+//
+// The override still wins, and is the only per-model source that will ever
+// carry an operator's intent. A future writer that genuinely learns a model's
+// surfaces should write there rather than onto the row.
 func surfaces(row store.ModelRow, preset Preset, override store.ModelOverride) []ir.Surface {
-	for _, candidate := range [][]string{override.Surfaces, row.Surfaces, preset.Surfaces} {
+	for _, candidate := range [][]string{override.Surfaces, preset.Surfaces, row.Surfaces} {
 		if parsed := parseSurfaces(candidate); len(parsed) > 0 {
 			return parsed
 		}

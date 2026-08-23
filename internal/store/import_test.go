@@ -175,3 +175,30 @@ func TestImportAbortsOnAnEmptyCredential(t *testing.T) {
 		t.Errorf("providers = %d, want 0 — an aborted import imports nothing", n)
 	}
 }
+
+func TestImportWritesThePresetColumn(t *testing.T) {
+	// providers.preset has existed since migration 0001 and nothing has ever
+	// written it, so the catalog join and the rerank path both saw "".
+	db := migrated(t)
+	ctx := context.Background()
+	key, err := OpenKeyring(ctx, db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "cohere", Kind: "openaicompat", Preset: "cohere",
+		BaseURL: "https://api.cohere.com/compatibility/v1", APIKey: "sk",
+		Models: []string{"rerank-v3.5"},
+	}}}
+	if _, err := ImportFromConfig(ctx, db, key, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT preset FROM providers WHERE id = 'cohere'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "cohere" {
+		t.Errorf("preset = %q", got)
+	}
+}

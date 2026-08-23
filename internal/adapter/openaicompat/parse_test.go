@@ -142,3 +142,71 @@ func TestParseStreamSurfacesUpstreamErrorPayload(t *testing.T) {
 		t.Fatal("expected an in-stream error to surface as a sequence error")
 	}
 }
+
+func TestReasoningAndTextDoNotShareABlockIndex(t *testing.T) {
+	// toolBlockBase exists because a colliding index is a bug. Reasoning was
+	// left at the zero value, which is the text block's index.
+	body := strings.Join([]string{
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}`,
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"data: [DONE]",
+		"",
+	}, "\n\n")
+
+	var thinkIdx, textIdx = -1, -1
+	for ev, err := range New().ParseStream(strings.NewReader(body), 1<<20) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Type != ir.EventContentDelta || ev.Delta == nil {
+			continue
+		}
+		switch ev.Delta.Type {
+		case ir.BlockThinking:
+			thinkIdx = ev.Index
+		case ir.BlockText:
+			textIdx = ev.Index
+		}
+	}
+	if thinkIdx < 0 || textIdx < 0 {
+		t.Fatalf("missing deltas: thinking at %d, text at %d", thinkIdx, textIdx)
+	}
+	if thinkIdx == textIdx {
+		t.Errorf("reasoning and text both at index %d; a consumer keying on the index "+
+			"cannot tell the two blocks apart", thinkIdx)
+	}
+}
+
+func TestAReasoningBlockIsOpenedAndClosed(t *testing.T) {
+	// A consumer that opens an item on block_start and finalizes it on
+	// block_stop gets neither for reasoning, so the item is never closed.
+	body := strings.Join([]string{
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}`,
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"data: [DONE]",
+		"",
+	}, "\n\n")
+
+	var start, stop bool
+	var startIdx, stopIdx int
+	for ev, err := range New().ParseStream(strings.NewReader(body), 1<<20) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Type {
+		case ir.EventBlockStart:
+			if ev.Delta != nil && ev.Delta.Type == ir.BlockThinking {
+				start, startIdx = true, ev.Index
+			}
+		case ir.EventBlockStop:
+			stop, stopIdx = true, ev.Index
+		}
+	}
+	if !start {
+		t.Error("no content_block_start for the reasoning block")
+	}
+	if !stop || stopIdx != startIdx {
+		t.Errorf("reasoning block opened at %d was not closed (stop=%v at %d)", startIdx, stop, stopIdx)
+	}
+}

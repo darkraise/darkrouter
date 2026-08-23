@@ -24,7 +24,7 @@ func TestModelsReadsEveryColumn(t *testing.T) {
 		    capabilities_source, context_window, max_output_tokens,
 		    input_price_micros_per_mtok, output_price_micros_per_mtok,
 		    cache_read_price_micros_per_mtok, state, missing_streak, last_seen_at)
-		 VALUES ('p', 'm', 'meta', '["llm","embeddings"]',
+		 VALUES ('p', 'm', 'meta', '["llm","embedding"]',
 		    '{"tools":true,"vision":false,"reasoning":true}', 'models_dev',
 		    200000, 64000, 5000000, 25000000, 500000, 'stale', 2, 1700000000000)`); err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestModelsReadsEveryColumn(t *testing.T) {
 	if r.ProviderID != "p" || r.ModelID != "m" || r.Publisher != "meta" {
 		t.Errorf("identity = %+v", r)
 	}
-	if len(r.Surfaces) != 2 || r.Surfaces[0] != "llm" || r.Surfaces[1] != "embeddings" {
+	if len(r.Surfaces) != 2 || r.Surfaces[0] != "llm" || r.Surfaces[1] != "embedding" {
 		t.Errorf("surfaces = %v", r.Surfaces)
 	}
 	if !r.Capabilities.Tools || r.Capabilities.Vision || !r.Capabilities.Reasoning {
