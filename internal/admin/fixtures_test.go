@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
@@ -132,4 +135,46 @@ func testServerWithCatalog(t *testing.T, aliases string) (*Server, *store.DB) {
 	s, db := testServerFullWithAliases(t, aliases)
 	s.deps.Catalog = catalogFixture()
 	return s, db
+}
+
+// testServerWithExecutor builds an admin server carrying a real exec.Executor
+// over a one-provider config, so the playground exercises the gateway rather
+// than a mock.
+func testServerWithExecutor(t *testing.T, upstreamURL, model string) *Server {
+	t.Helper()
+	db := store.MigratedForTest(t)
+	key, err := store.OpenKeyring(context.Background(), db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	body := "server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\nproviders:\n" +
+		"  - id: p\n    kind: openaicompat\n    base_url: " + upstreamURL +
+		"\n    api_key: sk\n    models: [" + model + "]\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: model, State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}}, []string{"p"}))
+
+	ex := exec.New(cfg, provider.NewYAMLSource(cfg),
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()},
+		exec.Deps{Catalog: cat})
+
+	s, err := New(Deps{
+		DB: db, PasswordHash: testHash(), Config: cfg, Key: key,
+		Presets: catalog.Embedded(), Catalog: cat,
+		Breaker: health.New(3, time.Minute), Exec: ex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
