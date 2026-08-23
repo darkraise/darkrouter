@@ -5733,3 +5733,1292 @@ git commit -m "feat(exec): serve the rerank surface"
 ```
 
 ---
+
+### Task 19: Images end to end
+
+**Files:**
+- Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
+- Create: `internal/adapter/openaicompat/image.go`, `internal/exec/image.go`
+- Test: `internal/adapter/openaicompat/image_test.go`, `internal/exec/image_test.go`, `internal/edge/openai/aux_test.go`
+
+**Interfaces:**
+- Consumes: `RunAux` (Task 14), `failedParse` (Task 15).
+- Produces: `ir.ImageRequest`, `ir.ImageResponse`, `ir.Image`, `adapter.ImageGenerator`, `edge.ImageDialect`, and `(*Executor).HandleImages`.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
+**Approach:** inline - skip 2: this is Task 16's layout with the image types substituted, and every file is given below.
+
+**Two models, two usage stories, and the difference is not a detail.** `gpt-image-1` returns a `usage` object with `input_tokens` and `output_tokens`, including image input tokens. The `dall-e` models return no `usage` key at all. Zero tokens therefore means *not reported*, never *free*, and the cost column must stay NULL for a dall-e call rather than record a confident zero. Task 20 is where that rule is enforced; this task's job is to carry the distinction faithfully rather than to normalize it away.
+
+`response_format` is forwarded exactly as the client sent it. It is a `dall-e` parameter that `gpt-image-1` rejects with a 400 — but a client sending it to `gpt-image-1` gets the same 400 talking to OpenAI directly, and inventing a translation here would make Darkrouter's behavior differ from the provider's for no gain.
+
+Image bytes are large. The response cap is 64 MiB rather than the JSON default because a `b64_json` response carrying four 1024×1024 PNGs is several megabytes of base64, and a cap that rejects a legitimate response is worse than no cap at all.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `internal/edge/openai/aux_test.go`:
+
+```go
+func TestParseImageReadsTheOptionals(t *testing.T) {
+	req, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations", strings.NewReader(
+		`{"model":"gpt-image-1","prompt":"a cat","n":2,"size":"1024x1024",
+		  "quality":"high","style":"vivid","response_format":"b64_json",
+		  "background":"transparent","output_format":"png","user":"u"}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "gpt-image-1" || req.Prompt != "a cat" || req.N != 2 {
+		t.Errorf("request = %+v", req)
+	}
+	if req.Size != "1024x1024" || req.Quality != "high" || req.Style != "vivid" {
+		t.Errorf("request = %+v", req)
+	}
+	if req.ResponseFormat != "b64_json" || req.Background != "transparent" ||
+		req.OutputFormat != "png" || req.User != "u" {
+		t.Errorf("request = %+v", req)
+	}
+}
+
+func TestParseImageRejectsAnEmptyPrompt(t *testing.T) {
+	if _, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"m"}`)), 1<<20); err == nil {
+		t.Error("a promptless generation request was accepted")
+	}
+}
+
+func TestWriteImageEmitsBothPayloadForms(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteImage(w, &ir.ImageResponse{
+		Created: 1700000000,
+		Images: []ir.Image{
+			{URL: "https://example.invalid/a.png", RevisedPrompt: "a revised cat"},
+			{Base64: "aGVsbG8="},
+		},
+		Usage: ir.Usage{InputTokens: 11, OutputTokens: 22}, UsageReported: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Created int64 `json:"created"`
+		Data    []struct {
+			URL           string `json:"url"`
+			B64           string `json:"b64_json"`
+			RevisedPrompt string `json:"revised_prompt"`
+		} `json:"data"`
+		Usage *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Created != 1700000000 || len(body.Data) != 2 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if body.Data[0].URL == "" || body.Data[0].RevisedPrompt != "a revised cat" {
+		t.Errorf("first image = %+v", body.Data[0])
+	}
+	if body.Data[0].B64 != "" {
+		t.Errorf("a URL image carried a b64_json key: %+v", body.Data[0])
+	}
+	if body.Data[1].B64 != "aGVsbG8=" || body.Data[1].URL != "" {
+		t.Errorf("second image = %+v", body.Data[1])
+	}
+	if body.Usage == nil || body.Usage.TotalTokens != 33 {
+		t.Errorf("usage = %+v", body.Usage)
+	}
+}
+
+func TestWriteImageOmitsUsageWhenTheProviderReportedNone(t *testing.T) {
+	// The dall-e models return no usage object. Emitting a zeroed one would
+	// tell the client the call was free.
+	w := httptest.NewRecorder()
+	if err := WriteImage(w, &ir.ImageResponse{
+		Created: 1, Images: []ir.Image{{URL: "https://example.invalid/a.png"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(w.Body.String(), "usage") {
+		t.Errorf("body = %s; a usage object was invented", w.Body.String())
+	}
+}
+```
+
+Create `internal/adapter/openaicompat/image_test.go`:
+
+```go
+package openaicompat
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestBuildImageRendersTheOpenAIShape(t *testing.T) {
+	hr, warns, err := New().BuildImage(context.Background(),
+		&adapter.Target{BaseURL: "https://api.example.com/v1/", APIKey: "sk", Model: "gpt-image-1"},
+		&ir.ImageRequest{
+			Prompt: "a cat", N: 2, Size: "1024x1024", Quality: "high",
+			ResponseFormat: "b64_json", User: "u",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v", warns)
+	}
+	if hr.URL.String() != "https://api.example.com/v1/images/generations" {
+		t.Errorf("url = %s", hr.URL)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "gpt-image-1" || body["prompt"] != "a cat" {
+		t.Errorf("body = %v", body)
+	}
+	if body["n"].(float64) != 2 || body["response_format"] != "b64_json" {
+		t.Errorf("body = %v", body)
+	}
+}
+
+func TestBuildImageOmitsEveryUnsetOptional(t *testing.T) {
+	// An explicit null or empty string is a 400 on several of these, and a
+	// zero n asks for no images at all.
+	hr, _, err := New().BuildImage(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1", Model: "dall-e-3"},
+		&ir.ImageRequest{Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	_ = json.Unmarshal(raw, &body)
+	for _, k := range []string{"n", "size", "quality", "style", "response_format",
+		"background", "output_format", "user"} {
+		if _, present := body[k]; present {
+			t.Errorf("an unset %q was sent as %v", k, body[k])
+		}
+	}
+}
+
+func TestParseImageReportsUsageWhenTheProviderDoes(t *testing.T) {
+	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(
+		`{"created":17,"data":[{"b64_json":"aGk="}],
+		  "usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`))}
+	out, err := New().ParseImage(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.UsageReported {
+		t.Error("UsageReported = false on a response carrying usage")
+	}
+	if out.Usage.InputTokens != 11 || out.Usage.OutputTokens != 22 {
+		t.Errorf("usage = %+v", out.Usage)
+	}
+	if len(out.Images) != 1 || out.Images[0].Base64 != "aGk=" {
+		t.Errorf("images = %+v", out.Images)
+	}
+}
+
+func TestParseImageDistinguishesAbsentUsageFromZero(t *testing.T) {
+	// The dall-e models report none. Zero tokens must mean "not reported", not
+	// "free", or the cost column records a confident zero.
+	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(
+		`{"created":17,"data":[{"url":"https://example.invalid/a.png","revised_prompt":"r"}]}`))}
+	out, err := New().ParseImage(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.UsageReported {
+		t.Error("UsageReported = true on a response with no usage object")
+	}
+	if out.Images[0].URL == "" || out.Images[0].RevisedPrompt != "r" {
+		t.Errorf("images = %+v", out.Images)
+	}
+}
+
+func TestParseImageRejectsAnImagelessBody(t *testing.T) {
+	resp := &http.Response{StatusCode: 200,
+		Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[]}`))}
+	if _, err := New().ParseImage(resp); err == nil {
+		t.Fatal("a 200 with no images parsed cleanly")
+	}
+}
+```
+
+Create `internal/exec/image_test.go`:
+
+```go
+package exec
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func imageUpstream(usage bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body := `{"created":17,"data":[{"b64_json":"aGk="}]`
+		if usage {
+			body += `,"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}`
+		}
+		_, _ = w.Write([]byte(body + `}`))
+	}
+}
+
+func TestImagesServeEndToEnd(t *testing.T) {
+	upstream := httptest.NewServer(imageUpstream(true))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "gpt-image-1", ir.SurfaceImage))
+	w := httptest.NewRecorder()
+	e.HandleImages(w, httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"gpt-image-1","prompt":"a cat","n":1}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Data []struct {
+			B64 string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Data) != 1 || body.Data[0].B64 != "aGk=" {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	got := rec.only(t)
+	if got.Surface != "image" || got.Status != "success" {
+		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+	if got.TokensIn != 11 || got.TokensOut != 22 {
+		t.Errorf("tokens = %d in, %d out; gpt-image-1 reports both", got.TokensIn, got.TokensOut)
+	}
+}
+
+func TestAnImageCallReportingNoUsageRecordsNone(t *testing.T) {
+	upstream := httptest.NewServer(imageUpstream(false))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "dall-e-3", ir.SurfaceImage))
+	e.HandleImages(httptest.NewRecorder(),
+		httptest.NewRequest("POST", "/v1/images/generations",
+			strings.NewReader(`{"model":"dall-e-3","prompt":"a cat"}`)), openaiedge.New())
+
+	got := rec.only(t)
+	if got.Status != "success" {
+		t.Fatalf("status = %q", got.Status)
+	}
+	if got.TokensIn != 0 || got.TokensOut != 0 {
+		t.Errorf("tokens = %d/%d; the provider reported none", got.TokensIn, got.TokensOut)
+	}
+	if got.CostMicros != nil {
+		t.Errorf("cost = %d; a call with no usage must leave cost NULL", *got.CostMicros)
+	}
+}
+
+func TestAnImageRequestWithNoImageProviderIsRefused(t *testing.T) {
+	upstream := httptest.NewServer(imageUpstream(true))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "chat-only", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.HandleImages(w, httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"chat-only","prompt":"a cat"}`)), openaiedge.New())
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if len(rec.only(t).Attempts) != 0 {
+		t.Error("a surface no provider offers attempted an upstream call")
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/adapter/openaicompat/ ./internal/exec/ -run Image -v
+```
+
+Expected: FAIL to build in all three — `undefined: ParseImage`, `undefined: BuildImage`, `e.HandleImages undefined`.
+
+- [ ] **Step 3: Add the IR types and the adapter interface**
+
+Append to `internal/ir/aux.go`:
+
+```go
+// ImageRequest is one generation call.
+//
+// ResponseFormat is carried and forwarded verbatim although gpt-image-1 rejects
+// it and the dall-e models require it. A client sending it to gpt-image-1 gets
+// the same 400 talking to the provider directly, and translating it here would
+// make Darkrouter behave differently from the upstream for no gain.
+type ImageRequest struct {
+	Model  string
+	Prompt string
+	// N is 0 when unset. Zero images is not a request anyone makes, so it needs
+	// no separate presence flag.
+	N              int
+	Size           string
+	Quality        string
+	Style          string
+	ResponseFormat string
+	Background     string
+	OutputFormat   string
+	User           string
+}
+
+// ImageCount is what was asked for, recorded on the request row per spec §9.
+// An unset n means one image, which is OpenAI's own default.
+func (r *ImageRequest) ImageCount() int {
+	if r.N <= 0 {
+		return 1
+	}
+	return r.N
+}
+
+// Image is one generated image. Exactly one of URL and Base64 is populated,
+// chosen by the provider rather than by the request: gpt-image-1 always returns
+// base64 whatever response_format said.
+type Image struct {
+	URL    string
+	Base64 string
+	// RevisedPrompt is what the provider actually generated from, when it says.
+	RevisedPrompt string
+}
+
+type ImageResponse struct {
+	Created int64
+	Model   string
+	Images  []Image
+
+	Usage Usage
+	// UsageReported distinguishes "the provider reported zero" from "the
+	// provider reported nothing". gpt-image-1 returns a usage object; the
+	// dall-e models return none, and recording their calls as zero-cost would
+	// be a confident lie rather than a missing value.
+	UsageReported bool
+}
+```
+
+In `internal/adapter/adapter.go`, beside `Reranker`:
+
+```go
+// ImageGenerator is implemented by an adapter serving the image surface.
+type ImageGenerator interface {
+	BuildImage(ctx context.Context, t *Target, req *ir.ImageRequest) (*http.Request, []ir.Warning, error)
+	// ParseImage takes ownership of resp.Body and always closes it.
+	ParseImage(resp *http.Response) (*ir.ImageResponse, error)
+}
+```
+
+- [ ] **Step 4: Add the edge interface, parser and writer**
+
+In `internal/edge/edge.go`, beside `RerankDialect`:
+
+```go
+// ImageDialect is the inbound wire form of the image surface.
+type ImageDialect interface {
+	Name() string
+	ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error)
+	WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+```
+
+Append to `internal/edge/openai/aux.go`:
+
+```go
+type wireImageRequest struct {
+	Model          string `json:"model"`
+	Prompt         string `json:"prompt"`
+	N              *int   `json:"n"`
+	Size           string `json:"size"`
+	Quality        string `json:"quality"`
+	Style          string `json:"style"`
+	ResponseFormat string `json:"response_format"`
+	Background     string `json:"background"`
+	OutputFormat   string `json:"output_format"`
+	User           string `json:"user"`
+}
+
+func ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireImageRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if w.Prompt == "" {
+		return nil, errors.New("prompt is required")
+	}
+	req := &ir.ImageRequest{
+		Model: w.Model, Prompt: w.Prompt, Size: w.Size, Quality: w.Quality,
+		Style: w.Style, ResponseFormat: w.ResponseFormat,
+		Background: w.Background, OutputFormat: w.OutputFormat, User: w.User,
+	}
+	if w.N != nil {
+		req.N = *w.N
+	}
+	return req, nil
+}
+
+func WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error {
+	data := make([]any, 0, len(resp.Images))
+	for _, img := range resp.Images {
+		row := map[string]any{}
+		// Exactly one payload key, and never both: a client tests for the one
+		// it asked for and an empty string in the other reads as a real answer.
+		if img.Base64 != "" {
+			row["b64_json"] = img.Base64
+		} else {
+			row["url"] = img.URL
+		}
+		if img.RevisedPrompt != "" {
+			row["revised_prompt"] = img.RevisedPrompt
+		}
+		data = append(data, row)
+	}
+	out := map[string]any{"created": resp.Created, "data": data}
+	// Omitted, not zeroed, when the provider reported nothing: the dall-e
+	// models return no usage object and a zeroed one says the call was free.
+	if resp.UsageReported {
+		out["usage"] = map[string]any{
+			"input_tokens":  resp.Usage.InputTokens,
+			"output_tokens": resp.Usage.OutputTokens,
+			"total_tokens":  resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(out)
+}
+
+func (d *Dialect) ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
+	return ParseImage(r, maxBody)
+}
+
+func (d *Dialect) WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error {
+	return WriteImage(w, resp)
+}
+
+var _ edge.ImageDialect = (*Dialect)(nil)
+```
+
+- [ ] **Step 5: Implement the adapter**
+
+Create `internal/adapter/openaicompat/image.go`:
+
+```go
+package openaicompat
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// maxImageBytes is far above the JSON default because a b64_json response
+// carrying four 1024x1024 PNGs is several megabytes of base64, and a cap that
+// rejects a legitimate response is worse than no cap at all.
+const maxImageBytes = 64 << 20
+
+func (a *Adapter) BuildImage(ctx context.Context, t *adapter.Target,
+	req *ir.ImageRequest) (*http.Request, []ir.Warning, error) {
+
+	body := map[string]any{"model": t.Model, "prompt": req.Prompt}
+	// Each is omitted rather than sent empty: an explicit null or "" is a 400
+	// on several of them, and n=0 asks for no images at all.
+	if req.N > 0 {
+		body["n"] = req.N
+	}
+	for k, v := range map[string]string{
+		"size":            req.Size,
+		"quality":         req.Quality,
+		"style":           req.Style,
+		"response_format": req.ResponseFormat,
+		"background":      req.Background,
+		"output_format":   req.OutputFormat,
+		"user":            req.User,
+	} {
+		if v != "" {
+			body[k] = v
+		}
+	}
+
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	url := strings.TrimRight(t.BaseURL, "/") + "/images/generations"
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build image request: %w", err)
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if t.APIKey != "" {
+		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
+	}
+	return hr, nil, nil
+}
+
+// imageEnvelope keeps usage as a pointer so an absent object stays
+// distinguishable from a reported zero.
+type imageEnvelope struct {
+	Created int64 `json:"created"`
+	Data    []struct {
+		URL           string `json:"url"`
+		B64           string `json:"b64_json"`
+		RevisedPrompt string `json:"revised_prompt"`
+	} `json:"data"`
+	Usage *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+func (a *Adapter) ParseImage(resp *http.Response) (*ir.ImageResponse, error) {
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read image response: %w", err)
+	}
+	var env imageEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("parse image response: %w", err)
+	}
+	if len(env.Data) == 0 {
+		// A 200 with no images is a provider fault: the prompt was accepted and
+		// nothing came back.
+		return nil, errors.New("image response carried no images")
+	}
+	out := &ir.ImageResponse{
+		Created: env.Created,
+		Images:  make([]ir.Image, 0, len(env.Data)),
+	}
+	for _, d := range env.Data {
+		out.Images = append(out.Images, ir.Image{
+			URL: d.URL, Base64: d.B64, RevisedPrompt: d.RevisedPrompt,
+		})
+	}
+	if env.Usage != nil {
+		out.UsageReported = true
+		out.Usage = ir.Usage{
+			InputTokens:  env.Usage.InputTokens,
+			OutputTokens: env.Usage.OutputTokens,
+		}
+	}
+	return out, nil
+}
+
+var _ adapter.ImageGenerator = (*Adapter)(nil)
+```
+
+- [ ] **Step 6: Write the op and the route**
+
+Create `internal/exec/image.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+type imageOp struct {
+	d   edge.ImageDialect
+	req *ir.ImageRequest
+}
+
+func (o *imageOp) Dialect() string { return o.d.Name() }
+
+func (o *imageOp) Query() router.Query {
+	return router.Query{Model: o.req.Model, Surface: ir.SurfaceImage}
+}
+
+func (o *imageOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	g, ok := ad.(adapter.ImageGenerator)
+	if !ok {
+		return nil, nil, fmt.Errorf("adapter %s does not serve images", ad.Kind())
+	}
+	return g.BuildImage(ctx, tgt, o.req)
+}
+
+func (o *imageOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	g, ok := ac.Adapter.(adapter.ImageGenerator)
+	if !ok {
+		resp.Body.Close()
+		return adapter.OutcomeFatal, &ir.Error{
+			Type: ir.ErrDarkrouter, Message: "adapter does not serve images",
+		}
+	}
+	out, err := g.ParseImage(resp)
+	if err != nil {
+		return failedParse(ac, resp, err)
+	}
+	out.Model = ac.Cand.Model
+
+	ttft := time.Since(ac.Rec.TS).Milliseconds()
+	ac.Rec.TTFTMs = &ttft
+	// Only when the provider reported it. A dall-e call recorded as zero tokens
+	// is indistinguishable in the log from a call that genuinely cost nothing.
+	if out.UsageReported {
+		applyUsage(ac.Rec, &out.Usage)
+	}
+	ac.Rec.FinalProviderID = ac.Cand.ProviderID
+	ac.Rec.FinalModel = ac.Cand.Model
+	ac.Rec.Warnings = warningStrings(ac.Warns)
+
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+	_ = o.d.WriteImage(cw, out)
+	return adapter.OutcomeSuccess, nil
+}
+
+func (o *imageOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+
+var _ SurfaceOp = (*imageOp)(nil)
+
+// HandleImages serves POST /v1/images/generations.
+func (e *Executor) HandleImages(w http.ResponseWriter, r *http.Request, d edge.ImageDialect) {
+	maxBody := e.store.Current().Server.MaxBodyBytes
+	e.RunAux(w, r, d.Name(), ir.SurfaceImage, d, func() (SurfaceOp, error) {
+		req, err := d.ParseImage(r, maxBody)
+		if err != nil {
+			return nil, err
+		}
+		return &imageOp{d: d, req: req}, nil
+	})
+}
+```
+
+In `internal/server/server.go`, beside the rerank route:
+
+```go
+	mux.HandleFunc("POST /v1/images/generations", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleImages(w, r, oa)
+	}))
+```
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/adapter/openaicompat/ ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in all four packages.
+
+- [ ] **Step 8: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/ir/aux.go internal/adapter/adapter.go internal/adapter/openaicompat/image.go \
+        internal/adapter/openaicompat/image_test.go internal/edge/edge.go \
+        internal/edge/openai/aux.go internal/edge/openai/aux_test.go \
+        internal/exec/image.go internal/exec/image_test.go internal/server/server.go
+git commit -m "feat(exec): serve the image surface"
+```
+
+---
+
+### Task 20: An oversized body is a 413, not a 400
+
+**Files:**
+- Modify: `internal/ir/ir.go`, `internal/edge/openai/write.go`, `internal/edge/anthropic/write.go`, `internal/edge/gemini/write.go`, `internal/exec/surface.go`
+- Test: `internal/edge/openai/write_test.go`, `internal/edge/anthropic/write_test.go`, `internal/edge/gemini/write_test.go`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `ir.ErrPayloadTooLarge` and its status mapping in all three dialects; `RunAux` honors it. Task 21's multipart parser raises it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: all three status tables exist and this adds one case to each.
+
+Spec §6 requires an oversized upload to be "rejected with 413 before any upstream connection". `RunAux` turns every parse failure into `ir.ErrInvalidRequest`, which every dialect maps to 400. To a client uploading a 90-minute recording those two answers mean completely different things — 400 says the request is malformed and retrying is pointless, 413 says send a smaller file — and the client has no other signal to tell them apart.
+
+The type is added to all three dialects rather than just OpenAI's. Only the auxiliary routes raise it today, and they are all OpenAI-dialect. But `statusFor` has no fall-through that would be right: an unmapped type becomes a 502 in OpenAI's table and Anthropic's, which would report a client's oversized upload as a gateway failure the moment any later phase raised it from a chat path.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `internal/edge/openai/write_test.go`:
+
+```go
+func TestAnOversizedPayloadIs413(t *testing.T) {
+	// 400 tells a client its request is malformed and retrying is pointless.
+	// 413 tells it to send a smaller file. An audio client has no other signal
+	// to tell those apart.
+	w := httptest.NewRecorder()
+	if err := WriteError(w, &ir.Error{
+		Type: ir.ErrPayloadTooLarge, Message: "upload exceeds the configured maximum",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", w.Code)
+	}
+}
+```
+
+Add the equivalent to `internal/edge/anthropic/write_test.go` and `internal/edge/gemini/write_test.go`, asserting 413 in each. Anthropic's error `type` string is `"invalid_request_error"` — it has no size-specific member and inventing one would break clients matching on the documented set — and Gemini's status string is `"INVALID_ARGUMENT"` for the same reason. **The HTTP status is what carries the distinction; the body stays inside each provider's documented vocabulary.** Assert both in each test.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/... -run Oversized -v
+```
+
+Expected: FAIL to build — `undefined: ir.ErrPayloadTooLarge`.
+
+- [ ] **Step 3: Add the type**
+
+In `internal/ir/ir.go`, in the `ErrorType` block:
+
+```go
+	// ErrPayloadTooLarge is an inbound body over the configured maximum. It is
+	// separate from ErrInvalidRequest because the two ask the client for
+	// different things: one says the request is malformed, the other says send
+	// less. A transcription client uploading a long recording can act on the
+	// second and not on the first.
+	ErrPayloadTooLarge ErrorType = "payload_too_large"
+```
+
+- [ ] **Step 4: Map it in all three dialects**
+
+In `internal/edge/openai/write.go`, in `statusFor`:
+
+```go
+	case ir.ErrPayloadTooLarge:
+		return http.StatusRequestEntityTooLarge
+```
+
+In `internal/edge/anthropic/write.go`, add to its type-and-status switch:
+
+```go
+	case ir.ErrPayloadTooLarge:
+		// Anthropic documents no size-specific error type, and inventing one
+		// would break clients matching on the documented set. The status is
+		// what carries the distinction.
+		return "invalid_request_error", http.StatusRequestEntityTooLarge
+```
+
+In `internal/edge/gemini/write.go`, likewise:
+
+```go
+	case ir.ErrPayloadTooLarge:
+		// Same reasoning as Anthropic: the google.rpc.Code vocabulary is fixed,
+		// so the status carries what the code cannot.
+		return "INVALID_ARGUMENT", http.StatusRequestEntityTooLarge
+```
+
+- [ ] **Step 5: Let `RunAux` raise it**
+
+In `internal/exec/surface.go`, replace the fixed error type in `RunAux`'s parse-failure branch:
+
+```go
+	op, err := build()
+	if err != nil {
+		// A parser reporting an oversized body says so in the error it
+		// returns, because only it knows the cap it was given.
+		kind := ir.ErrInvalidRequest
+		var ie *ir.Error
+		if errors.As(err, &ie) && ie.Type != "" {
+			kind = ie.Type
+		}
+		rec.ErrorCode = string(kind)
+		_ = ew.WriteError(w, &ir.Error{Type: kind, Message: err.Error()})
+		return
+	}
+```
+
+Add `"errors"` to that file's imports.
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/... ./internal/ir/ ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS in every package.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/ir/ir.go internal/edge/openai/write.go internal/edge/openai/write_test.go \
+        internal/edge/anthropic/write.go internal/edge/anthropic/write_test.go \
+        internal/edge/gemini/write.go internal/edge/gemini/write_test.go \
+        internal/exec/surface.go
+git commit -m "feat(ir): distinguish an oversized payload from a bad one"
+```
+
+---
+
+### Task 21: The multipart buffer and the in-form model rewrite
+
+**Files:**
+- Create: `internal/exec/multipart.go`
+- Test: `internal/exec/multipart_test.go`
+
+**Interfaces:**
+- Consumes: `ir.ErrPayloadTooLarge` (Task 20).
+- Produces: `exec.Form` with `ParseForm(r, maxBody) (*Form, error)`, `(*Form).Field(name) string`, and `(*Form).Render(model string) (body []byte, contentType string, err error)`. Task 22's op calls all three.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
+**Approach:** inline - skip 2: `mime/multipart` supplies both halves and the buffering decision is settled by spec §6.
+
+Spec §6 is unusually explicit here, and the reason is worth restating: an earlier draft specified **streaming** the multipart body through, which is **incompatible with failover**. A streamed body cannot be replayed for a second attempt, so transcriptions would have been the one surface with no failover in a gateway whose entire purpose is failover.
+
+It also makes the required rewrite impossible. The `model` field lives *inside* the multipart form and must be changed to the target's name — and clients are free to place it **after** the file part, so a streaming router would have to consume most of the body before it knew where to route anyway.
+
+Buffering restores failover, makes the rewrite trivial, and lets an oversized upload be refused before any upstream connection exists.
+
+Risk is 2 because this holds whole audio uploads in memory. The cap is `server.max_body_bytes` and it is enforced while reading rather than after, so a client cannot make the gateway allocate more than the operator allowed by lying about `Content-Length`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/exec/multipart_test.go`:
+
+```go
+package exec
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// buildForm writes a multipart body with the parts in the order given, so a
+// test can put the model field after the file exactly as a client may.
+func buildForm(t *testing.T, parts [][2]string, file [2]string, fileFirst bool) (string, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	writeFile := func() {
+		fw, err := w.CreateFormFile("file", file[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(fw, file[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fileFirst {
+		writeFile()
+	}
+	for _, p := range parts {
+		if err := w.WriteField(p[0], p[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !fileFirst {
+		writeFile()
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String(), w.FormDataContentType()
+}
+
+func parseForm(t *testing.T, body, ct string, max int64) (*Form, error) {
+	t.Helper()
+	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(body))
+	r.Header.Set("Content-Type", ct)
+	return ParseForm(r, max)
+}
+
+func TestParseFormFindsAFieldPlacedAfterTheFile(t *testing.T) {
+	// Clients do this. A streaming router would have had to consume the whole
+	// upload before it knew where to route.
+	body, ct := buildForm(t, [][2]string{{"model", "whisper-1"}, {"language", "en"}},
+		[2]string{"a.mp3", "AUDIO"}, true)
+	f, err := parseForm(t, body, ct, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Field("model"); got != "whisper-1" {
+		t.Errorf("model = %q", got)
+	}
+	if got := f.Field("language"); got != "en" {
+		t.Errorf("language = %q", got)
+	}
+	if got := f.Field("absent"); got != "" {
+		t.Errorf("absent field = %q", got)
+	}
+}
+
+func TestRenderRewritesTheModelInsideTheForm(t *testing.T) {
+	body, ct := buildForm(t, [][2]string{{"model", "whisper-1"}},
+		[2]string{"a.mp3", "AUDIO"}, false)
+	f, err := parseForm(t, body, ct, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, outCT, err := f.Render("distil-whisper-large-v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reparse(t, out, outCT)
+	if got.Field("model") != "distil-whisper-large-v3" {
+		t.Errorf("model = %q; the target's name must replace the client's", got.Field("model"))
+	}
+	if got.File("file") != "AUDIO" {
+		t.Errorf("file = %q; the upload did not survive the rewrite", got.File("file"))
+	}
+}
+
+func TestRenderAddsAModelFieldWhenTheClientSentNone(t *testing.T) {
+	// The router resolved a target from an alias in the URL or from a default,
+	// so the upstream still needs a model name.
+	body, ct := buildForm(t, nil, [2]string{"a.mp3", "AUDIO"}, true)
+	f, err := parseForm(t, body, ct, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, outCT, err := f.Render("whisper-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reparse(t, out, outCT).Field("model"); got != "whisper-1" {
+		t.Errorf("model = %q", got)
+	}
+}
+
+func TestRenderIsReplayable(t *testing.T) {
+	// Two attempts, two different targets, both from one buffered body. This
+	// is the whole reason the body is buffered.
+	body, ct := buildForm(t, [][2]string{{"model", "a"}}, [2]string{"a.mp3", "AUDIO"}, false)
+	f, err := parseForm(t, body, ct, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, ct1, err := f.Render("first-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, ct2, err := f.Render("second-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reparse(t, first, ct1).Field("model") != "first-model" {
+		t.Error("first render lost its model")
+	}
+	if reparse(t, second, ct2).Field("model") != "second-model" {
+		t.Error("second render lost its model")
+	}
+	if reparse(t, second, ct2).File("file") != "AUDIO" {
+		t.Error("the second render lost the upload")
+	}
+}
+
+func TestRenderPreservesTheFilePartMetadata(t *testing.T) {
+	// Whisper providers select a decoder from the filename extension. Dropping
+	// it turns a working upload into an unsupported-format error.
+	body, ct := buildForm(t, [][2]string{{"model", "m"}},
+		[2]string{"recording.m4a", "AUDIO"}, false)
+	f, err := parseForm(t, body, ct, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, outCT, err := f.Render("m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name := reparse(t, out, outCT).FileName("file"); name != "recording.m4a" {
+		t.Errorf("filename = %q", name)
+	}
+}
+
+func TestParseFormRefusesAnOversizedUpload(t *testing.T) {
+	body, ct := buildForm(t, [][2]string{{"model", "m"}},
+		[2]string{"a.mp3", strings.Repeat("A", 4096)}, false)
+	_, err := parseForm(t, body, ct, 512)
+	if err == nil {
+		t.Fatal("an oversized upload was accepted")
+	}
+	var ie *ir.Error
+	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
+		t.Errorf("err = %v; it must be distinguishable so the route answers 413", err)
+	}
+}
+
+func TestParseFormRejectsANonMultipartBody(t *testing.T) {
+	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(`{"a":1}`))
+	r.Header.Set("Content-Type", "application/json")
+	if _, err := ParseForm(r, 1<<20); err == nil {
+		t.Fatal("a JSON body parsed as multipart")
+	}
+}
+```
+
+Add two small helpers to the same file: `reparse(t, body []byte, contentType string) *Form` builds a request from the rendered bytes and calls `ParseForm`, and `Form.File(name)`/`Form.FileName(name)` return a file part's contents and filename. `File` and `FileName` are exported methods on `Form` in Step 3, because Task 22's tests use them too. `mime.ParseMediaType` is imported for the boundary check.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestParseForm|TestRender' -v
+```
+
+Expected: FAIL to build — `undefined: ParseForm`, `undefined: Form`.
+
+- [ ] **Step 3: Write the buffer**
+
+Create `internal/exec/multipart.go`:
+
+```go
+package exec
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/textproto"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// Form is a multipart request body held whole.
+//
+// Buffered, not streamed, per spec §6. A streamed body cannot be replayed for a
+// second attempt, which would make transcriptions the one surface with no
+// failover — and the rewrite the router requires is impossible while streaming
+// anyway, because the model field lives inside the form and clients are free to
+// place it after the file part. Buffering restores failover, makes the rewrite
+// trivial, and lets an oversized upload be refused before any upstream
+// connection exists.
+type Form struct {
+	parts []formPart
+}
+
+type formPart struct {
+	name     string
+	filename string
+	header   textproto.MIMEHeader
+	value    []byte
+}
+
+// ParseForm reads the whole body, enforcing max while reading rather than
+// after, so a client cannot make the gateway allocate more than the operator
+// allowed by lying about Content-Length.
+func ParseForm(r *http.Request, max int64) (*Form, error) {
+	ct := r.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Content-Type: %w", err)
+	}
+	if mediaType != "multipart/form-data" {
+		return nil, fmt.Errorf("expected multipart/form-data, got %s", mediaType)
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		return nil, errors.New("multipart body has no boundary")
+	}
+
+	// One budget across every part: capping each part separately would let a
+	// client send a thousand parts each just under the limit.
+	remaining := max
+	mr := multipart.NewReader(r.Body, boundary)
+	f := &Form{}
+	for {
+		p, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read multipart body: %w", err)
+		}
+		// One byte past the budget is enough to know it was exceeded, and stops
+		// the read there rather than draining the rest of the upload.
+		buf, err := io.ReadAll(io.LimitReader(p, remaining+1))
+		p.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read multipart part %q: %w", p.FormName(), err)
+		}
+		if int64(len(buf)) > remaining {
+			return nil, &ir.Error{
+				Type:    ir.ErrPayloadTooLarge,
+				Message: fmt.Sprintf("upload exceeds the configured maximum of %d bytes", max),
+			}
+		}
+		remaining -= int64(len(buf))
+		f.parts = append(f.parts, formPart{
+			name: p.FormName(), filename: p.FileName(),
+			header: p.Header.Clone(), value: buf,
+		})
+	}
+	if len(f.parts) == 0 {
+		return nil, errors.New("multipart body has no parts")
+	}
+	return f, nil
+}
+
+// Field returns a non-file field's value, or "" when it is absent.
+func (f *Form) Field(name string) string {
+	for _, p := range f.parts {
+		if p.name == name && p.filename == "" {
+			return string(p.value)
+		}
+	}
+	return ""
+}
+
+// File returns a file part's contents, or "" when it is absent.
+func (f *Form) File(name string) string {
+	for _, p := range f.parts {
+		if p.name == name && p.filename != "" {
+			return string(p.value)
+		}
+	}
+	return ""
+}
+
+// FileName returns a file part's declared filename. Whisper providers select a
+// decoder from its extension, so dropping it turns a working upload into an
+// unsupported-format error.
+func (f *Form) FileName(name string) string {
+	for _, p := range f.parts {
+		if p.name == name && p.filename != "" {
+			return p.filename
+		}
+	}
+	return ""
+}
+
+// Render writes the form out with model rewritten to the target's name, adding
+// the field when the client sent none. It is called once per attempt, which is
+// what makes failover across two differently-named models possible.
+func (f *Form) Render(model string) ([]byte, string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	wrote := false
+	for _, p := range f.parts {
+		if p.name == "model" && p.filename == "" {
+			if err := w.WriteField("model", model); err != nil {
+				return nil, "", err
+			}
+			wrote = true
+			continue
+		}
+		// CreatePart rather than CreateFormFile: the original part's header
+		// carries the Content-Type a provider may use to pick a decoder, and
+		// CreateFormFile would replace it with application/octet-stream.
+		pw, err := w.CreatePart(p.header)
+		if err != nil {
+			return nil, "", err
+		}
+		if _, err := pw.Write(p.value); err != nil {
+			return nil, "", err
+		}
+	}
+	if !wrote {
+		if err := w.WriteField("model", model); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), w.FormDataContentType(), nil
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestParseForm|TestRender' -race -count=1 -v
+```
+
+Expected: PASS, all seven.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing calls `ParseForm` yet; Task 22 is its only user.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/exec/multipart.go internal/exec/multipart_test.go
+git commit -m "feat(exec): buffer and re-render a multipart upload"
+```
+
+---
