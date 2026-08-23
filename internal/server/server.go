@@ -18,9 +18,11 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	bedrockadapter "github.com/darkraise/darkrouter/internal/adapter/bedrock"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/admin"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -115,12 +117,18 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Timeout:  cfg.Catalog.SyncTimeout,
 	})
 
+	// Static styles need nothing here; the manager serves them by returning a
+	// nil authorizer. Its collaborators arrive as the OAuth tasks land.
+	authManager := auth.NewManager(auth.Deps{})
+
 	ex := exec.New(cfgStore, src, map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),
 		"gemini":       geminiadapter.New(),
+		"bedrock":      bedrockadapter.New(),
 	}, exec.Deps{
 		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
+		Auth: authManager,
 	})
 
 	// The dashboard is always mounted. A missing password hash closes it — the
