@@ -108,10 +108,6 @@ func (m *Manager) For(ctx context.Context, t Target, c Credential) (Authorizer, 
 // Placeholders replaced in Tasks 3, 8 and 14. Returning the unsupported error
 // rather than nil keeps a half-wired build honest: a provider configured for a
 // strategy this commit does not have fails at resolution, naming the style.
-func (m *Manager) sigv4(context.Context, Target, Credential) (Authorizer, error) {
-	return nil, fmt.Errorf("%w: %s", ErrUnsupportedStyle, StyleSigV4)
-}
-
 func (m *Manager) gcpSA(context.Context, Target, Credential) (Authorizer, error) {
 	return nil, fmt.Errorf("%w: %s", ErrUnsupportedStyle, StyleGCPSA)
 }
