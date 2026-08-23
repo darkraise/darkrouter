@@ -18,6 +18,10 @@ type Credential struct {
 	ID      string
 	Secret  string
 	Enabled bool
+
+	// Kind is static, sigv4, gcp_sa or oauth. It says how to read Secret: a
+	// bare key, a service-account document, or a marshalled token.
+	Kind string
 }
 
 type Provider struct {
@@ -39,6 +43,13 @@ type Provider struct {
 
 	Priority int
 	Models   []string
+
+	// Region, Project and Location are the endpoint properties bedrock and
+	// vertex need. They have been columns on providers since migration 0001
+	// and, until phase 8, nothing read them.
+	Region   string
+	Project  string
+	Location string
 }
 
 type Source interface {
