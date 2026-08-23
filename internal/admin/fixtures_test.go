@@ -14,6 +14,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -101,4 +102,34 @@ func seedProviderWithKey(t *testing.T, s *Server, cookie *http.Cookie, token, id
 		t.Fatal(err)
 	}
 	return created.ID
+}
+
+// catalogFixture is the four-model catalog the catalog tests read: one model on
+// two providers, one with known capabilities, one with guessed ones, and one
+// serving embeddings.
+func catalogFixture() *catalog.Store {
+	c := &catalog.Store{}
+	c.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "a", ModelID: "shared-model", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, ContextWindow: 128000,
+			Capabilities: catalog.Capabilities{Tools: true, Known: true}},
+		{ProviderID: "b", ModelID: "shared-model", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, ContextWindow: 128000,
+			Capabilities: catalog.Capabilities{Tools: true, Known: true}},
+		{ProviderID: "a", ModelID: "known-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Capabilities: catalog.Capabilities{Known: true}},
+		{ProviderID: "c", ModelID: "guessed-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+			Capabilities: catalog.Capabilities{Known: false}},
+	}, []string{"a", "b", "c"}))
+	return c
+}
+
+// testServerWithCatalog is testServerFull carrying catalogFixture.
+func testServerWithCatalog(t *testing.T, aliases string) (*Server, *store.DB) {
+	t.Helper()
+	s, db := testServerFullWithAliases(t, aliases)
+	s.deps.Catalog = catalogFixture()
+	return s, db
 }
