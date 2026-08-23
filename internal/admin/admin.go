@@ -68,6 +68,12 @@ type Server struct {
 	csrf   *CSRF
 	mux    *http.ServeMux
 	probes probeLocks
+
+	// listeners are the temporary loopback servers receiving OAuth redirects,
+	// keyed by provider so a second flow replaces the first rather than failing
+	// to bind a port the first still holds.
+	listenerMu sync.Mutex
+	listeners  map[string]*redirectListener
 }
 
 // New builds the admin server and sweeps expired sessions.
@@ -116,6 +122,9 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("POST /api/providers/{id}/oauth/start", s.requireCSRF(s.handleOAuthStart))
 	s.mux.HandleFunc("POST /api/providers/{id}/oauth/complete", s.requireCSRF(s.handleOAuthComplete))
+	// requireSession rather than requireCSRF: a top-level navigation carries no
+	// header to check. State does that work — see handleOAuthCallback.
+	s.mux.HandleFunc("GET /api/oauth/callback", s.requireSession(s.handleOAuthCallback))
 
 	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
 
