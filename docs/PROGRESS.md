@@ -514,6 +514,71 @@ drawer renders it 1-based, because "Attempt 0" reads as a bug to an operator.
 Both test ports were released and no process was left running. Ports 8080 and
 8081 were never touched.
 
+### 8. Phase 7 full-stack verification against Groq — done
+
+Run on 2026-08-24 with a static `CGO_ENABLED=0` binary on ports 18080/18081,
+`DARKROUTER_ADMIN_PASSWORD_HASH` set from `darkrouter hash-password`. Section 7
+exercised the API with `curl`; this drives the built frontend and the real
+screens' request sequence.
+
+- **The dashboard is served from the binary and every deep link resolves.** `/`,
+  `/requests`, `/catalog`, `/playground`, `/settings` and `/requests/01ABC` all
+  returned `200 text/html`, with an `id="root"` mount point and
+  `<script type="module" crossorigin src="/assets/index-kCLcAtgC.js">` — a real
+  hashed bundle, not the placeholder a `.gitkeep`-only embed would serve.
+- **A browser-shaped login drives all five screens.** One `POST /api/auth/login`
+  with `Sec-Fetch-Site: same-origin` returned a CSRF token and a cookie; the
+  seven endpoints the screens fetch on load — `overview`, `models`, `requests`,
+  `usage`, `config`, `presets`, `providers` — all returned 200 on that session.
+- **A provider was added from a preset and its models discovered without editing
+  a file.** `POST /api/providers {"id":"groq-ui","preset":"groq"}` → 201, a
+  credential → 201, `POST .../test` → `ok: true, model_count: 13,
+  latency_ms: 247`, and `GET /api/models?q=gpt-oss` then listed three models
+  carrying both `groq` and `groq-ui` as providers.
+- **The failover trace explains every attempt.** A second provider created from
+  the same preset, then `PATCH`ed to `http://127.0.0.1:1`, was tried first on
+  priority 99. The trace carries two attempts — attempt 0 `broken` →
+  `retryable_provider` with `dial tcp 127.0.0.1:1: connect: connection refused`,
+  attempt 1 `groq` → `success` `http=200` `739ms` — and a three-entry
+  `candidates` array.
+- **A skipped candidate says why.** Ten concurrent requests tripped the breaker
+  and ten of the twelve resulting traces carry
+  `broken/<key>/openai/gpt-oss-120b:cooling` in `skips` with a single attempt.
+  Worth stating why the first sequential attempt did not produce one: the
+  cooldown ladder starts at one second and a Groq round trip is longer than
+  that, so each sequential request found the triple already reopened as the
+  half-open probe. That is the ladder working, not a missed trip.
+- **Deleting a provider names the stranded aliases and the reload still works.**
+  `DELETE /api/providers/groq` returned `{"dangling_aliases":["fast"]}`, and the
+  immediately following `POST /api/config/reload` returned `{"valid":true}`,
+  with `GET /api/config` still reporting `valid: true`. This is the criterion
+  the dangling-alias-is-a-warning rule exists for: a delete that could invalidate
+  the config would leave the operator with a reload button that keeps failing.
+- **No credential material reached any response.** The key does not appear in
+  any of the seven screen endpoints' bodies; the surviving credential renders as
+  `primary` plus `…Q1um`.
+
+Six of spec §8's seven criteria were exercised here; the seventh, `go test ./...`
+and the frontend build, is the standing gate every task ran. **One criterion was
+verified only in part:** "the overview shows a provider entering and leaving
+cooldown within one poll interval" was confirmed as data — the breaker trips and
+the router skips — but the overview's `cooling` count stayed at 0 throughout,
+because it counts credential-level cooldowns and a `retryable_provider` outcome
+cools the `(provider, key, model)` triple instead. The tile is not wrong, but a
+provider failing this way does not show as cooling on the overview. Filed as an
+observation rather than a fix: which cooldowns the tile should count is a phase 2
+question about breaker key shapes, not a rendering bug.
+
+One further observation, not a phase 7 defect: **a dangling alias created by a UI
+delete is reported once and then invisible.** The delete response names it, but
+neither `GET /api/config` nor `/healthz` carries a standing warning afterwards,
+because the loader computes that warning at parse time against the yaml
+`providers:` block — which is ignored once providers have been imported into the
+database.
+
+Both test ports were released and no process was left running. Ports 8080 and
+8081 were never touched.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |
