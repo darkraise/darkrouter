@@ -1,0 +1,19 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Say nothing.",
+          "type": "text"
+        },
+        {
+          "text": "Now say something.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

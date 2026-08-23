@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Capital of Norway?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "system": [
+    {
+      "text": "Answer in one word."
+    }
+  ]
+}

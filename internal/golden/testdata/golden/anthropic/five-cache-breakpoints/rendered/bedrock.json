@@ -1,0 +1,27 @@
+{
+  "inferenceConfig": {
+    "maxTokens": 1024
+  },
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "one"
+        },
+        {
+          "text": "two"
+        },
+        {
+          "text": "three"
+        },
+        {
+          "text": "four"
+        },
+        {
+          "text": "five"
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

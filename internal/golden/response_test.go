@@ -38,6 +38,11 @@ func responseCaseDirs(t *testing.T, kind string) []string {
 	t.Helper()
 	root := filepath.Join("testdata", "golden", "responses", kind)
 	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		// A kind with no response fixtures. TestEveryKindHasResponseFixtures
+		// is what stops that from being an accident.
+		return nil
+	}
 	if err != nil {
 		t.Fatalf("read %s: %v", root, err)
 	}

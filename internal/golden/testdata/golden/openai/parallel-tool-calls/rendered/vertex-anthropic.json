@@ -1,0 +1,79 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Oslo and Bergen?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "id": "call_a",
+          "input": {
+            "city": "Oslo"
+          },
+          "name": "lookup",
+          "type": "tool_use"
+        },
+        {
+          "id": "call_b",
+          "input": {
+            "city": "Bergen"
+          },
+          "name": "lookup",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "clear",
+              "type": "text"
+            }
+          ],
+          "tool_use_id": "call_a",
+          "type": "tool_result"
+        },
+        {
+          "content": [
+            {
+              "text": "rain",
+              "type": "text"
+            }
+          ],
+          "tool_use_id": "call_b",
+          "type": "tool_result"
+        },
+        {
+          "text": "And tomorrow?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "tools": [
+    {
+      "description": "weather",
+      "input_schema": {
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "lookup"
+    }
+  ]
+}

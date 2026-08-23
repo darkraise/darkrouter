@@ -1,0 +1,109 @@
+[
+  {
+    "Type": "message_start",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "msg_v",
+    "Model": "claude-sonnet-4-5",
+    "Warnings": null
+  },
+  {
+    "Type": "message_delta",
+    "Index": 0,
+    "Delta": null,
+    "Usage": {
+      "InputTokens": 7,
+      "OutputTokens": 0,
+      "CacheReadTokens": 0,
+      "CacheWriteTokens": 0,
+      "ReasoningTokens": 0,
+      "Estimated": false
+    },
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_start",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "From Anthropic.",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_stop",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "message_delta",
+    "Index": 0,
+    "Delta": null,
+    "Usage": {
+      "InputTokens": 7,
+      "OutputTokens": 4,
+      "CacheReadTokens": 0,
+      "CacheWriteTokens": 0,
+      "ReasoningTokens": 0,
+      "Estimated": false
+    },
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "message_stop",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "end_turn",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  }
+]

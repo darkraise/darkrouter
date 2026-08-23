@@ -1,0 +1,60 @@
+[
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "From "
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": ""
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "Google."
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "modelVersion": ""
+    }
+  },
+  {
+    "data": {
+      "candidates": [
+        {
+          "content": {
+            "parts": [],
+            "role": "model"
+          },
+          "finishReason": "STOP",
+          "index": 0
+        }
+      ],
+      "modelVersion": "",
+      "usageMetadata": {
+        "cachedContentTokenCount": 0,
+        "candidatesTokenCount": 3,
+        "promptTokenCount": 7,
+        "thoughtsTokenCount": 0,
+        "totalTokenCount": 10
+      }
+    }
+  }
+]

@@ -1,0 +1,93 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Oslo and Bergen?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "toolUse": {
+            "input": {
+              "city": "Oslo"
+            },
+            "name": "lookup",
+            "toolUseId": "call_a"
+          }
+        },
+        {
+          "toolUse": {
+            "input": {
+              "city": "Bergen"
+            },
+            "name": "lookup",
+            "toolUseId": "call_b"
+          }
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "toolResult": {
+            "content": [
+              {
+                "text": "clear"
+              }
+            ],
+            "toolUseId": "call_a"
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "toolResult": {
+            "content": [
+              {
+                "text": "rain"
+              }
+            ],
+            "toolUseId": "call_b"
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "And tomorrow?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "description": "weather",
+          "inputSchema": {
+            "json": {
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "name": "lookup"
+        }
+      }
+    ]
+  }
+}

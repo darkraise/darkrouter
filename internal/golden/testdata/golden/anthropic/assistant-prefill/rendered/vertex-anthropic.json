@@ -1,0 +1,24 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Return JSON only.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "{",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    }
+  ]
+}
