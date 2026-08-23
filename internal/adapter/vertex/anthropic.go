@@ -60,7 +60,7 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 	if req.Stream {
 		method = ":streamRawPredict"
 	}
-	endpoint := EndpointFor(t.Project, t.Location) + "/" + PublisherAnthropic +
+	endpoint := baseFor(t) + "/" + PublisherAnthropic +
 		"/models/" + escapePathSegment(t.Model) + method
 
 	out, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
