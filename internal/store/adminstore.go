@@ -88,6 +88,9 @@ type ProviderRow struct {
 	Enabled   bool
 	Region    string
 	Project   string
+	// Location is Vertex's regional endpoint. It is set at creation and not
+	// patchable: changing it moves every catalogued model to a different host.
+	Location string
 }
 
 // ProviderPatch is a partial update. Every field is a pointer because a partial
@@ -115,10 +118,10 @@ func (d *DB) CreateProvider(ctx context.Context, p ProviderRow) error {
 	if _, err := d.Write.ExecContext(ctx,
 		`INSERT INTO providers
 		   (id, name, preset, kind, base_url, auth_style, priority, enabled,
-		    region, project, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    region, project, location, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Preset, p.Kind, p.BaseURL, p.AuthStyle,
-		p.Priority, enabled, p.Region, p.Project, time.Now().UnixMilli()); err != nil {
+		p.Priority, enabled, p.Region, p.Project, p.Location, time.Now().UnixMilli()); err != nil {
 		return fmt.Errorf("create provider %q: %w", p.ID, err)
 	}
 	return nil
@@ -225,7 +228,7 @@ func (d *DB) DeleteCredential(ctx context.Context, providerID, keyID string) err
 func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT id, name, preset, kind, base_url, auth_style, priority, enabled,
-		        region, project
+		        region, project, location
 		   FROM providers ORDER BY priority DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
@@ -237,7 +240,7 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 		var p ProviderRow
 		var enabled int
 		if err := rows.Scan(&p.ID, &p.Name, &p.Preset, &p.Kind, &p.BaseURL,
-			&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project); err != nil {
+			&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project, &p.Location); err != nil {
 			return nil, fmt.Errorf("list providers: %w", err)
 		}
 		p.Enabled = enabled != 0

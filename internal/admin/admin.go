@@ -55,12 +55,23 @@ type Deps struct {
 	// OAuth routes, which is what every test that does not exercise them wants.
 	Flows *auth.FlowStore
 
-	// HTTP is the client used for token exchange. Nil uses http.DefaultClient.
+	// HTTP is the client used for token exchange and credential probes. Nil
+	// uses http.DefaultClient.
 	HTTP *http.Client
+
+	// Auth resolves a non-static credential into an authorizer, so the probe
+	// can exercise a signed or subscription credential the way a request does.
+	Auth AuthResolver
 
 	// Dev, when non-empty, is the Vite dev server to reverse-proxy unmatched
 	// paths to. It is empty in production.
 	Dev string
+}
+
+// AuthResolver mirrors exec.AuthResolver, declared here so a test can hand over
+// a fixed authorizer without constructing a signer.
+type AuthResolver interface {
+	For(ctx context.Context, t auth.Target, c auth.Credential) (auth.Authorizer, error)
 }
 
 type Server struct {

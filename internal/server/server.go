@@ -173,6 +173,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Presets: catalog.Embedded(), Exec: ex,
 		Warnings: startupWarnings,
 		Flows:    flows,
+		Auth:     authManager,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)

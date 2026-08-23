@@ -99,15 +99,23 @@ func (s *Server) cooling(providerID, keyID string) bool {
 }
 
 type createProviderBody struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Preset   string `json:"preset"`
-	Kind     string `json:"kind"`
-	BaseURL  string `json:"base_url"`
-	Priority int    `json:"priority"`
-	Enabled  *bool  `json:"enabled"`
-	Region   string `json:"region"`
-	Project  string `json:"project"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Preset  string `json:"preset"`
+	Kind    string `json:"kind"`
+	BaseURL string `json:"base_url"`
+	// AuthStyle overrides the preset's. Without it a provider created for a
+	// kind whose preset this build does not ship falls back to bearer, and a
+	// signed credential is never signed.
+	AuthStyle string `json:"auth_style"`
+	Priority  int    `json:"priority"`
+	Enabled   *bool  `json:"enabled"`
+	Region    string `json:"region"`
+	Project   string `json:"project"`
+	// Location is set at creation only: changing it moves every catalogued
+	// model to a different endpoint, which is a new provider rather than an
+	// edit to this one.
+	Location string `json:"location"`
 }
 
 func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
@@ -123,8 +131,9 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 
 	row := store.ProviderRow{
 		ID: body.ID, Name: body.Name, Preset: body.Preset,
-		Kind: body.Kind, BaseURL: body.BaseURL, Priority: body.Priority,
-		Region: body.Region, Project: body.Project,
+		Kind: body.Kind, BaseURL: body.BaseURL, AuthStyle: body.AuthStyle,
+		Priority: body.Priority,
+		Region:   body.Region, Project: body.Project, Location: body.Location,
 		Enabled: body.Enabled == nil || *body.Enabled,
 	}
 	// From a preset the operator supplies an id and a key and nothing else,
@@ -146,7 +155,9 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		if row.Name == "" {
 			row.Name = p.Name
 		}
-		row.AuthStyle = p.Auth.Style
+		if row.AuthStyle == "" {
+			row.AuthStyle = p.Auth.Style
+		}
 	}
 	if row.Kind == "" || row.BaseURL == "" {
 		writeError(w, http.StatusBadRequest,
