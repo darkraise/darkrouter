@@ -41,5 +41,7 @@ phase and every later phase is a redeploy rather than a big-bang integration.
 
 ## Open decisions
 
-One remains, recorded in the findings ledger §2.3: the rerank wire shape. The specs currently adopt
-Cohere v2 with a preset-declared path. Revisit before phase 5 if the provider mix argues otherwise.
+None. The last one — the rerank wire shape, findings ledger §2.3 — was settled in phase 5: exactly
+one shipped preset declares a `rerank` surface, `cohere`, and neither Jina nor Voyage is a preset at
+all. Cohere v2 is therefore not merely the recommendation but the only shape any shipped provider
+serves, at the path its preset declares. No revisit is planned.

@@ -28,6 +28,13 @@ aliases:
   fast:
     - groq/openai/gpt-oss-120b
 
+  # An embedding alias must list the SAME model across DIFFERENT providers.
+  # Two models produce vectors in different vector spaces, so a failover to a
+  # different model corrupts an index and nothing in the response says so.
+  # embed:
+  #   - openai/text-embedding-3-small
+  #   - azure-openai/text-embedding-3-small
+
 policy:
   cooldown:
     trip_after: 3
