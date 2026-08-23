@@ -6,6 +6,7 @@ import { themeConfig } from "./theme.config"
 import { api, onUnauthorized, setCsrfToken } from "./lib/api"
 import { ApiError } from "./lib/api"
 import { LoginScreen } from "./routes/login"
+import { OverviewScreen } from "./routes/overview"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,7 +69,7 @@ function Shell() {
       ]}
       showThemeSwitcher
     >
-      <div className="p-6" />
+      <OverviewScreen />
     </SidebarLayout>
   )
 }
