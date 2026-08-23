@@ -40,6 +40,11 @@ openai:
 groq:
   models_dev_id: groq
   free_tier: true
+  # Groq serves /v1/audio/transcriptions (whisper-large-v3) and
+  # /v1/audio/speech (the playai-tts voices) on the same OpenAI-compatible base
+  # URL. It serves no embeddings, images, rerank or moderations endpoint, and
+  # the router reports that honestly rather than being told otherwise here.
+  surfaces: [llm, stt, tts]
 
 cohere:
   models_dev_id: cohere
@@ -73,9 +78,28 @@ perplexity:
 
 together:
   models_dev_id: togetherai
+  surfaces: [llm, embedding, image]
+
+deepinfra:
+  models_dev_id: deepinfra
+  surfaces: [llm, embedding]
+
+voyage:
+  name: Voyage AI
+  kind: openaicompat
+  base_url: https://api.voyageai.com/v1
+  auth:
+    style: bearer
+  # Embeddings only. Voyage serves a rerank endpoint too, but its shape is not
+  # Cohere v2, and spec §3.1 excludes a deviating provider from the surface
+  # rather than special-casing it with quirks.
+  surfaces: [embedding]
+  no_models_dev: true
+  website: https://docs.voyageai.com
 
 fireworks:
   models_dev_id: fireworks-ai
+  surfaces: [llm, embedding, image]
   # Fireworks prefixes every id with an account path that no other source uses.
   model_aliases:
     accounts/fireworks/models/llama-v3p3-70b-instruct: llama-3.3-70b
