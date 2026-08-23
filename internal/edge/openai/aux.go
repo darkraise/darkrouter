@@ -23,16 +23,29 @@ type wireEmbeddingRequest struct {
 	User           string          `json:"user"`
 }
 
-func ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error) {
+// readCappedBody reads the inbound body under the configured cap, reading one
+// byte past it so "exactly at the cap" is not rejected.
+func readCappedBody(r *http.Request, maxBody int64) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(body)) > maxBody {
+		// Typed rather than a bare error: an oversized JSON body asks the
+		// client for the same thing an oversized upload does, and only the
+		// type can carry that distinction out to the response status.
 		return nil, &ir.Error{
 			Type:    ir.ErrPayloadTooLarge,
 			Message: fmt.Sprintf("request body exceeds %d bytes", maxBody),
 		}
+	}
+	return body, nil
+}
+
+func ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
 	}
 	var w wireEmbeddingRequest
 	if err := json.Unmarshal(body, &w); err != nil {
@@ -167,3 +180,95 @@ func (d *Dialect) WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingRespon
 }
 
 var _ edge.EmbeddingDialect = (*Dialect)(nil)
+
+type wireModerationRequest struct {
+	Model string          `json:"model"`
+	Input json.RawMessage `json:"input"`
+}
+
+func ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireModerationRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	texts, err := parseTextInput(w.Input)
+	if err != nil {
+		return nil, err
+	}
+	return &ir.ModerationRequest{Model: w.Model, Input: texts}, nil
+}
+
+// parseTextInput reads a bare string or an array of strings.
+//
+// omni-moderation-latest also accepts an array of content-part objects for
+// image moderation. That is refused rather than half-supported: accepting it
+// while dropping the image parts would moderate the text and report the whole
+// input clean.
+func parseTextInput(raw json.RawMessage) ([]string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, errors.New("input is required")
+	}
+	switch trimmed[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return nil, fmt.Errorf("input: %w", err)
+		}
+		return []string{s}, nil
+	case '[':
+		var out []string
+		if err := json.Unmarshal(trimmed, &out); err != nil {
+			return nil, fmt.Errorf("input must be text or an array of text: %w", err)
+		}
+		if len(out) == 0 {
+			return nil, errors.New("input is empty")
+		}
+		return out, nil
+	default:
+		return nil, errors.New("input must be text or an array of text")
+	}
+}
+
+func WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error {
+	results := make([]any, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		cats := r.Categories
+		if cats == nil {
+			cats = map[string]bool{}
+		}
+		scores := r.Scores
+		if scores == nil {
+			scores = map[string]float64{}
+		}
+		row := map[string]any{
+			"flagged":         r.Flagged,
+			"categories":      cats,
+			"category_scores": scores,
+		}
+		// Omitted when the provider sent none: the older moderation models do
+		// not report it and an empty object would claim they did.
+		if len(r.AppliedInputTypes) > 0 {
+			row["category_applied_input_types"] = r.AppliedInputTypes
+		}
+		results = append(results, row)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(map[string]any{
+		"id": resp.ID, "model": resp.Model, "results": results,
+	})
+}
+
+func (d *Dialect) ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error) {
+	return ParseModeration(r, maxBody)
+}
+
+func (d *Dialect) WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error {
+	return WriteModeration(w, resp)
+}
+
+var _ edge.ModerationDialect = (*Dialect)(nil)

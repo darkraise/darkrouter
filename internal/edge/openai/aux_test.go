@@ -169,3 +169,72 @@ func TestDialectServesTheEmbeddingSurface(t *testing.T) {
 		WriteEmbedding(http.ResponseWriter, *ir.EmbeddingResponse) error
 	} = New()
 }
+
+func TestParseModerationNormalizesBothInputShapes(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want []string
+	}{
+		{`{"model":"m","input":"hello"}`, []string{"hello"}},
+		{`{"model":"m","input":["a","b"]}`, []string{"a", "b"}},
+	} {
+		req, err := ParseModeration(httptest.NewRequest("POST", "/v1/moderations",
+			strings.NewReader(tc.body)), 1<<20)
+		if err != nil {
+			t.Fatalf("ParseModeration(%s): %v", tc.body, err)
+		}
+		if len(req.Input) != len(tc.want) || req.Input[0] != tc.want[0] {
+			t.Errorf("ParseModeration(%s).Input = %v, want %v", tc.body, req.Input, tc.want)
+		}
+	}
+}
+
+func TestParseModerationRejectsContentParts(t *testing.T) {
+	// Accepting this while dropping the image parts would moderate the text
+	// and report the whole input clean, which is worse than refusing it.
+	_, err := ParseModeration(httptest.NewRequest("POST", "/v1/moderations",
+		strings.NewReader(`{"model":"m","input":[{"type":"image_url","image_url":{"url":"x"}}]}`)), 1<<20)
+	if err == nil {
+		t.Fatal("a content-part input was accepted")
+	}
+	if !strings.Contains(err.Error(), "text") {
+		t.Errorf("err = %v; it must say what is supported", err)
+	}
+}
+
+func TestWriteModerationCarriesEveryCategory(t *testing.T) {
+	// The category list is provider-defined and grows. A dropped category on a
+	// moderation endpoint is a safety signal the client never sees.
+	w := httptest.NewRecorder()
+	if err := WriteModeration(w, &ir.ModerationResponse{
+		ID: "modr-1", Model: "omni-moderation-latest",
+		Results: []ir.ModerationResult{{
+			Flagged:    true,
+			Categories: map[string]bool{"harassment": true, "a-category-invented-later": false},
+			Scores:     map[string]float64{"harassment": 0.91, "a-category-invented-later": 0.01},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Results []struct {
+			Flagged    bool               `json:"flagged"`
+			Categories map[string]bool    `json:"categories"`
+			Scores     map[string]float64 `json:"category_scores"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != "modr-1" || len(body.Results) != 1 || !body.Results[0].Flagged {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if _, ok := body.Results[0].Categories["a-category-invented-later"]; !ok {
+		t.Errorf("categories = %v; an unknown category was dropped", body.Results[0].Categories)
+	}
+	if body.Results[0].Scores["harassment"] != 0.91 {
+		t.Errorf("scores = %v", body.Results[0].Scores)
+	}
+}

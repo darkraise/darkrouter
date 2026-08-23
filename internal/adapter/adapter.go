@@ -122,3 +122,10 @@ type Embedder interface {
 	// ParseEmbedding takes ownership of resp.Body and always closes it.
 	ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, error)
 }
+
+// Moderator is implemented by an adapter serving the moderation surface.
+type Moderator interface {
+	BuildModeration(ctx context.Context, t *Target, req *ir.ModerationRequest) (*http.Request, []ir.Warning, error)
+	// ParseModeration takes ownership of resp.Body and always closes it.
+	ParseModeration(resp *http.Response) (*ir.ModerationResponse, error)
+}

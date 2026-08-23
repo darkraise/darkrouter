@@ -44,6 +44,14 @@ type EmbeddingDialect interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// ModerationDialect is the inbound wire form of the moderation surface.
+type ModerationDialect interface {
+	Name() string
+	ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error)
+	WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
 // CountWriter is implemented by a dialect with a token-counting endpoint.
 type CountWriter interface {
 	Dialect
