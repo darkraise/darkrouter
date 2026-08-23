@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"iter"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -899,6 +901,120 @@ providers:
 	for _, s := range rec.only(t).Warnings {
 		if strings.Contains(s, "capabilities") {
 			t.Errorf("warned about a model models.dev vouched for: %v", rec.only(t).Warnings)
+		}
+	}
+}
+
+func TestEmptyStreamSucceedsWithoutFailover(t *testing.T) {
+	// A 200 SSE that ends with no content-bearing event is a legitimate empty
+	// completion, not a failure: exec.go flushes the buffer, succeeds, and does
+	// not fail over. Nothing pinned that, and a refactor moving the
+	// stream-ended-cleanly break across the op boundary would silently turn
+	// every instantly-stopping model into a full-chain retry.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// A well-formed stream carrying no delta.
+		_, _ = w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: a
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+  - id: b
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("upstream called %d times; an empty stream must not fail over", got)
+	}
+	if got := rec.only(t); got.Status != "success" {
+		t.Errorf("status = %q, want success", got.Status)
+	}
+	// The buffered events still reach the client.
+	if !strings.Contains(w.Body.String(), "finish_reason") {
+		t.Errorf("the buffered stream was not flushed: %q", w.Body.String())
+	}
+}
+
+func TestAnAbandonedAttemptsWarningsDoNotReachTheRecord(t *testing.T) {
+	// exec.go assigns warnings per served attempt rather than appending across
+	// the chain. A loop-level accumulator is the natural refactor mistake, and
+	// it would leak a dropped-field warning from an attempt nobody was served
+	// into the record for the one they were.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The first provider fails pre-commit; the second serves.
+		if hits.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	rec := &captureLogger{}
+	// The anthropic adapter warns about a missing max_tokens; the openaicompat
+	// one does not. Attempt 1 therefore produces a warning and is abandoned.
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: first
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    priority: 10
+    models: [m]
+  - id: second
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    priority: 1
+    models: [m]
+`, map[string]adapter.Adapter{
+		"anthropic":    anthropicadapter.New(),
+		"openaicompat": openaicompat.New(),
+	}, Deps{Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	got := rec.only(t)
+	if got.FinalProviderID != "second" {
+		t.Fatalf("served by %q, want second", got.FinalProviderID)
+	}
+	for _, warn := range got.Warnings {
+		if strings.Contains(warn, "max_tokens") {
+			t.Errorf("warnings = %v; an abandoned attempt's warning reached the served record", got.Warnings)
 		}
 	}
 }
