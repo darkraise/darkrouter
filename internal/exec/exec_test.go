@@ -26,6 +26,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -1097,5 +1098,157 @@ providers:
 	}
 	if len(got.Skips) == 0 {
 		t.Error("the skips explaining the empty candidate list were discarded")
+	}
+}
+
+// probeOp is a SurfaceOp that records what the loop handed it. It exists to
+// pin the contract between the loop and an op, which no chat test can: chat is
+// the one implementation whose behavior the rest of the suite already fixes.
+type probeOp struct {
+	q         router.Query
+	builds    int
+	responds  int
+	lastInfo  adapter.ModelInfo
+	buildWarn string
+	onRespond func(cw *CommitWriter) (adapter.Outcome, *ir.Error)
+}
+
+func (p *probeOp) Query() router.Query { return p.q }
+
+func (p *probeOp) Dialect() string { return "probe" }
+
+func (p *probeOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	p.builds++
+	p.lastInfo = tgt.Info
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(tgt.BaseURL, "/")+"/probe",
+		strings.NewReader(`{}`))
+	if err != nil {
+		return nil, nil, err
+	}
+	var warns []ir.Warning
+	if p.buildWarn != "" {
+		warns = append(warns, ir.Warning{Field: p.buildWarn, Target: "probe", Reason: "test"})
+	}
+	return req, warns, nil
+}
+
+func (p *probeOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	p.responds++
+	defer resp.Body.Close()
+	if p.onRespond != nil {
+		return p.onRespond(cw)
+	}
+	_, _ = cw.Write([]byte("ok"))
+	return adapter.OutcomeSuccess, nil
+}
+
+func (p *probeOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = w.Write([]byte(e.Message))
+	return nil
+}
+
+// executorForOp builds an executor over one provider of the "probe" kind. The
+// op renders its own request, so the adapter registered under that kind is
+// there only to satisfy adapterFor.
+func executorForOp(t *testing.T, url string, cat *catalog.Store) (*Executor, *captureLogger) {
+	t.Helper()
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: probe
+    base_url: `+url+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	return e, rec
+}
+
+// executorForOpWithTwoProviders gives a retry somewhere to go.
+func executorForOpWithTwoProviders(t *testing.T, url string) (*Executor, *captureLogger) {
+	t.Helper()
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: probe
+    base_url: `+url+`
+    api_key: sk
+    priority: 10
+    models: [m]
+  - id: q
+    kind: probe
+    base_url: `+url+`
+    api_key: sk
+    priority: 1
+    models: [m]
+`, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Log: rec})
+	return e, rec
+}
+
+func TestTheLoopGivesAnOpTheCatalogFacts(t *testing.T) {
+	// The loop owns Target construction, so an op must receive the catalog's
+	// view without doing its own lookup.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM}, MaxOutputTokens: 4242,
+	}}, []string{"p"}))
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceLLM}}
+	e, rec := executorForOp(t, upstream.URL, cat)
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if op.builds != 1 || op.responds != 1 {
+		t.Fatalf("builds = %d, responds = %d, want 1 and 1", op.builds, op.responds)
+	}
+	if op.lastInfo.MaxOutputTokens != 4242 {
+		t.Errorf("Info = %+v; the loop did not supply the catalog facts", op.lastInfo)
+	}
+	if got := rec.only(t); got.Status != "success" {
+		t.Errorf("status = %q", got.Status)
+	}
+}
+
+func TestAnOpThatCommittedCannotRestartTheChain(t *testing.T) {
+	// The op detects commit; the loop enforces it. An op reporting a retryable
+	// outcome after bytes went out must not produce a second attempt, or a
+	// client would receive two half-responses concatenated.
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	op := &probeOp{
+		q: router.Query{Model: "m", Surface: ir.SurfaceLLM},
+		onRespond: func(cw *CommitWriter) (adapter.Outcome, *ir.Error) {
+			_, _ = cw.Write([]byte("partial"))
+			// A lie the loop must not believe.
+			return adapter.OutcomeRetryableProvider, &ir.Error{Type: ir.ErrAPI, Message: "boom"}
+		},
+	}
+	e, _ := executorForOpWithTwoProviders(t, upstream.URL)
+	w := httptest.NewRecorder()
+	e.RunSurface(w, httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if got := hits.Load(); got != 1 {
+		t.Errorf("upstream called %d times; a committed attempt restarted the chain", got)
+	}
+	if !strings.Contains(w.Body.String(), "partial") {
+		t.Errorf("body = %q; the committed bytes were lost", w.Body.String())
 	}
 }
