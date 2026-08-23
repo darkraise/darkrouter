@@ -4,12 +4,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
 )
@@ -167,4 +169,25 @@ providers:
 	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()},
 		Deps{Catalog: cat, Log: rec})
 	return e, rec
+}
+
+func TestAnOversizedAuxBodyReachesTheClientAs413(t *testing.T) {
+	// The type mapping and the parser are each tested in their own package;
+	// this is the seam between them. RunAux used to rewrite every parse failure
+	// as invalid_request, which turned "send a smaller file" into "your request
+	// is malformed" for the one client that can act on the difference.
+	e, rec := executorForOp(t, "http://127.0.0.1:1", nil)
+	e.store.Current().Server.MaxBodyBytes = 16
+
+	w := httptest.NewRecorder()
+	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"m","input":"`+strings.Repeat("x", 200)+`"}`)),
+		openaiedge.New())
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if got := rec.only(t); got.ErrorCode != string(ir.ErrPayloadTooLarge) {
+		t.Errorf("error code = %q; the row must record what the client was told", got.ErrorCode)
+	}
 }

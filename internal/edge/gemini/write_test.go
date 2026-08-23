@@ -2,7 +2,9 @@ package gemini
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -164,5 +166,22 @@ func TestWriteCountUsesTotalTokens(t *testing.T) {
 	}
 	if got["totalTokens"].(float64) != 31 {
 		t.Errorf("body = %v", got)
+	}
+}
+
+func TestAnOversizedPayloadIs413(t *testing.T) {
+	// Same reasoning as Anthropic: google.rpc.Code is a fixed vocabulary, so
+	// the status carries what the code cannot.
+	w := httptest.NewRecorder()
+	if err := WriteError(w, &ir.Error{
+		Type: ir.ErrPayloadTooLarge, Message: "upload exceeds the configured maximum",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "INVALID_ARGUMENT") {
+		t.Errorf("body = %s; the status string must stay in the documented set", w.Body.String())
 	}
 }
