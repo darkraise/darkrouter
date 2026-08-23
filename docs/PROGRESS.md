@@ -12,7 +12,7 @@ Last updated: 2026-08-23
 | 4 — Dialects | ✅ | ✅ | **Complete.** 37 tasks; race-clean, verified live against Groq. |
 | 5 — Auxiliary surfaces | ✅ | ✅ | **Complete.** 34 tasks; race-clean, all seven surfaces served. |
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
-| 7 — Admin API and UI | ✅ | — | Not started |
+| 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | — | Not started |
 | 9 — Passthrough fast path | ✅ | — | Not started |
 
@@ -67,6 +67,60 @@ Two items phase 3 carried forward are done:
 
 Four smaller items are listed at the end of
 `docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
+
+## Closed by phase 7
+
+- **The admin API and dashboard exist.** Nineteen of the twenty-one endpoints
+  spec §4 lists; the two OAuth ones arrive with phase 8.
+- **Sessions survive a restart.** They live in the `sessions` table with a
+  sliding thirty-day expiry and a startup sweep, so a redeploy does not log the
+  operator out mid-task.
+- **CSRF is bound to the session by HMAC**, with an `Origin`/`Sec-Fetch-Site`
+  check beside it. Naive double-submit is defeated by an attacker who can set a
+  cookie for the host, which on a plain-HTTP LAN an active network attacker can.
+- **The proxy port ignoring cookies is now pinned by a test** rather than true by
+  accident.
+- **The request log is keyset-paginated** on `(ts, id)` with the composite and
+  filter indexes that make the promise real, and a cursor carrying a filter hash
+  so one presented under different filters is rejected rather than returning
+  nonsense.
+- **A provider's cooling credentials and cooling triples are both cleared by the
+  test button.** The triple half was written against `Snapshot.Offering`, which
+  answers "which providers serve this model" rather than "which models does this
+  provider serve"; passing it a provider id returned nothing and the triple
+  cooldowns were never cleared. Fixed with a regression test that fails against
+  the old code.
+- **The image builds the dashboard.** A Node stage runs before the Go stage, so
+  a clean checkout produces a binary carrying the real bundle rather than an
+  embedded placeholder — a `go:embed` of a `.gitkeep`-only directory compiles
+  and serves a broken page, which is what the build test now catches.
+
+## Carried forward from phase 7
+
+- **Cost is still never computed**, so the overview's spend tile and the trace
+  drawer's cost field both render an em-dash and say pricing is not wired. The
+  blocker is unchanged from phase 5: `ir.Usage.InputTokens` means different
+  things across adapters.
+- **`capture.bodies` still has no writer**, so the trace drawer's bodies panel
+  always reads "not captured".
+- **The probe's completion fallback is not implemented.** Spec §4.3 allows a
+  one-token completion where a kind has no listing endpoint; every kind that
+  ships today has one, so the fallback returns an explanatory error rather than
+  spending money on a path nothing exercises.
+- **The two OAuth endpoints are absent**, as scheduled: `POST /api/providers/:id/oauth/start`
+  and `GET /api/oauth/callback` arrive with phase 8. The settings screen shows a
+  credential disabled pending reconnection but cannot yet start one.
+- **`PATCH /api/providers/:id` does not accept `region` or `project`.** Spec §4
+  lists them; they are bedrock and vertex fields and neither kind is configurable
+  from the UI until phase 8 ships their credential flows.
+- **The per-provider discovery interval phase 6 filed against the settings screen
+  is still absent.** The screen edits providers, credentials and nothing else;
+  scheduling stays a config concern.
+- **Gemini media inlining still has no UI switch**, which phase 4 filed against
+  this screen. Spec §2 keeps policy in `darkrouter.yaml` and the screen renders
+  it read-only, so the toggle belongs in the file rather than here; the item
+  moves from "phase 7 will add it" to "it is a config key, and one nothing has
+  written yet".
 
 ## Closed by phase 6
 
