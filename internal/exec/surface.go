@@ -104,7 +104,11 @@ func (o *chatOp) Query() router.Query {
 }
 
 func (o *chatOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
-	return ad.BuildRequest(ctx, tgt, o.req)
+	hr, warns, err := ad.BuildRequest(ctx, tgt, o.req)
+	// The inbound parse's losses travel with the outbound ones. Until phase 5
+	// no dialect produced any, so nothing carried them and the responses
+	// parser's dropped reasoning item would have been recorded nowhere.
+	return hr, append(warns, o.req.Warnings...), err
 }
 
 func (o *chatOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
