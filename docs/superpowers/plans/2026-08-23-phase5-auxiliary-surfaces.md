@@ -4349,6 +4349,24 @@ func TestParseModerationKeepsUnknownCategories(t *testing.T) {
 	}
 }
 
+func TestParseModerationKeepsAppliedInputTypes(t *testing.T) {
+	// Without it a client cannot tell a flagged image from flagged text.
+	resp := &http.Response{
+		StatusCode: 200,
+		Body: io.NopCloser(strings.NewReader(`{"id":"m","model":"m","results":[
+		  {"flagged":true,"categories":{"violence":true},"category_scores":{"violence":0.9},
+		   "category_applied_input_types":{"violence":["image"]}}]}`)),
+	}
+	out, err := New().ParseModeration(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.Results[0].AppliedInputTypes["violence"]
+	if len(got) != 1 || got[0] != "image" {
+		t.Errorf("applied input types = %v", out.Results[0].AppliedInputTypes)
+	}
+}
+
 func TestParseModerationRejectsAnEmptyResultSet(t *testing.T) {
 	// A 200 with no results is a provider fault: the client asked about input
 	// it got no verdict on, and returning it as success hides that.
@@ -4414,8 +4432,8 @@ func TestModerationsServeEndToEnd(t *testing.T) {
 	if got.Surface != "moderation" || got.Status != "success" {
 		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
 	}
-	if got.CostMicros != nil {
-		t.Errorf("cost = %v; moderations report no usage and cost must stay NULL", *got.CostMicros)
+	if got.TokensIn != 0 || got.TokensOut != 0 {
+		t.Errorf("tokens = %d/%d; the moderation endpoint reports none", got.TokensIn, got.TokensOut)
 	}
 }
 
@@ -4495,6 +4513,10 @@ type ModerationResult struct {
 	Flagged    bool
 	Categories map[string]bool
 	Scores     map[string]float64
+	// AppliedInputTypes is omni-moderation's per-category record of which
+	// input modality triggered it. Dropping it would leave a client unable to
+	// tell a flagged image from flagged text.
+	AppliedInputTypes map[string][]string
 }
 
 type ModerationResponse struct {
@@ -4601,11 +4623,17 @@ func WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error {
 		if scores == nil {
 			scores = map[string]float64{}
 		}
-		results = append(results, map[string]any{
+		row := map[string]any{
 			"flagged":         r.Flagged,
 			"categories":      cats,
 			"category_scores": scores,
-		})
+		}
+		// Omitted when the provider sent none: the older moderation models do
+		// not report it and an empty object would claim they did.
+		if len(r.AppliedInputTypes) > 0 {
+			row["category_applied_input_types"] = r.AppliedInputTypes
+		}
+		results = append(results, row)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	return json.NewEncoder(w).Encode(map[string]any{
@@ -4695,9 +4723,10 @@ type moderationEnvelope struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Results []struct {
-		Flagged    bool               `json:"flagged"`
-		Categories map[string]bool    `json:"categories"`
-		Scores     map[string]float64 `json:"category_scores"`
+		Flagged    bool                `json:"flagged"`
+		Categories map[string]bool     `json:"categories"`
+		Scores     map[string]float64  `json:"category_scores"`
+		Applied    map[string][]string `json:"category_applied_input_types"`
 	} `json:"results"`
 }
 
@@ -4724,6 +4753,7 @@ func (a *Adapter) ParseModeration(resp *http.Response) (*ir.ModerationResponse, 
 	for _, r := range env.Results {
 		out.Results = append(out.Results, ir.ModerationResult{
 			Flagged: r.Flagged, Categories: r.Categories, Scores: r.Scores,
+			AppliedInputTypes: r.Applied,
 		})
 	}
 	return out, nil
@@ -6171,6 +6201,19 @@ func TestParseImageReadsTheOptionals(t *testing.T) {
 	}
 }
 
+func TestParseImageRejectsStreaming(t *testing.T) {
+	// The op parses a JSON body. Accepting stream:true would fail on the first
+	// SSE event with an error that says nothing useful.
+	_, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"gpt-image-1","prompt":"a cat","stream":true}`)), 1<<20)
+	if err == nil {
+		t.Fatal("a streamed image request was accepted")
+	}
+	if !strings.Contains(err.Error(), "stream") {
+		t.Errorf("err = %v; it must name what is unsupported", err)
+	}
+}
+
 func TestParseImageRejectsAnEmptyPrompt(t *testing.T) {
 	if _, err := ParseImage(httptest.NewRequest("POST", "/v1/images/generations",
 		strings.NewReader(`{"model":"m"}`)), 1<<20); err == nil {
@@ -6297,7 +6340,7 @@ func TestBuildImageOmitsEveryUnsetOptional(t *testing.T) {
 	raw, _ := io.ReadAll(hr.Body)
 	_ = json.Unmarshal(raw, &body)
 	for _, k := range []string{"n", "size", "quality", "style", "response_format",
-		"background", "output_format", "user"} {
+		"background", "output_format", "moderation", "output_compression", "user"} {
 		if _, present := body[k]; present {
 			t.Errorf("an unset %q was sent as %v", k, body[k])
 		}
@@ -6359,6 +6402,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
@@ -6424,8 +6468,37 @@ func TestAnImageCallReportingNoUsageRecordsNone(t *testing.T) {
 	if got.TokensIn != 0 || got.TokensOut != 0 {
 		t.Errorf("tokens = %d/%d; the provider reported none", got.TokensIn, got.TokensOut)
 	}
+	// CostMicros is nil for every surface today — nothing computes cost, and
+	// the reason is recorded as a carried-forward item in Task 33. This is a
+	// guard for when pricing lands: a dall-e call must stay NULL rather than
+	// record a confident zero.
 	if got.CostMicros != nil {
-		t.Errorf("cost = %d; a call with no usage must leave cost NULL", *got.CostMicros)
+		t.Errorf("cost = %d; a call with no reported usage must leave cost NULL", *got.CostMicros)
+	}
+}
+
+func TestImagesFailOverToASecondProvider(t *testing.T) {
+	// Spec §10 requires a failover case per surface.
+	var hits atomic.Int64
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(imageUpstream(true))
+	defer good.Close()
+
+	e, rec := executorForTwo(t, bad.URL, good.URL,
+		catalogPair("bad", "good", "gpt-image-1", ir.SurfaceImage))
+	w := httptest.NewRecorder()
+	e.HandleImages(w, httptest.NewRequest("POST", "/v1/images/generations",
+		strings.NewReader(`{"model":"gpt-image-1","prompt":"a cat"}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK || hits.Load() != 1 {
+		t.Fatalf("status = %d, failing provider hits = %d", w.Code, hits.Load())
+	}
+	if got := rec.only(t); len(got.Attempts) != 2 || got.FinalProviderID != "good" {
+		t.Errorf("attempts = %d, final = %q", len(got.Attempts), got.FinalProviderID)
 	}
 }
 
@@ -6479,7 +6552,12 @@ type ImageRequest struct {
 	ResponseFormat string
 	Background     string
 	OutputFormat   string
-	User           string
+	// Moderation and OutputCompression are gpt-image-1 parameters. They are
+	// carried rather than dropped because a client that set them gets
+	// different images without them, and nothing in the response would say so.
+	Moderation        string
+	OutputCompression int
+	User              string
 }
 
 // ImageCount is what was asked for, recorded on the request row per spec §9.
@@ -6551,9 +6629,12 @@ type wireImageRequest struct {
 	Quality        string `json:"quality"`
 	Style          string `json:"style"`
 	ResponseFormat string `json:"response_format"`
-	Background     string `json:"background"`
-	OutputFormat   string `json:"output_format"`
-	User           string `json:"user"`
+	Background       string `json:"background"`
+	OutputFormat     string `json:"output_format"`
+	Moderation       string `json:"moderation"`
+	OutputCompression *int  `json:"output_compression"`
+	Stream           bool   `json:"stream"`
+	User             string `json:"user"`
 }
 
 func ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
@@ -6568,13 +6649,24 @@ func ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
 	if w.Prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
+	if w.Stream {
+		// gpt-image-1 streams partial images as SSE. The image op parses a JSON
+		// body, so accepting this would fail on the first event with an
+		// unhelpful error; refusing it says what is actually supported.
+		return nil, errors.New(
+			"streamed image generation is not supported; omit stream to receive the finished images")
+	}
 	req := &ir.ImageRequest{
 		Model: w.Model, Prompt: w.Prompt, Size: w.Size, Quality: w.Quality,
 		Style: w.Style, ResponseFormat: w.ResponseFormat,
-		Background: w.Background, OutputFormat: w.OutputFormat, User: w.User,
+		Background: w.Background, OutputFormat: w.OutputFormat,
+		Moderation: w.Moderation, User: w.User,
 	}
 	if w.N != nil {
 		req.N = *w.N
+	}
+	if w.OutputCompression != nil {
+		req.OutputCompression = *w.OutputCompression
 	}
 	return req, nil
 }
@@ -6662,11 +6754,15 @@ func (a *Adapter) BuildImage(ctx context.Context, t *adapter.Target,
 		"response_format": req.ResponseFormat,
 		"background":      req.Background,
 		"output_format":   req.OutputFormat,
+		"moderation":      req.Moderation,
 		"user":            req.User,
 	} {
 		if v != "" {
 			body[k] = v
 		}
+	}
+	if req.OutputCompression > 0 {
+		body["output_compression"] = req.OutputCompression
 	}
 
 	buf, err := json.Marshal(body)
