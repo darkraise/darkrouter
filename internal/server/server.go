@@ -417,6 +417,10 @@ func (s *Server) Run(ctx context.Context) error {
 	defer func() {
 		stopWorkers()
 		workers.Wait()
+		// Temporary OAuth redirect listeners hold a loopback port. Leaving one
+		// bound after the gateway is gone is exactly the leak the operator
+		// notices next time they run the vendor's own CLI.
+		s.adm.Close()
 	}()
 	startWorker := func(name string, fn func(context.Context) error) {
 		workers.Add(1)

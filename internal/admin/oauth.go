@@ -242,11 +242,28 @@ func authConfig(c catalog.OAuth) auth.OAuthConfig {
 	}
 }
 
-// startListener is replaced in Task 13. Until then a localhost preset falls
-// back to the paste path, which spec §5.1 says always works — so this is a
-// degraded flow rather than a broken one.
-func (s *Server) startListener(auth.Flow, int, string, time.Duration) error {
-	return fmt.Errorf("the localhost redirect listener is not available")
+// handleOAuthCallback receives the redirect on the listener path.
+//
+// A state-changing GET, which is normally a mistake. It is unavoidable here:
+// the browser arrives by top-level navigation, so no header can be attached and
+// the CSRF check cannot apply. The session cookie is SameSite=Lax, so it does
+// travel — which is precisely why state must be unguessable, single-use,
+// expiring, and bound to the initiating session. That check is the whole
+// defense against forced account binding.
+func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	code, state, err := parseRedirected(r.URL.String())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	credID, label, account, err := s.completeOAuth(r.Context(), code, state, sessionFrom(r.Context()))
+	if err != nil {
+		writeError(w, statusForOAuth(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"credential_id": credID, "label": label, "account": account,
+	})
 }
 
 func (s *Server) httpClient() *http.Client {
