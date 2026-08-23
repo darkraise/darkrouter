@@ -5362,8 +5362,8 @@ func TestWriteRerankEmitsCohereV2(t *testing.T) {
 	var body struct {
 		ID      string `json:"id"`
 		Results []struct {
-			Index    int      `json:"index"`
-			Score    float64  `json:"relevance_score"`
+			Index    int     `json:"index"`
+			Score    float64 `json:"relevance_score"`
 			Document *struct {
 				Text string `json:"text"`
 			} `json:"document"`
@@ -6622,19 +6622,19 @@ Append to `internal/edge/openai/aux.go`:
 
 ```go
 type wireImageRequest struct {
-	Model          string `json:"model"`
-	Prompt         string `json:"prompt"`
-	N              *int   `json:"n"`
-	Size           string `json:"size"`
-	Quality        string `json:"quality"`
-	Style          string `json:"style"`
-	ResponseFormat string `json:"response_format"`
-	Background       string `json:"background"`
-	OutputFormat     string `json:"output_format"`
-	Moderation       string `json:"moderation"`
-	OutputCompression *int  `json:"output_compression"`
-	Stream           bool   `json:"stream"`
-	User             string `json:"user"`
+	Model             string `json:"model"`
+	Prompt            string `json:"prompt"`
+	N                 *int   `json:"n"`
+	Size              string `json:"size"`
+	Quality           string `json:"quality"`
+	Style             string `json:"style"`
+	ResponseFormat    string `json:"response_format"`
+	Background        string `json:"background"`
+	OutputFormat      string `json:"output_format"`
+	Moderation        string `json:"moderation"`
+	OutputCompression *int   `json:"output_compression"`
+	Stream            bool   `json:"stream"`
+	User              string `json:"user"`
 }
 
 func ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
@@ -11256,7 +11256,7 @@ func TestRequestRowCarriesSurfaceDetail(t *testing.T) {
 	rec := &RequestRecord{
 		ID: "r1", TS: time.Now(), Dialect: "openai", Surface: "embedding",
 		RequestedModel: "e5", Status: "success",
-		SurfaceMeta:    map[string]any{"input_count": 3, "dimensions": 256},
+		SurfaceMeta: map[string]any{"input_count": 3, "dimensions": 256},
 	}
 	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
@@ -11305,7 +11305,7 @@ func TestRequestRowCarriesResponseSizeAndType(t *testing.T) {
 	rec := &RequestRecord{
 		ID: "r3", TS: time.Now(), Dialect: "openai", Surface: "tts",
 		RequestedModel: "tts-1", Status: "success",
-		ResponseBytes:  204800, ResponseContentType: "audio/mpeg",
+		ResponseBytes: 204800, ResponseContentType: "audio/mpeg",
 	}
 	if _, err := w.flush(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
@@ -11330,10 +11330,10 @@ func TestSurfaceDetailIsQueryable(t *testing.T) {
 	if _, err := w.flush(context.Background(), []*RequestRecord{
 		{ID: "a", TS: time.Now(), Dialect: "openai", Surface: "image",
 			RequestedModel: "m", Status: "success",
-			SurfaceMeta:    map[string]any{"image_count": 4}},
+			SurfaceMeta: map[string]any{"image_count": 4}},
 		{ID: "b", TS: time.Now(), Dialect: "openai", Surface: "image",
 			RequestedModel: "m", Status: "success",
-			SurfaceMeta:    map[string]any{"image_count": 1}},
+			SurfaceMeta: map[string]any{"image_count": 1}},
 	}); err != nil {
 		t.Fatal(err)
 	}
