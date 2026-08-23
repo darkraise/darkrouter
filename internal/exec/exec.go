@@ -174,6 +174,22 @@ func modelInfo(cat catalog.Reader, providerID, modelID string) adapter.ModelInfo
 	}
 }
 
+// rerankPath returns the provider's preset-declared rerank path, or "" when it
+// has no preset or the preset declares none. Spec §3.1: providers expose rerank
+// at differing URLs, so the path is preset data rather than an adapter
+// constant.
+func rerankPath(preset string) string {
+	if preset == "" {
+		return ""
+	}
+	p, ok := catalog.Embedded()[preset]
+	if !ok {
+		return ""
+	}
+	v, _ := p.QuirkValue("rerank-path")
+	return v
+}
+
 // catalogFor returns the live snapshot, or phase 3's provider-derived view
 // when no catalog is wired. The fallback is what keeps a zero Deps usable.
 func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
@@ -318,7 +334,8 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 
 	tgt := &adapter.Target{
 		BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model,
-		Info: modelInfo(cat, c.ProviderID, c.Model),
+		Info:       modelInfo(cat, c.ProviderID, c.Model),
+		RerankPath: rerankPath(p.Preset),
 	}
 	var warns []ir.Warning
 	if iw, ok := inferredWarningFor(c, op.Query()); ok {

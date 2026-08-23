@@ -1105,12 +1105,13 @@ providers:
 // pin the contract between the loop and an op, which no chat test can: chat is
 // the one implementation whose behavior the rest of the suite already fixes.
 type probeOp struct {
-	q         router.Query
-	builds    int
-	responds  int
-	lastInfo  adapter.ModelInfo
-	buildWarn string
-	onRespond func(cw *CommitWriter) (adapter.Outcome, *ir.Error)
+	q          router.Query
+	builds     int
+	responds   int
+	lastInfo   adapter.ModelInfo
+	lastTarget adapter.Target
+	buildWarn  string
+	onRespond  func(cw *CommitWriter) (adapter.Outcome, *ir.Error)
 }
 
 func (p *probeOp) Query() router.Query { return p.q }
@@ -1120,6 +1121,7 @@ func (p *probeOp) Dialect() string { return "probe" }
 func (p *probeOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
 	p.builds++
 	p.lastInfo = tgt.Info
+	p.lastTarget = *tgt
 	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(tgt.BaseURL, "/")+"/probe",
 		strings.NewReader(`{}`))
 	if err != nil {
@@ -1328,5 +1330,65 @@ providers:
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+// executorForPreset is executorForOp with a preset named on the provider row.
+// The model is a parameter because the provider's own models list gates
+// routing, and each caller declares a different one in its catalog.
+func executorForPreset(t *testing.T, url, preset, model string, cat *catalog.Store) (*Executor, *captureLogger) {
+	t.Helper()
+	rec := &captureLogger{}
+	deps := Deps{Log: rec}
+	if cat != nil {
+		deps.Catalog = cat
+	}
+	body := `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: probe
+`
+	if preset != "" {
+		body += "    preset: " + preset + "\n"
+	}
+	body += `    base_url: ` + url + `
+    api_key: sk
+    models: [` + model + `]
+`
+	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	return e, rec
+}
+
+func TestTheTargetCarriesThePresetRerankPath(t *testing.T) {
+	// Spec §3.1: providers expose rerank at differing URLs, so the path is
+	// data. The adapter is handed a resolved target and must not have to reach
+	// into the shipped preset file to build a URL.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	op := &probeOp{q: router.Query{Model: "rerank-v3.5", Surface: ir.SurfaceRerank}}
+	e, _ := executorForPreset(t, upstream.URL, "cohere", "rerank-v3.5",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if op.lastTarget.RerankPath != "/v2/rerank" {
+		t.Errorf("RerankPath = %q, want the cohere preset's quirk value", op.lastTarget.RerankPath)
+	}
+}
+
+func TestAProviderWithNoPresetCarriesNoRerankPath(t *testing.T) {
+	// An uncatalogued provider is a base URL and a key. Guessing a rerank path
+	// for it would post a rerank body at whatever URL the guess produced.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceRerank}}
+	e, _ := executorForPreset(t, upstream.URL, "", "m", catalogWith("p", "m", ir.SurfaceRerank))
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op, e.store.Current())
+
+	if op.lastTarget.RerankPath != "" {
+		t.Errorf("RerankPath = %q, want empty", op.lastTarget.RerankPath)
 	}
 }

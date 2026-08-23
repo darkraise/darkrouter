@@ -39,6 +39,12 @@ type Target struct {
 	APIKey  string
 	Model   string
 	Info    ModelInfo
+
+	// RerankPath is the preset-declared Cohere-v2 path, spec §3.1, resolved by
+	// the executor because the adapter is handed a target and knows nothing
+	// about presets. Empty for a provider with no preset, which is a
+	// misconfiguration for this surface rather than a licence to guess a URL.
+	RerankPath string
 }
 
 // Outcome is the classification that drives failover. Phase 1 has nowhere to
