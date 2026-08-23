@@ -1310,6 +1310,8 @@ Risk is 3 because this rewrites the request path every existing route runs on. *
 
 A single opaque `Attempt` method would have made six new surfaces each re-implement the left column.
 
+The interface is five methods: `Dialect`, `Query`, `Build`, `Respond` and `WriteError`.
+
 - [ ] **Step 1: Write the failing test**
 
 Add to `internal/exec/exec_test.go`. This asserts the seam itself rather than chat behavior, which the existing suite already covers:
@@ -1461,8 +1463,8 @@ import (
 // is surface-invariant and stays in the loop, because that is where phase 3's
 // subtle bugs were fixed and it must not be reimplemented six more times.
 //
-// The interface is deliberately four methods split at two joints: rendering the
-// outbound request, and turning a 2xx into client bytes.
+// Beyond naming its dialect it is deliberately narrow, split at two joints:
+// rendering the outbound request, and turning a 2xx into client bytes.
 type SurfaceOp interface {
 	// Dialect names the inbound wire form, for the request row's dialect
 	// column. An op knows it; the loop cannot infer it, and the six auxiliary
@@ -1513,6 +1515,14 @@ type AttemptCtx struct {
 	// describe the translation the client received.
 	Warns   []ir.Warning
 	Adapter adapter.Adapter
+
+	// FirstModel is the model of the first candidate the router produced, not
+	// of the first attempt that ran. Spec §8's embedding warning fires when the
+	// serving model differs from it, and the difference matters: a first
+	// candidate skipped by the live cooling re-check never reaches Build, so an
+	// op inferring "first" from its own calls would stay silent in exactly the
+	// case the warning exists for.
+	FirstModel string
 }
 ```
 
@@ -1529,7 +1539,19 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 	cat catalog.Reader) {
 ```
 
-Inside it, `e.attempt(w, r, d, cfg, req, c, ...)` becomes `e.attempt(w, r, op, cfg, c, ...)`, and both `_ = d.WriteError(w, lastErr)` calls become `_ = op.WriteError(w, lastErr)`. Nothing else in the body changes — the budget gate, the health re-check, `adapterFor`, `MarkUsed`, `nextIndex` and the status assignments are all surface-invariant already.
+Inside it, `e.attempt(w, r, d, cfg, req, c, ...)` becomes `e.attempt(w, r, op, cfg, c, ..., firstModel)`, where `firstModel` is computed once before the loop:
+
+```go
+	// The first candidate the router produced, captured before the loop so a
+	// candidate skipped by the live health re-check is still "first". Spec §8's
+	// embedding warning depends on this distinction.
+	var firstModel string
+	if len(cands) > 0 {
+		firstModel = cands[0].Model
+	}
+```
+
+Both `_ = d.WriteError(w, lastErr)` calls become `_ = op.WriteError(w, lastErr)`. Nothing else in the body changes — the budget gate, the health re-check, `adapterFor`, `MarkUsed`, `nextIndex` and the status assignments are all surface-invariant already.
 
 `attempt` keeps its whole preamble and changes only where it reaches for the request or the dialect:
 
@@ -1537,7 +1559,7 @@ Inside it, `e.attempt(w, r, d, cfg, req, c, ...)` becomes `e.attempt(w, r, op, c
 func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	cfg *config.Config, c router.Candidate, p provider.Provider,
 	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
-	cat catalog.Reader) (adapter.Outcome, int, *ir.Error) {
+	cat catalog.Reader, firstModel string) (adapter.Outcome, int, *ir.Error) {
 ```
 
 Replace the build block — everything from `var warns []ir.Warning` through the `makeReplayable` check — with:
@@ -1563,7 +1585,7 @@ Replace everything from `if req.Stream {` to the end of the function with:
 	cw := NewCommitWriter(w)
 	outcome, aerr := op.Respond(cw, resp, &AttemptCtx{
 		Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: seq, Timer: timer,
-		Warns: warns, Adapter: ad,
+		Warns: warns, Adapter: ad, FirstModel: firstModel,
 	})
 	// The loop asks the writer, not the op. An op that reports a retryable
 	// outcome after bytes have gone out is describing a post-commit failure,
@@ -2308,7 +2330,7 @@ git commit -m "feat(exec): supply adapter surfaces to the router"
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
 **Approach:** inline - skip 2: the three closure types fall directly out of `SurfaceOp`'s method set, which Task 6 fixed.
 
-Six surfaces differ in exactly two ways — what they render and how they write — and are identical in every other respect. Six near-duplicate types implementing four methods each would be thirty-odd methods of ceremony around twelve lines of actual difference.
+Six surfaces differ in exactly two ways — what they render and how they write — and are identical in every other respect. Six near-duplicate types implementing five methods each would be thirty methods of ceremony around twelve lines of actual difference.
 
 So the scaffold takes the difference as three closures and supplies the rest. This is not a new abstraction layer: it is `SurfaceOp` with the boilerplate written once.
 
@@ -3420,7 +3442,10 @@ func ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error
 		return nil, err
 	}
 	if int64(len(body)) > maxBody {
-		return nil, fmt.Errorf("request body exceeds %d bytes", maxBody)
+		return nil, &ir.Error{
+			Type:    ir.ErrPayloadTooLarge,
+			Message: fmt.Sprintf("request body exceeds %d bytes", maxBody),
+		}
 	}
 	var w wireEmbeddingRequest
 	if err := json.Unmarshal(body, &w); err != nil {
@@ -3592,7 +3617,7 @@ git commit -m "feat(edge): parse and write the embedding shape"
 
 **Interfaces:**
 - Consumes: `SurfaceOp`, `resolve` (Tasks 4, 6).
-- Produces: `(*Executor).RunAux(w, r, dialect string, surface ir.Surface, ew errorWriter, build func() (SurfaceOp, error))`. Tasks 15, 16, 18, 19, 22 and 23 each call it exactly once.
+- Produces: `(*Executor).RunAux(w, r, dialect string, surface ir.Surface, ew errorWriter, build func(*config.Config) (SurfaceOp, error))`. Tasks 15, 16, 19, 20, 23 and 24 each call it exactly once.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
@@ -3614,6 +3639,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
 )
@@ -3628,7 +3654,7 @@ func TestRunAuxLogsAMalformedBody(t *testing.T) {
 	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
 	e.RunAux(w, httptest.NewRequest("POST", "/v1/embeddings", nil),
 		"openai", ir.SurfaceEmbedding, op,
-		func() (SurfaceOp, error) { return nil, errors.New("input is required") })
+		func(*config.Config) (SurfaceOp, error) { return nil, errors.New("input is required") })
 
 	got := rec.only(t)
 	if got.Surface != string(ir.SurfaceEmbedding) {
@@ -3662,7 +3688,7 @@ func TestRunAuxRunsTheOpWhenTheBodyParses(t *testing.T) {
 
 	e.RunAux(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/embeddings", nil),
 		"openai", ir.SurfaceEmbedding, op,
-		func() (SurfaceOp, error) { return op, nil })
+		func(*config.Config) (SurfaceOp, error) { return op, nil })
 
 	if op.builds != 1 || op.responds != 1 {
 		t.Fatalf("builds = %d, responds = %d", op.builds, op.responds)
@@ -3714,7 +3740,7 @@ func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op Surface
 // no op yet — the dialect is what knows the client's error shape.
 func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
 	dialect string, surface ir.Surface, ew errorWriter,
-	build func() (SurfaceOp, error)) {
+	build func(cfg *config.Config) (SurfaceOp, error)) {
 
 	start := time.Now()
 	rec := &store.RequestRecord{
@@ -3731,13 +3757,14 @@ func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
 	}()
 	e.beginResponse(w, rec)
 
-	op, err := build()
+	cfg := e.store.Current() // one snapshot for this request's whole lifetime
+	op, err := build(cfg)
 	if err != nil {
 		rec.ErrorCode = string(ir.ErrInvalidRequest)
 		_ = ew.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
-	e.runOp(w, r, op, rec, start)
+	e.runOp(w, r, op, rec, start, cfg)
 }
 
 // beginResponse sets the two headers every route emits before it knows whether
@@ -3750,9 +3777,8 @@ func (e *Executor) beginResponse(w http.ResponseWriter, rec *store.RequestRecord
 }
 
 func (e *Executor) runOp(w http.ResponseWriter, r *http.Request, op SurfaceOp,
-	rec *store.RequestRecord, start time.Time) {
+	rec *store.RequestRecord, start time.Time, cfg *config.Config) {
 
-	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 	res, ok := e.resolve(r.Context(), w, op, op.Query(), rec, cfg, start)
 	if !ok {
 		return
@@ -3809,7 +3835,7 @@ This is the first surface to run end to end, so it is the one that proves the pi
 
 Risk is 2 because of spec §8. An embedding request that fails over to a **different model** returns vectors from a different vector space; a client filling an index across that failover corrupts it, and **nothing in the response body signals it**. Darkrouter permits the failover — refusing it would make an embedding alias useless the moment its first provider rate-limits — and records a warning naming both models. The comparison is against the **first candidate's model**, not the name the client sent, because that name is usually an alias and often not a model name at all.
 
-`embedOp` implements `SurfaceOp` directly rather than wrapping `AuxOp`. It carries one piece of per-request state — the first candidate's model — and a closure over that state buys nothing over a struct field.
+The first candidate's model comes from `AttemptCtx.FirstModel`, which Task 6's loop fills from `cands[0]`. The op deliberately does **not** infer it from its own first `Build` call: a first candidate skipped by the live cooling re-check never reaches `Build`, and that — primary cooling, secondary with a different model serving — is precisely the case the warning exists for.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4007,28 +4033,17 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
 )
 
 // embedOp is the embedding surface. It implements SurfaceOp directly rather
-// than wrapping AuxOp because it carries one piece of per-request state, and a
-// closure over that state buys nothing over a field.
+// than wrapping AuxOp because its Respond does one thing no other surface does.
 type embedOp struct {
 	d   edge.EmbeddingDialect
 	req *ir.EmbeddingRequest
-
-	// firstModel is the model the first attempt rendered for. Spec §8: an
-	// embedding request that fails over to a different model returns vectors
-	// from a different vector space, a client filling an index across that
-	// failover corrupts it, and nothing in the response body says so. The
-	// comparison is against the first candidate rather than the name the client
-	// sent, which is usually an alias and often not a model name at all.
-	//
-	// Written only from Build, which the loop calls once per attempt on one
-	// goroutine, so no synchronization is needed.
-	firstModel string
 }
 
 func (o *embedOp) Dialect() string { return o.d.Name() }
@@ -4048,9 +4063,6 @@ func (o *embedOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Ada
 		// sending a chat body to an embedding endpoint.
 		return nil, nil, fmt.Errorf("adapter %s does not serve embeddings", ad.Kind())
 	}
-	if o.firstModel == "" {
-		o.firstModel = tgt.Model
-	}
 	return em.BuildEmbedding(ctx, tgt, o.req)
 }
 
@@ -4067,13 +4079,17 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 		return failedParse(ac, resp, err)
 	}
 
+	// Spec §8. The comparison is against the first candidate the router
+	// produced — supplied by the loop, not inferred from this op's own Build
+	// calls, because a first candidate skipped by the live cooling re-check
+	// never reaches Build and is exactly when this warning must still fire.
 	warns := ac.Warns
-	if ac.Cand.Model != o.firstModel {
+	if ac.FirstModel != "" && ac.Cand.Model != ac.FirstModel {
 		warns = append(warns, ir.Warning{
 			Field:  "model",
 			Target: ac.Cand.ProviderID + "/" + ac.Cand.Model,
-			Reason: "embeddings served by " + ac.Cand.Model + " after " + o.firstModel +
-				" failed; vectors from two models are not in the same vector space " +
+			Reason: "embeddings served by " + ac.Cand.Model + " after " + ac.FirstModel +
+				" was not used; vectors from two models are not in the same vector space " +
 				"and an index filled across this failover is corrupt",
 		})
 	}
@@ -4122,9 +4138,8 @@ func failedParse(ac *AttemptCtx, resp *http.Response, err error) (adapter.Outcom
 
 // HandleEmbeddings serves POST /v1/embeddings.
 func (e *Executor) HandleEmbeddings(w http.ResponseWriter, r *http.Request, d edge.EmbeddingDialect) {
-	maxBody := e.store.Current().Server.MaxBodyBytes
-	e.RunAux(w, r, d.Name(), ir.SurfaceEmbedding, d, func() (SurfaceOp, error) {
-		req, err := d.ParseEmbedding(r, maxBody)
+	e.RunAux(w, r, d.Name(), ir.SurfaceEmbedding, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, err := d.ParseEmbedding(r, cfg.Server.MaxBodyBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -4620,7 +4635,12 @@ func readCappedBody(r *http.Request, maxBody int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(body)) > maxBody {
-		return nil, fmt.Errorf("request body exceeds %d bytes", maxBody)
+		// Typed, so RunAux answers 413 rather than 400. An oversized JSON body
+		// asks the client for the same thing an oversized upload does.
+		return nil, &ir.Error{
+			Type:    ir.ErrPayloadTooLarge,
+			Message: fmt.Sprintf("request body exceeds %d bytes", maxBody),
+		}
 	}
 	return body, nil
 }
@@ -4726,6 +4746,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
@@ -4783,9 +4804,8 @@ var _ SurfaceOp = (*moderationOp)(nil)
 
 // HandleModerations serves POST /v1/moderations.
 func (e *Executor) HandleModerations(w http.ResponseWriter, r *http.Request, d edge.ModerationDialect) {
-	maxBody := e.store.Current().Server.MaxBodyBytes
-	e.RunAux(w, r, d.Name(), ir.SurfaceModeration, d, func() (SurfaceOp, error) {
-		req, err := d.ParseModeration(r, maxBody)
+	e.RunAux(w, r, d.Name(), ir.SurfaceModeration, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, err := d.ParseModeration(r, cfg.Server.MaxBodyBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -5983,6 +6003,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
@@ -6056,9 +6077,8 @@ var _ SurfaceOp = (*rerankOp)(nil)
 
 // HandleRerank serves POST /v1/rerank.
 func (e *Executor) HandleRerank(w http.ResponseWriter, r *http.Request, d edge.RerankDialect) {
-	maxBody := e.store.Current().Server.MaxBodyBytes
-	e.RunAux(w, r, d.Name(), ir.SurfaceRerank, d, func() (SurfaceOp, error) {
-		req, err := d.ParseRerank(r, maxBody)
+	e.RunAux(w, r, d.Name(), ir.SurfaceRerank, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, err := d.ParseRerank(r, cfg.Server.MaxBodyBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -6732,6 +6752,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
@@ -6794,9 +6815,8 @@ var _ SurfaceOp = (*imageOp)(nil)
 
 // HandleImages serves POST /v1/images/generations.
 func (e *Executor) HandleImages(w http.ResponseWriter, r *http.Request, d edge.ImageDialect) {
-	maxBody := e.store.Current().Server.MaxBodyBytes
-	e.RunAux(w, r, d.Name(), ir.SurfaceImage, d, func() (SurfaceOp, error) {
-		req, err := d.ParseImage(r, maxBody)
+	e.RunAux(w, r, d.Name(), ir.SurfaceImage, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, err := d.ParseImage(r, cfg.Server.MaxBodyBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -6859,7 +6879,7 @@ git commit -m "feat(exec): serve the image surface"
 
 Spec §6 requires an oversized upload to be "rejected with 413 before any upstream connection". `RunAux` turns every parse failure into `ir.ErrInvalidRequest`, which every dialect maps to 400. To a client uploading a 90-minute recording those two answers mean completely different things — 400 says the request is malformed and retrying is pointless, 413 says send a smaller file — and the client has no other signal to tell them apart.
 
-The type is added to all three dialects rather than just OpenAI's. Only the auxiliary routes raise it today, and they are all OpenAI-dialect. But `statusFor` has no fall-through that would be right: an unmapped type becomes a 502 in OpenAI's table and Anthropic's, which would report a client's oversized upload as a gateway failure the moment any later phase raised it from a chat path.
+The type is added to all three dialects rather than just OpenAI's. Both the JSON parsers and the multipart one raise it, so an oversized embedding batch and an oversized upload answer the same way. Only the auxiliary routes raise it today, and they are all OpenAI-dialect. But `statusFor` has no fall-through that would be right: an unmapped type becomes a 502 in OpenAI's table and Anthropic's, which would report a client's oversized upload as a gateway failure the moment any later phase raised it from a chat path.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -6936,20 +6956,29 @@ In `internal/edge/gemini/write.go`, likewise:
 
 - [ ] **Step 5: Let `RunAux` raise it**
 
-In `internal/exec/surface.go`, replace the fixed error type in `RunAux`'s parse-failure branch:
+Two edits in `internal/exec/surface.go`. First, `RunAux`'s build closure takes the config snapshot, so a route reads it once rather than twice — today each `HandleX` calls `e.store.Current()` for `maxBody` and `runOp` calls it again, and a reload between the two would serve one request under two configurations:
 
 ```go
-	op, err := build()
+	build func(cfg *config.Config) (SurfaceOp, error)
+```
+
+with `runOp` receiving the same `cfg` rather than re-reading it. Then replace the fixed error type in the parse-failure branch:
+
+```go
+	op, err := build(cfg)
 	if err != nil {
 		// A parser reporting an oversized body says so in the error it
-		// returns, because only it knows the cap it was given.
-		kind := ir.ErrInvalidRequest
+		// returns, because only it knows the cap it was given. The message is
+		// taken from the typed error rather than from err.Error(), which
+		// prepends the type and would reach the client as
+		// "payload_too_large: upload exceeds…".
+		e := &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()}
 		var ie *ir.Error
 		if errors.As(err, &ie) && ie.Type != "" {
-			kind = ie.Type
+			e = ie
 		}
-		rec.ErrorCode = string(kind)
-		_ = ew.WriteError(w, &ir.Error{Type: kind, Message: err.Error()})
+		rec.ErrorCode = string(e.Type)
+		_ = ew.WriteError(w, e)
 		return
 	}
 ```
@@ -7789,6 +7818,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
@@ -7933,9 +7963,8 @@ func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
 
 // HandleTranscriptions serves POST /v1/audio/transcriptions.
 func (e *Executor) HandleTranscriptions(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
-	maxBody := e.store.Current().Server.MaxBodyBytes
-	e.RunAux(w, r, d.Name(), ir.SurfaceSTT, d, func() (SurfaceOp, error) {
-		form, err := ParseForm(r, maxBody)
+	e.RunAux(w, r, d.Name(), ir.SurfaceSTT, d, func(cfg *config.Config) (SurfaceOp, error) {
+		form, err := ParseForm(r, cfg.Server.MaxBodyBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -8421,6 +8450,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
@@ -8480,9 +8510,8 @@ var _ SurfaceOp = (*speechOp)(nil)
 
 // HandleSpeech serves POST /v1/audio/speech.
 func (e *Executor) HandleSpeech(w http.ResponseWriter, r *http.Request, d edge.SpeechDialect) {
-	maxBody := e.store.Current().Server.MaxBodyBytes
-	e.RunAux(w, r, d.Name(), ir.SurfaceTTS, d, func() (SurfaceOp, error) {
-		req, err := d.ParseSpeech(r, maxBody)
+	e.RunAux(w, r, d.Name(), ir.SurfaceTTS, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, err := d.ParseSpeech(r, cfg.Server.MaxBodyBytes)
 		if err != nil {
 			return nil, err
 		}
