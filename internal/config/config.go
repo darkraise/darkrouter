@@ -38,8 +38,12 @@ type SSEConfig struct {
 }
 
 type ProviderConfig struct {
-	ID       string   `yaml:"id"`
-	Kind     string   `yaml:"kind"`
+	ID   string `yaml:"id"`
+	Kind string `yaml:"kind"`
+	// Preset names the shipped catalog entry this provider is an instance of.
+	// It is how quirks, surfaces, model traits and the models.dev join key are
+	// reached at request time; without it a provider is a base URL and a key.
+	Preset   string   `yaml:"preset"`
 	BaseURL  string   `yaml:"base_url"`
 	APIKey   string   `yaml:"api_key"`
 	Priority int      `yaml:"priority"`
