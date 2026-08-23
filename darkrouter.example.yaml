@@ -28,6 +28,25 @@ providers:
     models:
       - openai/gpt-oss-120b
 
+# Bedrock and Vertex carry endpoint properties rather than a base URL. Both are
+# database-managed like every other provider since phase 7 — this block is
+# imported once and then ignored — but the fields are shown here because they
+# have no equivalent anywhere else:
+#
+#   - id: bedrock
+#     kind: bedrock
+#     preset: bedrock
+#     region: us-east-1          # the endpoint, not part of the model id
+#
+#   - id: vertex
+#     kind: vertex
+#     preset: vertex             # or vertex-anthropic, which selects the
+#     project: my-gcp-project    # rawPredict route and the Anthropic payload
+#     location: us-central1
+#
+# A Claude subscription is connected from the dashboard rather than configured
+# here: there is no key to write down, only a flow to complete.
+
 # Aliases map a friendly name to an ordered fallback chain. Targets are
 # provider/model or a bare model name.
 aliases:
