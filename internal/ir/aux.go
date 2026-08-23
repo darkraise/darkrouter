@@ -200,3 +200,25 @@ type ImageResponse struct {
 	// be a confident lie rather than a missing value.
 	UsageReported bool
 }
+
+// SpeechRequest is one text-to-speech call.
+//
+// There is no SpeechResponse. An audio body is not representable in an IR and
+// nothing needs it to be: the bytes go from the upstream to the client
+// untouched, and the only facts worth keeping are the content type and the byte
+// count, which the executor records.
+type SpeechRequest struct {
+	Model          string
+	Input          string
+	Voice          string
+	ResponseFormat string
+	// Speed is 0 when unset. Zero is not a legal speed, so it needs no separate
+	// presence flag.
+	Speed        float64
+	Instructions string
+	// StreamFormat is "sse" when the client asked for events rather than a
+	// binary body. It changes nothing in the executor — whatever arrives is
+	// forwarded with a flush per chunk — and is carried only so the upstream
+	// request matches the client's.
+	StreamFormat string
+}
