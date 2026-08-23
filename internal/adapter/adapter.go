@@ -161,3 +161,10 @@ type ImageGenerator interface {
 type Transcriber interface {
 	BuildTranscription(ctx context.Context, t *Target, body []byte, contentType string) (*http.Request, []ir.Warning, error)
 }
+
+// Speaker is implemented by an adapter serving the tts surface. Like
+// Transcriber it has no Parse counterpart: the response is audio, forwarded
+// without being read.
+type Speaker interface {
+	BuildSpeech(ctx context.Context, t *Target, req *ir.SpeechRequest) (*http.Request, []ir.Warning, error)
+}

@@ -478,3 +478,45 @@ func (d *Dialect) WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) erro
 }
 
 var _ edge.ImageDialect = (*Dialect)(nil)
+
+type wireSpeechRequest struct {
+	Model          string   `json:"model"`
+	Input          string   `json:"input"`
+	Voice          string   `json:"voice"`
+	ResponseFormat string   `json:"response_format"`
+	Speed          *float64 `json:"speed"`
+	Instructions   string   `json:"instructions"`
+	StreamFormat   string   `json:"stream_format"`
+}
+
+func ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireSpeechRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if w.Input == "" {
+		return nil, errors.New("input is required")
+	}
+	if w.Voice == "" {
+		return nil, errors.New("voice is required")
+	}
+	req := &ir.SpeechRequest{
+		Model: w.Model, Input: w.Input, Voice: w.Voice,
+		ResponseFormat: w.ResponseFormat, Instructions: w.Instructions,
+		StreamFormat: w.StreamFormat,
+	}
+	if w.Speed != nil {
+		req.Speed = *w.Speed
+	}
+	return req, nil
+}
+
+func (d *Dialect) ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error) {
+	return ParseSpeech(r, maxBody)
+}
+
+var _ edge.SpeechDialect = (*Dialect)(nil)

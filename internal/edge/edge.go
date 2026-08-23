@@ -69,6 +69,14 @@ type ImageDialect interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// SpeechDialect is the inbound wire form of the tts surface. It has no writer:
+// the response is forwarded byte for byte.
+type SpeechDialect interface {
+	Name() string
+	ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error)
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
 // CountWriter is implemented by a dialect with a token-counting endpoint.
 type CountWriter interface {
 	Dialect
