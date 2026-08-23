@@ -4832,7 +4832,239 @@ git commit -m "feat(exec): serve the moderation surface"
 
 ---
 
-### Task 17: The preset-declared rerank path reaches the adapter
+### Task 17: Providers declare their preset in configuration
+
+**Files:**
+- Modify: `internal/config/config.go`, `internal/provider/provider.go`, `internal/store/import.go`
+- Test: `internal/config/load_test.go`, `internal/provider/provider_test.go`, `internal/store/import_test.go`
+
+**Interfaces:**
+- Consumes: `catalog.Embedded` (phase 6).
+- Produces: `config.ProviderConfig.Preset` and a populated `provider.Provider.Preset` from both sources. Task 18's `rerankPath` reads it; Tasks 19, 30 and 34 depend on it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-medium
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
+**Approach:** inline - skip 2: the column already exists and the three writers are three lines each.
+
+**A YAML-configured provider can never reach its preset today, and that is a production gap, not a test inconvenience.** `provider.Provider.Preset` is documented as "how quirks, surfaces, model traits and the models.dev join key are reached at request time" — but `config.ProviderConfig` has no `preset` field, the loader is strict (`dec.KnownFields(true)`, so writing one is a validation *error*), `YAMLSource.Providers` never sets it, and `ImportFromConfig` omits it from its `INSERT` even though `providers.preset` has existed since migration 0001. The only writer of that column anywhere in the tree is a test doing raw SQL.
+
+Phase 6's verification already recorded the symptom — "a provider imported from the YAML `providers:` block has an empty [preset], so nothing joins until it is set… by hand" — and filed it as a phase 7 UI concern. It is not: it is a missing three-line plumbing, and phase 5 makes it blocking. Task 18 resolves the rerank path from the preset, so **without this, rerank cannot be served by any YAML-configured provider at all**, and Task 36's live verification cannot attach Groq's audio surfaces.
+
+An unknown preset name is a **warning, not an error**. `Config.Warnings` exists for exactly this and surfaces on `/healthz`; refusing to start because a preset was renamed upstream would take a working gateway down over metadata.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/config/load_test.go`:
+
+```go
+func TestAProviderCanNameItsPreset(t *testing.T) {
+	// Without this the loader rejects the key outright: dec.KnownFields(true)
+	// makes an unknown field a validation failure.
+	cfg := mustLoad(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: cohere
+    kind: openaicompat
+    preset: cohere
+    base_url: https://api.cohere.com/compatibility/v1
+    api_key: sk
+    models: [rerank-v3.5]
+`)
+	if len(cfg.Providers) != 1 || cfg.Providers[0].Preset != "cohere" {
+		t.Fatalf("providers = %+v", cfg.Providers)
+	}
+}
+
+func TestAnUnknownPresetWarnsRatherThanFailing(t *testing.T) {
+	// A preset renamed upstream must not take a working gateway down. The
+	// warning reaches /healthz, which is where an operator looks.
+	cfg := mustLoad(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    preset: not-a-real-preset
+    base_url: https://x/v1
+    api_key: sk
+    models: [m]
+`)
+	if len(cfg.Warnings) == 0 {
+		t.Fatal("an unknown preset produced no warning")
+	}
+	if !strings.Contains(strings.Join(cfg.Warnings, " "), "not-a-real-preset") {
+		t.Errorf("warnings = %v; the warning must name the preset", cfg.Warnings)
+	}
+}
+```
+
+Use whatever helper `load_test.go` already has for loading a config from a string; if it has none, write the document to `t.TempDir()` and call the same loader the other tests call. **Read the file first** rather than assuming `mustLoad` exists.
+
+Add to `internal/provider/provider_test.go`:
+
+```go
+func TestYAMLSourceCarriesThePreset(t *testing.T) {
+	// Provider.Preset is documented as how quirks, surfaces and traits are
+	// reached at request time. A YAML provider reached none of them.
+	ps := providersFrom(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: cohere
+    kind: openaicompat
+    preset: cohere
+    base_url: https://api.cohere.com/compatibility/v1
+    api_key: sk
+    models: [rerank-v3.5]
+`)
+	if len(ps) != 1 || ps[0].Preset != "cohere" {
+		t.Fatalf("providers = %+v", ps)
+	}
+}
+```
+
+`providersFrom` builds a `config.Store` over a temp file and calls `NewYAMLSource(...).Providers(ctx)`; follow whatever the existing tests in that file already do.
+
+Add to `internal/store/import_test.go`:
+
+```go
+func TestImportWritesThePresetColumn(t *testing.T) {
+	// providers.preset has existed since migration 0001 and nothing has ever
+	// written it, so the catalog join and the rerank path both saw "".
+	db := migrated(t)
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "cohere", Kind: "openaicompat", Preset: "cohere",
+		BaseURL: "https://api.cohere.com/compatibility/v1", APIKey: "sk",
+		Models: []string{"rerank-v3.5"},
+	}}}
+	if _, err := db.ImportFromConfig(context.Background(), cfg, testKey(t)); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.Read.QueryRowContext(context.Background(),
+		`SELECT preset FROM providers WHERE id = 'cohere'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "cohere" {
+		t.Errorf("preset = %q", got)
+	}
+}
+```
+
+Match `ImportFromConfig`'s real receiver, signature and key argument, and the master-key helper the other import tests use — **read `internal/store/import_test.go` first**.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/config/ ./internal/provider/ ./internal/store/ -run 'Preset' -v
+```
+
+Expected: the config tests fail with a validation error naming the unknown field `preset`; the others fail to build on `ProviderConfig.Preset`.
+
+- [ ] **Step 3: Add the field**
+
+In `internal/config/config.go`:
+
+```go
+type ProviderConfig struct {
+	ID   string `yaml:"id"`
+	Kind string `yaml:"kind"`
+	// Preset names the shipped catalog entry this provider is an instance of.
+	// It is how quirks, surfaces, model traits and the models.dev join key are
+	// reached at request time; without it a provider is a base URL and a key.
+	Preset   string   `yaml:"preset"`
+	BaseURL  string   `yaml:"base_url"`
+	APIKey   string   `yaml:"api_key"`
+	Priority int      `yaml:"priority"`
+	Models   []string `yaml:"models"`
+}
+```
+
+- [ ] **Step 4: Warn on an unknown preset**
+
+In `internal/config/load.go`, in the same pass that produces the other warnings:
+
+```go
+	for _, p := range c.Providers {
+		if p.Preset == "" {
+			continue
+		}
+		if _, ok := catalog.Embedded()[p.Preset]; !ok {
+			// A warning, not an error. A preset renamed upstream must not take
+			// a working gateway down over metadata; /healthz is where this
+			// belongs and where an operator looks.
+			c.Warnings = append(c.Warnings,
+				fmt.Sprintf("provider %q names preset %q, which is not a shipped preset; "+
+					"its quirks, surfaces and pricing will not be applied", p.ID, p.Preset))
+		}
+	}
+```
+
+**Check for an import cycle before writing this.** If `internal/catalog` imports `internal/config`, this validation cannot live here — move it to wherever the other startup warnings are assembled (`internal/server`), and say so in the commit. Run `go list -deps` or simply build; do not leave a cycle in place.
+
+- [ ] **Step 5: Carry it through both sources**
+
+In `internal/provider/provider.go`, in `YAMLSource.Providers`:
+
+```go
+		out = append(out, Provider{
+			ID: p.ID, Kind: p.Kind, BaseURL: p.BaseURL, Preset: p.Preset,
+			// A config credential has no database row, so its id is empty. The
+			// breaker keys on that empty id, which is what phase 2 already did.
+			Credentials: []Credential{{ID: "", Secret: p.APIKey, Enabled: true}},
+			Priority:    p.Priority, Models: p.Models,
+		})
+```
+
+In `internal/store/import.go`, extend the provider insert:
+
+```go
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO providers (id, name, preset, kind, base_url, priority, enabled, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+			p.ID, p.ID, p.Preset, p.Kind, p.BaseURL, p.Priority, now.UnixMilli()); err != nil {
+			return ImportResult{}, fmt.Errorf("import provider %q: %w", p.ID, err)
+		}
+```
+
+No migration is needed: `providers.preset` has existed since `0001_init.sql` with a `''` default and has simply never been written.
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/config/ ./internal/provider/ ./internal/store/ ./internal/catalog/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS in all four packages.
+
+- [ ] **Step 7: Document the field**
+
+Add `preset:` to `darkrouter.example.yaml`'s provider block with a one-line comment saying it is what connects a provider to its shipped metadata, and that omitting it means no pricing, capabilities or quirks. This is the field phase 6's verification found people would otherwise have to set by hand in SQL.
+
+- [ ] **Step 8: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/config/config.go internal/config/load.go internal/config/load_test.go \
+        internal/provider/provider.go internal/provider/provider_test.go \
+        internal/store/import.go internal/store/import_test.go darkrouter.example.yaml
+git commit -m "feat(config): let a provider name its preset"
+```
+
+---
+
+### Task 18: The preset-declared rerank path reaches the adapter
 
 **Files:**
 - Modify: `internal/adapter/adapter.go`, `internal/exec/exec.go`
@@ -4840,7 +5072,7 @@ git commit -m "feat(exec): serve the moderation surface"
 
 **Interfaces:**
 - Consumes: `catalog.Preset.QuirkValue` (phase 6), `provider.Provider.Preset`.
-- Produces: `adapter.Target.RerankPath`. Task 18's adapter reads it.
+- Produces: `adapter.Target.RerankPath`. Task 19's adapter reads it.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
@@ -4850,7 +5082,7 @@ Spec §3.1: "Each preset declares its own rerank path, since providers expose it
 
 **Why a field on `Target` rather than a lookup inside the adapter.** The adapter is given a resolved target and knows nothing about presets; reaching into `catalog.Embedded()` from inside it would make the renderer depend on the shipped data file and become untestable without it. Every other per-provider fact on `Target` — base URL, key, model, model info — is resolved by the executor for the same reason, and this is one more.
 
-An empty `RerankPath` is not a fallback to a guessed URL. The router only produces a rerank candidate for a model whose preset declares the surface, and Task 2's test refuses such a preset without the quirk, so empty means a misconfiguration and Task 18 fails the build loudly rather than posting a rerank body at `/chat/completions`.
+An empty `RerankPath` is not a fallback to a guessed URL. The router only produces a rerank candidate for a model whose preset declares the surface, and Task 2's test refuses such a preset without the quirk, so empty means a misconfiguration and Task 19 fails the build loudly rather than posting a rerank body at `/chat/completions`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4982,7 +5214,7 @@ git commit -m "feat(exec): resolve the preset rerank path onto the target"
 
 ---
 
-### Task 18: Rerank end to end, at the preset-declared path
+### Task 19: Rerank end to end, at the preset-declared path
 
 **Files:**
 - Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
@@ -4990,7 +5222,7 @@ git commit -m "feat(exec): resolve the preset rerank path onto the target"
 - Test: `internal/adapter/openaicompat/rerank_test.go`, `internal/exec/rerank_test.go`, `internal/edge/openai/aux_test.go`
 
 **Interfaces:**
-- Consumes: `adapter.Target.RerankPath` (Task 17), `RunAux` (Task 14), `failedParse` (Task 15).
+- Consumes: `adapter.Target.RerankPath` (Task 18), `RunAux` (Task 14), `failedParse` (Task 15).
 - Produces: `ir.RerankRequest`, `ir.RerankResponse`, `ir.RerankResult`, `adapter.Reranker`, `edge.RerankDialect`, and `(*Executor).HandleRerank`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
@@ -5001,7 +5233,11 @@ OpenAI defines no rerank endpoint, so Darkrouter's inbound contract **is** Coher
 
 **The path is absolute from the host root, and that is load-bearing.** `cohere`'s preset base URL is `https://api.cohere.com/compatibility/v1` — an OpenAI-compatibility shim — while its rerank endpoint is the native `/v2/rerank`. Joining them the way every other endpoint is joined produces `https://api.cohere.com/compatibility/v1/v2/rerank`, which does not exist. A `rerank-path` beginning with `/` therefore replaces the base URL's path entirely.
 
-Cohere v2 accepts `documents` as strings or as objects. Both are read; an object contributes its `text` field and **any other field it carries is dropped with a warning**, because a document object with structured fields is being reranked on its text alone and the client cannot otherwise tell.
+**Spec §3.1 is factually wrong about Cohere v2, and the master design wins.** It describes "document objects, `top_n`, `return_documents`". Verified against the live API reference on 2026-08-23: v2's `documents` is a **list of strings**; `return_documents` and `rank_fields` are **v1 parameters that v2 does not define**; and each element of `results[]` carries **`index` and `relevance_score` only, never a `document`**. The master design says only "the Cohere v2 request and response schema", which is what is implemented.
+
+That leaves `return_documents` — which the inbound contract keeps, because a client asking for its documents back is reasonable and every rerank client expects it. **Darkrouter honors it at the edge rather than forwarding it.** The buffered request already holds every document, and `results[]` carries the index into it, so the op fills each result's document from the request it sent. That is strictly better than forwarding a parameter the endpoint ignores: forwarding it would return results with no documents while the client believed it had asked for them — the same silent lie this plan refuses for embeddings, one surface over.
+
+Cohere v2 accepts `documents` as strings. Darkrouter's **inbound** contract also accepts objects, as a deliberate superset: an object contributes its `text` field and **any other field it carries is dropped with a warning**, because a document object with structured fields is being reranked on its text alone and the client cannot otherwise tell.
 
 Rerank reports no token usage — Cohere bills it in `search_units` — so `TokensIn` and `TokensOut` stay zero and cost stays NULL.
 
@@ -5186,11 +5422,12 @@ func TestBuildRerankOmitsUnsetTopN(t *testing.T) {
 	}
 }
 
-func TestParseRerankReadsResultsAndDocuments(t *testing.T) {
+func TestParseRerankReadsTheV2Results(t *testing.T) {
+	// Cohere v2 returns index and relevance_score and nothing else.
 	resp := &http.Response{
 		StatusCode: 200,
 		Body: io.NopCloser(strings.NewReader(`{"id":"r-1","results":[
-		  {"index":2,"relevance_score":0.98,"document":{"text":"kept"}},
+		  {"index":2,"relevance_score":0.98},
 		  {"index":0,"relevance_score":0.11}]}`)),
 	}
 	out, err := New().ParseRerank(resp)
@@ -5200,12 +5437,33 @@ func TestParseRerankReadsResultsAndDocuments(t *testing.T) {
 	if out.ID != "r-1" || len(out.Results) != 2 {
 		t.Fatalf("response = %+v", out)
 	}
-	if out.Results[0].Index != 2 || out.Results[0].RelevanceScore != 0.98 ||
-		out.Results[0].Document != "kept" {
+	if out.Results[0].Index != 2 || out.Results[0].RelevanceScore != 0.98 {
 		t.Errorf("first result = %+v", out.Results[0])
 	}
-	if out.Results[1].Document != "" {
-		t.Errorf("second document = %q, want empty", out.Results[1].Document)
+	if out.Results[0].Document != "" {
+		t.Errorf("document = %q; the adapter must not invent one", out.Results[0].Document)
+	}
+}
+
+func TestBuildRerankNeverSendsReturnDocuments(t *testing.T) {
+	// It is a v1 parameter. Sending it to v2 asks for something the endpoint
+	// does not define, and the client would get results with no documents.
+	hr, _, err := New().BuildRerank(context.Background(),
+		&adapter.Target{BaseURL: "https://x", Model: "m", RerankPath: "/v2/rerank"},
+		&ir.RerankRequest{Query: "q", Documents: []string{"a"}, ReturnDocuments: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	_ = json.Unmarshal(raw, &body)
+	if _, present := body["return_documents"]; present {
+		t.Error("return_documents was forwarded to a v2 endpoint")
+	}
+	for _, k := range []string{"model", "query", "documents"} {
+		if _, present := body[k]; !present {
+			t.Errorf("body is missing %q: %v", k, body)
+		}
 	}
 }
 
@@ -5230,6 +5488,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
@@ -5277,6 +5536,86 @@ func TestRerankServesEndToEndAtThePresetPath(t *testing.T) {
 	got := rec.only(t)
 	if got.Surface != "rerank" || got.Status != "success" {
 		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+}
+
+func TestRerankEchoesDocumentsTheProviderDoesNotReturn(t *testing.T) {
+	// Cohere v2 returns no documents. Darkrouter holds them and results carry
+	// the index, so return_documents is honored here rather than forwarded.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"r-1","results":[
+		  {"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.2}]}`))
+	}))
+	defer upstream.Close()
+
+	e, _ := executorForPreset(t, upstream.URL, "cohere",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	w := httptest.NewRecorder()
+	e.HandleRerank(w, httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"rerank-v3.5","query":"q","documents":["alpha","beta"],"return_documents":true}`)),
+		openaiedge.New())
+
+	var body struct {
+		Results []struct {
+			Index    int `json:"index"`
+			Document *struct {
+				Text string `json:"text"`
+			} `json:"document"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Results) != 2 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if body.Results[0].Document == nil || body.Results[0].Document.Text != "beta" {
+		t.Errorf("first result document = %v, want the document at index 1", body.Results[0].Document)
+	}
+	if body.Results[1].Document == nil || body.Results[1].Document.Text != "alpha" {
+		t.Errorf("second result document = %v", body.Results[1].Document)
+	}
+}
+
+func TestRerankOmitsDocumentsWhenTheClientDidNotAsk(t *testing.T) {
+	upstream := httptest.NewServer(rerankUpstream(nil))
+	defer upstream.Close()
+
+	e, _ := executorForPreset(t, upstream.URL, "cohere",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	w := httptest.NewRecorder()
+	e.HandleRerank(w, httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"rerank-v3.5","query":"q","documents":["alpha"]}`)), openaiedge.New())
+
+	if strings.Contains(w.Body.String(), "document") {
+		t.Errorf("body = %s; a document was returned unasked", w.Body.String())
+	}
+}
+
+func TestRerankFailsOverToASecondProvider(t *testing.T) {
+	// Spec §10 requires a failover case per surface.
+	var hits atomic.Int64
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(rerankUpstream(nil))
+	defer good.Close()
+
+	e, rec := executorForTwoPresets(t, bad.URL, good.URL, "cohere",
+		catalogPair("bad", "good", "rerank-v3.5", ir.SurfaceRerank))
+	w := httptest.NewRecorder()
+	e.HandleRerank(w, httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"rerank-v3.5","query":"q","documents":["a"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK || hits.Load() != 1 {
+		t.Fatalf("status = %d, failing provider hits = %d, body = %s",
+			w.Code, hits.Load(), w.Body.String())
+	}
+	if got := rec.only(t); len(got.Attempts) != 2 || got.FinalProviderID != "good" {
+		t.Errorf("attempts = %d, final = %q", len(got.Attempts), got.FinalProviderID)
 	}
 }
 
@@ -5541,15 +5880,15 @@ func (a *Adapter) BuildRerank(ctx context.Context, t *adapter.Target,
 		return nil, nil, errors.New(
 			"this provider declares no rerank-path quirk; rerank cannot be served without one")
 	}
+	// model, query, documents and top_n are the whole of Cohere v2's request.
+	// return_documents is a v1 parameter v2 does not define, so it is honored
+	// at the edge from the buffered request rather than forwarded here.
 	body := map[string]any{
 		"model": t.Model, "query": req.Query, "documents": req.Documents,
 	}
 	// Zero is not a legal top_n, so absence needs no separate presence flag.
 	if req.TopN > 0 {
 		body["top_n"] = req.TopN
-	}
-	if req.ReturnDocuments {
-		body["return_documents"] = true
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -5593,14 +5932,14 @@ func rerankURL(base, path string) (string, error) {
 	return strings.TrimRight(base, "/") + "/" + path, nil
 }
 
+// rerankEnvelope is Cohere v2's response: results carry an index and a score
+// and nothing else. There is no document object to read, which is why the op
+// fills documents from the request it sent.
 type rerankEnvelope struct {
 	ID      string `json:"id"`
 	Results []struct {
-		Index    int     `json:"index"`
-		Score    float64 `json:"relevance_score"`
-		Document *struct {
-			Text string `json:"text"`
-		} `json:"document"`
+		Index int     `json:"index"`
+		Score float64 `json:"relevance_score"`
 	} `json:"results"`
 }
 
@@ -5622,11 +5961,7 @@ func (a *Adapter) ParseRerank(resp *http.Response) (*ir.RerankResponse, error) {
 	}
 	out := &ir.RerankResponse{ID: env.ID, Results: make([]ir.RerankResult, 0, len(env.Results))}
 	for _, r := range env.Results {
-		res := ir.RerankResult{Index: r.Index, RelevanceScore: r.Score}
-		if r.Document != nil {
-			res.Document = r.Document.Text
-		}
-		out.Results = append(out.Results, res)
+		out.Results = append(out.Results, ir.RerankResult{Index: r.Index, RelevanceScore: r.Score})
 	}
 	return out, nil
 }
@@ -5687,6 +6022,19 @@ func (o *rerankOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 	// The provider's own id is echoed, but the model it ranked with is the
 	// candidate's: a rerank response carries no model field.
 	out.Model = ac.Cand.Model
+
+	// Cohere v2 returns no documents, so return_documents is honored here from
+	// the request Darkrouter sent. Forwarding the parameter instead would
+	// return results with no documents while the client believed it had asked
+	// for them. An out-of-range index is a provider fault and is left empty
+	// rather than panicking on a slice the response does not agree with.
+	if o.req.ReturnDocuments {
+		for i, r := range out.Results {
+			if r.Index >= 0 && r.Index < len(o.req.Documents) {
+				out.Results[i].Document = o.req.Documents[r.Index]
+			}
+		}
+	}
 
 	ttft := time.Since(ac.Rec.TS).Milliseconds()
 	ac.Rec.TTFTMs = &ttft
@@ -5757,7 +6105,7 @@ git commit -m "feat(exec): serve the rerank surface"
 
 ---
 
-### Task 19: Images end to end
+### Task 20: Images end to end
 
 **Files:**
 - Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
@@ -5772,7 +6120,7 @@ git commit -m "feat(exec): serve the rerank surface"
 **Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
 **Approach:** inline - skip 2: this is Task 16's layout with the image types substituted, and every file is given below.
 
-**Two models, two usage stories, and the difference is not a detail.** `gpt-image-1` returns a `usage` object with `input_tokens` and `output_tokens`, including image input tokens. The `dall-e` models return no `usage` key at all. Zero tokens therefore means *not reported*, never *free*, and the cost column must stay NULL for a dall-e call rather than record a confident zero. Task 20 is where that rule is enforced; this task's job is to carry the distinction faithfully rather than to normalize it away.
+**Two models, two usage stories, and the difference is not a detail.** `gpt-image-1` returns a `usage` object with `input_tokens` and `output_tokens`, including image input tokens. The `dall-e` models return no `usage` key at all. Zero tokens therefore means *not reported*, never *free*, and the cost column must stay NULL for a dall-e call rather than record a confident zero. Task 21 is where that rule is enforced; this task's job is to carry the distinction faithfully rather than to normalize it away.
 
 `response_format` is forwarded exactly as the client sent it. It is a `dall-e` parameter that `gpt-image-1` rejects with a 400 — but a client sending it to `gpt-image-1` gets the same 400 talking to OpenAI directly, and inventing a translation here would make Darkrouter's behavior differ from the provider's for no gain.
 
@@ -6495,7 +6843,7 @@ git commit -m "feat(exec): serve the image surface"
 
 ---
 
-### Task 20: An oversized body is a 413, not a 400
+### Task 21: An oversized body is a 413, not a 400
 
 **Files:**
 - Modify: `internal/ir/ir.go`, `internal/edge/openai/write.go`, `internal/edge/anthropic/write.go`, `internal/edge/gemini/write.go`, `internal/exec/surface.go`
@@ -6503,7 +6851,7 @@ git commit -m "feat(exec): serve the image surface"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `ir.ErrPayloadTooLarge` and its status mapping in all three dialects; `RunAux` honors it. Task 21's multipart parser raises it.
+- Produces: `ir.ErrPayloadTooLarge` and its status mapping in all three dialects; `RunAux` honors it. Task 22's multipart parser raises it.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
@@ -6638,15 +6986,15 @@ git commit -m "feat(ir): distinguish an oversized payload from a bad one"
 
 ---
 
-### Task 21: The multipart buffer and the in-form model rewrite
+### Task 22: The multipart buffer and the in-form model rewrite
 
 **Files:**
 - Create: `internal/exec/multipart.go`
 - Test: `internal/exec/multipart_test.go`
 
 **Interfaces:**
-- Consumes: `ir.ErrPayloadTooLarge` (Task 20).
-- Produces: `exec.Form` with `ParseForm(r, maxBody) (*Form, error)`, `(*Form).Field(name) string`, and `(*Form).Render(model string) (body []byte, contentType string, err error)`. Task 22's op calls all three.
+- Consumes: `ir.ErrPayloadTooLarge` (Task 21).
+- Produces: `exec.Form` with `ParseForm(r, maxBody) (*Form, error)`, `(*Form).Field(name) string`, and `(*Form).Render(model string) (body []byte, contentType string, err error)`. Task 23's op calls all three.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
@@ -6843,7 +7191,7 @@ func TestParseFormRejectsANonMultipartBody(t *testing.T) {
 }
 ```
 
-Add two small helpers to the same file: `reparse(t, body []byte, contentType string) *Form` builds a request from the rendered bytes and calls `ParseForm`, and `Form.File(name)`/`Form.FileName(name)` return a file part's contents and filename. `File` and `FileName` are exported methods on `Form` in Step 3, because Task 22's tests use them too. `mime.ParseMediaType` is imported for the boundary check.
+Add two small helpers to the same file: `reparse(t, body []byte, contentType string) *Form` builds a request from the rendered bytes and calls `ParseForm`, and `Form.File(name)`/`Form.FileName(name)` return a file part's contents and filename. `File` and `FileName` are exported methods on `Form` in Step 3, because Task 23's tests use them too. `mime.ParseMediaType` is imported for the boundary check.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -7035,7 +7383,7 @@ export PATH=$PATH:/usr/local/go/bin
 go test ./... -race -count=1 && go vet ./... && gofmt -l .
 ```
 
-Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing calls `ParseForm` yet; Task 22 is its only user.
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing. Nothing calls `ParseForm` yet; Task 23 is its only user.
 
 - [ ] **Step 6: Commit**
 
@@ -7046,7 +7394,7 @@ git commit -m "feat(exec): buffer and re-render a multipart upload"
 
 ---
 
-### Task 22: Transcriptions end to end
+### Task 23: Transcriptions end to end
 
 **Files:**
 - Modify: `internal/adapter/adapter.go`, `internal/adapter/openaicompat/classify.go`, `internal/server/server.go`
@@ -7054,12 +7402,12 @@ git commit -m "feat(exec): buffer and re-render a multipart upload"
 - Test: `internal/adapter/openaicompat/audio_test.go`, `internal/exec/transcription_test.go`
 
 **Interfaces:**
-- Consumes: `Form` and `ParseForm` (Task 21), `RunAux` (Task 14).
-- Produces: `adapter.Transcriber`, `exec.copyFlushing`, and `(*Executor).HandleTranscriptions`. Task 23 reuses `copyFlushing`.
+- Consumes: `Form` and `ParseForm` (Task 22), `RunAux` (Task 14).
+- Produces: `adapter.Transcriber`, `exec.copyFlushing`, and `(*Executor).HandleTranscriptions`. Task 24 reuses `copyFlushing`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-medium
 **Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
-**Approach:** inline - skip 2: the buffering decision is settled by spec §6, Task 21 supplies the machinery, and the three response shapes are enumerated below.
+**Approach:** inline - skip 2: the buffering decision is settled by spec §6, Task 22 supplies the machinery, and the three response shapes are enumerated below.
 
 **There is no transcription IR type, and that is deliberate.** The request is a multipart form that `Form` already holds and re-renders; the response is OpenAI's own shape going straight back to an OpenAI client. Parsing it into an IR and re-emitting would *lose* fields — `verbose_json` carries per-segment timings, log-probabilities and a language guess that no narrow type would model — so the body is **forwarded verbatim** and read only to extract what the request row needs.
 
@@ -7637,7 +7985,7 @@ git commit -m "feat(exec): serve the transcription surface"
 
 ---
 
-### Task 23: Speech end to end, streamed and never captured
+### Task 24: Speech end to end, streamed and never captured
 
 **Files:**
 - Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
@@ -7645,18 +7993,18 @@ git commit -m "feat(exec): serve the transcription surface"
 - Test: `internal/adapter/openaicompat/speech_test.go`, `internal/exec/speech_test.go`
 
 **Interfaces:**
-- Consumes: `copyFlushing` (Task 22), `RunAux` (Task 14).
+- Consumes: `copyFlushing` (Task 23), `RunAux` (Task 14).
 - Produces: `ir.SpeechRequest`, `adapter.Speaker`, `edge.SpeechDialect`, and `(*Executor).HandleSpeech`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-medium
 **Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
-**Approach:** inline - skip 2: the request shape is OpenAI's and the response handling is Task 22's non-JSON branch with nothing read at all.
+**Approach:** inline - skip 2: the request shape is OpenAI's and the response handling is Task 23's non-JSON branch with nothing read at all.
 
 Spec §6: the response "streams through without parsing, bypasses body capture entirely — audio in SQLite is never right — and the log records content type, byte count, and duration."
 
 **There is no speech response type.** Nothing about an audio body is representable in an IR and nothing needs to be: the bytes go from the upstream to the client and the only facts worth keeping are the content type and the count. `stream_format: "sse"` changes nothing here either — the op already forwards whatever arrives with a flush per chunk, so an SSE speech response is handled by the same three lines as an MP3.
 
-**What "not captured" means today, stated plainly.** `capture.bodies` is a config field with a retention sweep and **no writer anywhere in the tree** — nothing has ever inserted into `request_bodies`. So "a speech response is not captured" is true by construction rather than by enforcement, and a test asserting an empty table would prove nothing about this surface. The property that *is* enforceable and is what the criterion is really protecting is that the body is **never held whole**: the test below makes the upstream refuse to send its second chunk until the first has reached the client, so a buffering implementation deadlocks instead of passing. The capture gap is recorded as a carried-forward item in Task 29.
+**What "not captured" means today, stated plainly.** `capture.bodies` is a config field with a retention sweep and **no writer anywhere in the tree** — nothing has ever inserted into `request_bodies`. So "a speech response is not captured" is true by construction rather than by enforcement, and a test asserting an empty table would prove nothing about this surface. The property that *is* enforceable and is what the criterion is really protecting is that the body is **never held whole**: the test below makes the upstream refuse to send its second chunk until the first has reached the client, so a buffering implementation deadlocks instead of passing. The capture gap is recorded as a carried-forward item in Task 31.
 
 Risk is 2 because of spec §7. Once the first audio byte is out there is no re-route, and unlike chat there is no in-stream error vocabulary to tell the client the rest is missing. A provider that returns a fast 200 and then truncates delivers truncated audio, and the byte count on the request row is the only place that shows up.
 
@@ -8182,7 +8530,7 @@ git commit -m "feat(exec): serve the speech surface"
 
 ---
 
-### Task 24: The Responses request, and what it refuses
+### Task 25: The Responses request, and what it refuses
 
 **Files:**
 - Create: `internal/edge/openai/responses.go`
@@ -8207,7 +8555,7 @@ So three things are refused:
 - `background: true` — it asks for a queued response the client polls for by id. Darkrouter has no queue and no resolvable ids, and answering with a finished response would leave the client polling an id that will never exist.
 - any tool whose `type` is not `function` — `web_search`, `file_search`, `code_interpreter`, `image_generation`, `computer_use_preview`, `mcp`, `local_shell`. None is something Darkrouter can execute or forward.
 
-**`store` is not refused.** Its default is `true`, so refusing it would fail every request written by an SDK's defaults. It is accepted, ignored, and answered with `store: false` in the response body — which is precisely how a Responses client is told the id is not resumable. Task 25 emits that.
+**`store` is not refused.** Its default is `true`, so refusing it would fail every request written by an SDK's defaults. It is accepted, ignored, and answered with `store: false` in the response body — which is precisely how a Responses client is told the id is not resumable. Task 26 emits that.
 
 Reasoning items in the input are **dropped rather than replayed**. An encrypted reasoning item is meaningful only to the provider that minted it, and Darkrouter may be sending this turn somewhere else entirely. The drop is warned about, so the trace shows it.
 
@@ -8811,7 +9159,7 @@ git commit -m "feat(edge): parse the responses request shape"
 
 ---
 
-### Task 25: The Responses item-based body
+### Task 26: The Responses item-based body
 
 **Files:**
 - Modify: `internal/edge/openai/responses.go`
@@ -8819,7 +9167,7 @@ git commit -m "feat(edge): parse the responses request shape"
 
 **Interfaces:**
 - Consumes: `ir.Response` (phase 1).
-- Produces: `openai.WriteResponses(w, *ir.Response) error`, plus `responsesBody(id string, resp *ir.Response, status string) map[string]any` and `responsesItemID(kind string, index int) string`. Task 26's stream writer reuses both so the streamed and unary final objects cannot drift.
+- Produces: `openai.WriteResponses(w, *ir.Response) error`, plus `responsesBody(id string, resp *ir.Response, status string) map[string]any` and `responsesItemID(kind string, index int) string`. Task 28's stream writer reuses both so the streamed and unary final objects cannot drift.
 
 **Implementer:** dcc-superpower-companions:impl-sonnet-high
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
@@ -8827,9 +9175,9 @@ git commit -m "feat(edge): parse the responses request shape"
 
 Responses returns an **item-based** body: an `output` array of `reasoning`, `message` and `function_call` items rather than a single `choices[0].message`. Usage is named `input_tokens` and `output_tokens`, not `prompt_tokens` and `completion_tokens`.
 
-**`responsesBody` is factored out on purpose.** The streamed `response.completed` event carries the same object the unary path returns, and two independently-written assemblers would drift on exactly the fields a client reads last. Task 26 accumulates its deltas into an `ir.Response` and calls this.
+**`responsesBody` is factored out on purpose.** The streamed `response.completed` event carries the same object the unary path returns, and two independently-written assemblers would drift on exactly the fields a client reads last. Task 28 accumulates its deltas into an `ir.Response` and calls this.
 
-**Ids are marked non-resumable, and `store: false` is how.** Darkrouter mints no resolvable ids, and a Responses client reads `store: false` as "this response was not persisted and cannot be referenced". The `resp_dr_` prefix makes the same fact legible to a human reading a log line. Task 24 already refuses any request that carries one back.
+**Ids are marked non-resumable, and `store: false` is how.** Darkrouter mints no resolvable ids, and a Responses client reads `store: false` as "this response was not persisted and cannot be referenced". The `resp_dr_` prefix makes the same fact legible to a human reading a log line. Task 25 already refuses any request that carries one back.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9146,15 +9494,200 @@ git commit -m "feat(edge): assemble the responses item body"
 
 ---
 
-### Task 26: The Responses semantic stream writer
+### Task 27: Reasoning deltas need an index of their own
+
+**Files:**
+- Modify: `internal/adapter/openaicompat/parse.go`
+- Test: `internal/adapter/openaicompat/parse_test.go`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: a distinct block index space for reasoning in the openaicompat stream. Task 28's writer is the first consumer that keys on index and cannot work without it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-medium
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 2 = 5
+**Approach:** inline - skip 2: `toolBlockBase` in the same file is the established fix for exactly this collision, and this applies it to the third block kind.
+
+**This is a real defect in shipped code, found while reviewing the Responses stream writer.** In `internal/adapter/openaicompat/parse.go`'s `ParseStream`, text deltas open a block at `textIdx = 0` with a proper `EventBlockStart`, and tool deltas get `toolBlockBase + tc.Index` precisely so they "cannot collide" — the constant's own comment says so. Reasoning deltas get neither:
+
+```go
+				if d.Reasoning != "" {
+					if !yield(ir.StreamEvent{Type: ir.EventContentDelta,
+						Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: d.Reasoning}}, nil) {
+						return
+					}
+				}
+```
+
+No `Index`, so the zero value — **which is the text block's index** — and no `EventBlockStart` or `EventBlockStop` at all.
+
+It has been invisible because the only consumers so far switch on `ev.Delta.Type` and ignore the index. The Responses stream writer is the first that keys items *by* index, and on a model that emits both reasoning and text it either misattributes every text delta to the reasoning item or dereferences a nil `Thinking` and panics, depending on which arrives first. Anthropic and Gemini both assign distinct indices and are unaffected.
+
+Fixing it at the adapter rather than working around it in the writer is the right call for three reasons: the IR contract says a block index identifies a block, one consumer's workaround would not protect the next one, and a `BlockThinking` delta and a `BlockText` delta sharing an index is wrong however it is consumed.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/adapter/openaicompat/parse_test.go`:
+
+```go
+func TestReasoningAndTextDoNotShareABlockIndex(t *testing.T) {
+	// toolBlockBase exists because a colliding index is a bug. Reasoning was
+	// left at the zero value, which is the text block's index.
+	body := strings.Join([]string{
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}`,
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"data: [DONE]",
+		"",
+	}, "\n\n")
+
+	var thinkIdx, textIdx = -1, -1
+	for ev, err := range New().ParseStream(strings.NewReader(body), 1<<20) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Type != ir.EventContentDelta || ev.Delta == nil {
+			continue
+		}
+		switch ev.Delta.Type {
+		case ir.BlockThinking:
+			thinkIdx = ev.Index
+		case ir.BlockText:
+			textIdx = ev.Index
+		}
+	}
+	if thinkIdx < 0 || textIdx < 0 {
+		t.Fatalf("missing deltas: thinking at %d, text at %d", thinkIdx, textIdx)
+	}
+	if thinkIdx == textIdx {
+		t.Errorf("reasoning and text both at index %d; a consumer keying on the index "+
+			"cannot tell the two blocks apart", thinkIdx)
+	}
+}
+
+func TestAReasoningBlockIsOpenedAndClosed(t *testing.T) {
+	// A consumer that opens an item on block_start and finalizes it on
+	// block_stop gets neither for reasoning, so the item is never closed.
+	body := strings.Join([]string{
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}`,
+		`data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"data: [DONE]",
+		"",
+	}, "\n\n")
+
+	var start, stop bool
+	var startIdx, stopIdx int
+	for ev, err := range New().ParseStream(strings.NewReader(body), 1<<20) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Type {
+		case ir.EventBlockStart:
+			if ev.Delta != nil && ev.Delta.Type == ir.BlockThinking {
+				start, startIdx = true, ev.Index
+			}
+		case ir.EventBlockStop:
+			stop, stopIdx = true, ev.Index
+		}
+	}
+	if !start {
+		t.Error("no content_block_start for the reasoning block")
+	}
+	if !stop || stopIdx != startIdx {
+		t.Errorf("reasoning block opened at %d was not closed (stop=%v at %d)", startIdx, stop, stopIdx)
+	}
+}
+```
+
+Check the wire field name the existing tests use for reasoning — `reasoning_content` is OpenAI-compatible providers' spelling and is what `wireDelta` should already carry. **Read the struct before writing the fixture** rather than assuming.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ -run 'ReasoningAndText|AReasoningBlock' -v
+```
+
+Expected: the first reports both at index 0; the second reports no `content_block_start`.
+
+- [ ] **Step 3: Give reasoning its own index space**
+
+In `internal/adapter/openaicompat/parse.go`, beside `toolBlockBase`:
+
+```go
+// reasoningBlockBase does for reasoning what toolBlockBase does for tool calls.
+// A block index identifies a block, and a consumer that keys items by index —
+// the responses stream writer is the first — cannot tell a thinking delta from
+// a text delta when both arrive at zero.
+const reasoningBlockBase = 2000
+```
+
+and replace the reasoning branch inside the choices loop:
+
+```go
+				if d.Reasoning != "" {
+					if reasoningIdx < 0 {
+						reasoningIdx = reasoningBlockBase
+						open[reasoningIdx] = true
+						if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: reasoningIdx,
+							Delta: &ir.Delta{Type: ir.BlockThinking}}, nil) {
+							return
+						}
+					}
+					if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: reasoningIdx,
+						Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: d.Reasoning}}, nil) {
+						return
+					}
+				}
+```
+
+Declare `reasoningIdx := -1` beside `textIdx := -1`, and reset it to `-1` wherever `textIdx` is reset. `closeAll` already emits an `EventBlockStop` for every key in `open`, so registering the block there is what closes it — read `closeAll` and confirm that before relying on it.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package. Existing stream tests switch on `Delta.Type` and ignore the index, so none should move.
+
+- [ ] **Step 5: Check the golden suite, which is where a stream shape change shows**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/golden/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+If a golden file changes, **read the diff before regenerating**. A new `content_block_start`/`content_block_stop` pair around reasoning is the expected change and is correct; anything else — reordered text, a changed tool index, a dropped event — means the edit went wrong. Regenerate only after reading, and say in the commit which files moved and why.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/adapter/openaicompat/parse.go internal/adapter/openaicompat/parse_test.go
+git commit -m "fix(openaicompat): index reasoning blocks distinctly"
+```
+
+---
+
+### Task 28: The Responses semantic stream writer
 
 **Files:**
 - Create: `internal/edge/openai/responses_stream.go`
 - Test: `internal/edge/openai/responses_stream_test.go`
 
 **Interfaces:**
-- Consumes: `responsesBody`, `responsesItemID`, `responsesID`, `responsesStatus` (Task 25).
-- Produces: `openai.WriteResponsesStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error`. Task 27's dialect calls it.
+- Consumes: `responsesBody`, `responsesItemID`, `responsesID`, `responsesStatus` (Task 26).
+- Produces: `openai.WriteResponsesStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error`. Task 29's dialect calls it.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
@@ -9164,7 +9697,7 @@ Spec §5 calls this "effectively a fourth edge stream writer, not a thin adaptat
 
 - **Every event carries a `sequence_number`**, monotonic across the whole stream, and clients use it to detect drops.
 - **Items are opened and closed explicitly.** A client does not treat an item as final until it sees `response.output_item.done`, so a stream that ends mid-item leaves the client waiting forever. Whatever the provider left open is closed before `response.completed`.
-- **The terminal event carries the whole response object**, the same one the unary path returns. That is why the writer accumulates into an `ir.Response` and calls Task 25's `responsesBody` rather than assembling a second time.
+- **The terminal event carries the whole response object**, the same one the unary path returns. That is why the writer accumulates into an `ir.Response` and calls Task 26's `responsesBody` rather than assembling a second time.
 
 **There is no `[DONE]` sentinel.** Chat's SSE ends with one; the Responses stream ends at `response.completed`. Sending it would put an unparseable line in front of a client that reads every `data:` as JSON.
 
@@ -9932,14 +10465,14 @@ git commit -m "feat(edge): write the responses semantic stream"
 
 ---
 
-### Task 27: The Responses dialect and route
+### Task 29: The Responses dialect and route
 
 **Files:**
 - Modify: `internal/edge/openai/dialect.go`, `internal/exec/surface.go`, `internal/server/server.go`
 - Test: `internal/edge/openai/dialect_test.go`, `internal/exec/responses_test.go`
 
 **Interfaces:**
-- Consumes: `ParseResponses` (Task 24), `WriteResponses` (Task 25), `WriteResponsesStream` (Task 26).
+- Consumes: `ParseResponses` (Task 25), `WriteResponses` (Task 26), `WriteResponsesStream` (Task 28).
 - Produces: `openai.NewResponses() *ResponsesDialect` satisfying `edge.Dialect`, and the `POST /v1/responses` route.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
@@ -9950,7 +10483,7 @@ Responses is chat-shaped, so it becomes a **fourth `edge.Dialect`** rather than 
 
 `Name()` is `"openai-responses"` rather than `"openai"`. The request row's `dialect` column is how an operator tells a Responses client from a chat client, and both speak OpenAI over the same auth.
 
-**One thing has to be fixed here or the parse warnings vanish.** `chatOp.Build` returns only the adapter's warnings. Task 24's parser is the first inbound parse that produces any, and without appending them the reasoning-item drop is recorded nowhere.
+**One thing has to be fixed here or the parse warnings vanish.** `chatOp.Build` returns only the adapter's warnings. Task 25's parser is the first inbound parse that produces any, and without appending them the reasoning-item drop is recorded nowhere.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -10234,7 +10767,7 @@ git commit -m "feat(server): serve the responses API"
 
 ---
 
-### Task 28: Migration 0003 and the surface log columns
+### Task 30: Migration 0003 and the surface log columns
 
 **Files:**
 - Create: `internal/store/migrations/0003_surfaces.sql`
@@ -10243,7 +10776,7 @@ git commit -m "feat(server): serve the responses API"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `store.RequestRecord.SurfaceMeta map[string]any`, `.ResponseBytes int64`, `.ResponseContentType string`, and the three columns behind them. Task 29 fills them.
+- Produces: `store.RequestRecord.SurfaceMeta map[string]any`, `.ResponseBytes int64`, `.ResponseContentType string`, and the three columns behind them. Task 31 fills them.
 
 **Implementer:** dcc-superpower-companions:impl-opus-high
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 3 = 6
@@ -10523,14 +11056,14 @@ git commit -m "feat(store): record surface detail on the request row"
 
 ---
 
-### Task 29: Each surface records its own detail
+### Task 31: Each surface records its own detail
 
 **Files:**
 - Modify: `internal/exec/embed.go`, `internal/exec/image.go`, `internal/exec/rerank.go`, `internal/exec/transcription.go`, `internal/exec/speech.go`, `internal/exec/moderation.go`
 - Test: `internal/exec/surfacemeta_test.go`
 
 **Interfaces:**
-- Consumes: `store.RequestRecord.SurfaceMeta`, `.ResponseBytes`, `.ResponseContentType` (Task 28); `CommitWriter.Bytes()` (Task 5).
+- Consumes: `store.RequestRecord.SurfaceMeta`, `.ResponseBytes`, `.ResponseContentType` (Task 30); `CommitWriter.Bytes()` (Task 5).
 - Produces: nothing new.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
@@ -10814,7 +11347,367 @@ git commit -m "feat(exec): record each surface's own detail"
 
 ---
 
-### Task 30: Documentation
+### Task 32: Gemini serves embeddings
+
+**Files:**
+- Create: `internal/adapter/gemini/embed.go`
+- Modify: `internal/adapter/gemini/adapter.go`
+- Test: `internal/adapter/gemini/embed_test.go`
+
+**Interfaces:**
+- Consumes: `ir.EmbeddingRequest`, `ir.EmbeddingResponse`, `adapter.Embedder` (Task 11), `adapter.SurfaceSet` (Task 7).
+- Produces: `gemini.Adapter` implementing `adapter.Embedder` and `adapter.SurfaceProvider`.
+
+**Implementer:** dcc-superpower-companions:impl-sonnet-high
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
+**Approach:** inline - skip 2: `count.go` beside it is the pattern for a second gemini endpoint, and the wire shape is given below.
+
+Spec §4's matrix says gemini serves `embedding` via `embedContent`, and Task 2 widens its preset to declare it. Without this task the adapter never declares the surface, Task 8's filter excludes gemini from every embedding request, and the matrix — which the plan calls the specification — has a cell no step implements. The runtime behavior would be safe but wrong: a `gemini` provider advertising embeddings in the catalog that the router always skips.
+
+**`batchEmbedContents`, not `embedContent`.** The IR request is batched and the single-item endpoint would mean one HTTP call per input — a 96-input batch becoming 96 round trips through the attempt loop, each one separately failable. `batchEmbedContents` is the batched form of the same operation and takes the same per-item body.
+
+Two losses have to be reported rather than hidden:
+
+- **Gemini returns floats only.** A client that asked for `base64` gets floats, which is a different response from the one it asked for, so it warns.
+- **Gemini reports no token usage** for embeddings. `Usage` stays zero, which the request row records as unreported rather than free.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/adapter/gemini/embed_test.go`:
+
+```go
+package gemini
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestBuildEmbeddingRendersTheBatchShape(t *testing.T) {
+	hr, warns, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{
+			BaseURL: "https://generativelanguage.googleapis.com/v1beta",
+			APIKey:  "k", Model: "text-embedding-004",
+		},
+		&ir.EmbeddingRequest{Input: []string{"a", "b"}, Dimensions: 256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v", warns)
+	}
+	want := "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents"
+	if hr.URL.String() != want {
+		t.Errorf("url = %s, want %s", hr.URL, want)
+	}
+	if hr.Header.Get("x-goog-api-key") != "k" {
+		t.Errorf("auth header = %q; gemini does not use bearer", hr.Header.Get("x-goog-api-key"))
+	}
+
+	var body struct {
+		Requests []struct {
+			Model   string `json:"model"`
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			OutputDimensionality *int `json:"outputDimensionality"`
+		} `json:"requests"`
+	}
+	raw, _ := io.ReadAll(hr.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Requests) != 2 {
+		t.Fatalf("requests = %d, want one per input", len(body.Requests))
+	}
+	// Every element must repeat the model, prefixed. Gemini rejects the batch
+	// without it even though the name is already in the URL.
+	if body.Requests[0].Model != "models/text-embedding-004" {
+		t.Errorf("requests[0].model = %q", body.Requests[0].Model)
+	}
+	if body.Requests[1].Content.Parts[0].Text != "b" {
+		t.Errorf("requests[1] text = %q", body.Requests[1].Content.Parts[0].Text)
+	}
+	if body.Requests[0].OutputDimensionality == nil || *body.Requests[0].OutputDimensionality != 256 {
+		t.Errorf("outputDimensionality = %v", body.Requests[0].OutputDimensionality)
+	}
+}
+
+func TestBuildEmbeddingOmitsUnsetDimensions(t *testing.T) {
+	hr, _, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1beta", Model: "m"},
+		&ir.EmbeddingRequest{Input: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(hr.Body)
+	if strings.Contains(string(raw), "outputDimensionality") {
+		t.Errorf("body = %s; an unset dimension count was sent", raw)
+	}
+}
+
+func TestBuildEmbeddingWarnsThatBase64IsUnavailable(t *testing.T) {
+	// The client asked for base64 to skip a decode and will get floats. That
+	// is a different response from the one it asked for.
+	_, warns, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1beta", Model: "m"},
+		&ir.EmbeddingRequest{Input: []string{"a"}, Encoding: "base64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0].Reason, "float") {
+		t.Errorf("warnings = %v", warns)
+	}
+}
+
+func TestBuildEmbeddingRefusesTokenInput(t *testing.T) {
+	// Gemini takes text. Sending token ids as their decimal spelling would
+	// embed the digits and the client could not tell.
+	_, _, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1beta", Model: "m"},
+		&ir.EmbeddingRequest{Tokens: [][]int{{1, 2}}})
+	if err == nil {
+		t.Fatal("a pre-tokenized input was accepted")
+	}
+}
+
+func TestParseEmbeddingReadsTheBatchResponse(t *testing.T) {
+	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(
+		`{"embeddings":[{"values":[0.5,-0.25]},{"values":[1]}]}`))}
+	out, err := New().ParseEmbedding(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Embeddings) != 2 {
+		t.Fatalf("embeddings = %+v", out.Embeddings)
+	}
+	if out.Embeddings[0].Index != 0 || out.Embeddings[1].Index != 1 {
+		t.Errorf("indices = %d, %d; gemini returns order only and the index is ours to assign",
+			out.Embeddings[0].Index, out.Embeddings[1].Index)
+	}
+	if out.Embeddings[0].Float[1] != -0.25 {
+		t.Errorf("vector = %v", out.Embeddings[0].Float)
+	}
+	if out.Usage.InputTokens != 0 {
+		t.Errorf("usage = %+v; gemini reports none for embeddings", out.Usage)
+	}
+}
+
+func TestParseEmbeddingRejectsAVectorlessBody(t *testing.T) {
+	resp := &http.Response{StatusCode: 200,
+		Body: io.NopCloser(strings.NewReader(`{"embeddings":[]}`))}
+	if _, err := New().ParseEmbedding(resp); err == nil {
+		t.Fatal("a 200 with no vectors parsed cleanly")
+	}
+}
+
+func TestGeminiDeclaresTheEmbeddingSurface(t *testing.T) {
+	// Spec §4's matrix. Without this the router filters gemini out of every
+	// embedding request while its preset advertises the surface.
+	got := adapter.SurfacesOf(New())
+	if !got.Has(ir.SurfaceEmbedding) || !got.Has(ir.SurfaceLLM) {
+		t.Errorf("surfaces = %v", got)
+	}
+	if got.Has(ir.SurfaceImage) {
+		t.Error("gemini declares image; Imagen is out of scope for v1 per the §4 matrix")
+	}
+}
+```
+
+Match `adapter.SurfaceSet`'s accessor to whatever Task 7 actually named it — read `internal/adapter/adapter.go` before writing the last test rather than assuming `Has`.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/gemini/ -run 'Embedding|GeminiDeclares' -v
+```
+
+Expected: FAIL to build — `undefined: BuildEmbedding`.
+
+- [ ] **Step 3: Implement the adapter**
+
+Create `internal/adapter/gemini/embed.go`:
+
+```go
+package gemini
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+const maxGeminiEmbeddingBytes = 32 << 20
+
+type geminiEmbedRequest struct {
+	Requests []geminiEmbedItem `json:"requests"`
+}
+
+type geminiEmbedItem struct {
+	// Model is repeated per item, prefixed with "models/". Gemini rejects the
+	// batch without it even though the name is already in the URL.
+	Model   string `json:"model"`
+	Content struct {
+		Parts []struct {
+			Text string `json:"text"`
+		} `json:"parts"`
+	} `json:"content"`
+	OutputDimensionality *int `json:"outputDimensionality,omitempty"`
+}
+
+// BuildEmbedding renders batchEmbedContents rather than embedContent. The IR
+// request is batched, and the single-item endpoint would turn a 96-input batch
+// into 96 round trips through the attempt loop, each separately failable.
+func (a *Adapter) BuildEmbedding(ctx context.Context, t *adapter.Target,
+	req *ir.EmbeddingRequest) (*http.Request, []ir.Warning, error) {
+
+	if len(req.Tokens) > 0 {
+		// Gemini takes text. Sending token ids as their decimal spelling would
+		// embed the digits, succeed, and give the client no way to notice.
+		return nil, nil, errors.New(
+			"this provider takes text, and the request carried pre-tokenized input")
+	}
+	if len(req.Input) == 0 {
+		return nil, nil, errors.New("input is required")
+	}
+
+	var warns []ir.Warning
+	if req.Encoding == "base64" {
+		warns = append(warns, ir.Warning{
+			Field: "encoding_format", Target: t.Model,
+			Reason: "this provider returns float vectors only; base64 was requested",
+		})
+	}
+
+	name := "models/" + t.Model
+	body := geminiEmbedRequest{Requests: make([]geminiEmbedItem, 0, len(req.Input))}
+	for _, text := range req.Input {
+		item := geminiEmbedItem{Model: name}
+		item.Content.Parts = append(item.Content.Parts, struct {
+			Text string `json:"text"`
+		}{Text: text})
+		if req.Dimensions > 0 {
+			d := req.Dimensions
+			item.OutputDimensionality = &d
+		}
+		body.Requests = append(body.Requests, item)
+	}
+
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	endpoint := strings.TrimRight(t.BaseURL, "/") + "/models/" +
+		url.PathEscape(t.Model) + ":batchEmbedContents"
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build embedding request: %w", err)
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if t.APIKey != "" {
+		hr.Header.Set("x-goog-api-key", t.APIKey)
+	}
+	return hr, warns, nil
+}
+
+func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, error) {
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxGeminiEmbeddingBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read embedding response: %w", err)
+	}
+	var env struct {
+		Embeddings []struct {
+			Values []float32 `json:"values"`
+		} `json:"embeddings"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("parse embedding response: %w", err)
+	}
+	if len(env.Embeddings) == 0 {
+		return nil, errors.New("embedding response carried no vectors")
+	}
+	out := &ir.EmbeddingResponse{
+		Embeddings: make([]ir.Embedding, 0, len(env.Embeddings)),
+		// Gemini reports no usage for embeddings. Zero here means unreported,
+		// and the request row records it as such rather than as free.
+	}
+	for i, e := range env.Embeddings {
+		// The index is ours to assign: the batch response carries order only.
+		out.Embeddings = append(out.Embeddings, ir.Embedding{Index: i, Float: e.Values})
+	}
+	return out, nil
+}
+
+var _ adapter.Embedder = (*Adapter)(nil)
+```
+
+- [ ] **Step 4: Declare the surface**
+
+In `internal/adapter/gemini/adapter.go`, beside the other methods:
+
+```go
+// Surfaces is spec §4's matrix row. Imagen is out of scope for v1, so no image
+// surface is declared even though the provider offers one.
+func (a *Adapter) Surfaces() adapter.SurfaceSet {
+	return adapter.NewSurfaceSet(ir.SurfaceLLM, ir.SurfaceEmbedding)
+}
+```
+
+Match `NewSurfaceSet` to the constructor Task 7 actually wrote.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/gemini/ ./internal/adapter/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS in both packages. `internal/adapter`'s matrix test from Task 7 now sees gemini's real row.
+
+- [ ] **Step 6: Read the rendered request rather than only asserting on it**
+
+Add a temporary `t.Log(string(raw))` to `TestBuildEmbeddingRendersTheBatchShape`, re-run it, and read the JSON: confirm every element repeats `"model":"models/…"`, that `content.parts` is an array of objects rather than a bare string, and that `outputDimensionality` sits inside each request rather than at the top level. Remove the log before committing. Gemini rejects all three mistakes with the same unhelpful 400.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/adapter/gemini/embed.go internal/adapter/gemini/embed_test.go internal/adapter/gemini/adapter.go
+git commit -m "feat(gemini): serve the embedding surface"
+```
+
+---
+
+### Task 33: Documentation
 
 **Files:**
 - Modify: `README.md`, `darkrouter.example.yaml`, `docs/PROGRESS.md`
@@ -10898,7 +11791,7 @@ Add a "Carried forward from phase 5" section with these, each one or two sentenc
 - **Per-call image pricing has no catalog source.** Spec §9 says cost should come from per-call or per-unit pricing where no usage arrives, but `catalog.Pricing` carries only per-MTok rates and models.dev supplies nothing else. A dall-e call therefore records no cost at all, which is correct but incomplete.
 - **Unmodeled Responses request fields are dropped silently.** `top_logprobs`, `truncation`, `include`, `service_tier`, `max_tool_calls` and `prompt_cache_key` are parsed away without a warning. None changes the answer's content, but `truncation` and `max_tool_calls` change its shape, and a client setting them gets behavior it did not ask for with nothing in the trace saying so.
 - **Responses ids are not resolvable, by design.** Returned ids carry a `resp_dr_` prefix and `store: false`; any request echoing one back is refused. A client built around server-side conversation state will not work against Darkrouter and is told so explicitly rather than served an amnesic answer.
-- **Four of the seven surfaces have no live-verified provider.** Task 31 verifies chat, responses, transcriptions and speech against Groq. Embeddings, images, rerank and moderations are verified only as the no-provider error, because no key for a provider serving them was available. Verifying them needs an OpenAI or Cohere key.
+- **Four of the seven surfaces have no live-verified provider.** Task 34 verifies chat, responses, transcriptions and speech against Groq. Embeddings, images, rerank and moderations are verified only as the no-provider error, because no key for a provider serving them was available. Verifying them needs an OpenAI or Cohere key.
 
 - [ ] **Step 4: Update the spec index**
 
@@ -10923,7 +11816,7 @@ git commit -m "docs: document the auxiliary surfaces"
 
 ---
 
-### Task 31: Live verification against a real provider
+### Task 34: Live verification against a real provider
 
 **Files:**
 - Modify: `docs/PROGRESS.md`
@@ -11083,7 +11976,7 @@ git commit -m "docs: record phase 5 live verification"
 
 ## Finishing
 
-With Task 31 committed, use superpowers:finishing-a-development-branch. The merge is `--no-ff` onto `master`, so the phase stays legible as a unit in the history:
+With Task 34 committed, use superpowers:finishing-a-development-branch. The merge is `--no-ff` onto `master`, so the phase stays legible as a unit in the history:
 
 ```bash
 export PATH=$PATH:/usr/local/go/bin
