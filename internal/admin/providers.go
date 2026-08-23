@@ -43,13 +43,16 @@ type credentialView struct {
 }
 
 type providerView struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Preset      string           `json:"preset"`
-	Kind        string           `json:"kind"`
-	BaseURL     string           `json:"base_url"`
-	Priority    int              `json:"priority"`
-	Enabled     bool             `json:"enabled"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Preset   string `json:"preset"`
+	Kind     string `json:"kind"`
+	BaseURL  string `json:"base_url"`
+	Priority int    `json:"priority"`
+	Enabled  bool   `json:"enabled"`
+	// AuthStyle tells the dashboard which credential form to show. A static
+	// key form is useless for an oauth provider: there is no key to type.
+	AuthStyle   string           `json:"auth_style"`
 	Credentials []credentialView `json:"credentials"`
 }
 
@@ -64,7 +67,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		v := providerView{
 			ID: p.ID, Name: p.Name, Preset: p.Preset, Kind: p.Kind,
 			BaseURL: p.BaseURL, Priority: p.Priority, Enabled: p.Enabled,
-			Credentials: []credentialView{},
+			AuthStyle: p.AuthStyle, Credentials: []credentialView{},
 		}
 		if s.deps.Key != nil {
 			creds, cerr := s.deps.DB.Credentials(r.Context(), s.deps.Key, p.ID)
