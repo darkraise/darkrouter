@@ -242,3 +242,123 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	}
 	return out, rows.Err()
 }
+
+// maxRequestPage caps a page server-side. A client asking for a million rows is
+// asking the gateway to build a million-row JSON array in memory. A larger
+// request is clamped rather than refused, because refusing makes a UI bug look
+// like a server outage.
+const maxRequestPage = 200
+
+// RequestQuery is one page request. AfterTS and AfterID together are the keyset
+// position; an empty AfterID means the first page.
+type RequestQuery struct {
+	Limit   int
+	AfterTS int64
+	AfterID string
+
+	Provider string
+	Model    string
+	Status   string
+	Alias    string
+	Surface  string
+	SinceMs  int64
+	UntilMs  int64
+}
+
+// RequestSummary is one row of the table. It carries TSMs and ID because the
+// next cursor is built from the last row of the page and there is nowhere else
+// to get them.
+type RequestSummary struct {
+	ID              string
+	TSMs            int64
+	Dialect         string
+	Surface         string
+	RequestedModel  string
+	ResolvedAlias   string
+	FinalProviderID string
+	FinalModel      string
+	Status          string
+	TokensIn        int64
+	TokensOut       int64
+	CostMicros      *int64
+	TTFTMs          *int64
+	TotalMs         *int64
+	ErrorCode       string
+	Attempts        int
+}
+
+// ListRequests returns one keyset page, newest first.
+//
+// The predicate is the lexicographic tuple (ts, id) < (cursor_ts, cursor_id),
+// written expanded rather than as a row value because SQLite uses the composite
+// index more reliably that way. The tie-break on id is what makes the order
+// total: request ids are ULIDs, lexicographically ordered by time, so two rows
+// in the same millisecond still have a defined position and a page boundary
+// there neither repeats nor skips.
+func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary, error) {
+	limit := q.Limit
+	if limit <= 0 || limit > maxRequestPage {
+		limit = maxRequestPage
+	}
+
+	where := []string{"1 = 1"}
+	args := []any{}
+	if q.AfterID != "" {
+		where = append(where, "(r.ts < ? OR (r.ts = ? AND r.id < ?))")
+		args = append(args, q.AfterTS, q.AfterTS, q.AfterID)
+	}
+	// A fixed sequence rather than a map range: the generated SQL has to be
+	// deterministic or SQLite's statement cache misses on every call, and the
+	// order matches RequestFilters.Hash so the two stay legible together.
+	for _, f := range []struct {
+		col string
+		val string
+	}{
+		{"r.final_provider_id", q.Provider},
+		{"r.final_model", q.Model},
+		{"r.status", q.Status},
+		{"r.resolved_alias", q.Alias},
+		{"r.surface", q.Surface},
+	} {
+		if f.val != "" {
+			where = append(where, f.col+" = ?")
+			args = append(args, f.val)
+		}
+	}
+	if q.SinceMs > 0 {
+		where = append(where, "r.ts >= ?")
+		args = append(args, q.SinceMs)
+	}
+	if q.UntilMs > 0 {
+		where = append(where, "r.ts <= ?")
+		args = append(args, q.UntilMs)
+	}
+	args = append(args, limit)
+
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT r.id, r.ts, r.dialect, r.surface, r.requested_model, r.resolved_alias,
+		        r.final_provider_id, r.final_model, r.status,
+		        r.tokens_in, r.tokens_out, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
+		        (SELECT count(*) FROM request_attempts a WHERE a.request_id = r.id)
+		   FROM requests r
+		  WHERE `+strings.Join(where, " AND ")+`
+		  ORDER BY r.ts DESC, r.id DESC
+		  LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list requests: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]RequestSummary, 0, limit)
+	for rows.Next() {
+		var s RequestSummary
+		if err := rows.Scan(&s.ID, &s.TSMs, &s.Dialect, &s.Surface, &s.RequestedModel,
+			&s.ResolvedAlias, &s.FinalProviderID, &s.FinalModel, &s.Status,
+			&s.TokensIn, &s.TokensOut, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
+			&s.ErrorCode, &s.Attempts); err != nil {
+			return nil, fmt.Errorf("list requests: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
