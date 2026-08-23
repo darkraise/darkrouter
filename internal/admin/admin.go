@@ -116,6 +116,26 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
+
+	// A mistyped API path must answer as an API path. Without these two an
+	// unknown /api/… would fall through to the SPA and return HTML, and the
+	// client would report a JSON parse error instead of the missing route.
+	s.mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "no such endpoint")
+	})
+	s.mux.HandleFunc("POST /api/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "no such endpoint")
+	})
+
+	// Registered last and at the root so every exact API path above wins:
+	// http.ServeMux prefers the longest matching pattern.
+	if s.deps.Dev != "" {
+		if proxy, err := devProxy(s.deps.Dev); err == nil {
+			s.mux.Handle("/", proxy)
+			return
+		}
+	}
+	s.mux.Handle("/", s.spaHandler())
 }
 
 // writeJSON is the single response path, so no handler invents its own header
