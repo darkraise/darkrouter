@@ -4148,3 +4148,1588 @@ git commit -m "feat(exec): serve the embeddings surface"
 ```
 
 ---
+
+### Task 16: Moderations end to end
+
+**Files:**
+- Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
+- Create: `internal/adapter/openaicompat/moderation.go`, `internal/exec/moderation.go`
+- Test: `internal/adapter/openaicompat/moderation_test.go`, `internal/exec/moderation_test.go`, `internal/edge/openai/aux_test.go`
+
+**Interfaces:**
+- Consumes: `RunAux` (Task 14), `failedParse` (Task 15).
+- Produces: `ir.ModerationRequest`, `ir.ModerationResponse`, `ir.ModerationResult`, `adapter.Moderator`, `edge.ModerationDialect`, and `(*Executor).HandleModerations`.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
+**Approach:** inline - skip 2: this is Task 15's four files with the moderation types substituted, and every one of them is given below.
+
+The one real design decision is **categories are maps, not structs**. OpenAI's category list has grown five times since the endpoint shipped and is different again on `omni-moderation-latest`. A struct would silently drop every category added after this was written, and a dropped category on a moderation endpoint is a safety signal the client never sees. A map forwards whatever arrives.
+
+Moderations report **no usage** — the endpoint is free and returns no `usage` object. `TokensIn` and `TokensOut` stay zero and cost stays NULL, which is the honest record rather than a fabricated one.
+
+`omni-moderation-latest` also accepts an array of content-part objects for image moderation. That shape is **rejected with a clear error** rather than half-supported: forwarding it would need an image-part IR this phase does not build, and accepting it while dropping the image parts would moderate the text and report the whole input clean.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `internal/edge/openai/aux_test.go`:
+
+```go
+func TestParseModerationNormalizesBothInputShapes(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want []string
+	}{
+		{`{"model":"m","input":"hello"}`, []string{"hello"}},
+		{`{"model":"m","input":["a","b"]}`, []string{"a", "b"}},
+	} {
+		req, err := ParseModeration(httptest.NewRequest("POST", "/v1/moderations",
+			strings.NewReader(tc.body)), 1<<20)
+		if err != nil {
+			t.Fatalf("ParseModeration(%s): %v", tc.body, err)
+		}
+		if len(req.Input) != len(tc.want) || req.Input[0] != tc.want[0] {
+			t.Errorf("ParseModeration(%s).Input = %v, want %v", tc.body, req.Input, tc.want)
+		}
+	}
+}
+
+func TestParseModerationRejectsContentParts(t *testing.T) {
+	// Accepting this while dropping the image parts would moderate the text
+	// and report the whole input clean, which is worse than refusing it.
+	_, err := ParseModeration(httptest.NewRequest("POST", "/v1/moderations",
+		strings.NewReader(`{"model":"m","input":[{"type":"image_url","image_url":{"url":"x"}}]}`)), 1<<20)
+	if err == nil {
+		t.Fatal("a content-part input was accepted")
+	}
+	if !strings.Contains(err.Error(), "text") {
+		t.Errorf("err = %v; it must say what is supported", err)
+	}
+}
+
+func TestWriteModerationCarriesEveryCategory(t *testing.T) {
+	// The category list is provider-defined and grows. A dropped category on a
+	// moderation endpoint is a safety signal the client never sees.
+	w := httptest.NewRecorder()
+	if err := WriteModeration(w, &ir.ModerationResponse{
+		ID: "modr-1", Model: "omni-moderation-latest",
+		Results: []ir.ModerationResult{{
+			Flagged:    true,
+			Categories: map[string]bool{"harassment": true, "a-category-invented-later": false},
+			Scores:     map[string]float64{"harassment": 0.91, "a-category-invented-later": 0.01},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Results []struct {
+			Flagged    bool               `json:"flagged"`
+			Categories map[string]bool    `json:"categories"`
+			Scores     map[string]float64 `json:"category_scores"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != "modr-1" || len(body.Results) != 1 || !body.Results[0].Flagged {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if _, ok := body.Results[0].Categories["a-category-invented-later"]; !ok {
+		t.Errorf("categories = %v; an unknown category was dropped", body.Results[0].Categories)
+	}
+	if body.Results[0].Scores["harassment"] != 0.91 {
+		t.Errorf("scores = %v", body.Results[0].Scores)
+	}
+}
+```
+
+Create `internal/adapter/openaicompat/moderation_test.go`:
+
+```go
+package openaicompat
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestBuildModerationRendersTheOpenAIShape(t *testing.T) {
+	hr, warns, err := New().BuildModeration(context.Background(),
+		&adapter.Target{BaseURL: "https://api.example.com/v1/", APIKey: "sk", Model: "omni-moderation-latest"},
+		&ir.ModerationRequest{Input: []string{"a", "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v", warns)
+	}
+	if hr.URL.String() != "https://api.example.com/v1/moderations" {
+		t.Errorf("url = %s", hr.URL)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "omni-moderation-latest" {
+		t.Errorf("model = %v; the target's name must be sent", body["model"])
+	}
+	if in, ok := body["input"].([]any); !ok || len(in) != 2 {
+		t.Errorf("input = %v", body["input"])
+	}
+}
+
+func TestParseModerationKeepsUnknownCategories(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Body: io.NopCloser(strings.NewReader(`{"id":"modr-1","model":"m","results":[
+		  {"flagged":true,
+		   "categories":{"hate":false,"invented-later":true},
+		   "category_scores":{"hate":0.01,"invented-later":0.99}}]}`)),
+	}
+	out, err := New().ParseModeration(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != "modr-1" || len(out.Results) != 1 || !out.Results[0].Flagged {
+		t.Fatalf("response = %+v", out)
+	}
+	if !out.Results[0].Categories["invented-later"] {
+		t.Errorf("categories = %v", out.Results[0].Categories)
+	}
+	if out.Results[0].Scores["invented-later"] != 0.99 {
+		t.Errorf("scores = %v", out.Results[0].Scores)
+	}
+}
+
+func TestParseModerationRejectsAnEmptyResultSet(t *testing.T) {
+	// A 200 with no results is a provider fault: the client asked about input
+	// it got no verdict on, and returning it as success hides that.
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"m","model":"m","results":[]}`)),
+	}
+	if _, err := New().ParseModeration(resp); err == nil {
+		t.Fatal("a verdict-free 200 parsed cleanly")
+	}
+}
+```
+
+Create `internal/exec/moderation_test.go`:
+
+```go
+package exec
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func moderationUpstream() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"modr-1","model":"omni","results":[
+		  {"flagged":false,"categories":{"hate":false},"category_scores":{"hate":0.001}}]}`))
+	}
+}
+
+func TestModerationsServeEndToEnd(t *testing.T) {
+	upstream := httptest.NewServer(moderationUpstream())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "omni", ir.SurfaceModeration))
+	w := httptest.NewRecorder()
+	e.HandleModerations(w, httptest.NewRequest("POST", "/v1/moderations",
+		strings.NewReader(`{"model":"omni","input":"hello"}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Results []struct {
+			Flagged bool `json:"flagged"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Results) != 1 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	got := rec.only(t)
+	if got.Surface != "moderation" || got.Status != "success" {
+		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+	if got.CostMicros != nil {
+		t.Errorf("cost = %v; moderations report no usage and cost must stay NULL", *got.CostMicros)
+	}
+}
+
+func TestModerationsFailOverToASecondProvider(t *testing.T) {
+	var hits atomic.Int64
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(moderationUpstream())
+	defer good.Close()
+
+	e, rec := executorForTwo(t, bad.URL, good.URL,
+		catalogPair("bad", "good", "omni", ir.SurfaceModeration))
+	w := httptest.NewRecorder()
+	e.HandleModerations(w, httptest.NewRequest("POST", "/v1/moderations",
+		strings.NewReader(`{"model":"omni","input":"hello"}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK || hits.Load() != 1 {
+		t.Fatalf("status = %d, failing provider hits = %d", w.Code, hits.Load())
+	}
+	if got := rec.only(t); got.FinalProviderID != "good" {
+		t.Errorf("final = %q", got.FinalProviderID)
+	}
+}
+
+func TestAModerationRequestWithNoModerationProviderIsRefused(t *testing.T) {
+	upstream := httptest.NewServer(moderationUpstream())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "chat-only", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.HandleModerations(w, httptest.NewRequest("POST", "/v1/moderations",
+		strings.NewReader(`{"model":"chat-only","input":"hello"}`)), openaiedge.New())
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if len(rec.only(t).Attempts) != 0 {
+		t.Error("a surface no provider offers attempted an upstream call")
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/adapter/openaicompat/ ./internal/exec/ -run Moderation -v
+```
+
+Expected: FAIL to build in all three — `undefined: ParseModeration`, `undefined: BuildModeration`, `e.HandleModerations undefined`.
+
+- [ ] **Step 3: Add the IR types and the adapter interface**
+
+Append to `internal/ir/aux.go`:
+
+```go
+// ModerationRequest is one moderation call. Input is always a slice: OpenAI
+// accepts a bare string or an array of strings and the edge flattens both.
+type ModerationRequest struct {
+	Model string
+	Input []string
+}
+
+// InputCount is the batched item count, recorded on the request row per spec §9.
+func (r *ModerationRequest) InputCount() int { return len(r.Input) }
+
+// ModerationResult is one verdict.
+//
+// Categories and Scores are maps rather than a fixed field set because the
+// category list is provider-defined and has grown repeatedly. A struct would
+// silently drop every category added after it was written, and a dropped
+// category on a moderation endpoint is a safety signal the client never sees.
+type ModerationResult struct {
+	Flagged    bool
+	Categories map[string]bool
+	Scores     map[string]float64
+}
+
+type ModerationResponse struct {
+	ID    string
+	Model string
+	// Results is parallel to the request's Input, one verdict per item.
+	Results []ModerationResult
+	// Usage is zero for every known provider: the endpoint reports none. It is
+	// carried anyway so a provider that starts reporting is recorded rather
+	// than discarded.
+	Usage Usage
+}
+```
+
+In `internal/adapter/adapter.go`, beside `Embedder`:
+
+```go
+// Moderator is implemented by an adapter serving the moderation surface.
+type Moderator interface {
+	BuildModeration(ctx context.Context, t *Target, req *ir.ModerationRequest) (*http.Request, []ir.Warning, error)
+	// ParseModeration takes ownership of resp.Body and always closes it.
+	ParseModeration(resp *http.Response) (*ir.ModerationResponse, error)
+}
+```
+
+- [ ] **Step 4: Add the edge interface, parser and writer**
+
+In `internal/edge/edge.go`, beside `EmbeddingDialect`:
+
+```go
+// ModerationDialect is the inbound wire form of the moderation surface.
+type ModerationDialect interface {
+	Name() string
+	ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error)
+	WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+```
+
+Append to `internal/edge/openai/aux.go`:
+
+```go
+type wireModerationRequest struct {
+	Model string          `json:"model"`
+	Input json.RawMessage `json:"input"`
+}
+
+func ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireModerationRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	texts, err := parseTextInput(w.Input)
+	if err != nil {
+		return nil, err
+	}
+	return &ir.ModerationRequest{Model: w.Model, Input: texts}, nil
+}
+
+// parseTextInput reads a bare string or an array of strings.
+//
+// omni-moderation-latest also accepts an array of content-part objects for
+// image moderation. That is refused rather than half-supported: accepting it
+// while dropping the image parts would moderate the text and report the whole
+// input clean.
+func parseTextInput(raw json.RawMessage) ([]string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, errors.New("input is required")
+	}
+	switch trimmed[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return nil, fmt.Errorf("input: %w", err)
+		}
+		return []string{s}, nil
+	case '[':
+		var out []string
+		if err := json.Unmarshal(trimmed, &out); err != nil {
+			return nil, fmt.Errorf("input must be text or an array of text: %w", err)
+		}
+		if len(out) == 0 {
+			return nil, errors.New("input is empty")
+		}
+		return out, nil
+	default:
+		return nil, errors.New("input must be text or an array of text")
+	}
+}
+
+func WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error {
+	results := make([]any, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		cats := r.Categories
+		if cats == nil {
+			cats = map[string]bool{}
+		}
+		scores := r.Scores
+		if scores == nil {
+			scores = map[string]float64{}
+		}
+		results = append(results, map[string]any{
+			"flagged":         r.Flagged,
+			"categories":      cats,
+			"category_scores": scores,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(map[string]any{
+		"id": resp.ID, "model": resp.Model, "results": results,
+	})
+}
+
+func (d *Dialect) ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error) {
+	return ParseModeration(r, maxBody)
+}
+
+func (d *Dialect) WriteModeration(w http.ResponseWriter, resp *ir.ModerationResponse) error {
+	return WriteModeration(w, resp)
+}
+
+var _ edge.ModerationDialect = (*Dialect)(nil)
+```
+
+Extract the body read `ParseEmbedding` already performs into `readCappedBody` in the same file, and have `ParseEmbedding` call it too — every auxiliary parser needs the identical eight lines:
+
+```go
+// readCappedBody reads the inbound body under the configured cap, reading one
+// byte past it so "exactly at the cap" is not rejected.
+func readCappedBody(r *http.Request, maxBody int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBody {
+		return nil, fmt.Errorf("request body exceeds %d bytes", maxBody)
+	}
+	return body, nil
+}
+```
+
+- [ ] **Step 5: Implement the adapter**
+
+Create `internal/adapter/openaicompat/moderation.go`:
+
+```go
+package openaicompat
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// maxModerationBytes bounds the response read. A verdict set is small; an
+// unbounded read from a misbehaving provider is the hazard max_body_bytes
+// prevents inbound and nothing was preventing outbound.
+const maxModerationBytes = 4 << 20
+
+func (a *Adapter) BuildModeration(ctx context.Context, t *adapter.Target,
+	req *ir.ModerationRequest) (*http.Request, []ir.Warning, error) {
+
+	buf, err := json.Marshal(map[string]any{"model": t.Model, "input": req.Input})
+	if err != nil {
+		return nil, nil, err
+	}
+	url := strings.TrimRight(t.BaseURL, "/") + "/moderations"
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build moderation request: %w", err)
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if t.APIKey != "" {
+		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
+	}
+	return hr, nil, nil
+}
+
+type moderationEnvelope struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	Results []struct {
+		Flagged    bool               `json:"flagged"`
+		Categories map[string]bool    `json:"categories"`
+		Scores     map[string]float64 `json:"category_scores"`
+	} `json:"results"`
+}
+
+func (a *Adapter) ParseModeration(resp *http.Response) (*ir.ModerationResponse, error) {
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxModerationBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read moderation response: %w", err)
+	}
+	var env moderationEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("parse moderation response: %w", err)
+	}
+	if len(env.Results) == 0 {
+		// A 200 with no verdict is a provider fault: the client asked about
+		// input it got no answer on, and reporting success hides that.
+		return nil, errors.New("moderation response carried no results")
+	}
+	out := &ir.ModerationResponse{
+		ID: env.ID, Model: env.Model,
+		Results: make([]ir.ModerationResult, 0, len(env.Results)),
+	}
+	for _, r := range env.Results {
+		out.Results = append(out.Results, ir.ModerationResult{
+			Flagged: r.Flagged, Categories: r.Categories, Scores: r.Scores,
+		})
+	}
+	return out, nil
+}
+
+var _ adapter.Moderator = (*Adapter)(nil)
+```
+
+- [ ] **Step 6: Write the op and the route**
+
+Create `internal/exec/moderation.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+type moderationOp struct {
+	d   edge.ModerationDialect
+	req *ir.ModerationRequest
+}
+
+func (o *moderationOp) Dialect() string { return o.d.Name() }
+
+func (o *moderationOp) Query() router.Query {
+	return router.Query{Model: o.req.Model, Surface: ir.SurfaceModeration}
+}
+
+func (o *moderationOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	m, ok := ad.(adapter.Moderator)
+	if !ok {
+		return nil, nil, fmt.Errorf("adapter %s does not serve moderations", ad.Kind())
+	}
+	return m.BuildModeration(ctx, tgt, o.req)
+}
+
+func (o *moderationOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	m, ok := ac.Adapter.(adapter.Moderator)
+	if !ok {
+		resp.Body.Close()
+		return adapter.OutcomeFatal, &ir.Error{
+			Type: ir.ErrDarkrouter, Message: "adapter does not serve moderations",
+		}
+	}
+	out, err := m.ParseModeration(resp)
+	if err != nil {
+		return failedParse(ac, resp, err)
+	}
+
+	ttft := time.Since(ac.Rec.TS).Milliseconds()
+	ac.Rec.TTFTMs = &ttft
+	applyUsage(ac.Rec, &out.Usage)
+	ac.Rec.FinalProviderID = ac.Cand.ProviderID
+	ac.Rec.FinalModel = ac.Cand.Model
+	ac.Rec.Warnings = warningStrings(ac.Warns)
+
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+	_ = o.d.WriteModeration(cw, out)
+	return adapter.OutcomeSuccess, nil
+}
+
+func (o *moderationOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+
+var _ SurfaceOp = (*moderationOp)(nil)
+
+// HandleModerations serves POST /v1/moderations.
+func (e *Executor) HandleModerations(w http.ResponseWriter, r *http.Request, d edge.ModerationDialect) {
+	maxBody := e.store.Current().Server.MaxBodyBytes
+	e.RunAux(w, r, d.Name(), ir.SurfaceModeration, d, func() (SurfaceOp, error) {
+		req, err := d.ParseModeration(r, maxBody)
+		if err != nil {
+			return nil, err
+		}
+		return &moderationOp{d: d, req: req}, nil
+	})
+}
+```
+
+In `internal/server/server.go`, beside the embeddings route:
+
+```go
+	mux.HandleFunc("POST /v1/moderations", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleModerations(w, r, oa)
+	}))
+```
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/adapter/openaicompat/ ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in all four packages.
+
+- [ ] **Step 8: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/ir/aux.go internal/adapter/adapter.go internal/adapter/openaicompat/moderation.go \
+        internal/adapter/openaicompat/moderation_test.go internal/edge/edge.go \
+        internal/edge/openai/aux.go internal/edge/openai/aux_test.go \
+        internal/exec/moderation.go internal/exec/moderation_test.go internal/server/server.go
+git commit -m "feat(exec): serve the moderation surface"
+```
+
+---
+
+### Task 17: The preset-declared rerank path reaches the adapter
+
+**Files:**
+- Modify: `internal/adapter/adapter.go`, `internal/exec/exec.go`
+- Test: `internal/exec/exec_test.go`
+
+**Interfaces:**
+- Consumes: `catalog.Preset.QuirkValue` (phase 6), `provider.Provider.Preset`.
+- Produces: `adapter.Target.RerankPath`. Task 18's adapter reads it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: the quirk mechanism and its accessor both exist from phase 6, and the only new code is one field and one lookup.
+
+Spec §3.1: "Each preset declares its own rerank path, since providers expose it at differing URLs." Task 2 encodes that as the valued quirk `rerank-path=/v2/rerank` and its test refuses a rerank preset without one. Nothing carries the value to the adapter yet, and the adapter is where the URL is built.
+
+**Why a field on `Target` rather than a lookup inside the adapter.** The adapter is given a resolved target and knows nothing about presets; reaching into `catalog.Embedded()` from inside it would make the renderer depend on the shipped data file and become untestable without it. Every other per-provider fact on `Target` — base URL, key, model, model info — is resolved by the executor for the same reason, and this is one more.
+
+An empty `RerankPath` is not a fallback to a guessed URL. The router only produces a rerank candidate for a model whose preset declares the surface, and Task 2's test refuses such a preset without the quirk, so empty means a misconfiguration and Task 18 fails the build loudly rather than posting a rerank body at `/chat/completions`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/exec/exec_test.go`:
+
+```go
+func TestTheTargetCarriesThePresetRerankPath(t *testing.T) {
+	// Spec §3.1: providers expose rerank at differing URLs, so the path is
+	// data. The adapter is handed a resolved target and must not have to reach
+	// into the shipped preset file to build a URL.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	op := &probeOp{q: router.Query{Model: "rerank-v3.5", Surface: ir.SurfaceRerank}}
+	e, _ := executorForPreset(t, upstream.URL, "cohere",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op)
+
+	if op.lastTarget.RerankPath != "/v2/rerank" {
+		t.Errorf("RerankPath = %q, want the cohere preset's quirk value", op.lastTarget.RerankPath)
+	}
+}
+
+func TestAProviderWithNoPresetCarriesNoRerankPath(t *testing.T) {
+	// An uncatalogued provider is a base URL and a key. Guessing a rerank path
+	// for it would post a rerank body at whatever URL the guess produced.
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceRerank}}
+	e, _ := executorForPreset(t, upstream.URL, "", catalogWith("p", "m", ir.SurfaceRerank))
+	e.RunSurface(httptest.NewRecorder(), httptest.NewRequest("POST", "/probe", nil), op)
+
+	if op.lastTarget.RerankPath != "" {
+		t.Errorf("RerankPath = %q, want empty", op.lastTarget.RerankPath)
+	}
+}
+```
+
+Two supporting edits:
+
+- Give `probeOp` a `lastTarget adapter.Target` field and set it in `Build` beside the existing `lastInfo`. `lastInfo` stays, so Task 6's assertions are untouched.
+- Add `executorForPreset(t, url, preset string, cat *catalog.Store)`, which is `executorForOp` with `preset:` set on the provider row.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestTheTargetCarriesThePreset|TestAProviderWithNoPreset' -v
+```
+
+Expected: FAIL to build — `op.lastTarget undefined` and `tgt.RerankPath undefined`.
+
+- [ ] **Step 3: Add the field**
+
+In `internal/adapter/adapter.go`:
+
+```go
+type Target struct {
+	BaseURL string
+	APIKey  string
+	Model   string
+	Info    ModelInfo
+
+	// RerankPath is the preset-declared Cohere-v2 path, spec §3.1, resolved by
+	// the executor because the adapter is handed a target and knows nothing
+	// about presets. Empty for a provider with no preset, which is a
+	// misconfiguration for this surface rather than a licence to guess a URL.
+	RerankPath string
+}
+```
+
+- [ ] **Step 4: Resolve it in the executor**
+
+In `internal/exec/exec.go`, extend the `Target` construction inside `attempt`:
+
+```go
+	tgt := &adapter.Target{
+		BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model,
+		Info:       modelInfo(cat, c.ProviderID, c.Model),
+		RerankPath: rerankPath(p.Preset),
+	}
+```
+
+and add beside `modelInfo`:
+
+```go
+// rerankPath returns the provider's preset-declared rerank path, or "" when it
+// has no preset or the preset declares none. Spec §3.1: providers expose rerank
+// at differing URLs, so the path is preset data rather than an adapter
+// constant.
+func rerankPath(preset string) string {
+	if preset == "" {
+		return ""
+	}
+	p, ok := catalog.Embedded()[preset]
+	if !ok {
+		return ""
+	}
+	v, _ := p.QuirkValue("rerank-path")
+	return v
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/adapter/adapter.go internal/exec/exec.go internal/exec/exec_test.go
+git commit -m "feat(exec): resolve the preset rerank path onto the target"
+```
+
+---
+
+### Task 18: Rerank end to end, at the preset-declared path
+
+**Files:**
+- Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
+- Create: `internal/adapter/openaicompat/rerank.go`, `internal/exec/rerank.go`
+- Test: `internal/adapter/openaicompat/rerank_test.go`, `internal/exec/rerank_test.go`, `internal/edge/openai/aux_test.go`
+
+**Interfaces:**
+- Consumes: `adapter.Target.RerankPath` (Task 17), `RunAux` (Task 14), `failedParse` (Task 15).
+- Produces: `ir.RerankRequest`, `ir.RerankResponse`, `ir.RerankResult`, `adapter.Reranker`, `edge.RerankDialect`, and `(*Executor).HandleRerank`.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
+**Approach:** inline - skip 2: the shape is Cohere v2, settled in this plan's foundation, and the file layout is Task 16's with the rerank types substituted.
+
+OpenAI defines no rerank endpoint, so Darkrouter's inbound contract **is** Cohere v2 — the same shape in and out. That makes this the one surface where the edge and the adapter agree by construction rather than by translation.
+
+**The path is absolute from the host root, and that is load-bearing.** `cohere`'s preset base URL is `https://api.cohere.com/compatibility/v1` — an OpenAI-compatibility shim — while its rerank endpoint is the native `/v2/rerank`. Joining them the way every other endpoint is joined produces `https://api.cohere.com/compatibility/v1/v2/rerank`, which does not exist. A `rerank-path` beginning with `/` therefore replaces the base URL's path entirely.
+
+Cohere v2 accepts `documents` as strings or as objects. Both are read; an object contributes its `text` field and **any other field it carries is dropped with a warning**, because a document object with structured fields is being reranked on its text alone and the client cannot otherwise tell.
+
+Rerank reports no token usage — Cohere bills it in `search_units` — so `TokensIn` and `TokensOut` stay zero and cost stays NULL.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `internal/edge/openai/aux_test.go`:
+
+```go
+func TestParseRerankReadsBothDocumentForms(t *testing.T) {
+	req, err := ParseRerank(httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"rerank-v3.5","query":"q","documents":["plain",{"text":"boxed"}],
+		  "top_n":1,"return_documents":true}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "rerank-v3.5" || req.Query != "q" {
+		t.Errorf("request = %+v", req)
+	}
+	if len(req.Documents) != 2 || req.Documents[0] != "plain" || req.Documents[1] != "boxed" {
+		t.Errorf("documents = %v", req.Documents)
+	}
+	if req.TopN != 1 || !req.ReturnDocuments {
+		t.Errorf("top_n = %d, return_documents = %v", req.TopN, req.ReturnDocuments)
+	}
+	if len(req.Warnings) != 0 {
+		t.Errorf("warnings = %v; neither document lost a field", req.Warnings)
+	}
+}
+
+func TestParseRerankWarnsOnDroppedDocumentFields(t *testing.T) {
+	// A document object with structured fields is reranked on its text alone.
+	// The client cannot tell that from the response, so the trace must.
+	req, err := ParseRerank(httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"m","query":"q","documents":[{"text":"t","title":"T","url":"u"}]}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want one", req.Warnings)
+	}
+	if !strings.Contains(req.Warnings[0].Reason, "title") ||
+		!strings.Contains(req.Warnings[0].Reason, "url") {
+		t.Errorf("warning = %q; it must name the dropped fields", req.Warnings[0].Reason)
+	}
+}
+
+func TestParseRerankRejectsAnUnusableRequest(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","documents":["a"]}`,
+		`{"model":"m","query":"q"}`,
+		`{"model":"m","query":"q","documents":[]}`,
+		`{"model":"m","query":"q","documents":[{"title":"no text"}]}`,
+	} {
+		if _, err := ParseRerank(httptest.NewRequest("POST", "/v1/rerank",
+			strings.NewReader(body)), 1<<20); err == nil {
+			t.Errorf("ParseRerank(%s) accepted an unusable request", body)
+		}
+	}
+}
+
+func TestWriteRerankEmitsCohereV2(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteRerank(w, &ir.RerankResponse{
+		ID: "r-1", Model: "rerank-v3.5",
+		Results: []ir.RerankResult{
+			{Index: 2, RelevanceScore: 0.98, Document: "kept"},
+			{Index: 0, RelevanceScore: 0.11},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Results []struct {
+			Index    int      `json:"index"`
+			Score    float64  `json:"relevance_score"`
+			Document *struct {
+				Text string `json:"text"`
+			} `json:"document"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != "r-1" || len(body.Results) != 2 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if body.Results[0].Index != 2 || body.Results[0].Score != 0.98 {
+		t.Errorf("first result = %+v", body.Results[0])
+	}
+	if body.Results[0].Document == nil || body.Results[0].Document.Text != "kept" {
+		t.Errorf("document = %v; a returned document was lost", body.Results[0].Document)
+	}
+	if body.Results[1].Document != nil {
+		t.Errorf("document = %v; a result with no document must omit the key entirely",
+			body.Results[1].Document)
+	}
+}
+```
+
+Create `internal/adapter/openaicompat/rerank_test.go`:
+
+```go
+package openaicompat
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestBuildRerankUsesTheAbsolutePresetPath(t *testing.T) {
+	// cohere's base URL is an OpenAI-compatibility shim while its rerank
+	// endpoint is native. Joining them produces a URL that does not exist.
+	hr, _, err := New().BuildRerank(context.Background(),
+		&adapter.Target{
+			BaseURL:    "https://api.cohere.com/compatibility/v1",
+			APIKey:     "sk",
+			Model:      "rerank-v3.5",
+			RerankPath: "/v2/rerank",
+		},
+		&ir.RerankRequest{Query: "q", Documents: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hr.URL.String(); got != "https://api.cohere.com/v2/rerank" {
+		t.Errorf("url = %s, want the path replaced rather than appended", got)
+	}
+	if hr.Header.Get("Authorization") != "Bearer sk" {
+		t.Errorf("auth = %q", hr.Header.Get("Authorization"))
+	}
+}
+
+func TestBuildRerankJoinsARelativePresetPath(t *testing.T) {
+	hr, _, err := New().BuildRerank(context.Background(),
+		&adapter.Target{BaseURL: "https://x/api/", Model: "m", RerankPath: "rerank"},
+		&ir.RerankRequest{Query: "q", Documents: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hr.URL.String(); got != "https://x/api/rerank" {
+		t.Errorf("url = %s", got)
+	}
+}
+
+func TestBuildRerankRefusesToGuessAPath(t *testing.T) {
+	// The router only produces a rerank candidate for a preset declaring the
+	// surface, and that preset must declare a path. Empty is a misconfiguration
+	// and posting a rerank body at a guessed URL is the worse failure.
+	_, _, err := New().BuildRerank(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1", Model: "m"},
+		&ir.RerankRequest{Query: "q", Documents: []string{"a"}})
+	if err == nil {
+		t.Fatal("a target with no rerank path built a request")
+	}
+	if !strings.Contains(err.Error(), "rerank-path") {
+		t.Errorf("err = %v; it must name the quirk an operator has to set", err)
+	}
+}
+
+func TestBuildRerankOmitsUnsetTopN(t *testing.T) {
+	hr, _, err := New().BuildRerank(context.Background(),
+		&adapter.Target{BaseURL: "https://x", Model: "m", RerankPath: "/v2/rerank"},
+		&ir.RerankRequest{Query: "q", Documents: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	_ = json.Unmarshal(raw, &body)
+	if _, present := body["top_n"]; present {
+		t.Error("an unset top_n was sent; zero is not a legal value")
+	}
+	if body["model"] != "m" {
+		t.Errorf("model = %v", body["model"])
+	}
+}
+
+func TestParseRerankReadsResultsAndDocuments(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Body: io.NopCloser(strings.NewReader(`{"id":"r-1","results":[
+		  {"index":2,"relevance_score":0.98,"document":{"text":"kept"}},
+		  {"index":0,"relevance_score":0.11}]}`)),
+	}
+	out, err := New().ParseRerank(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != "r-1" || len(out.Results) != 2 {
+		t.Fatalf("response = %+v", out)
+	}
+	if out.Results[0].Index != 2 || out.Results[0].RelevanceScore != 0.98 ||
+		out.Results[0].Document != "kept" {
+		t.Errorf("first result = %+v", out.Results[0])
+	}
+	if out.Results[1].Document != "" {
+		t.Errorf("second document = %q, want empty", out.Results[1].Document)
+	}
+}
+
+func TestParseRerankRejectsAResultlessBody(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"r","results":[]}`)),
+	}
+	if _, err := New().ParseRerank(resp); err == nil {
+		t.Fatal("a rerank 200 with no ranking parsed cleanly")
+	}
+}
+```
+
+Create `internal/exec/rerank_test.go`:
+
+```go
+package exec
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func rerankUpstream(seen *string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if seen != nil {
+			*seen = r.URL.Path
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"r-1","results":[{"index":0,"relevance_score":0.9}]}`))
+	}
+}
+
+func TestRerankServesEndToEndAtThePresetPath(t *testing.T) {
+	var path string
+	upstream := httptest.NewServer(rerankUpstream(&path))
+	defer upstream.Close()
+
+	e, rec := executorForPreset(t, upstream.URL, "cohere",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	w := httptest.NewRecorder()
+	e.HandleRerank(w, httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"rerank-v3.5","query":"q","documents":["a","b"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if path != "/v2/rerank" {
+		t.Errorf("upstream path = %q, want the preset's declared path", path)
+	}
+	var body struct {
+		Results []struct {
+			Index int `json:"index"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Results) != 1 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	got := rec.only(t)
+	if got.Surface != "rerank" || got.Status != "success" {
+		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+}
+
+func TestARerankRequestWithNoRerankProviderIsRefused(t *testing.T) {
+	upstream := httptest.NewServer(rerankUpstream(nil))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "chat-only", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.HandleRerank(w, httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+		`{"model":"chat-only","query":"q","documents":["a"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if len(rec.only(t).Attempts) != 0 {
+		t.Error("a surface no provider offers attempted an upstream call")
+	}
+}
+
+func TestARerankRequestRecordsItsDroppedDocumentFields(t *testing.T) {
+	upstream := httptest.NewServer(rerankUpstream(nil))
+	defer upstream.Close()
+
+	e, rec := executorForPreset(t, upstream.URL, "cohere",
+		catalogWith("p", "rerank-v3.5", ir.SurfaceRerank))
+	e.HandleRerank(httptest.NewRecorder(),
+		httptest.NewRequest("POST", "/v1/rerank", strings.NewReader(
+			`{"model":"rerank-v3.5","query":"q","documents":[{"text":"t","title":"T"}]}`)),
+		openaiedge.New())
+
+	got := rec.only(t)
+	if len(got.Warnings) == 0 || !strings.Contains(strings.Join(got.Warnings, " "), "title") {
+		t.Errorf("warnings = %v; the dropped field never reached the request row", got.Warnings)
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/adapter/openaicompat/ ./internal/exec/ -run Rerank -v
+```
+
+Expected: FAIL to build in all three — `undefined: ParseRerank`, `undefined: BuildRerank`, `e.HandleRerank undefined`.
+
+- [ ] **Step 3: Add the IR types and the adapter interface**
+
+Append to `internal/ir/aux.go`:
+
+```go
+// RerankRequest is one Cohere-v2 rerank call. OpenAI defines no rerank
+// endpoint, so this shape is both the inbound contract and the outbound one.
+type RerankRequest struct {
+	Model string
+	Query string
+	// Documents is always text. Cohere v2 accepts document objects too; the
+	// edge takes their text field and warns about the rest, because a document
+	// reranked on its text alone is not something the response reveals.
+	Documents       []string
+	TopN            int // 0 when unset; zero is not a legal value
+	ReturnDocuments bool
+	// Warnings are what the inbound parse could not express. They ride on the
+	// request because the edge, not the adapter, is where the loss happens.
+	Warnings []Warning
+}
+
+// DocumentCount is recorded on the request row per spec §9.
+func (r *RerankRequest) DocumentCount() int { return len(r.Documents) }
+
+type RerankResult struct {
+	Index          int
+	RelevanceScore float64
+	// Document is populated only when the client set return_documents.
+	Document string
+}
+
+type RerankResponse struct {
+	ID      string
+	Model   string
+	Results []RerankResult
+	// Usage is zero: Cohere bills rerank in search units, not tokens.
+	Usage Usage
+}
+```
+
+In `internal/adapter/adapter.go`, beside `Moderator`:
+
+```go
+// Reranker is implemented by an adapter serving the rerank surface.
+type Reranker interface {
+	BuildRerank(ctx context.Context, t *Target, req *ir.RerankRequest) (*http.Request, []ir.Warning, error)
+	// ParseRerank takes ownership of resp.Body and always closes it.
+	ParseRerank(resp *http.Response) (*ir.RerankResponse, error)
+}
+```
+
+- [ ] **Step 4: Add the edge interface, parser and writer**
+
+In `internal/edge/edge.go`, beside `ModerationDialect`:
+
+```go
+// RerankDialect is the inbound wire form of the rerank surface. Its shape is
+// Cohere v2, which Darkrouter adopts because OpenAI defines no rerank endpoint.
+type RerankDialect interface {
+	Name() string
+	ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error)
+	WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+```
+
+Append to `internal/edge/openai/aux.go`:
+
+```go
+type wireRerankRequest struct {
+	Model           string            `json:"model"`
+	Query           string            `json:"query"`
+	Documents       []json.RawMessage `json:"documents"`
+	TopN            *int              `json:"top_n"`
+	ReturnDocuments bool              `json:"return_documents"`
+}
+
+func ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireRerankRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if w.Query == "" {
+		return nil, errors.New("query is required")
+	}
+	if len(w.Documents) == 0 {
+		return nil, errors.New("documents is required and must not be empty")
+	}
+	req := &ir.RerankRequest{
+		Model: w.Model, Query: w.Query, ReturnDocuments: w.ReturnDocuments,
+		Documents: make([]string, 0, len(w.Documents)),
+	}
+	if w.TopN != nil {
+		req.TopN = *w.TopN
+	}
+	for i, raw := range w.Documents {
+		text, dropped, err := rerankDocument(raw)
+		if err != nil {
+			return nil, fmt.Errorf("documents[%d]: %w", i, err)
+		}
+		req.Documents = append(req.Documents, text)
+		if len(dropped) > 0 {
+			req.Warnings = append(req.Warnings, ir.Warning{
+				Field:  fmt.Sprintf("documents[%d]", i),
+				Target: "rerank",
+				Reason: "reranked on text alone; dropped " + strings.Join(dropped, ", "),
+			})
+		}
+	}
+	return req, nil
+}
+
+// rerankDocument reads one document, which Cohere v2 allows as a string or an
+// object. An object contributes its text field; every other field is reported
+// so the trace can say the document was ranked on less than it carried.
+func rerankDocument(raw json.RawMessage) (string, []string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", nil, errors.New("document is empty")
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return "", nil, err
+		}
+		return s, nil, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return "", nil, errors.New("document must be text or an object with a text field")
+	}
+	var text string
+	if t, ok := obj["text"]; ok {
+		if err := json.Unmarshal(t, &text); err != nil {
+			return "", nil, fmt.Errorf("text: %w", err)
+		}
+	}
+	if text == "" {
+		return "", nil, errors.New("document object has no text field")
+	}
+	dropped := make([]string, 0, len(obj))
+	for k := range obj {
+		if k != "text" {
+			dropped = append(dropped, k)
+		}
+	}
+	// Sorted so the warning text is stable: map iteration order would make an
+	// otherwise identical request produce a different trace line each time.
+	sort.Strings(dropped)
+	return text, dropped, nil
+}
+
+func WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error {
+	results := make([]any, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		row := map[string]any{"index": r.Index, "relevance_score": r.RelevanceScore}
+		// The key is omitted rather than null when the client did not ask for
+		// documents: a Cohere client tests for its presence.
+		if r.Document != "" {
+			row["document"] = map[string]any{"text": r.Document}
+		}
+		results = append(results, row)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(map[string]any{
+		"id": resp.ID, "results": results,
+	})
+}
+
+func (d *Dialect) ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error) {
+	return ParseRerank(r, maxBody)
+}
+
+func (d *Dialect) WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) error {
+	return WriteRerank(w, resp)
+}
+
+var _ edge.RerankDialect = (*Dialect)(nil)
+```
+
+Add `"sort"` and `"strings"` to that file's imports.
+
+- [ ] **Step 5: Implement the adapter**
+
+Create `internal/adapter/openaicompat/rerank.go`:
+
+```go
+package openaicompat
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+const maxRerankBytes = 8 << 20
+
+func (a *Adapter) BuildRerank(ctx context.Context, t *adapter.Target,
+	req *ir.RerankRequest) (*http.Request, []ir.Warning, error) {
+
+	if t.RerankPath == "" {
+		return nil, nil, errors.New(
+			"this provider declares no rerank-path quirk; rerank cannot be served without one")
+	}
+	body := map[string]any{
+		"model": t.Model, "query": req.Query, "documents": req.Documents,
+	}
+	// Zero is not a legal top_n, so absence needs no separate presence flag.
+	if req.TopN > 0 {
+		body["top_n"] = req.TopN
+	}
+	if req.ReturnDocuments {
+		body["return_documents"] = true
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	endpoint, err := rerankURL(t.BaseURL, t.RerankPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build rerank request: %w", err)
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if t.APIKey != "" {
+		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
+	}
+	// The inbound parse's losses ride out with the request so the loop records
+	// them on the row that describes the attempt they applied to.
+	return hr, req.Warnings, nil
+}
+
+// rerankURL resolves the preset-declared path against the provider's base URL.
+//
+// A path beginning with "/" replaces the base URL's path entirely. That is not
+// a stylistic choice: cohere's base URL is
+// https://api.cohere.com/compatibility/v1 — an OpenAI-compatibility shim — and
+// its rerank endpoint is the native /v2/rerank. Appending would produce
+// /compatibility/v1/v2/rerank, which does not exist.
+func rerankURL(base, path string) (string, error) {
+	if strings.HasPrefix(path, "/") {
+		u, err := url.Parse(base)
+		if err != nil {
+			return "", fmt.Errorf("provider base URL: %w", err)
+		}
+		u.Path = path
+		u.RawQuery = ""
+		u.Fragment = ""
+		return u.String(), nil
+	}
+	return strings.TrimRight(base, "/") + "/" + path, nil
+}
+
+type rerankEnvelope struct {
+	ID      string `json:"id"`
+	Results []struct {
+		Index    int     `json:"index"`
+		Score    float64 `json:"relevance_score"`
+		Document *struct {
+			Text string `json:"text"`
+		} `json:"document"`
+	} `json:"results"`
+}
+
+func (a *Adapter) ParseRerank(resp *http.Response) (*ir.RerankResponse, error) {
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRerankBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read rerank response: %w", err)
+	}
+	var env rerankEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("parse rerank response: %w", err)
+	}
+	if len(env.Results) == 0 {
+		// A 200 with no ranking is a provider fault: the documents went up and
+		// no ordering came back.
+		return nil, errors.New("rerank response carried no results")
+	}
+	out := &ir.RerankResponse{ID: env.ID, Results: make([]ir.RerankResult, 0, len(env.Results))}
+	for _, r := range env.Results {
+		res := ir.RerankResult{Index: r.Index, RelevanceScore: r.Score}
+		if r.Document != nil {
+			res.Document = r.Document.Text
+		}
+		out.Results = append(out.Results, res)
+	}
+	return out, nil
+}
+
+var _ adapter.Reranker = (*Adapter)(nil)
+```
+
+- [ ] **Step 6: Write the op and the route**
+
+Create `internal/exec/rerank.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+type rerankOp struct {
+	d   edge.RerankDialect
+	req *ir.RerankRequest
+}
+
+func (o *rerankOp) Dialect() string { return o.d.Name() }
+
+func (o *rerankOp) Query() router.Query {
+	return router.Query{Model: o.req.Model, Surface: ir.SurfaceRerank}
+}
+
+func (o *rerankOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	rr, ok := ad.(adapter.Reranker)
+	if !ok {
+		return nil, nil, fmt.Errorf("adapter %s does not serve rerank", ad.Kind())
+	}
+	return rr.BuildRerank(ctx, tgt, o.req)
+}
+
+func (o *rerankOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	rr, ok := ac.Adapter.(adapter.Reranker)
+	if !ok {
+		resp.Body.Close()
+		return adapter.OutcomeFatal, &ir.Error{
+			Type: ir.ErrDarkrouter, Message: "adapter does not serve rerank",
+		}
+	}
+	out, err := rr.ParseRerank(resp)
+	if err != nil {
+		return failedParse(ac, resp, err)
+	}
+	// The provider's own id is echoed, but the model it ranked with is the
+	// candidate's: a rerank response carries no model field.
+	out.Model = ac.Cand.Model
+
+	ttft := time.Since(ac.Rec.TS).Milliseconds()
+	ac.Rec.TTFTMs = &ttft
+	applyUsage(ac.Rec, &out.Usage)
+	ac.Rec.FinalProviderID = ac.Cand.ProviderID
+	ac.Rec.FinalModel = ac.Cand.Model
+	ac.Rec.Warnings = warningStrings(ac.Warns)
+
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+	_ = o.d.WriteRerank(cw, out)
+	return adapter.OutcomeSuccess, nil
+}
+
+func (o *rerankOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+
+var _ SurfaceOp = (*rerankOp)(nil)
+
+// HandleRerank serves POST /v1/rerank.
+func (e *Executor) HandleRerank(w http.ResponseWriter, r *http.Request, d edge.RerankDialect) {
+	maxBody := e.store.Current().Server.MaxBodyBytes
+	e.RunAux(w, r, d.Name(), ir.SurfaceRerank, d, func() (SurfaceOp, error) {
+		req, err := d.ParseRerank(r, maxBody)
+		if err != nil {
+			return nil, err
+		}
+		return &rerankOp{d: d, req: req}, nil
+	})
+}
+```
+
+In `internal/server/server.go`, beside the moderations route:
+
+```go
+	mux.HandleFunc("POST /v1/rerank", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleRerank(w, r, oa)
+	}))
+```
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/adapter/openaicompat/ ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in all four packages.
+
+- [ ] **Step 8: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/ir/aux.go internal/adapter/adapter.go internal/adapter/openaicompat/rerank.go \
+        internal/adapter/openaicompat/rerank_test.go internal/edge/edge.go \
+        internal/edge/openai/aux.go internal/edge/openai/aux_test.go \
+        internal/exec/rerank.go internal/exec/rerank_test.go internal/server/server.go
+git commit -m "feat(exec): serve the rerank surface"
+```
+
+---
