@@ -112,7 +112,7 @@ func TestFilterSkipsAModelTheProviderDoesNotOffer(t *testing.T) {
 func TestFilterSkipsTheWrongSurface(t *testing.T) {
 	ps := fleetWith(provider.Credential{ID: "k1", Secret: "a", Enabled: true})
 	snap := snapOf(t, ps, health.Availability{})
-	q := Query{Model: "llama", Surface: ir.SurfaceEmbeddings}
+	q := Query{Model: "llama", Surface: ir.SurfaceEmbedding}
 
 	cands, skips, _ := filterTarget(target{"groq", "llama"}, q, snap, byIDOf(ps))
 	if len(cands) != 0 || len(skips) != 1 || skips[0].Reason != SkipSurface {

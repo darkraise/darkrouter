@@ -498,7 +498,7 @@ cohere:
     style: bearer
   surfaces:
     - llm
-    - embeddings
+    - embedding
     - rerank
   models_dev_id: cohere
   free_tier: true
@@ -867,7 +867,7 @@ gemini:
     header: x-goog-api-key
   surfaces:
     - llm
-    - embeddings
+    - embedding
   models_dev_id: google
   free_tier: true
   website: https://aistudio.google.com
@@ -1207,7 +1207,7 @@ lmstudio:
     style: none
   surfaces:
     - llm
-    - embeddings
+    - embedding
   no_models_dev: true
   website: https://lmstudio.ai
 longcat:
@@ -1262,7 +1262,7 @@ mistral:
     style: bearer
   surfaces:
     - llm
-    - embeddings
+    - embedding
   models_dev_id: mistral
   free_tier: true
   website: https://mistral.ai
@@ -1491,7 +1491,7 @@ ollama:
     style: none
   surfaces:
     - llm
-    - embeddings
+    - embedding
   no_models_dev: true
   website: https://ollama.com
   quirks:
@@ -1529,10 +1529,11 @@ openai:
     style: bearer
   surfaces:
     - llm
-    - embeddings
-    - images
-    - audio
-    - moderations
+    - embedding
+    - image
+    - tts
+    - stt
+    - moderation
   models_dev_id: openai
   website: https://platform.openai.com
   quirks:
@@ -2080,7 +2081,7 @@ vertex:
     style: gcp-sa
   surfaces:
     - llm
-    - embeddings
+    - embedding
   models_dev_id: google-vertex
   free_tier: true
   website: https://cloud.google.com/vertex-ai

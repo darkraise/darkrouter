@@ -19,28 +19,43 @@ const (
 // Surface is the kind of work a request asks for. It lives here rather than in
 // the router or the catalog because both need it and either import would
 // create a cycle.
+//
+// The seven values are master design §6's, and the strings are data: presets
+// declare them and the models.surfaces column stores them. tts and stt are
+// separate because a provider can serve /v1/audio/speech without serving
+// /v1/audio/transcriptions, and one "audio" surface cannot express that.
 type Surface string
 
 const (
-	SurfaceLLM         Surface = "llm"
-	SurfaceEmbeddings  Surface = "embeddings"
-	SurfaceImages      Surface = "images"
-	SurfaceAudio       Surface = "audio"
-	SurfaceRerank      Surface = "rerank"
-	SurfaceModerations Surface = "moderations"
+	SurfaceLLM        Surface = "llm"
+	SurfaceEmbedding  Surface = "embedding"
+	SurfaceImage      Surface = "image"
+	SurfaceTTS        Surface = "tts"
+	SurfaceSTT        Surface = "stt"
+	SurfaceRerank     Surface = "rerank"
+	SurfaceModeration Surface = "moderation"
 )
+
+// AllSurfaces returns the vocabulary in master design order. Callers that
+// enumerate surfaces — the adapter matrix test, the admin API — use this rather
+// than repeating the list.
+func AllSurfaces() []Surface {
+	return []Surface{
+		SurfaceLLM, SurfaceEmbedding, SurfaceImage,
+		SurfaceTTS, SurfaceSTT, SurfaceRerank, SurfaceModeration,
+	}
+}
 
 // ParseSurface converts a stored or inbound string. It reports failure rather
 // than defaulting, because a request routed to the wrong surface fails in a
 // much more confusing way than one refused up front.
 func ParseSurface(s string) (Surface, bool) {
-	switch Surface(s) {
-	case SurfaceLLM, SurfaceEmbeddings, SurfaceImages,
-		SurfaceAudio, SurfaceRerank, SurfaceModerations:
-		return Surface(s), true
-	default:
-		return "", false
+	for _, known := range AllSurfaces() {
+		if Surface(s) == known {
+			return known, true
+		}
 	}
+	return "", false
 }
 
 type BlockType string

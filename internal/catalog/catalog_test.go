@@ -58,7 +58,7 @@ func TestModelDeclaresSurface(t *testing.T) {
 	if !m.DeclaresSurface(ir.SurfaceLLM) {
 		t.Error("llm must be declared")
 	}
-	if m.DeclaresSurface(ir.SurfaceEmbeddings) {
+	if m.DeclaresSurface(ir.SurfaceEmbedding) {
 		t.Error("embeddings must not be declared in phase 3")
 	}
 }
