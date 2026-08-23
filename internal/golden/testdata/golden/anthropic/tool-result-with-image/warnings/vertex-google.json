@@ -1,0 +1,3 @@
+[
+  "messages[].tool_result.image -\u003e gemini: moved out of the function response, which accepts a JSON struct only"
+]

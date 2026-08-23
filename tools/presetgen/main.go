@@ -378,6 +378,9 @@ func applyOverrides(presets catalog.Presets, path string) (int, error) {
 		if o.CapabilityProbe != "" {
 			base.CapabilityProbe = o.CapabilityProbe
 		}
+		if o.Publisher != "" {
+			base.Publisher = o.Publisher
+		}
 		if o.OAuth != nil {
 			base.OAuth = o.OAuth
 		}

@@ -1,0 +1,79 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Weather in Oslo and Bergen?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "functionCall": {
+            "args": {
+              "city": "Oslo"
+            },
+            "id": "call_a",
+            "name": "lookup"
+          }
+        },
+        {
+          "functionCall": {
+            "args": {
+              "city": "Bergen"
+            },
+            "id": "call_b",
+            "name": "lookup"
+          }
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_a",
+            "name": "lookup",
+            "response": {
+              "result": "clear"
+            }
+          }
+        },
+        {
+          "functionResponse": {
+            "id": "call_b",
+            "name": "lookup",
+            "response": {
+              "result": "rain"
+            }
+          }
+        },
+        {
+          "text": "And tomorrow?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "description": "weather",
+          "name": "lookup",
+          "parameters": {
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ]
+}

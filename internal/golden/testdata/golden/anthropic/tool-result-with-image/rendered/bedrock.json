@@ -1,0 +1,47 @@
+{
+  "inferenceConfig": {
+    "maxTokens": 1024
+  },
+  "messages": [
+    {
+      "content": [
+        {
+          "toolUse": {
+            "input": {
+              "url": "https://x.invalid"
+            },
+            "name": "screenshot",
+            "toolUseId": "call_a"
+          }
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "toolResult": {
+            "content": [
+              {
+                "text": "captured"
+              },
+              {
+                "image": {
+                  "format": "png",
+                  "source": {
+                    "bytes": "iVBORw=="
+                  }
+                }
+              }
+            ],
+            "toolUseId": "call_a"
+          }
+        },
+        {
+          "text": "What is on screen?"
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

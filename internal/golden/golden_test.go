@@ -19,8 +19,10 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	bedrockadapter "github.com/darkraise/darkrouter/internal/adapter/bedrock"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/edge"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
@@ -55,13 +57,38 @@ func adapters() map[string]adapter.Adapter {
 		// A fetcher with a zero byte cap and a transport that refuses, so a
 		// fixture carrying a public image URL drops it with a warning instead
 		// of reaching the network. No golden test makes an outbound request.
-		"gemini": geminiadapter.NewWithFetcher(&offlineFetcher),
+		"gemini":  geminiadapter.NewWithFetcher(&offlineFetcher),
+		"bedrock": bedrockadapter.New(),
+		// Two entries, one adapter. vertex renders two different payloads
+		// depending on the target's publisher, and one entry would cover half
+		// the behavior while looking complete.
+		"vertex-google":    vertexadapter.New(),
+		"vertex-anthropic": vertexadapter.New(),
 	}
 }
 
 const targetBase = "https://upstream.example/v1"
 
-func target() *adapter.Target {
+func target() *adapter.Target { return targetFor("openaicompat") }
+
+// targetFor supplies the endpoint properties a kind needs. Everything before
+// phase 8 took a bare base URL; bedrock derives its host from a region, and
+// vertex from a project, a location and a publisher.
+func targetFor(name string) *adapter.Target {
+	switch name {
+	case "bedrock":
+		return &adapter.Target{Region: "us-east-1", Model: "target-model"}
+	case "vertex-google":
+		return &adapter.Target{
+			Project: "proj", Location: "us-central1",
+			Publisher: vertexadapter.PublisherGoogle, Model: "target-model",
+		}
+	case "vertex-anthropic":
+		return &adapter.Target{
+			Project: "proj", Location: "us-central1",
+			Publisher: vertexadapter.PublisherAnthropic, Model: "target-model",
+		}
+	}
 	return &adapter.Target{BaseURL: targetBase, APIKey: "sk-test", Model: "target-model"}
 }
 
@@ -178,7 +205,7 @@ func TestGoldenRequests(t *testing.T) {
 				compareJSON(t, filepath.Join(dir, "ir.json"), req)
 
 				for kind, ad := range adapters() {
-					hr, warns, err := ad.BuildRequest(ctx, target(), req)
+					hr, warns, err := ad.BuildRequest(ctx, targetFor(kind), req)
 					if err != nil {
 						t.Fatalf("%s build: %v", kind, err)
 					}
@@ -243,3 +270,45 @@ func compareRecorded(t *testing.T, path string, rec *httptest.ResponseRecorder) 
 }
 
 func errorsAs(err error, target **ir.Error) bool { return errors.As(err, target) }
+
+// streamExempt names the kinds whose streaming is deliberately not covered by
+// an .sse fixture, with the reason. Master design §15 wants every adapter kind
+// in this suite; an exemption has to be a decision rather than an omission.
+var streamExempt = map[string]string{
+	"bedrock": "AWS binary eventstream framing; covered in internal/adapter/bedrock " +
+		"by frames the SDK's own encoder builds",
+}
+
+func TestEveryKindHasRenderedFixtures(t *testing.T) {
+	// The request-rendering half of master design §15. Every kind must appear
+	// under every case, or a payload changes with nothing to notice.
+	for kind := range adapters() {
+		for _, dir := range caseDirs(t, "openai") {
+			path := filepath.Join(dir, "rendered", kind+".json")
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("%s is missing: run go test ./internal/golden/ -update", path)
+			}
+		}
+	}
+}
+
+func TestEveryKindHasResponseFixtures(t *testing.T) {
+	for kind := range adapters() {
+		if len(responseCaseDirs(t, kind)) == 0 {
+			t.Errorf("kind %q has no response fixtures under testdata/golden/responses", kind)
+		}
+	}
+}
+
+func TestEveryKindHasStreamFixtures(t *testing.T) {
+	for kind := range adapters() {
+		if len(streamCaseDirs(t, kind)) > 0 {
+			continue
+		}
+		if reason, ok := streamExempt[kind]; ok {
+			t.Logf("kind %q is exempt: %s", kind, reason)
+			continue
+		}
+		t.Errorf("kind %q has no stream fixtures and no recorded exemption", kind)
+	}
+}

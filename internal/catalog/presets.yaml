@@ -2083,6 +2083,7 @@ vercel-ai-gateway:
 vertex:
   name: Google Vertex AI
   kind: vertex
+  publisher: publishers/google
   base_url: https://us-central1-aiplatform.googleapis.com/v1/projects
   auth:
     style: gcp-sa
@@ -2095,6 +2096,7 @@ vertex:
 vertex-anthropic:
   name: Google Vertex AI (Anthropic publisher)
   kind: vertex
+  publisher: publishers/anthropic
   base_url: ""
   auth:
     style: gcp-sa

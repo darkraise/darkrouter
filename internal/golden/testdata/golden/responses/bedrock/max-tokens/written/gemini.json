@@ -1,0 +1,33 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Weighing the options",
+              "thought": true,
+              "thoughtSignature": "sig-1"
+            },
+            {
+              "text": "The answer is cut off"
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "MAX_TOKENS",
+        "index": 0
+      }
+    ],
+    "modelVersion": "",
+    "responseId": "",
+    "usageMetadata": {
+      "cachedContentTokenCount": 4,
+      "candidatesTokenCount": 64,
+      "promptTokenCount": 9,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 73
+    }
+  },
+  "status": 200
+}

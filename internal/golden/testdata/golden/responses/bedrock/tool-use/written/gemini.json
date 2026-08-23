@@ -1,0 +1,37 @@
+{
+  "body": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Checking the weather."
+            },
+            {
+              "functionCall": {
+                "args": {
+                  "city": "Oslo"
+                },
+                "id": "tu_1",
+                "name": "get_weather"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "modelVersion": "",
+    "responseId": "",
+    "usageMetadata": {
+      "cachedContentTokenCount": 0,
+      "candidatesTokenCount": 13,
+      "promptTokenCount": 24,
+      "thoughtsTokenCount": 0,
+      "totalTokenCount": 37
+    }
+  },
+  "status": 200
+}

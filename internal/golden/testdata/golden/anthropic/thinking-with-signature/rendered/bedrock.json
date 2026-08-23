@@ -1,0 +1,31 @@
+{
+  "inferenceConfig": {
+    "maxTokens": 1024
+  },
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Is 91 prime?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "No."
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "Show the factors."
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

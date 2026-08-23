@@ -1,0 +1,28 @@
+{
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "length",
+        "index": 0,
+        "message": {
+          "content": "The answer is cut off",
+          "reasoning_content": "Weighing the options",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 0,
+    "id": "",
+    "model": "",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 64,
+      "prompt_tokens": 9,
+      "prompt_tokens_details": {
+        "cached_tokens": 4
+      },
+      "total_tokens": 73
+    }
+  },
+  "status": 200
+}

@@ -1,0 +1,111 @@
+// Package vertex renders the IR to Google Vertex AI.
+//
+// One adapter kind, two request builders, selected by the publisher recorded on
+// the catalog entry — master design §6.2. An earlier draft claimed the Gemini
+// payload covers both and that only transport and auth differ; that is false
+// for exactly the models that justify supporting two URL forms, and following
+// it 400s on every Claude call.
+//
+// Neither payload is reimplemented here. The Google half hands phase 4's Gemini
+// builder a base URL that already ends in the publisher segment; the Anthropic
+// half calls phase 4's Anthropic builder and rewrites what Vertex moves.
+package vertex
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"iter"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+const (
+	PublisherGoogle    = "publishers/google"
+	PublisherAnthropic = "publishers/anthropic"
+
+	// AnthropicVersion is mandatory in the body on the rawPredict route, and
+	// is a different value from the anthropic-version header the direct API
+	// takes.
+	AnthropicVersion = "vertex-2023-10-16"
+)
+
+type Adapter struct{}
+
+func New() *Adapter { return &Adapter{} }
+
+func (a *Adapter) Kind() string { return "vertex" }
+
+// Surfaces is llm alone for now. The vertex preset declares embedding as well,
+// but the embedding route is a third URL shape and phase 8's scope is the two
+// generative ones; claiming the surface would route embeddings to a 404.
+func (a *Adapter) Surfaces() adapter.SurfaceSet {
+	return adapter.SurfaceSet{ir.SurfaceLLM: true}
+}
+
+// EndpointFor builds the regional host and project path. Location appears
+// twice: once in the hostname and once in the path, which is Vertex's shape and
+// not a mistake.
+func EndpointFor(project, location string) string {
+	return fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s",
+		location, project, location)
+}
+
+// baseFor is EndpointFor unless the provider row names a host of its own.
+//
+// An explicit base URL wins for the same reason it does for bedrock: a private
+// service endpoint, or a test server, has to be reachable. Without this the
+// adapter could only ever talk to googleapis.com, which also makes it
+// untestable above the unit level.
+func baseFor(t *adapter.Target) string {
+	if b := strings.TrimRight(t.BaseURL, "/"); b != "" {
+		return b
+	}
+	return EndpointFor(t.Project, t.Location)
+}
+
+func publisherOf(t *adapter.Target) string {
+	if t.Publisher == "" {
+		// A catalog row seeded before publisher was populated. Google is the
+		// safe default: it is what the vertex preset declares.
+		return PublisherGoogle
+	}
+	return t.Publisher
+}
+
+func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
+	if t.Project == "" || t.Location == "" {
+		return nil, nil, fmt.Errorf("vertex target needs a project and a location")
+	}
+	switch publisherOf(t) {
+	case PublisherGoogle:
+		return buildGoogle(ctx, t, req)
+	case PublisherAnthropic:
+		return buildAnthropic(ctx, t, req)
+	}
+	// Llama and Mistral MaaS use endpoints/openapi/chat/completions and are
+	// out of scope for v1. Guessing one of the two implemented shapes would
+	// 400 with a message about the wrong payload, which is worse than saying so.
+	return nil, nil, fmt.Errorf("vertex publisher %q is not supported", t.Publisher)
+}
+
+// ParseResponse and ParseStream dispatch on shape rather than on the publisher,
+// because neither is handed a Target. That works because the two payloads are
+// unambiguous: an Anthropic response has a top-level content array and type
+// "message"; a Gemini one has candidates.
+func (a *Adapter) ParseResponse(resp *http.Response) (*ir.Response, error) {
+	return parseResponse(resp)
+}
+
+func (a *Adapter) ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
+	return parseStream(r, maxLine)
+}
+
+func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
+	return adapter.ClassifyStatus(resp, err)
+}
+
+var _ adapter.Adapter = (*Adapter)(nil)

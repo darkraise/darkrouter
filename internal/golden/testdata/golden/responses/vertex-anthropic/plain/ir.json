@@ -1,0 +1,27 @@
+{
+  "ID": "msg_vertex_1",
+  "Model": "claude-sonnet-4-5",
+  "Content": [
+    {
+      "Type": "text",
+      "Text": "From the Anthropic publisher.",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "end_turn",
+  "Usage": {
+    "InputTokens": 7,
+    "OutputTokens": 5,
+    "CacheReadTokens": 0,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}

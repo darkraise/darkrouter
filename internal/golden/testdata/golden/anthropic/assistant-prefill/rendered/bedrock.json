@@ -1,0 +1,23 @@
+{
+  "inferenceConfig": {
+    "maxTokens": 1024
+  },
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Return JSON only."
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "{"
+        }
+      ],
+      "role": "assistant"
+    }
+  ]
+}

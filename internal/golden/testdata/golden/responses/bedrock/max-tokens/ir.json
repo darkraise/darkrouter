@@ -1,0 +1,41 @@
+{
+  "ID": "",
+  "Model": "",
+  "Content": [
+    {
+      "Type": "thinking",
+      "Text": "",
+      "Media": null,
+      "Thinking": {
+        "Text": "Weighing the options",
+        "Signature": "sig-1",
+        "Data": ""
+      },
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    },
+    {
+      "Type": "text",
+      "Text": "The answer is cut off",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "max_tokens",
+  "Usage": {
+    "InputTokens": 9,
+    "OutputTokens": 64,
+    "CacheReadTokens": 4,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}

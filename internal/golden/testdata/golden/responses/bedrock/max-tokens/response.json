@@ -1,0 +1,13 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {"reasoningContent": {"reasoningText": {"text": "Weighing the options", "signature": "sig-1"}}},
+        {"text": "The answer is cut off"}
+      ]
+    }
+  },
+  "stopReason": "max_tokens",
+  "usage": {"inputTokens": 9, "outputTokens": 64, "cacheReadInputTokens": 4}
+}
