@@ -139,3 +139,176 @@ func TestSweepRemovesOnlyExpiredSessions(t *testing.T) {
 		t.Error("the sweep removed a live session")
 	}
 }
+
+func TestCreateAndReadAProvider(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P One", Preset: "groq", Kind: "openaicompat",
+		BaseURL: "https://x/v1", Priority: 7, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ProviderRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != "p1" || rows[0].Preset != "groq" {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if rows[0].Priority != 7 || !rows[0].Enabled {
+		t.Errorf("row = %+v", rows[0])
+	}
+	if rows[0].AuthStyle != "bearer" {
+		t.Errorf("auth style = %q; a row created here must match one from the importer",
+			rows[0].AuthStyle)
+	}
+}
+
+func TestCreatingADuplicateProviderIsAnError(t *testing.T) {
+	// The settings screen turns this into "that id is taken" rather than a
+	// silent overwrite of a working provider.
+	db := migrated(t)
+	ctx := context.Background()
+	p := ProviderRow{ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1"}
+	if err := db.CreateProvider(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateProvider(ctx, p); err == nil {
+		t.Error("a duplicate id was accepted")
+	}
+}
+
+func TestUpdateTouchesOnlyWhatThePatchNames(t *testing.T) {
+	// A value struct cannot tell "set priority to 0" from "leave it alone",
+	// and 0 is a legal priority meaning last resort.
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat",
+		BaseURL: "https://x/v1", Priority: 7, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	zero := 0
+	if err := db.UpdateProvider(ctx, "p1", ProviderPatch{Priority: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := db.ProviderRows(ctx)
+	if rows[0].Priority != 0 {
+		t.Errorf("priority = %d, want 0", rows[0].Priority)
+	}
+	if rows[0].BaseURL != "https://x/v1" {
+		t.Errorf("base url = %q; an untouched field changed", rows[0].BaseURL)
+	}
+	if !rows[0].Enabled {
+		t.Error("enabled changed; the patch did not name it")
+	}
+}
+
+func TestAnEmptyPatchIsAnError(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateProvider(ctx, "p1", ProviderPatch{}); err == nil {
+		t.Error("an empty patch succeeded; the UI sent a form it did not fill in")
+	}
+}
+
+func TestUpdatingAnUnknownProviderIsAnError(t *testing.T) {
+	db := migrated(t)
+	enabled := false
+	if err := db.UpdateProvider(context.Background(), "nope",
+		ProviderPatch{Enabled: &enabled}); err == nil {
+		t.Error("patching a provider that does not exist succeeded")
+	}
+}
+
+func TestDeleteCascadesToCredentialsAndModels(t *testing.T) {
+	// A provider row without its credentials cannot serve; a credential
+	// without its provider is a decryptable secret nobody can account for.
+	// The schema's ON DELETE CASCADE does this, which foreign keys being on
+	// makes real — this is the test that proves the pragma is actually set.
+	db := migrated(t)
+	ctx := context.Background()
+	key, err := OpenKeyring(ctx, db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddCredential(ctx, key, Credential{
+		ProviderID: "p1", Label: "k", Secret: "sk-x", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id, state, last_seen_at)
+		 VALUES ('p1','m','live',1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.DeleteProvider(ctx, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`SELECT count(*) FROM providers WHERE id = 'p1'`,
+		`SELECT count(*) FROM provider_keys WHERE provider_id = 'p1'`,
+		`SELECT count(*) FROM models WHERE provider_id = 'p1'`,
+	} {
+		var n int
+		if err := db.Read.QueryRowContext(ctx, q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s left %d rows", q, n)
+		}
+	}
+}
+
+func TestDeletingAnUnknownProviderIsAnError(t *testing.T) {
+	if err := migrated(t).DeleteProvider(context.Background(), "nope"); err == nil {
+		t.Error("deleting a provider that does not exist succeeded")
+	}
+}
+
+func TestDeleteCredentialLeavesTheProvider(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	key, err := OpenKeyring(ctx, db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "p1", Name: "P", Kind: "openaicompat", BaseURL: "https://x/v1", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := db.AddCredential(ctx, key, Credential{
+		ProviderID: "p1", Label: "k", Secret: "sk-x", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteCredential(ctx, "p1", id); err != nil {
+		t.Fatal(err)
+	}
+	creds, err := db.Credentials(ctx, key, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creds) != 0 {
+		t.Errorf("credentials = %+v", creds)
+	}
+	rows, _ := db.ProviderRows(ctx)
+	if len(rows) != 1 {
+		t.Error("deleting a credential removed its provider")
+	}
+}
