@@ -12,7 +12,6 @@ package bedrock
 
 import (
 	"context"
-	"errors"
 	"io"
 	"iter"
 	"net/http"
@@ -51,10 +50,3 @@ func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
-
-// Replaced in Task 6.
-func ParseStream(io.Reader, int) iter.Seq2[ir.StreamEvent, error] {
-	return func(yield func(ir.StreamEvent, error) bool) {
-		yield(ir.StreamEvent{}, errors.New("bedrock: stream parsing arrives in task 6"))
-	}
-}
