@@ -21,7 +21,7 @@ var gemini = geminiadapter.New()
 // drift from the one the golden files cover.
 func buildGoogle(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	inner := *t
-	inner.BaseURL = EndpointFor(t.Project, t.Location) + "/" + PublisherGoogle
+	inner.BaseURL = baseFor(t) + "/" + PublisherGoogle
 	// The bearer token comes from internal/auth, so the Gemini builder must
 	// not write x-goog-api-key.
 	inner.APIKey = ""

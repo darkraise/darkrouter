@@ -605,6 +605,62 @@ database.
 Both test ports were released and no process was left running. Ports 8080 and
 8081 were never touched.
 
+### 9. Phase 8 verification against fakes — done
+
+Run on 2026-08-24. **No vendor was contacted.** This environment has no AWS
+account, no GCP service account and no Claude subscription, and that limitation
+was accepted deliberately before the phase was planned. Every upstream below is
+an `httptest` server; what these results prove is that the wiring holds end to
+end, not that a real vendor accepts the payload.
+
+Eight cases in `internal/e2e`, driving an assembled `server.Server` over a
+temporary database through both its handlers:
+
+- **A Bedrock request leaves signed.** The fake saw
+  `AWS4-HMAC-SHA256 Credential=…/us-east-1/bedrock/aws4_request`, a path ending
+  `…-v2%3A0/converse` — the escaped form the signature covers — and a
+  Converse-shaped body. The completion reached the client.
+- **A Bedrock stream decodes.** Six SDK-encoded eventstream frames became SSE
+  carrying the reassembled text.
+- **A signed provider fails over like any other.** A bedrock provider at
+  `127.0.0.1:1` on priority 99 with an openaicompat provider behind it:
+  `X-Darkrouter-Attempts: 2`, `X-Darkrouter-Provider: back`.
+- **Vertex routes each publisher to its own URL.** Two models on one provider:
+  `…:generateContent` with a `contents` body, and `…:rawPredict` with
+  `anthropic_version: vertex-2023-10-16` and no `model` key.
+- **An OAuth account serves.** The upstream saw `Authorization: Bearer at-0`
+  and no `x-api-key` beside it.
+- **A rotated refresh survives a restart.** After one refresh, the server was
+  torn down and rebuilt over the same database file; the stored credential named
+  `rt-1`, the token the vendor now expects.
+- **An `invalid_grant` shows as needing reconnection.** The probe reported
+  `ok: false` naming reconnection, and `GET /api/overview` reported
+  `needs_reauth: true` for the provider.
+- **No credential material leaves the process.** Six admin endpoints and a proxy
+  error response swept for the AWS secret and access key id.
+
+The image builds and stays static: **57.1 MB**, against phase 7's 53.3 MB. The
+3.8 MB is `aws-sdk-go-v2` and `golang.org/x/oauth2`; Node never reaches the
+final stage and `CGO_ENABLED=0` still produces one binary.
+
+Of spec §8's seven criteria, **six were exercised against fakes** and the
+seventh — `go test ./...` with golden files — is the standing gate every task
+ran. **None was exercised live.** The two that a fake can least stand in for are
+the first and the third: whether real Bedrock accepts this Converse body, and
+whether real Vertex accepts this `rawPredict` body. Those field names come from
+vendor documentation and are pinned by golden files, so a correction is a
+visible diff rather than a silent behavior change — but they are unverified.
+
+Two defects were found by this task rather than by a unit test, both fixed:
+**the Vertex adapter ignored `Target.BaseURL` entirely**, so it could only ever
+address googleapis.com — no private service endpoint, and no test above the unit
+level; and **a credential written directly to the database never reached the
+provider source**, which is why the harness forces a reload. The second is a
+test-harness fact rather than a product defect: every path that writes a
+credential through the API already reloads.
+
+No process was left running and no port was held.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |

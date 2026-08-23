@@ -247,3 +247,24 @@ func keys(m map[string]any) []string {
 	}
 	return out
 }
+
+func TestAnExplicitBaseURLWins(t *testing.T) {
+	// A private service endpoint, or a test server. Without this the adapter
+	// could only ever talk to googleapis.com — which also makes it untestable
+	// above the unit level.
+	tgt := googleTarget()
+	tgt.BaseURL = "https://vertex.internal/v1/projects/p/locations/l"
+	hr, _ := build(t, tgt, req())
+	want := "https://vertex.internal/v1/projects/p/locations/l/publishers/google/" +
+		"models/gemini-2.5-pro:generateContent"
+	if hr.URL.String() != want {
+		t.Errorf("url = %s\nwant %s", hr.URL, want)
+	}
+
+	tgt = anthropicTarget()
+	tgt.BaseURL = "https://vertex.internal/v1/projects/p/locations/l"
+	hr, _ = build(t, tgt, req())
+	if !strings.HasPrefix(hr.URL.String(), "https://vertex.internal/") {
+		t.Errorf("anthropic url = %s", hr.URL)
+	}
+}

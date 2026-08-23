@@ -17,6 +17,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -51,6 +52,19 @@ func (a *Adapter) Surfaces() adapter.SurfaceSet {
 func EndpointFor(project, location string) string {
 	return fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s",
 		location, project, location)
+}
+
+// baseFor is EndpointFor unless the provider row names a host of its own.
+//
+// An explicit base URL wins for the same reason it does for bedrock: a private
+// service endpoint, or a test server, has to be reachable. Without this the
+// adapter could only ever talk to googleapis.com, which also makes it
+// untestable above the unit level.
+func baseFor(t *adapter.Target) string {
+	if b := strings.TrimRight(t.BaseURL, "/"); b != "" {
+		return b
+	}
+	return EndpointFor(t.Project, t.Location)
 }
 
 func publisherOf(t *adapter.Target) string {
