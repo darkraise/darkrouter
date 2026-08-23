@@ -149,3 +149,15 @@ type ImageGenerator interface {
 	// ParseImage takes ownership of resp.Body and always closes it.
 	ParseImage(resp *http.Response) (*ir.ImageResponse, error)
 }
+
+// Transcriber is implemented by an adapter serving the stt surface.
+//
+// It takes rendered bytes rather than a parsed form because the form type lives
+// in the executor and importing it here would be a cycle. The split is right
+// regardless: the executor owns the in-form model rewrite, the adapter owns the
+// URL and the credential. There is no Parse counterpart — a transcription
+// response is forwarded to the client verbatim, since parsing it into an IR
+// would drop the per-segment timings and log-probabilities verbose_json carries.
+type Transcriber interface {
+	BuildTranscription(ctx context.Context, t *Target, body []byte, contentType string) (*http.Request, []ir.Warning, error)
+}
