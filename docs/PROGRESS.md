@@ -364,6 +364,60 @@ Recorded so Phase 2 does not trip over them:
 - **The lossy-field warning mechanism does not exist yet.** Master design §5 requires dropped fields to be recorded; `requests.warnings` arrives in Phase 2 and the mechanism in Phase 4. Phase 1's adapter drops silently.
 - **No request logging at all.** The done criterion "a client disconnect is distinguishable from a timeout in logs" is unmet: nothing in the request path logs. Phase 2 owns this.
 
+### 6. Phase 5 verification against Groq — done
+
+Run on 2026-08-23 with a static `CGO_ENABLED=0` binary (30 MB) on ports
+18080/18081, one `groq` provider carrying `preset: groq`.
+
+**Groq serves three of the seven surfaces.** It offers chat and
+`/v1/audio/transcriptions` on its OpenAI-compatible base URL, and no
+embeddings, images, rerank or moderations endpoint. Those four were verified
+only as the no-provider error, which is itself a done criterion rather than a
+skipped check. Verifying them live needs an OpenAI key (embeddings, images,
+moderations) and a Cohere key (rerank).
+
+- **Chat is unmoved by the `runAttempts` refactor.** A completion came back with
+  `X-Darkrouter-Attempts: 1`, `-Provider: groq`, `-Model: openai/gpt-oss-120b`
+  and a request id. 73 input tokens, 66 output.
+- **The Responses API serves unary and streamed.** The unary body carried
+  `"object":"response"`, `"status":"completed"`, `"store":false`, one `message`
+  item and an `output_text`, with a `resp_dr_`-prefixed id. The stateful case
+  returned 400 naming `previous_response_id`.
+- **The streamed Responses events are well-formed against a real provider.**
+  Thirteen frames, sequence numbers contiguous 0..12, every `event:` name
+  matching its `data.type`, `response.output_item.done` before
+  `response.completed`, and no `[DONE]`. The terminal event carried
+  `input_tokens: 74, output_tokens: 66` — non-zero, which is the check that
+  matters: Groq sends its usage chunk after the finish chunk, so completing on
+  `message_stop` would have reported zero here and passed every unit test.
+- **Transcriptions serve both response shapes.** `response_format=json` returned
+  `application/json` with a `text` field; `response_format=text` returned
+  `text/plain; charset=UTF-8`. The second call sent `model` after the file part,
+  which is the placement spec §6 calls out, and the in-form rewrite handled it.
+  Both request rows carry `file_name: tone.mp3` and a real `response_bytes`.
+- **Speech could not be verified end to end, for a provider reason.** Groq has
+  decommissioned `playai-tts` and its models list now offers no TTS model at
+  all, so the surface has no live target. What was verified is that the route
+  routes: the request reached the provider (one attempt, status 400, outcome
+  `fatal`), and the upstream error was normalized into the inbound dialect. A
+  direct call to Groq with the same body returns the same 400
+  (`model_decommissioned`), so this is not a Darkrouter fault. The streaming
+  behavior remains covered by `TestSpeechIsNeverHeldWhole`, which deadlocks
+  rather than passes if the body is buffered.
+- **The four unserved surfaces return 404 and attempt nothing.** Each body reads
+  "no configured provider offers this model on this surface", and the request
+  rows show `not_found` with **zero attempts** — the filter runs before any
+  provider is contacted, which is what spec §4 exists to guarantee.
+- **The request rows were read, not assumed.** `openai-responses` appears as a
+  dialect distinct from `openai`; the `stt` rows carry `response_bytes` and
+  their surface meta; `warnings_json` is `[]` on every row, and `request_bodies`
+  is empty. Phase 6's verification caught a mechanism that passed every test and
+  did nothing in production by reading this column, which is why it is read here
+  rather than trusted.
+
+Both test ports were released and no process was left running. Ports 8080 and
+8081 were never touched.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |
