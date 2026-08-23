@@ -7022,3 +7022,1139 @@ git commit -m "feat(exec): buffer and re-render a multipart upload"
 ```
 
 ---
+
+### Task 22: Transcriptions end to end
+
+**Files:**
+- Modify: `internal/adapter/adapter.go`, `internal/adapter/openaicompat/classify.go`, `internal/server/server.go`
+- Create: `internal/adapter/openaicompat/audio.go`, `internal/exec/transcription.go`
+- Test: `internal/adapter/openaicompat/audio_test.go`, `internal/exec/transcription_test.go`
+
+**Interfaces:**
+- Consumes: `Form` and `ParseForm` (Task 21), `RunAux` (Task 14).
+- Produces: `adapter.Transcriber`, `exec.copyFlushing`, and `(*Executor).HandleTranscriptions`. Task 23 reuses `copyFlushing`.
+
+**Implementer:** dcc-superpower-companions:impl-opus-medium
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
+**Approach:** inline - skip 2: the buffering decision is settled by spec §6, Task 21 supplies the machinery, and the three response shapes are enumerated below.
+
+**There is no transcription IR type, and that is deliberate.** The request is a multipart form that `Form` already holds and re-renders; the response is OpenAI's own shape going straight back to an OpenAI client. Parsing it into an IR and re-emitting would *lose* fields — `verbose_json` carries per-segment timings, log-probabilities and a language guess that no narrow type would model — so the body is **forwarded verbatim** and read only to extract what the request row needs.
+
+**The response shape is chosen by `Content-Type`, never by the route.** Spec §6 is explicit, and it has to be: the same route returns JSON for `response_format: json`, `text/plain` for `text`, `srt` and `vtt`, and `text/event-stream` for `stream: true`. Three of those four format values are indistinguishable from the route and two of them arrive as fields buried in a multipart form. Reading the header the provider actually sent is the only thing that is right in every case.
+
+- `application/json` — read bounded, extract `text`, `duration` and `usage` for the record, then write the bytes through unchanged.
+- `text/event-stream` — copy through with a flush per chunk. Buffering an SSE transcript turns incremental output into a single blob at the end.
+- anything else — copy through with a flush per chunk, as opaque bytes.
+
+`adapter.Transcriber` takes rendered bytes rather than a `*Form`, because `Form` lives in `internal/exec` and an adapter importing it would be an import cycle. The split is right anyway: the op owns the rewrite, the adapter owns the URL and the auth.
+
+The upload is already whole in memory by the time `Build` runs, so re-rendering per attempt costs one buffer copy and buys failover across two providers whose model names differ.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `internal/adapter/openaicompat/audio_test.go`:
+
+```go
+package openaicompat
+
+import (
+	"context"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+)
+
+func TestBuildTranscriptionPostsTheFormVerbatim(t *testing.T) {
+	body := []byte("--b\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n--b--\r\n")
+	hr, warns, err := New().BuildTranscription(context.Background(),
+		&adapter.Target{BaseURL: "https://api.example.com/v1/", APIKey: "sk", Model: "whisper-1"},
+		body, "multipart/form-data; boundary=b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v", warns)
+	}
+	if hr.URL.String() != "https://api.example.com/v1/audio/transcriptions" {
+		t.Errorf("url = %s", hr.URL)
+	}
+	if got := hr.Header.Get("Content-Type"); got != "multipart/form-data; boundary=b" {
+		t.Errorf("content-type = %q; the boundary must be the rendered form's", got)
+	}
+	if hr.Header.Get("Authorization") != "Bearer sk" {
+		t.Errorf("auth = %q", hr.Header.Get("Authorization"))
+	}
+	sent, _ := io.ReadAll(hr.Body)
+	if string(sent) != string(body) {
+		t.Errorf("body was altered: %q", sent)
+	}
+	if hr.ContentLength != int64(len(body)) {
+		t.Errorf("content-length = %d, want %d", hr.ContentLength, len(body))
+	}
+}
+
+func TestBuildTranscriptionIsReplayable(t *testing.T) {
+	// The transport retries by calling GetBody. Without it a retried upload is
+	// sent empty and the provider reports an unreadable file.
+	hr, _, err := New().BuildTranscription(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1", Model: "m"},
+		[]byte("AUDIO"), "multipart/form-data; boundary=b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hr.GetBody == nil {
+		t.Fatal("GetBody is nil")
+	}
+	again, err := hr.GetBody()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(again)
+	if string(got) != "AUDIO" {
+		t.Errorf("replayed body = %q", got)
+	}
+	_ = strings.TrimSpace("")
+}
+```
+
+Create `internal/exec/transcription_test.go`:
+
+```go
+package exec
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// transcriptionRequest builds a real multipart upload with the model field
+// after the file part, which is where several clients put it.
+func transcriptionRequest(t *testing.T, model string) *http.Request {
+	t.Helper()
+	body, ct := buildForm(t, [][2]string{{"model", model}, {"response_format", "json"}},
+		[2]string{"a.mp3", "AUDIO"}, true)
+	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(body))
+	r.Header.Set("Content-Type", ct)
+	return r
+}
+
+func TestTranscriptionsServeJSON(t *testing.T) {
+	var sawModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("upstream could not parse the form: %v", err)
+		}
+		sawModel = r.FormValue("model")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello there","duration":2.5,
+		  "usage":{"type":"tokens","input_tokens":7,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "whisper-1", ir.SurfaceSTT))
+	w := httptest.NewRecorder()
+	e.HandleTranscriptions(w, transcriptionRequest(t, "whisper-1"), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if sawModel != "whisper-1" {
+		t.Errorf("upstream saw model %q", sawModel)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["text"] != "hello there" {
+		t.Errorf("body = %s", w.Body.String())
+	}
+	if _, ok := body["duration"]; !ok {
+		t.Error("duration was dropped; the body must be forwarded verbatim")
+	}
+	got := rec.only(t)
+	if got.Surface != "stt" || got.Status != "success" {
+		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+	if got.TokensIn != 7 || got.TokensOut != 3 {
+		t.Errorf("tokens = %d/%d", got.TokensIn, got.TokensOut)
+	}
+}
+
+func TestTranscriptionsForwardPlainTextByContentType(t *testing.T) {
+	// The route cannot tell srt from json; the response header can.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, "1\n00:00:00,000 --> 00:00:02,500\nhello there\n")
+	}))
+	defer upstream.Close()
+
+	e, _ := executorForOp(t, upstream.URL, catalogWith("p", "whisper-1", ir.SurfaceSTT))
+	w := httptest.NewRecorder()
+	e.HandleTranscriptions(w, transcriptionRequest(t, "whisper-1"), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") {
+		t.Errorf("content-type = %q; the upstream's was not preserved", w.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(w.Body.String(), "00:00:02,500") {
+		t.Errorf("body = %q; a subtitle body was not forwarded intact", w.Body.String())
+	}
+}
+
+func TestTranscriptionsForwardSSEByContentType(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hel\"}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"transcript.text.done\",\"text\":\"hello\"}\n\n")
+	}))
+	defer upstream.Close()
+
+	e, _ := executorForOp(t, upstream.URL, catalogWith("p", "whisper-1", ir.SurfaceSTT))
+	w := httptest.NewRecorder()
+	e.HandleTranscriptions(w, transcriptionRequest(t, "whisper-1"), openaiedge.New())
+
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("content-type = %q", ct)
+	}
+	if !strings.Contains(w.Body.String(), "transcript.text.delta") ||
+		!strings.Contains(w.Body.String(), "transcript.text.done") {
+		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
+func TestATranscriptionSurvivesAFirstProviderFailure(t *testing.T) {
+	// The done criterion: the buffered body is replayed against a second
+	// provider whose model name differs, and the form carries the new name.
+	var hits atomic.Int64
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+
+	var sawModel, sawFile string
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("replayed form did not parse: %v", err)
+		}
+		sawModel = r.FormValue("model")
+		f, _, err := r.FormFile("file")
+		if err == nil {
+			b, _ := io.ReadAll(f)
+			sawFile = string(b)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"hello"}`))
+	}))
+	defer good.Close()
+
+	e, rec := executorForTwo(t, bad.URL, good.URL,
+		catalogAlias("bad", "whisper-1", "good", "distil-whisper", ir.SurfaceSTT))
+	w := httptest.NewRecorder()
+	body, ct := buildForm(t, [][2]string{{"model", "speech"}}, [2]string{"a.mp3", "AUDIO"}, true)
+	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(body))
+	r.Header.Set("Content-Type", ct)
+	e.HandleTranscriptions(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if hits.Load() != 1 {
+		t.Errorf("the failing provider was called %d times", hits.Load())
+	}
+	if sawModel != "distil-whisper" {
+		t.Errorf("replayed model = %q; the in-form name was not rewritten for the second target", sawModel)
+	}
+	if sawFile != "AUDIO" {
+		t.Errorf("replayed file = %q; the upload did not survive the replay", sawFile)
+	}
+	if got := rec.only(t); len(got.Attempts) != 2 {
+		t.Errorf("attempts = %d", len(got.Attempts))
+	}
+}
+
+func TestAnOversizedUploadIsRefusedBeforeAnyUpstreamCall(t *testing.T) {
+	var hits atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForCapped(t, upstream.URL, catalogWith("p", "whisper-1", ir.SurfaceSTT), 512)
+	w := httptest.NewRecorder()
+	body, ct := buildForm(t, [][2]string{{"model", "whisper-1"}},
+		[2]string{"a.mp3", strings.Repeat("A", 4096)}, false)
+	r := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader(body))
+	r.Header.Set("Content-Type", ct)
+	e.HandleTranscriptions(w, r, openaiedge.New())
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body = %s", w.Code, w.Body.String())
+	}
+	if hits.Load() != 0 {
+		t.Errorf("an oversized upload reached an upstream %d times", hits.Load())
+	}
+	if got := rec.only(t); got.ErrorCode != string(ir.ErrPayloadTooLarge) {
+		t.Errorf("error code = %q", got.ErrorCode)
+	}
+}
+
+func TestATranscriptionWithNoSTTProviderIsRefused(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "chat-only", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.HandleTranscriptions(w, transcriptionRequest(t, "chat-only"), openaiedge.New())
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if len(rec.only(t).Attempts) != 0 {
+		t.Error("a surface no provider offers attempted an upstream call")
+	}
+}
+```
+
+Add `executorForCapped(t, url string, cat *catalog.Store, maxBody int64)` beside the other executor helpers — `executorForOp` with `server.max_body_bytes` set to the given value.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ ./internal/exec/ -run 'Transcription|OversizedUpload' -v
+```
+
+Expected: FAIL to build — `undefined: BuildTranscription`, `e.HandleTranscriptions undefined`.
+
+- [ ] **Step 3: Add the adapter interface and implementation**
+
+In `internal/adapter/adapter.go`, beside `ImageGenerator`:
+
+```go
+// Transcriber is implemented by an adapter serving the stt surface.
+//
+// It takes rendered bytes rather than a parsed form because the form type lives
+// in the executor and importing it here would be a cycle. The split is right
+// regardless: the executor owns the in-form model rewrite, the adapter owns the
+// URL and the credential. There is no Parse counterpart — a transcription
+// response is forwarded to the client verbatim, since parsing it into an IR
+// would drop the per-segment timings and log-probabilities verbose_json carries.
+type Transcriber interface {
+	BuildTranscription(ctx context.Context, t *Target, body []byte, contentType string) (*http.Request, []ir.Warning, error)
+}
+```
+
+Create `internal/adapter/openaicompat/audio.go`:
+
+```go
+package openaicompat
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func (a *Adapter) BuildTranscription(ctx context.Context, t *adapter.Target,
+	body []byte, contentType string) (*http.Request, []ir.Warning, error) {
+
+	url := strings.TrimRight(t.BaseURL, "/") + "/audio/transcriptions"
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build transcription request: %w", err)
+	}
+	// The rendered form's own boundary, not a fresh one: the body and the
+	// header have to agree or the provider sees no parts at all.
+	hr.Header.Set("Content-Type", contentType)
+	if t.APIKey != "" {
+		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
+	}
+	hr.ContentLength = int64(len(body))
+	// Set here rather than left to makeReplayable so a transport-level retry
+	// resends the upload instead of an empty body.
+	hr.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	return hr, nil, nil
+}
+
+var _ adapter.Transcriber = (*Adapter)(nil)
+```
+
+- [ ] **Step 4: Write the op and the route**
+
+Create `internal/exec/transcription.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+// maxTranscriptBytes bounds a JSON transcription response. verbose_json for a
+// long recording carries a segment object per phrase, so the cap is generous;
+// a cap that rejects a legitimate transcript is worse than no cap.
+const maxTranscriptBytes = 64 << 20
+
+type transcriptionOp struct {
+	d    edge.Dialect
+	form *Form
+	// model is the name the client put in the form, kept for routing. The name
+	// sent upstream is the candidate's, written into the form by Render.
+	model string
+}
+
+func (o *transcriptionOp) Dialect() string { return o.d.Name() }
+
+func (o *transcriptionOp) Query() router.Query {
+	return router.Query{Model: o.model, Surface: ir.SurfaceSTT}
+}
+
+func (o *transcriptionOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	tr, ok := ad.(adapter.Transcriber)
+	if !ok {
+		return nil, nil, fmt.Errorf("adapter %s does not serve transcriptions", ad.Kind())
+	}
+	// Re-rendered per attempt, not once per request: the model field lives
+	// inside the form and the second candidate's name is usually different.
+	body, ct, err := o.form.Render(tgt.Model)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tr.BuildTranscription(ctx, tgt, body, ct)
+}
+
+// Respond dispatches on the response Content-Type rather than on the route.
+// Spec §6: one route returns JSON, plain text and SSE depending on a
+// response_format field buried in the multipart form, and the header the
+// provider actually sent is the only thing that is right in every case.
+func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	defer resp.Body.Close()
+
+	ct := resp.Header.Get("Content-Type")
+	ac.Rec.FinalProviderID = ac.Cand.ProviderID
+	ac.Rec.FinalModel = ac.Cand.Model
+	ac.Rec.Warnings = warningStrings(ac.Warns)
+
+	if strings.HasPrefix(ct, "application/json") {
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTranscriptBytes))
+		if err != nil {
+			return failedParse(ac, resp, fmt.Errorf("read transcription response: %w", err))
+		}
+		// Read for the record only. The bytes go out unchanged, because
+		// verbose_json carries per-segment timings and log-probabilities that
+		// re-emitting from a narrow IR would drop.
+		applyTranscriptUsage(ac, raw)
+		ttft := time.Since(ac.Rec.TS).Milliseconds()
+		ac.Rec.TTFTMs = &ttft
+		ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+		cw.Header().Set("Content-Type", ct)
+		_, _ = cw.Write(raw)
+		return adapter.OutcomeSuccess, nil
+	}
+
+	// Text and SSE alike are opaque and are forwarded with a flush per chunk.
+	// Buffering an SSE transcript would turn incremental output into one blob
+	// at the end, which is the whole thing the client asked to avoid.
+	ttft := time.Since(ac.Rec.TS).Milliseconds()
+	ac.Rec.TTFTMs = &ttft
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+	if ct != "" {
+		cw.Header().Set("Content-Type", ct)
+	}
+	if _, err := copyFlushing(cw, resp.Body); err != nil && !cw.Committed() {
+		return failedParse(ac, resp, err)
+	}
+	// Once bytes have gone out the chain ends whatever happened next. The loop
+	// enforces this by consulting the writer, and the byte count is what the
+	// trace has instead of an in-stream error the format cannot carry.
+	return adapter.OutcomeSuccess, nil
+}
+
+func (o *transcriptionOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+
+var _ SurfaceOp = (*transcriptionOp)(nil)
+
+// applyTranscriptUsage reads the token counts a transcription model may report.
+// whisper-1 reports none; the gpt-4o transcription models report a usage object
+// whose type is "tokens". A "duration" type carries seconds rather than tokens
+// and is deliberately not recorded as tokens.
+func applyTranscriptUsage(ac *AttemptCtx, raw []byte) {
+	var env struct {
+		Usage *struct {
+			Type         string `json:"type"`
+			InputTokens  int    `json:"input_tokens"`
+			OutputTokens int    `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil || env.Usage == nil {
+		return
+	}
+	if env.Usage.Type != "" && env.Usage.Type != "tokens" {
+		return
+	}
+	applyUsage(ac.Rec, &ir.Usage{
+		InputTokens: env.Usage.InputTokens, OutputTokens: env.Usage.OutputTokens,
+	})
+}
+
+// copyFlushing copies src to dst, flushing after every chunk.
+//
+// io.Copy alone would let the ResponseWriter buffer, which turns an SSE
+// transcript or a streamed audio body into a single delivery at the end. It is
+// shared with the speech surface, which has the same requirement for the same
+// reason.
+func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
+	buf := make([]byte, 32<<10)
+	var total int64
+	for {
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			w, werr := dst.Write(buf[:n])
+			total += int64(w)
+			if werr != nil {
+				return total, werr
+			}
+			dst.Flush()
+		}
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return total, nil
+			}
+			return total, rerr
+		}
+	}
+}
+
+// HandleTranscriptions serves POST /v1/audio/transcriptions.
+func (e *Executor) HandleTranscriptions(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
+	maxBody := e.store.Current().Server.MaxBodyBytes
+	e.RunAux(w, r, d.Name(), ir.SurfaceSTT, d, func() (SurfaceOp, error) {
+		form, err := ParseForm(r, maxBody)
+		if err != nil {
+			return nil, err
+		}
+		return &transcriptionOp{d: d, form: form, model: form.Field("model")}, nil
+	})
+}
+```
+
+In `internal/server/server.go`, beside the images route:
+
+```go
+	mux.HandleFunc("POST /v1/audio/transcriptions", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleTranscriptions(w, r, oa)
+	}))
+```
+
+- [ ] **Step 5: Declare the surface**
+
+In `internal/adapter/openaicompat/classify.go`, add `ir.SurfaceSTT` to the `Surfaces()` set Task 7 wrote, if it is not already present. The §4 matrix gives `openaicompat` all seven surfaces except none — check the set against the matrix and correct it rather than assuming.
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in all three packages.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/adapter/adapter.go internal/adapter/openaicompat/audio.go \
+        internal/adapter/openaicompat/audio_test.go internal/adapter/openaicompat/classify.go \
+        internal/exec/transcription.go internal/exec/transcription_test.go internal/server/server.go
+git commit -m "feat(exec): serve the transcription surface"
+```
+
+---
+
+### Task 23: Speech end to end, streamed and never captured
+
+**Files:**
+- Modify: `internal/ir/aux.go`, `internal/adapter/adapter.go`, `internal/edge/edge.go`, `internal/edge/openai/aux.go`, `internal/server/server.go`
+- Create: `internal/adapter/openaicompat/speech.go`, `internal/exec/speech.go`
+- Test: `internal/adapter/openaicompat/speech_test.go`, `internal/exec/speech_test.go`
+
+**Interfaces:**
+- Consumes: `copyFlushing` (Task 22), `RunAux` (Task 14).
+- Produces: `ir.SpeechRequest`, `adapter.Speaker`, `edge.SpeechDialect`, and `(*Executor).HandleSpeech`.
+
+**Implementer:** dcc-superpower-companions:impl-opus-medium
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
+**Approach:** inline - skip 2: the request shape is OpenAI's and the response handling is Task 22's non-JSON branch with nothing read at all.
+
+Spec §6: the response "streams through without parsing, bypasses body capture entirely — audio in SQLite is never right — and the log records content type, byte count, and duration."
+
+**There is no speech response type.** Nothing about an audio body is representable in an IR and nothing needs to be: the bytes go from the upstream to the client and the only facts worth keeping are the content type and the count. `stream_format: "sse"` changes nothing here either — the op already forwards whatever arrives with a flush per chunk, so an SSE speech response is handled by the same three lines as an MP3.
+
+**What "not captured" means today, stated plainly.** `capture.bodies` is a config field with a retention sweep and **no writer anywhere in the tree** — nothing has ever inserted into `request_bodies`. So "a speech response is not captured" is true by construction rather than by enforcement, and a test asserting an empty table would prove nothing about this surface. The property that *is* enforceable and is what the criterion is really protecting is that the body is **never held whole**: the test below makes the upstream refuse to send its second chunk until the first has reached the client, so a buffering implementation deadlocks instead of passing. The capture gap is recorded as a carried-forward item in Task 29.
+
+Risk is 2 because of spec §7. Once the first audio byte is out there is no re-route, and unlike chat there is no in-stream error vocabulary to tell the client the rest is missing. A provider that returns a fast 200 and then truncates delivers truncated audio, and the byte count on the request row is the only place that shows up.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `internal/adapter/openaicompat/speech_test.go`:
+
+```go
+package openaicompat
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestBuildSpeechRendersTheOpenAIShape(t *testing.T) {
+	hr, warns, err := New().BuildSpeech(context.Background(),
+		&adapter.Target{BaseURL: "https://api.example.com/v1/", APIKey: "sk", Model: "tts-1"},
+		&ir.SpeechRequest{
+			Input: "hello", Voice: "alloy", ResponseFormat: "mp3",
+			Speed: 1.25, Instructions: "cheerful", StreamFormat: "sse",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v", warns)
+	}
+	if hr.URL.String() != "https://api.example.com/v1/audio/speech" {
+		t.Errorf("url = %s", hr.URL)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "tts-1" || body["input"] != "hello" || body["voice"] != "alloy" {
+		t.Errorf("body = %v", body)
+	}
+	if body["response_format"] != "mp3" || body["speed"].(float64) != 1.25 {
+		t.Errorf("body = %v", body)
+	}
+	if body["instructions"] != "cheerful" || body["stream_format"] != "sse" {
+		t.Errorf("body = %v", body)
+	}
+}
+
+func TestBuildSpeechOmitsUnsetOptionals(t *testing.T) {
+	// speed 0 is not "default", it is a 400.
+	hr, _, err := New().BuildSpeech(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1", Model: "tts-1"},
+		&ir.SpeechRequest{Input: "hi", Voice: "alloy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	_ = json.Unmarshal(raw, &body)
+	for _, k := range []string{"speed", "response_format", "instructions", "stream_format"} {
+		if _, present := body[k]; present {
+			t.Errorf("an unset %q was sent as %v", k, body[k])
+		}
+	}
+}
+```
+
+Create `internal/exec/speech_test.go`:
+
+```go
+package exec
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// watchWriter reports each Write as it happens, so a test can prove bytes
+// reached the client before the upstream finished sending.
+type watchWriter struct {
+	http.ResponseWriter
+	writes chan []byte
+}
+
+func (w *watchWriter) Write(b []byte) (int, error) {
+	cp := append([]byte(nil), b...)
+	select {
+	case w.writes <- cp:
+	default:
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *watchWriter) Flush() {}
+
+func speechRequest() *http.Request {
+	return httptest.NewRequest("POST", "/v1/audio/speech",
+		strings.NewReader(`{"model":"tts-1","input":"hello","voice":"alloy"}`))
+}
+
+func TestSpeechIsNeverHeldWhole(t *testing.T) {
+	// The upstream refuses to send its second chunk until the first has reached
+	// the client. An implementation that buffers the audio deadlocks here
+	// instead of passing, which is the enforceable form of "never captured".
+	gotFirst := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("FIRST"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-gotFirst:
+		case <-time.After(5 * time.Second):
+			t.Error("the first chunk never reached the client; the body was buffered")
+		}
+		_, _ = w.Write([]byte("SECOND"))
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "tts-1", ir.SurfaceTTS))
+	inner := httptest.NewRecorder()
+	ww := &watchWriter{ResponseWriter: inner, writes: make(chan []byte, 8)}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.HandleSpeech(ww, speechRequest(), openaiedge.New())
+	}()
+
+	select {
+	case b := <-ww.writes:
+		if string(b) != "FIRST" {
+			t.Errorf("first chunk = %q", b)
+		}
+		close(gotFirst)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no bytes reached the client before the upstream finished")
+	}
+	<-done
+
+	if got := inner.Body.String(); got != "FIRSTSECOND" {
+		t.Errorf("body = %q", got)
+	}
+	if ct := inner.Header().Get("Content-Type"); ct != "audio/mpeg" {
+		t.Errorf("content-type = %q; the upstream's was not preserved", ct)
+	}
+	got := rec.only(t)
+	if got.Surface != "tts" || got.Status != "success" {
+		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+}
+
+func TestSpeechForwardsAnSSEBodyUnchanged(t *testing.T) {
+	// stream_format: "sse" changes nothing in the op: whatever arrives is
+	// forwarded with a flush per chunk.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"speech.audio.delta\",\"audio\":\"AA==\"}\n\n"))
+	}))
+	defer upstream.Close()
+
+	e, _ := executorForOp(t, upstream.URL, catalogWith("p", "tts-1", ir.SurfaceTTS))
+	w := httptest.NewRecorder()
+	e.HandleSpeech(w, httptest.NewRequest("POST", "/v1/audio/speech", strings.NewReader(
+		`{"model":"tts-1","input":"hi","voice":"alloy","stream_format":"sse"}`)), openaiedge.New())
+
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("content-type = %q", ct)
+	}
+	if !strings.Contains(w.Body.String(), "speech.audio.delta") {
+		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
+func TestSpeechFailsOverBeforeTheFirstByte(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("AUDIO"))
+	}))
+	defer good.Close()
+
+	e, rec := executorForTwo(t, bad.URL, good.URL, catalogPair("bad", "good", "tts-1", ir.SurfaceTTS))
+	w := httptest.NewRecorder()
+	e.HandleSpeech(w, speechRequest(), openaiedge.New())
+
+	if w.Code != http.StatusOK || w.Body.String() != "AUDIO" {
+		t.Fatalf("status = %d, body = %q", w.Code, w.Body.String())
+	}
+	if got := rec.only(t); len(got.Attempts) != 2 || got.FinalProviderID != "good" {
+		t.Errorf("attempts = %d, final = %q", len(got.Attempts), got.FinalProviderID)
+	}
+}
+
+func TestASpeechRequestWithNoTTSProviderIsRefused(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "chat-only", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.HandleSpeech(w, httptest.NewRequest("POST", "/v1/audio/speech", strings.NewReader(
+		`{"model":"chat-only","input":"hi","voice":"alloy"}`)), openaiedge.New())
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if len(rec.only(t).Attempts) != 0 {
+		t.Error("a surface no provider offers attempted an upstream call")
+	}
+}
+
+func TestAMalformedSpeechBodyIsRefused(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+
+	e, _ := executorForOp(t, upstream.URL, catalogWith("p", "tts-1", ir.SurfaceTTS))
+	for _, body := range []string{`{"model":"tts-1","voice":"alloy"}`, `{"model":"tts-1","input":"hi"}`} {
+		w := httptest.NewRecorder()
+		e.HandleSpeech(w, httptest.NewRequest("POST", "/v1/audio/speech",
+			strings.NewReader(body)), openaiedge.New())
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("HandleSpeech(%s) status = %d, want 400", body, w.Code)
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ ./internal/exec/ -run Speech -v
+```
+
+Expected: FAIL to build — `undefined: BuildSpeech`, `e.HandleSpeech undefined`.
+
+- [ ] **Step 3: Add the IR type, the adapter interface and the edge**
+
+Append to `internal/ir/aux.go`:
+
+```go
+// SpeechRequest is one text-to-speech call.
+//
+// There is no SpeechResponse. An audio body is not representable in an IR and
+// nothing needs it to be: the bytes go from the upstream to the client
+// untouched, and the only facts worth keeping are the content type and the byte
+// count, which the executor records.
+type SpeechRequest struct {
+	Model          string
+	Input          string
+	Voice          string
+	ResponseFormat string
+	// Speed is 0 when unset. Zero is not a legal speed, so it needs no separate
+	// presence flag.
+	Speed        float64
+	Instructions string
+	// StreamFormat is "sse" when the client asked for events rather than a
+	// binary body. It changes nothing in the executor — whatever arrives is
+	// forwarded with a flush per chunk — and is carried only so the upstream
+	// request matches the client's.
+	StreamFormat string
+}
+```
+
+In `internal/adapter/adapter.go`, beside `Transcriber`:
+
+```go
+// Speaker is implemented by an adapter serving the tts surface. Like
+// Transcriber it has no Parse counterpart: the response is audio, forwarded
+// without being read.
+type Speaker interface {
+	BuildSpeech(ctx context.Context, t *Target, req *ir.SpeechRequest) (*http.Request, []ir.Warning, error)
+}
+```
+
+In `internal/edge/edge.go`, beside `ImageDialect`:
+
+```go
+// SpeechDialect is the inbound wire form of the tts surface. It has no writer:
+// the response is forwarded byte for byte.
+type SpeechDialect interface {
+	Name() string
+	ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error)
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+```
+
+Append to `internal/edge/openai/aux.go`:
+
+```go
+type wireSpeechRequest struct {
+	Model          string   `json:"model"`
+	Input          string   `json:"input"`
+	Voice          string   `json:"voice"`
+	ResponseFormat string   `json:"response_format"`
+	Speed          *float64 `json:"speed"`
+	Instructions   string   `json:"instructions"`
+	StreamFormat   string   `json:"stream_format"`
+}
+
+func ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireSpeechRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if w.Input == "" {
+		return nil, errors.New("input is required")
+	}
+	if w.Voice == "" {
+		return nil, errors.New("voice is required")
+	}
+	req := &ir.SpeechRequest{
+		Model: w.Model, Input: w.Input, Voice: w.Voice,
+		ResponseFormat: w.ResponseFormat, Instructions: w.Instructions,
+		StreamFormat: w.StreamFormat,
+	}
+	if w.Speed != nil {
+		req.Speed = *w.Speed
+	}
+	return req, nil
+}
+
+func (d *Dialect) ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error) {
+	return ParseSpeech(r, maxBody)
+}
+
+var _ edge.SpeechDialect = (*Dialect)(nil)
+```
+
+- [ ] **Step 4: Implement the adapter**
+
+Create `internal/adapter/openaicompat/speech.go`:
+
+```go
+package openaicompat
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func (a *Adapter) BuildSpeech(ctx context.Context, t *adapter.Target,
+	req *ir.SpeechRequest) (*http.Request, []ir.Warning, error) {
+
+	body := map[string]any{"model": t.Model, "input": req.Input, "voice": req.Voice}
+	// Omitted rather than sent empty: speed 0 is a 400 rather than a default,
+	// and an empty response_format or stream_format is rejected outright.
+	if req.Speed > 0 {
+		body["speed"] = req.Speed
+	}
+	for k, v := range map[string]string{
+		"response_format": req.ResponseFormat,
+		"instructions":    req.Instructions,
+		"stream_format":   req.StreamFormat,
+	} {
+		if v != "" {
+			body[k] = v
+		}
+	}
+
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	url := strings.TrimRight(t.BaseURL, "/") + "/audio/speech"
+	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build speech request: %w", err)
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if t.APIKey != "" {
+		hr.Header.Set("Authorization", "Bearer "+t.APIKey)
+	}
+	return hr, nil, nil
+}
+
+var _ adapter.Speaker = (*Adapter)(nil)
+```
+
+- [ ] **Step 5: Write the op and the route**
+
+Create `internal/exec/speech.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+type speechOp struct {
+	d   edge.SpeechDialect
+	req *ir.SpeechRequest
+}
+
+func (o *speechOp) Dialect() string { return o.d.Name() }
+
+func (o *speechOp) Query() router.Query {
+	return router.Query{Model: o.req.Model, Surface: ir.SurfaceTTS}
+}
+
+func (o *speechOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	sp, ok := ad.(adapter.Speaker)
+	if !ok {
+		return nil, nil, fmt.Errorf("adapter %s does not serve speech", ad.Kind())
+	}
+	return sp.BuildSpeech(ctx, tgt, o.req)
+}
+
+// Respond forwards the body without reading it.
+//
+// Spec §6: audio in SQLite is never right, so the bytes are never held. Spec §7:
+// once the first byte is out there is no re-route, and unlike chat there is no
+// in-stream error vocabulary to tell the client the rest is missing — so a
+// truncated body reaches the client as truncated audio and the byte count on
+// the request row is the only place that shows up.
+func (o *speechOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	defer resp.Body.Close()
+
+	ac.Rec.FinalProviderID = ac.Cand.ProviderID
+	ac.Rec.FinalModel = ac.Cand.Model
+	ac.Rec.Warnings = warningStrings(ac.Warns)
+	ttft := time.Since(ac.Rec.TS).Milliseconds()
+	ac.Rec.TTFTMs = &ttft
+
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		cw.Header().Set("Content-Type", ct)
+	}
+	if _, err := copyFlushing(cw, resp.Body); err != nil && !cw.Committed() {
+		// Nothing reached the client, so the chain may still continue.
+		return adapter.OutcomeRetryableProvider, errorFor(adapter.OutcomeRetryableProvider, err)
+	}
+	return adapter.OutcomeSuccess, nil
+}
+
+func (o *speechOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+
+var _ SurfaceOp = (*speechOp)(nil)
+
+// HandleSpeech serves POST /v1/audio/speech.
+func (e *Executor) HandleSpeech(w http.ResponseWriter, r *http.Request, d edge.SpeechDialect) {
+	maxBody := e.store.Current().Server.MaxBodyBytes
+	e.RunAux(w, r, d.Name(), ir.SurfaceTTS, d, func() (SurfaceOp, error) {
+		req, err := d.ParseSpeech(r, maxBody)
+		if err != nil {
+			return nil, err
+		}
+		return &speechOp{d: d, req: req}, nil
+	})
+}
+```
+
+In `internal/server/server.go`, beside the transcriptions route:
+
+```go
+	mux.HandleFunc("POST /v1/audio/speech", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleSpeech(w, r, oa)
+	}))
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/adapter/openaicompat/ ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in all three packages. Run `internal/exec` at `-count=5` as well — `TestSpeechIsNeverHeldWhole` synchronizes two goroutines and a flaky pass would be worse than a failure.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+go test ./internal/exec/ -race -count=5
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing, no flakes across five runs.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/ir/aux.go internal/adapter/adapter.go internal/adapter/openaicompat/speech.go \
+        internal/adapter/openaicompat/speech_test.go internal/edge/edge.go \
+        internal/edge/openai/aux.go internal/exec/speech.go internal/exec/speech_test.go \
+        internal/server/server.go
+git commit -m "feat(exec): serve the speech surface"
+```
+
+---
