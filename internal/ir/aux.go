@@ -71,3 +71,40 @@ type EmbeddingResponse struct {
 	Embeddings []Embedding
 	Usage      Usage
 }
+
+// ModerationRequest is one moderation call. Input is always a slice: OpenAI
+// accepts a bare string or an array of strings and the edge flattens both.
+type ModerationRequest struct {
+	Model string
+	Input []string
+}
+
+// InputCount is the batched item count, recorded on the request row per spec §9.
+func (r *ModerationRequest) InputCount() int { return len(r.Input) }
+
+// ModerationResult is one verdict.
+//
+// Categories and Scores are maps rather than a fixed field set because the
+// category list is provider-defined and has grown repeatedly. A struct would
+// silently drop every category added after it was written, and a dropped
+// category on a moderation endpoint is a safety signal the client never sees.
+type ModerationResult struct {
+	Flagged    bool
+	Categories map[string]bool
+	Scores     map[string]float64
+	// AppliedInputTypes is omni-moderation's per-category record of which
+	// input modality triggered it. Dropping it would leave a client unable to
+	// tell a flagged image from flagged text.
+	AppliedInputTypes map[string][]string
+}
+
+type ModerationResponse struct {
+	ID    string
+	Model string
+	// Results is parallel to the request's Input, one verdict per item.
+	Results []ModerationResult
+	// Usage is zero for every known provider: the endpoint reports none. It is
+	// carried anyway so a provider that starts reporting is recorded rather
+	// than discarded.
+	Usage Usage
+}
