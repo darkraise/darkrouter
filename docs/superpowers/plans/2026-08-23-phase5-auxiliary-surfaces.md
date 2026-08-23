@@ -421,6 +421,17 @@ mistral:
 ```
 
 ```yaml
+groq:
+  models_dev_id: groq
+  free_tier: true
+  # Groq serves /v1/audio/transcriptions (whisper-large-v3) and
+  # /v1/audio/speech (the playai-tts voices) on the same OpenAI-compatible base
+  # URL. It serves no embeddings, images, rerank or moderations endpoint, and
+  # the router reports that honestly rather than being told otherwise here.
+  surfaces: [llm, stt, tts]
+```
+
+```yaml
 ollama:
   name: Ollama
   kind: openaicompat
