@@ -1154,6 +1154,12 @@ func (p *probeOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
 func executorForOp(t *testing.T, url string, cat *catalog.Store) (*Executor, *captureLogger) {
 	t.Helper()
 	rec := &captureLogger{}
+	// Assigned only when non-nil: a typed nil in the interface field reads as
+	// present and would be dereferenced on the routing path.
+	deps := Deps{Log: rec}
+	if cat != nil {
+		deps.Catalog = cat
+	}
 	e := executorFor(t, `
 server:
   proxy_listen: ":0"
@@ -1163,7 +1169,7 @@ providers:
     base_url: `+url+`
     api_key: sk
     models: [m]
-`, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+`, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
 	return e, rec
 }
 
