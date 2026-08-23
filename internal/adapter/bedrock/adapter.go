@@ -52,16 +52,9 @@ func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
 
 var _ adapter.Adapter = (*Adapter)(nil)
 
-// Replaced in Tasks 5 and 6.
-func ParseResponse(resp *http.Response) (*ir.Response, error) {
-	_ = resp.Body.Close()
-	return nil, errors.New("bedrock: response parsing arrives in task 5")
-}
-
+// Replaced in Task 6.
 func ParseStream(io.Reader, int) iter.Seq2[ir.StreamEvent, error] {
 	return func(yield func(ir.StreamEvent, error) bool) {
 		yield(ir.StreamEvent{}, errors.New("bedrock: stream parsing arrives in task 6"))
 	}
 }
-
-func Classify(*http.Response, error) adapter.Outcome { return adapter.OutcomeFatal }
