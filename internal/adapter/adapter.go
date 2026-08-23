@@ -113,3 +113,12 @@ type TokenCounter interface {
 	// ParseCountResponse takes ownership of resp.Body and always closes it.
 	ParseCountResponse(resp *http.Response) (int, error)
 }
+
+// Embedder is implemented by an adapter serving the embedding surface. Optional
+// for the same reason TokenCounter is: two of the five kinds have no embedding
+// endpoint, and a method on Adapter would make them stub it out.
+type Embedder interface {
+	BuildEmbedding(ctx context.Context, t *Target, req *ir.EmbeddingRequest) (*http.Request, []ir.Warning, error)
+	// ParseEmbedding takes ownership of resp.Body and always closes it.
+	ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, error)
+}
