@@ -4890,7 +4890,7 @@ git commit -m "feat(exec): serve the moderation surface"
 
 **Interfaces:**
 - Consumes: `catalog.Embedded` (phase 6).
-- Produces: `config.ProviderConfig.Preset` and a populated `provider.Provider.Preset` from both sources. Task 18's `rerankPath` reads it; Tasks 19, 30 and 34 depend on it.
+- Produces: `config.ProviderConfig.Preset` and a populated `provider.Provider.Preset` from both sources. Task 18's `rerankPath` reads it; Tasks 19, 31 and 34 depend on it.
 
 **Implementer:** dcc-superpower-companions:impl-opus-medium
 **Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
@@ -4898,7 +4898,7 @@ git commit -m "feat(exec): serve the moderation surface"
 
 **A YAML-configured provider can never reach its preset today, and that is a production gap, not a test inconvenience.** `provider.Provider.Preset` is documented as "how quirks, surfaces, model traits and the models.dev join key are reached at request time" — but `config.ProviderConfig` has no `preset` field, the loader is strict (`dec.KnownFields(true)`, so writing one is a validation *error*), `YAMLSource.Providers` never sets it, and `ImportFromConfig` omits it from its `INSERT` even though `providers.preset` has existed since migration 0001. The only writer of that column anywhere in the tree is a test doing raw SQL.
 
-Phase 6's verification already recorded the symptom — "a provider imported from the YAML `providers:` block has an empty [preset], so nothing joins until it is set… by hand" — and filed it as a phase 7 UI concern. It is not: it is a missing three-line plumbing, and phase 5 makes it blocking. Task 18 resolves the rerank path from the preset, so **without this, rerank cannot be served by any YAML-configured provider at all**, and Task 36's live verification cannot attach Groq's audio surfaces.
+Phase 6's verification already recorded the symptom — "a provider imported from the YAML `providers:` block has an empty [preset], so nothing joins until it is set… by hand" — and filed it as a phase 7 UI concern. It is not: it is a missing three-line plumbing, and phase 5 makes it blocking. Task 18 resolves the rerank path from the preset, so **without this, rerank cannot be served by any YAML-configured provider at all**, and Task 34's live verification cannot attach Groq's audio surfaces.
 
 An unknown preset name is a **warning, not an error**. `Config.Warnings` exists for exactly this and surfaces on `/healthz`; refusing to start because a preset was renamed upstream would take a working gateway down over metadata.
 
@@ -8687,7 +8687,7 @@ git commit -m "feat(exec): serve the speech surface"
 
 **Interfaces:**
 - Consumes: `ir.Request` and its content-block model.
-- Produces: `openai.ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error)`. Tasks 25 to 27 build the writers and the dialect around it.
+- Produces: `openai.ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, *responsesEcho, error)`. Tasks 26 to 29 build the writers and the dialect around it.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
