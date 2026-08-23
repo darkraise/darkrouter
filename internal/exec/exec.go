@@ -208,51 +208,15 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	if pt != nil && pt.Surface != "" {
 		surface = pt.Surface
 	}
-	rec.Surface = string(surface)
-	rec.RequestedModel = req.Model
-
-	providers, err := e.src.Providers(r.Context())
-	if err != nil {
-		rec.ErrorCode = string(ir.ErrDarkrouter)
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()})
-		return
-	}
-
-	// The snapshot freezes every input the router is allowed to read. Health is
-	// resolved to booleans here rather than inside Resolve, which is what keeps
-	// the router a pure function of its arguments.
-	snap := router.Snapshot{
-		At:        start,
-		Providers: providers,
-		Catalog:   e.catalogFor(providers),
-		Config:    cfg,
-	}
-	if e.deps.Fleet != nil {
-		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
-		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
-	}
-
 	needs := req.Needs()
-	cands, skips, rerr := router.Resolve(router.Query{
+	res, ok := e.resolve(r.Context(), w, d, router.Query{
 		Model: req.Model, Surface: surface,
 		NeedsTools: needs.Tools, NeedsVision: needs.Vision, NeedsReasoning: needs.Reasoning,
-	}, snap)
-
-	rec.Candidates = traceCandidates(cands)
-	rec.Skips = traceSkips(skips)
-
-	if rerr != nil {
-		e2 := routerError(rerr)
-		rec.ErrorCode = string(e2.Type)
-		_ = d.WriteError(w, e2)
+	}, rec, cfg, start)
+	if !ok {
 		return
 	}
-
-	byID := make(map[string]provider.Provider, len(providers))
-	for _, p := range providers {
-		byID[p.ID] = p
-	}
-	e.runAttempts(w, r, d, cfg, req, cands, rec, start, byID, snap.Catalog)
+	e.runAttempts(w, r, d, cfg, req, res.Candidates, rec, start, res.ByID, res.Catalog)
 }
 
 // runAttempts drives the chain. The ordered list is fixed at snapshot time and

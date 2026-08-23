@@ -21,6 +21,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -1016,5 +1017,85 @@ providers:
 		if strings.Contains(warn, "max_tokens") {
 			t.Errorf("warnings = %v; an abandoned attempt's warning reached the served record", got.Warnings)
 		}
+	}
+}
+
+func TestResolveRecordsTheTraceForEveryRoute(t *testing.T) {
+	// HandleCount discarded its skips, so a count request that routed to
+	// nothing was undiagnosable. Sharing the prologue fixes that as a side
+	// effect, and this is what pins it.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "chat-only", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [chat-only]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"nonexistent","messages":[{"role":"user","content":"hi"}]}`))
+	e.HandleCount(w, r, anthropicedge.New(), "anthropic")
+
+	got := rec.only(t)
+	if got.RequestedModel != "nonexistent" {
+		t.Errorf("requested model = %q", got.RequestedModel)
+	}
+	if got.ErrorCode == "" {
+		t.Error("a count that resolved to nothing recorded no error code")
+	}
+}
+
+func TestACountThatRoutesToNothingRecordsItsSkips(t *testing.T) {
+	// The trace, not just the error code, is what says *why* nothing routed.
+	// An unknown model produces no skips at all, so only a model that exists
+	// and is rejected exercises the path HandleCount used to discard.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "embed-only", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceEmbedding},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [embed-only]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"embed-only","messages":[{"role":"user","content":"hi"}]}`))
+	e.HandleCount(w, r, anthropicedge.New(), "anthropic")
+
+	got := rec.only(t)
+	if got.ErrorCode == "" {
+		t.Error("a count that resolved to nothing recorded no error code")
+	}
+	if len(got.Skips) == 0 {
+		t.Error("the skips explaining the empty candidate list were discarded")
 	}
 }
