@@ -152,6 +152,13 @@ func (s *Server) ProxyHandler() http.Handler {
 	mux.HandleFunc("POST /v1/audio/speech", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
 		s.ex.HandleSpeech(w, r, oa)
 	}))
+	// One shared instance for the auth check, which is stateless, and a fresh
+	// one per request for the handler, which holds the response echo. Sharing
+	// the handler's instance across requests would race on that field.
+	rdAuth := openaiedge.NewResponses()
+	mux.HandleFunc("POST /v1/responses", s.authed(rdAuth, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, openaiedge.NewResponses())
+	}))
 	mux.HandleFunc("GET /v1/models", s.authed(oa, s.handleModels))
 
 	an := anthropicedge.New()
