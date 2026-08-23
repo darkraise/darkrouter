@@ -142,3 +142,61 @@ type RerankResponse struct {
 	// Usage is zero: Cohere bills rerank in search units, not tokens.
 	Usage Usage
 }
+
+// ImageRequest is one generation call.
+//
+// ResponseFormat is carried and forwarded verbatim although gpt-image-1 rejects
+// it and the dall-e models require it. A client sending it to gpt-image-1 gets
+// the same 400 talking to the provider directly, and translating it here would
+// make Darkrouter behave differently from the upstream for no gain.
+type ImageRequest struct {
+	Model  string
+	Prompt string
+	// N is 0 when unset. Zero images is not a request anyone makes, so it needs
+	// no separate presence flag.
+	N              int
+	Size           string
+	Quality        string
+	Style          string
+	ResponseFormat string
+	Background     string
+	OutputFormat   string
+	// Moderation and OutputCompression are gpt-image-1 parameters. They are
+	// carried rather than dropped because a client that set them gets
+	// different images without them, and nothing in the response would say so.
+	Moderation        string
+	OutputCompression int
+	User              string
+}
+
+// ImageCount is what was asked for, recorded on the request row per spec §9.
+// An unset n means one image, which is OpenAI's own default.
+func (r *ImageRequest) ImageCount() int {
+	if r.N <= 0 {
+		return 1
+	}
+	return r.N
+}
+
+// Image is one generated image. Exactly one of URL and Base64 is populated,
+// chosen by the provider rather than by the request: gpt-image-1 always returns
+// base64 whatever response_format said.
+type Image struct {
+	URL    string
+	Base64 string
+	// RevisedPrompt is what the provider actually generated from, when it says.
+	RevisedPrompt string
+}
+
+type ImageResponse struct {
+	Created int64
+	Model   string
+	Images  []Image
+
+	Usage Usage
+	// UsageReported distinguishes "the provider reported zero" from "the
+	// provider reported nothing". gpt-image-1 returns a usage object; the
+	// dall-e models return none, and recording their calls as zero-cost would
+	// be a confident lie rather than a missing value.
+	UsageReported bool
+}

@@ -142,3 +142,10 @@ type Reranker interface {
 	// ParseRerank takes ownership of resp.Body and always closes it.
 	ParseRerank(resp *http.Response) (*ir.RerankResponse, error)
 }
+
+// ImageGenerator is implemented by an adapter serving the image surface.
+type ImageGenerator interface {
+	BuildImage(ctx context.Context, t *Target, req *ir.ImageRequest) (*http.Request, []ir.Warning, error)
+	// ParseImage takes ownership of resp.Body and always closes it.
+	ParseImage(resp *http.Response) (*ir.ImageResponse, error)
+}

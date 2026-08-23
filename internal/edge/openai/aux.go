@@ -388,3 +388,93 @@ func (d *Dialect) WriteRerank(w http.ResponseWriter, resp *ir.RerankResponse) er
 }
 
 var _ edge.RerankDialect = (*Dialect)(nil)
+
+type wireImageRequest struct {
+	Model             string `json:"model"`
+	Prompt            string `json:"prompt"`
+	N                 *int   `json:"n"`
+	Size              string `json:"size"`
+	Quality           string `json:"quality"`
+	Style             string `json:"style"`
+	ResponseFormat    string `json:"response_format"`
+	Background        string `json:"background"`
+	OutputFormat      string `json:"output_format"`
+	Moderation        string `json:"moderation"`
+	OutputCompression *int   `json:"output_compression"`
+	Stream            bool   `json:"stream"`
+	User              string `json:"user"`
+}
+
+func ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, err
+	}
+	var w wireImageRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	if w.Prompt == "" {
+		return nil, errors.New("prompt is required")
+	}
+	if w.Stream {
+		// gpt-image-1 streams partial images as SSE. The image op parses a JSON
+		// body, so accepting this would fail on the first event with an
+		// unhelpful error; refusing it says what is actually supported.
+		return nil, errors.New(
+			"streamed image generation is not supported; omit stream to receive the finished images")
+	}
+	req := &ir.ImageRequest{
+		Model: w.Model, Prompt: w.Prompt, Size: w.Size, Quality: w.Quality,
+		Style: w.Style, ResponseFormat: w.ResponseFormat,
+		Background: w.Background, OutputFormat: w.OutputFormat,
+		Moderation: w.Moderation, User: w.User,
+	}
+	if w.N != nil {
+		req.N = *w.N
+	}
+	if w.OutputCompression != nil {
+		req.OutputCompression = *w.OutputCompression
+	}
+	return req, nil
+}
+
+func WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error {
+	data := make([]any, 0, len(resp.Images))
+	for _, img := range resp.Images {
+		row := map[string]any{}
+		// Exactly one payload key, and never both: a client tests for the one
+		// it asked for and an empty string in the other reads as a real answer.
+		if img.Base64 != "" {
+			row["b64_json"] = img.Base64
+		} else {
+			row["url"] = img.URL
+		}
+		if img.RevisedPrompt != "" {
+			row["revised_prompt"] = img.RevisedPrompt
+		}
+		data = append(data, row)
+	}
+	out := map[string]any{"created": resp.Created, "data": data}
+	// Omitted, not zeroed, when the provider reported nothing: the dall-e
+	// models return no usage object and a zeroed one says the call was free.
+	if resp.UsageReported {
+		out["usage"] = map[string]any{
+			"input_tokens":  resp.Usage.InputTokens,
+			"output_tokens": resp.Usage.OutputTokens,
+			"total_tokens":  resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(out)
+}
+
+func (d *Dialect) ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
+	return ParseImage(r, maxBody)
+}
+
+func (d *Dialect) WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error {
+	return WriteImage(w, resp)
+}
+
+var _ edge.ImageDialect = (*Dialect)(nil)
