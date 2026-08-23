@@ -8158,3 +8158,2055 @@ git commit -m "feat(exec): serve the speech surface"
 ```
 
 ---
+
+### Task 24: The Responses request, and what it refuses
+
+**Files:**
+- Create: `internal/edge/openai/responses.go`
+- Test: `internal/edge/openai/responses_test.go`
+
+**Interfaces:**
+- Consumes: `ir.Request` and its content-block model.
+- Produces: `openai.ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error)`. Tasks 25 to 27 build the writers and the dialect around it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: the item vocabulary is enumerated below and `parse.go` beside it is the pattern for building `ir.Request` from a wire body.
+
+`/v1/responses` is chat-shaped, so it maps onto the chat IR rather than getting its own type. What makes it its own task is not the mapping but **what it refuses**.
+
+**Stateful requests are rejected, not degraded.** With a server-stored conversation the body carries only the newest turn. Degrading that to a chat completion would return a fluent, confident, amnesic answer that looks entirely successful, and no client can detect it. The same applies to a declared built-in tool: silently answering without the web search the client asked for is the same class of lie. An error the client can handle beats a wrong answer it cannot.
+
+So three things are refused:
+
+- `previous_response_id` — Darkrouter mints no resolvable ids and cannot resolve anyone else's.
+- `conversation` — same reason, one level up.
+- `background: true` — it asks for a queued response the client polls for by id. Darkrouter has no queue and no resolvable ids, and answering with a finished response would leave the client polling an id that will never exist.
+- any tool whose `type` is not `function` — `web_search`, `file_search`, `code_interpreter`, `image_generation`, `computer_use_preview`, `mcp`, `local_shell`. None is something Darkrouter can execute or forward.
+
+**`store` is not refused.** Its default is `true`, so refusing it would fail every request written by an SDK's defaults. It is accepted, ignored, and answered with `store: false` in the response body — which is precisely how a Responses client is told the id is not resumable. Task 25 emits that.
+
+Reasoning items in the input are **dropped rather than replayed**. An encrypted reasoning item is meaningful only to the provider that minted it, and Darkrouter may be sending this turn somewhere else entirely. The drop is warned about, so the trace shows it.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/edge/openai/responses_test.go`:
+
+```go
+package openai
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func parseResponses(t *testing.T, body string) (*ir.Request, error) {
+	t.Helper()
+	req, _, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(body)), 1<<20)
+	return req, err
+}
+
+func TestParseResponsesTurnsABareInputIntoAUserTurn(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"gpt-4o","input":"hello"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "gpt-4o" || len(req.Messages) != 1 {
+		t.Fatalf("request = %+v", req)
+	}
+	if req.Messages[0].Role != ir.RoleUser || req.Messages[0].Content[0].Text != "hello" {
+		t.Errorf("message = %+v", req.Messages[0])
+	}
+}
+
+func TestParseResponsesMapsInstructionsToSystem(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","instructions":"be terse","input":"hi"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.System) != 1 || req.System[0].Text != "be terse" {
+		t.Errorf("system = %+v", req.System)
+	}
+}
+
+func TestParseResponsesReadsMessageItems(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[
+	  {"role":"user","content":"first"},
+	  {"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]},
+	  {"type":"message","role":"user","content":[
+	     {"type":"input_text","text":"third"},
+	     {"type":"input_image","image_url":"data:image/png;base64,AAA"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %d: %+v", len(req.Messages), req.Messages)
+	}
+	if req.Messages[1].Role != ir.RoleAssistant || req.Messages[1].Content[0].Text != "second" {
+		t.Errorf("assistant turn = %+v", req.Messages[1])
+	}
+	last := req.Messages[2].Content
+	if len(last) != 2 || last[0].Text != "third" || last[1].Type != ir.BlockImage {
+		t.Errorf("multimodal turn = %+v", last)
+	}
+	if last[1].Media == nil || last[1].Media.MIME != "image/png" || last[1].Media.Data != "AAA" {
+		t.Errorf("image = %+v", last[1].Media)
+	}
+}
+
+func TestParseResponsesReadsAToolCallRoundTrip(t *testing.T) {
+	// This is what an agent loop replays on its second turn. Losing either
+	// half strands the model waiting for a result it already produced.
+	req, err := parseResponses(t, `{"model":"m","input":[
+	  {"role":"user","content":"weather?"},
+	  {"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Oslo\"}"},
+	  {"type":"function_call_output","call_id":"call_1","output":"12C"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %d: %+v", len(req.Messages), req.Messages)
+	}
+	call := req.Messages[1]
+	if call.Role != ir.RoleAssistant || call.Content[0].Type != ir.BlockToolUse {
+		t.Fatalf("call turn = %+v", call)
+	}
+	if call.Content[0].ToolUse.ID != "call_1" || call.Content[0].ToolUse.Name != "get_weather" {
+		t.Errorf("tool use = %+v", call.Content[0].ToolUse)
+	}
+	out := req.Messages[2]
+	if out.Content[0].Type != ir.BlockToolResult ||
+		out.Content[0].ToolResult.ToolUseID != "call_1" ||
+		out.Content[0].ToolResult.Text() != "12C" {
+		t.Errorf("output turn = %+v", out.Content[0])
+	}
+}
+
+func TestParseResponsesReadsFunctionTools(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi","tools":[
+	  {"type":"function","name":"f","description":"d","parameters":{"type":"object"}}],
+	  "tool_choice":"required","parallel_tool_calls":false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Tools) != 1 || req.Tools[0].Name != "f" || req.Tools[0].Description != "d" {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	if req.ToolChoice == nil || req.ToolChoice.Mode != "any" {
+		t.Errorf("tool choice = %+v", req.ToolChoice)
+	}
+	if req.ParallelToolCalls == nil || *req.ParallelToolCalls {
+		t.Errorf("parallel_tool_calls = %v", req.ParallelToolCalls)
+	}
+}
+
+func TestParseResponsesReadsSamplingAndFormat(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi","max_output_tokens":128,
+	  "temperature":0.2,"top_p":0.9,"stream":true,"reasoning":{"effort":"high"},
+	  "text":{"format":{"type":"json_schema","name":"s","schema":{"type":"object"}}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.MaxTokens == nil || *req.MaxTokens != 128 {
+		t.Errorf("max tokens = %v", req.MaxTokens)
+	}
+	if !req.Stream || req.Temperature == nil || *req.Temperature != 0.2 {
+		t.Errorf("request = %+v", req)
+	}
+	if req.Reasoning == nil || req.Reasoning.Effort != "high" {
+		t.Errorf("reasoning = %+v", req.Reasoning)
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_schema" {
+		t.Errorf("response format = %+v", req.ResponseFormat)
+	}
+}
+
+func TestParseResponsesRejectsAStatefulRequest(t *testing.T) {
+	// Degrading either of these returns a fluent, confident, amnesic answer
+	// that looks entirely successful and no client can detect.
+	for _, body := range []string{
+		`{"model":"m","input":"hi","previous_response_id":"resp_abc"}`,
+		`{"model":"m","input":"hi","conversation":"conv_abc"}`,
+		`{"model":"m","input":"hi","conversation":{"id":"conv_abc"}}`,
+		`{"model":"m","input":"hi","background":true}`,
+	} {
+		_, err := parseResponses(t, body)
+		if err == nil {
+			t.Errorf("ParseResponses(%s) served a stateful request", body)
+			continue
+		}
+		if !strings.Contains(err.Error(), "stateless") {
+			t.Errorf("err = %v; it must tell the client what will work", err)
+		}
+	}
+}
+
+func TestParseResponsesRejectsBuiltInTools(t *testing.T) {
+	for _, kind := range []string{"web_search", "web_search_preview", "file_search",
+		"code_interpreter", "image_generation", "computer_use_preview", "mcp", "local_shell"} {
+		_, err := parseResponses(t, `{"model":"m","input":"hi","tools":[{"type":"`+kind+`"}]}`)
+		if err == nil {
+			t.Errorf("a %s tool was accepted; answering without it is the same lie as answering "+
+				"without the conversation", kind)
+			continue
+		}
+		if !strings.Contains(err.Error(), kind) {
+			t.Errorf("err = %v; it must name the tool that cannot be served", err)
+		}
+	}
+}
+
+func TestParseResponsesAcceptsStore(t *testing.T) {
+	// store defaults to true, so refusing it would fail every request an SDK
+	// writes with its defaults. The response body is what says the id is not
+	// resumable.
+	if _, err := parseResponses(t, `{"model":"m","input":"hi","store":true}`); err != nil {
+		t.Fatalf("store:true was refused: %v", err)
+	}
+}
+
+func TestParseResponsesDropsReasoningItemsWithAWarning(t *testing.T) {
+	// An encrypted reasoning item means something only to the provider that
+	// minted it, and this turn may be going somewhere else entirely.
+	req, err := parseResponses(t, `{"model":"m","input":[
+	  {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"xxx"},
+	  {"role":"user","content":"hi"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 {
+		t.Errorf("messages = %+v; the reasoning item was replayed", req.Messages)
+	}
+	if len(req.Warnings) != 1 || !strings.Contains(req.Warnings[0].Reason, "reasoning") {
+		t.Errorf("warnings = %+v", req.Warnings)
+	}
+}
+
+func TestParseResponsesReportsTheSurface(t *testing.T) {
+	// The passthrough carries the surface so the executor's record says llm
+	// rather than guessing from the route.
+	_, pt, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"m","input":"hi"}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt == nil || pt.Surface != ir.SurfaceLLM || pt.ModelField != "model" {
+		t.Errorf("passthrough = %+v", pt)
+	}
+}
+```
+
+`req.Warnings` is a new field on `ir.Request`: `Warnings []Warning`, sitting beside `Extra`. It carries losses the **inbound parse** discovered, which until now could only be produced by an adapter on the way out. Add it in this task with the comment:
+
+```go
+	// Warnings are losses the inbound parse discovered. Until phase 5 every
+	// warning came from an adapter rendering outbound; a dialect that drops
+	// something on the way in had nowhere to say so.
+	Warnings []Warning
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -run TestParseResponses -v
+```
+
+Expected: FAIL to build — `undefined: ParseResponses`.
+
+- [ ] **Step 3: Write the parser**
+
+Create `internal/edge/openai/responses.go`:
+
+```go
+package openai
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+type wireResponsesRequest struct {
+	Model             string          `json:"model"`
+	Input             json.RawMessage `json:"input"`
+	Instructions      string          `json:"instructions"`
+	Tools             []wireRespTool  `json:"tools"`
+	ToolChoice        json.RawMessage `json:"tool_choice"`
+	MaxOutputTokens   *int            `json:"max_output_tokens"`
+	Temperature       *float64        `json:"temperature"`
+	TopP              *float64        `json:"top_p"`
+	Stream            bool            `json:"stream"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls"`
+	Reasoning         *struct {
+		Effort string `json:"effort"`
+	} `json:"reasoning"`
+	Text *struct {
+		Format *wireResponseFormat `json:"format"`
+	} `json:"text"`
+	Metadata map[string]string `json:"metadata"`
+
+	// The two stateful fields. Their presence is the rejection, so both are
+	// raw: a conversation may be an id string or an object.
+	PreviousResponseID string          `json:"previous_response_id"`
+	Conversation       json.RawMessage `json:"conversation"`
+	Background         bool            `json:"background"`
+}
+
+type wireRespTool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// wireRespItem is one element of the input array. The vocabulary is a union
+// discriminated by type, except that a plain message may omit type entirely.
+type wireRespItem struct {
+	Type    string          `json:"type"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Output    string `json:"output"`
+}
+
+type wireRespPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url"`
+	FileID   string `json:"file_id"`
+}
+
+func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
+	body, err := readCappedBody(r, maxBody)
+	if err != nil {
+		return nil, nil, err
+	}
+	var w wireResponsesRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+
+	// Refused before anything else is read: an answer built from a body that
+	// carries only the newest turn is fluent, confident and amnesic, and the
+	// client cannot tell it apart from a correct one.
+	if w.PreviousResponseID != "" {
+		return nil, nil, errors.New(
+			"previous_response_id is not supported: Darkrouter stores no conversations, " +
+				"so send the full input each turn and use stateless requests")
+	}
+	if len(w.Conversation) > 0 && string(w.Conversation) != "null" {
+		return nil, nil, errors.New(
+			"conversation is not supported: Darkrouter stores no conversations, " +
+				"so send the full input each turn and use stateless requests")
+	}
+	if w.Background {
+		// Answering with a finished response would leave the client polling an
+		// id that will never exist.
+		return nil, nil, errors.New(
+			"background is not supported: Darkrouter has no queue and mints no " +
+				"resolvable ids, so use a stateless foreground request")
+	}
+
+	req := &ir.Request{
+		Model:             w.Model,
+		MaxTokens:         w.MaxOutputTokens,
+		Temperature:       w.Temperature,
+		TopP:              w.TopP,
+		Stream:            w.Stream,
+		ParallelToolCalls: w.ParallelToolCalls,
+		Metadata:          w.Metadata,
+	}
+	if w.Instructions != "" {
+		req.System = []ir.ContentBlock{{Type: ir.BlockText, Text: w.Instructions}}
+	}
+	if w.Reasoning != nil && w.Reasoning.Effort != "" {
+		req.Reasoning = &ir.Reasoning{Effort: w.Reasoning.Effort}
+	}
+	if w.Text != nil && w.Text.Format != nil {
+		req.ResponseFormat = responseFormatOf(w.Text.Format)
+	}
+	if err := applyResponsesTools(req, w.Tools, w.ToolChoice); err != nil {
+		return nil, nil, err
+	}
+	if err := applyResponsesInput(req, w.Input); err != nil {
+		return nil, nil, err
+	}
+	return req, &edge.Passthrough{
+		Body: body, ModelField: "model", Surface: ir.SurfaceLLM,
+	}, nil
+}
+
+// applyResponsesTools reads the function tools and refuses every built-in.
+//
+// Silently answering without a requested web search is the same class of lie as
+// silently answering without the stored conversation: the response looks
+// entirely successful and nothing in it says the tool never ran.
+func applyResponsesTools(req *ir.Request, tools []wireRespTool, choice json.RawMessage) error {
+	for _, t := range tools {
+		if t.Type != "" && t.Type != "function" {
+			return fmt.Errorf(
+				"tool type %q is not supported: Darkrouter cannot execute built-in tools, "+
+					"and answering without one would look like success", t.Type)
+		}
+		if t.Name == "" {
+			return errors.New("a function tool has no name")
+		}
+		req.Tools = append(req.Tools, ir.Tool{
+			Name: t.Name, Description: t.Description, Schema: t.Parameters,
+		})
+	}
+	req.ToolChoice = parseResponsesToolChoice(choice)
+	return nil
+}
+
+// parseResponsesToolChoice maps the Responses spellings onto the IR's. The
+// Responses "required" is the IR's "any", which is Anthropic's spelling and the
+// one the IR settled on in phase 1.
+func parseResponsesToolChoice(raw json.RawMessage) *ir.ToolChoice {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		switch s {
+		case "auto":
+			return &ir.ToolChoice{Mode: "auto"}
+		case "none":
+			return &ir.ToolChoice{Mode: "none"}
+		case "required":
+			return &ir.ToolChoice{Mode: "any"}
+		default:
+			return nil
+		}
+	}
+	var obj struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	if obj.Type == "function" && obj.Name != "" {
+		return &ir.ToolChoice{Mode: "tool", Name: obj.Name}
+	}
+	return nil
+}
+
+func applyResponsesInput(req *ir.Request, raw json.RawMessage) error {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return errors.New("input is required")
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return fmt.Errorf("input: %w", err)
+		}
+		req.Messages = append(req.Messages, ir.Message{
+			Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: s}},
+		})
+		return nil
+	}
+
+	var items []wireRespItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return fmt.Errorf("input must be text or an array of items: %w", err)
+	}
+	if len(items) == 0 {
+		return errors.New("input is empty")
+	}
+	for i, it := range items {
+		switch {
+		case it.Type == "function_call":
+			args := it.Arguments
+			if args == "" {
+				args = "{}"
+			}
+			req.Messages = append(req.Messages, ir.Message{
+				Role: ir.RoleAssistant,
+				Content: []ir.ContentBlock{{
+					Type:    ir.BlockToolUse,
+					ToolUse: &ir.ToolUse{ID: it.CallID, Name: it.Name, Input: json.RawMessage(args)},
+				}},
+			})
+		case it.Type == "function_call_output":
+			req.Messages = append(req.Messages, ir.Message{
+				Role: ir.RoleTool,
+				Content: []ir.ContentBlock{{
+					Type: ir.BlockToolResult,
+					ToolResult: &ir.ToolResult{
+						ToolUseID: it.CallID,
+						Content:   []ir.ContentBlock{{Type: ir.BlockText, Text: it.Output}},
+					},
+				}},
+			})
+		case it.Type == "reasoning":
+			// Dropped, not replayed: an encrypted reasoning item is meaningful
+			// only to the provider that minted it, and this turn may be routed
+			// somewhere else entirely.
+			req.Warnings = append(req.Warnings, ir.Warning{
+				Field:  fmt.Sprintf("input[%d]", i),
+				Target: "responses",
+				Reason: "reasoning item dropped; it is only meaningful to the provider that produced it",
+			})
+		case it.Type == "" || it.Type == "message":
+			blocks, err := responsesContent(it.Content)
+			if err != nil {
+				return fmt.Errorf("input[%d]: %w", i, err)
+			}
+			req.Messages = append(req.Messages, ir.Message{
+				Role: roleOf(it.Role), Content: blocks,
+			})
+		default:
+			return fmt.Errorf("input[%d]: item type %q is not supported", i, it.Type)
+		}
+	}
+	if len(req.Messages) == 0 {
+		return errors.New("input carried no messages")
+	}
+	return nil
+}
+
+func roleOf(s string) ir.Role {
+	switch s {
+	case "assistant":
+		return ir.RoleAssistant
+	case "system", "developer":
+		return ir.RoleSystem
+	default:
+		return ir.RoleUser
+	}
+}
+
+// responsesContent reads a message's content, which is a string or an array of
+// typed parts. input_text and output_text differ only in which side wrote them,
+// so both become text blocks.
+func responsesContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, errors.New("content is required")
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, err
+		}
+		return []ir.ContentBlock{{Type: ir.BlockText, Text: s}}, nil
+	}
+	var parts []wireRespPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, fmt.Errorf("content must be text or an array of parts: %w", err)
+	}
+	out := make([]ir.ContentBlock, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case "input_text", "output_text", "text", "summary_text":
+			out = append(out, ir.ContentBlock{Type: ir.BlockText, Text: p.Text})
+		case "input_image", "image":
+			blk, err := imageBlockFrom(p.ImageURL, p.FileID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, blk)
+		case "input_file", "file":
+			out = append(out, ir.ContentBlock{
+				Type: ir.BlockDocument, Media: &ir.Media{FileID: p.FileID, URL: p.ImageURL},
+			})
+		default:
+			return nil, fmt.Errorf("content part type %q is not supported", p.Type)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("content carried no parts")
+	}
+	return out, nil
+}
+
+// imageBlockFrom splits a data URL into its MIME type and payload, and passes a
+// plain URL or a provider file handle through. FileID is not interchangeable
+// with URL: a target accepting its own handle will reject a public address.
+func imageBlockFrom(imageURL, fileID string) (ir.ContentBlock, error) {
+	if fileID != "" {
+		return ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{FileID: fileID}}, nil
+	}
+	if imageURL == "" {
+		return ir.ContentBlock{}, errors.New("image part has neither image_url nor file_id")
+	}
+	if rest, ok := strings.CutPrefix(imageURL, "data:"); ok {
+		meta, payload, found := strings.Cut(rest, ",")
+		if !found {
+			return ir.ContentBlock{}, errors.New("malformed data URL in an image part")
+		}
+		mime, _, _ := strings.Cut(meta, ";")
+		return ir.ContentBlock{
+			Type: ir.BlockImage, Media: &ir.Media{MIME: mime, Data: payload},
+		}, nil
+	}
+	return ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{URL: imageURL}}, nil
+}
+```
+
+`responseFormatOf` is the existing helper `parse.go` already uses to turn a `wireResponseFormat` into an `*ir.ResponseFormat`. If that logic is inline in `ParseRequest` rather than a function, extract it first as its own step and leave chat's behavior identical — the two dialects must not drift on the schema shape.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/ir/ir.go internal/edge/openai/responses.go internal/edge/openai/responses_test.go internal/edge/openai/parse.go
+git commit -m "feat(edge): parse the responses request shape"
+```
+
+---
+
+### Task 25: The Responses item-based body
+
+**Files:**
+- Modify: `internal/edge/openai/responses.go`
+- Test: `internal/edge/openai/responses_test.go`
+
+**Interfaces:**
+- Consumes: `ir.Response` (phase 1).
+- Produces: `openai.WriteResponses(w, *ir.Response) error`, plus `responsesBody(id string, resp *ir.Response, status string) map[string]any` and `responsesItemID(kind string, index int) string`. Task 26's stream writer reuses both so the streamed and unary final objects cannot drift.
+
+**Implementer:** dcc-superpower-companions:impl-sonnet-high
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
+**Approach:** inline - skip 2: the item vocabulary is enumerated below and `write.go` beside it is the pattern for assembling a body from `ir.Response`.
+
+Responses returns an **item-based** body: an `output` array of `reasoning`, `message` and `function_call` items rather than a single `choices[0].message`. Usage is named `input_tokens` and `output_tokens`, not `prompt_tokens` and `completion_tokens`.
+
+**`responsesBody` is factored out on purpose.** The streamed `response.completed` event carries the same object the unary path returns, and two independently-written assemblers would drift on exactly the fields a client reads last. Task 26 accumulates its deltas into an `ir.Response` and calls this.
+
+**Ids are marked non-resumable, and `store: false` is how.** Darkrouter mints no resolvable ids, and a Responses client reads `store: false` as "this response was not persisted and cannot be referenced". The `resp_dr_` prefix makes the same fact legible to a human reading a log line. Task 24 already refuses any request that carries one back.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/edge/openai/responses_test.go`:
+
+```go
+func TestWriteResponsesEmitsItems(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := WriteResponses(w, &ir.Response{
+		ID: "chatcmpl-1", Model: "gpt-4o",
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "pondering"}},
+			{Type: ir.BlockText, Text: "the answer"},
+			{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
+				ID: "call_1", Name: "f", Input: []byte(`{"a":1}`)}},
+		},
+		StopReason: ir.StopToolUse,
+		Usage:      ir.Usage{InputTokens: 5, OutputTokens: 7, ReasoningTokens: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID     string `json:"id"`
+		Object string `json:"object"`
+		Status string `json:"status"`
+		Model  string `json:"model"`
+		Store  bool   `json:"store"`
+		Output []struct {
+			Type      string `json:"type"`
+			ID        string `json:"id"`
+			Role      string `json:"role"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+			Content   []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			Summary []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"summary"`
+		} `json:"output"`
+		OutputText string `json:"output_text"`
+		Usage      struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+			OutDetails   struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"output_tokens_details"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Object != "response" || body.Status != "completed" || body.Model != "gpt-4o" {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if !strings.HasPrefix(body.ID, "resp_dr_") {
+		t.Errorf("id = %q; it must be legible as non-resumable", body.ID)
+	}
+	if body.Store {
+		t.Error("store = true; Darkrouter persists nothing and the client must be told")
+	}
+	if len(body.Output) != 3 {
+		t.Fatalf("output = %+v", body.Output)
+	}
+	if body.Output[0].Type != "reasoning" || body.Output[0].Summary[0].Text != "pondering" {
+		t.Errorf("reasoning item = %+v", body.Output[0])
+	}
+	if body.Output[1].Type != "message" || body.Output[1].Role != "assistant" ||
+		body.Output[1].Content[0].Type != "output_text" ||
+		body.Output[1].Content[0].Text != "the answer" {
+		t.Errorf("message item = %+v", body.Output[1])
+	}
+	if body.Output[2].Type != "function_call" || body.Output[2].CallID != "call_1" ||
+		body.Output[2].Name != "f" || body.Output[2].Arguments != `{"a":1}` {
+		t.Errorf("function call item = %+v", body.Output[2])
+	}
+	if body.OutputText != "the answer" {
+		t.Errorf("output_text = %q; the SDK convenience field is wrong", body.OutputText)
+	}
+	if body.Usage.InputTokens != 5 || body.Usage.OutputTokens != 7 ||
+		body.Usage.TotalTokens != 12 || body.Usage.OutDetails.ReasoningTokens != 3 {
+		t.Errorf("usage = %+v; Responses names these differently from chat", body.Usage)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content-type = %q", ct)
+	}
+}
+
+func TestWriteResponsesReportsATruncatedAnswerAsIncomplete(t *testing.T) {
+	// A client that reads status "completed" stops asking. A length-truncated
+	// answer is not completed, and Responses has a field that says so.
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{
+		ID: "x", Model: "m",
+		Content:    []ir.ContentBlock{{Type: ir.BlockText, Text: "half an ans"}},
+		StopReason: ir.StopMaxTokens,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Status     string `json:"status"`
+		Incomplete *struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "incomplete" {
+		t.Errorf("status = %q", body.Status)
+	}
+	if body.Incomplete == nil || body.Incomplete.Reason != "max_output_tokens" {
+		t.Errorf("incomplete_details = %+v", body.Incomplete)
+	}
+}
+
+func TestWriteResponsesReportsAFilteredAnswerAsIncomplete(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{
+		ID: "x", Model: "m", StopReason: ir.StopContentFilter,
+		Content: []ir.ContentBlock{{Type: ir.BlockText, Text: ""}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Status     string `json:"status"`
+		Incomplete *struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.Status != "incomplete" || body.Incomplete == nil ||
+		body.Incomplete.Reason != "content_filter" {
+		t.Errorf("status = %q, incomplete = %+v", body.Status, body.Incomplete)
+	}
+}
+
+func TestWriteResponsesEmitsAnEmptyOutputArrayNotNull(t *testing.T) {
+	// An SDK ranges over output. null there is a crash rather than no items.
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.Body.String(), `"output":[]`) {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}
+```
+
+Add `"encoding/json"` to that file's imports.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -run TestWriteResponses -v
+```
+
+Expected: FAIL to build — `undefined: WriteResponses`.
+
+- [ ] **Step 3: Write the assembler**
+
+Append to `internal/edge/openai/responses.go`:
+
+```go
+// responsesID marks the id as one Darkrouter cannot resolve. Master design and
+// spec §5: no resolvable ids are minted, so the prefix makes that legible in a
+// log line and store:false makes it legible to the client.
+func responsesID(upstream string) string {
+	if upstream == "" {
+		return "resp_dr_darkrouter"
+	}
+	return "resp_dr_" + upstream
+}
+
+// responsesItemID names an output item. It is derived from the response id and
+// the item's position so that the streamed events and the final object agree —
+// a client correlates deltas to items by this value.
+func responsesItemID(respID, kind string, index int) string {
+	return fmt.Sprintf("%s_%s_%d", strings.TrimPrefix(respID, "resp_dr_"), kind, index)
+}
+
+// responsesStatus maps a stop reason onto the Responses status pair. A client
+// reading "completed" stops asking, so a truncated or filtered answer must not
+// claim it.
+func responsesStatus(s ir.StopReason) (string, string) {
+	switch s {
+	case ir.StopMaxTokens:
+		return "incomplete", "max_output_tokens"
+	case ir.StopContentFilter:
+		return "incomplete", "content_filter"
+	default:
+		return "completed", ""
+	}
+}
+
+// responsesBody assembles the object both the unary path and the streamed
+// response.completed event return. It is one function so the two cannot drift
+// on the fields a client reads last.
+func responsesBody(id string, resp *ir.Response, status, incomplete string) map[string]any {
+	output := make([]any, 0, len(resp.Content))
+	var text strings.Builder
+	for _, b := range resp.Content {
+		idx := len(output)
+		switch b.Type {
+		case ir.BlockThinking:
+			if b.Thinking == nil || b.Thinking.Text == "" {
+				continue
+			}
+			output = append(output, map[string]any{
+				"type": "reasoning",
+				"id":   responsesItemID(id, "rs", idx),
+				"summary": []any{map[string]any{
+					"type": "summary_text", "text": b.Thinking.Text,
+				}},
+			})
+		case ir.BlockText:
+			if b.Text == "" {
+				continue
+			}
+			text.WriteString(b.Text)
+			output = append(output, map[string]any{
+				"type": "message", "id": responsesItemID(id, "msg", idx),
+				"status": "completed", "role": "assistant",
+				"content": []any{map[string]any{
+					"type": "output_text", "text": b.Text, "annotations": []any{},
+				}},
+			})
+		case ir.BlockToolUse:
+			if b.ToolUse == nil {
+				continue
+			}
+			args := string(b.ToolUse.Input)
+			if args == "" {
+				args = "{}"
+			}
+			output = append(output, map[string]any{
+				"type": "function_call", "id": responsesItemID(id, "fc", idx),
+				"call_id": b.ToolUse.ID, "name": b.ToolUse.Name,
+				"arguments": args, "status": "completed",
+			})
+		}
+	}
+
+	body := map[string]any{
+		"id":         id,
+		"object":     "response",
+		"created_at": now().Unix(),
+		"status":     status,
+		"model":      resp.Model,
+		// Darkrouter persists nothing, and this is the field a Responses client
+		// reads to learn the id cannot be referenced later.
+		"store":       false,
+		"output":      output,
+		"output_text": text.String(),
+		"usage":       responsesUsage(resp.Usage),
+	}
+	if incomplete != "" {
+		body["incomplete_details"] = map[string]any{"reason": incomplete}
+	}
+	return body
+}
+
+func responsesUsage(u ir.Usage) map[string]any {
+	body := map[string]any{
+		"input_tokens":  u.InputTokens,
+		"output_tokens": u.OutputTokens,
+		"total_tokens":  u.InputTokens + u.OutputTokens,
+	}
+	// The details objects are always present: an SDK reads through them
+	// without a nil check, unlike chat's, where OpenAI itself omits them.
+	body["input_tokens_details"] = map[string]any{"cached_tokens": u.CacheReadTokens}
+	body["output_tokens_details"] = map[string]any{"reasoning_tokens": u.ReasoningTokens}
+	return body
+}
+
+func WriteResponses(w http.ResponseWriter, resp *ir.Response) error {
+	id := responsesID(resp.ID)
+	status, incomplete := responsesStatus(resp.StopReason)
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(responsesBody(id, resp, status, incomplete))
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/edge/openai/responses.go internal/edge/openai/responses_test.go
+git commit -m "feat(edge): assemble the responses item body"
+```
+
+---
+
+### Task 26: The Responses semantic stream writer
+
+**Files:**
+- Create: `internal/edge/openai/responses_stream.go`
+- Test: `internal/edge/openai/responses_stream_test.go`
+
+**Interfaces:**
+- Consumes: `responsesBody`, `responsesItemID`, `responsesID`, `responsesStatus` (Task 25).
+- Produces: `openai.WriteResponsesStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error`. Task 27's dialect calls it.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
+**Approach:** inline - skip 2: the event sequence is enumerated below in full and `stream.go` beside it is the pattern for driving one from `iter.Seq2`.
+
+Spec §5 calls this "effectively a fourth edge stream writer, not a thin adaptation, and the largest single piece of work in this phase". Three things make it different from the chat writer beside it:
+
+- **Every event carries a `sequence_number`**, monotonic across the whole stream, and clients use it to detect drops.
+- **Items are opened and closed explicitly.** A client does not treat an item as final until it sees `response.output_item.done`, so a stream that ends mid-item leaves the client waiting forever. Whatever the provider left open is closed before `response.completed`.
+- **The terminal event carries the whole response object**, the same one the unary path returns. That is why the writer accumulates into an `ir.Response` and calls Task 25's `responsesBody` rather than assembling a second time.
+
+**There is no `[DONE]` sentinel.** Chat's SSE ends with one; the Responses stream ends at `response.completed`. Sending it would put an unparseable line in front of a client that reads every `data:` as JSON.
+
+**Output index is not the IR block index.** `openaicompat` offsets tool blocks by 1000 to keep them clear of the text block, so the two are mapped exactly as chat's writer maps `toolIndex` — and the mapping has a second job here, because the item ids the deltas carry must match the ids `responsesBody` derives from position in the final object.
+
+The full sequence for a turn with reasoning, text and one tool call:
+
+| Order | Event |
+|---|---|
+| 1 | `response.created` |
+| 2 | `response.in_progress` |
+| 3 | `response.output_item.added` (reasoning) |
+| 4 | `response.reasoning_summary_part.added` |
+| 5 | `response.reasoning_summary_text.delta` × n |
+| 6 | `response.reasoning_summary_text.done`, `.part.done`, `response.output_item.done` |
+| 7 | `response.output_item.added` (message), `response.content_part.added` |
+| 8 | `response.output_text.delta` × n |
+| 9 | `response.output_text.done`, `response.content_part.done`, `response.output_item.done` |
+| 10 | `response.output_item.added` (function_call) |
+| 11 | `response.function_call_arguments.delta` × n |
+| 12 | `response.function_call_arguments.done`, `response.output_item.done` |
+| 13 | `response.completed` |
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/edge/openai/responses_stream_test.go`:
+
+```go
+package openai
+
+import (
+	"encoding/json"
+	"iter"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// respEvents runs the writer over a fixed sequence and returns the parsed
+// event objects in order.
+func respEvents(t *testing.T, evs []ir.StreamEvent, final error) []map[string]any {
+	t.Helper()
+	seq := func(yield func(ir.StreamEvent, error) bool) {
+		for _, e := range evs {
+			if !yield(e, nil) {
+				return
+			}
+		}
+		if final != nil {
+			yield(ir.StreamEvent{}, final)
+		}
+	}
+	w := httptest.NewRecorder()
+	if err := WriteResponsesStream(w, iter.Seq2[ir.StreamEvent, error](seq)); err != nil {
+		t.Fatalf("WriteResponsesStream: %v", err)
+	}
+	var out []map[string]any
+	for _, block := range strings.Split(w.Body.String(), "\n\n") {
+		var data string
+		for _, line := range strings.Split(block, "\n") {
+			if rest, ok := strings.CutPrefix(line, "data: "); ok {
+				data += rest
+			}
+		}
+		if data == "" {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(data), &obj); err != nil {
+			t.Fatalf("event data is not JSON: %q", data)
+		}
+		out = append(out, obj)
+	}
+	return out
+}
+
+func types(evs []map[string]any) []string {
+	out := make([]string, 0, len(evs))
+	for _, e := range evs {
+		s, _ := e["type"].(string)
+		out = append(out, s)
+	}
+	return out
+}
+
+func textTurn() []ir.StreamEvent {
+	return []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "chatcmpl-1", Model: "gpt-4o"},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "he"}},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "llo"}},
+		{Type: ir.EventBlockStop, Index: 0},
+		{Type: ir.EventMessageDelta, Usage: &ir.Usage{InputTokens: 3, OutputTokens: 2}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}
+}
+
+func TestResponsesStreamEmitsTheTextLifecycle(t *testing.T) {
+	got := types(respEvents(t, textTurn(), nil))
+	want := []string{
+		"response.created", "response.in_progress",
+		"response.output_item.added", "response.content_part.added",
+		"response.output_text.delta", "response.output_text.delta",
+		"response.output_text.done", "response.content_part.done",
+		"response.output_item.done", "response.completed",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("events = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestResponsesStreamNumbersEveryEvent(t *testing.T) {
+	// Clients detect drops with this. A repeated or missing number is
+	// indistinguishable from a lost event.
+	evs := respEvents(t, textTurn(), nil)
+	for i, e := range evs {
+		n, ok := e["sequence_number"].(float64)
+		if !ok {
+			t.Fatalf("event %d (%v) has no sequence_number", i, e["type"])
+		}
+		if int(n) != i {
+			t.Errorf("event %d has sequence_number %d", i, int(n))
+		}
+	}
+}
+
+func TestResponsesStreamNeverSendsTheChatSentinel(t *testing.T) {
+	// The Responses stream ends at response.completed. [DONE] would put an
+	// unparseable line in front of a client that reads every data: as JSON.
+	w := httptest.NewRecorder()
+	seq := func(yield func(ir.StreamEvent, error) bool) {
+		for _, e := range textTurn() {
+			if !yield(e, nil) {
+				return
+			}
+		}
+	}
+	if err := WriteResponsesStream(w, iter.Seq2[ir.StreamEvent, error](seq)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(w.Body.String(), "[DONE]") {
+		t.Errorf("body carried the chat sentinel:\n%s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "event: response.completed") {
+		t.Errorf("no named completed event:\n%s", w.Body.String())
+	}
+}
+
+func TestResponsesStreamCompletedCarriesTheWholeResponse(t *testing.T) {
+	evs := respEvents(t, textTurn(), nil)
+	last := evs[len(evs)-1]
+	resp, ok := last["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("completed event = %v", last)
+	}
+	if resp["status"] != "completed" || resp["output_text"] != "hello" {
+		t.Errorf("response = %v", resp)
+	}
+	if resp["store"] != false {
+		t.Errorf("store = %v; the streamed object must say the id is not resumable", resp["store"])
+	}
+	usage, _ := resp["usage"].(map[string]any)
+	if usage == nil || usage["input_tokens"].(float64) != 3 || usage["output_tokens"].(float64) != 2 {
+		t.Errorf("usage = %v", usage)
+	}
+	out, _ := resp["output"].([]any)
+	if len(out) != 1 {
+		t.Fatalf("output = %v", out)
+	}
+	item, _ := out[0].(map[string]any)
+	if item["type"] != "message" || item["status"] != "completed" {
+		t.Errorf("item = %v", item)
+	}
+}
+
+func TestResponsesStreamItemIDsMatchTheFinalObject(t *testing.T) {
+	// A client correlates deltas to items by item_id. If the streamed id and
+	// the one in the final object differ, the assembled answer is dropped.
+	evs := respEvents(t, textTurn(), nil)
+	var deltaID string
+	for _, e := range evs {
+		if e["type"] == "response.output_text.delta" {
+			deltaID, _ = e["item_id"].(string)
+		}
+	}
+	resp := evs[len(evs)-1]["response"].(map[string]any)
+	item := resp["output"].([]any)[0].(map[string]any)
+	if deltaID == "" || deltaID != item["id"] {
+		t.Errorf("delta item_id = %q, final item id = %v", deltaID, item["id"])
+	}
+}
+
+func TestResponsesStreamEmitsAToolCallLifecycle(t *testing.T) {
+	got := types(respEvents(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "c1", Model: "m"},
+		{Type: ir.EventBlockStart, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolID: "call_1", ToolName: "f"}},
+		{Type: ir.EventContentDelta, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolInput: `{"a":`}},
+		{Type: ir.EventContentDelta, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolInput: `1}`}},
+		{Type: ir.EventBlockStop, Index: 1000},
+		{Type: ir.EventMessageStop, StopReason: ir.StopToolUse},
+	}, nil))
+	want := []string{
+		"response.created", "response.in_progress", "response.output_item.added",
+		"response.function_call_arguments.delta", "response.function_call_arguments.delta",
+		"response.function_call_arguments.done", "response.output_item.done",
+		"response.completed",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("events = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestResponsesStreamCarriesTheAssembledArguments(t *testing.T) {
+	evs := respEvents(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "c1", Model: "m"},
+		{Type: ir.EventBlockStart, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolID: "call_1", ToolName: "f"}},
+		{Type: ir.EventContentDelta, Index: 1000, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolInput: `{"a":1}`}},
+		{Type: ir.EventBlockStop, Index: 1000},
+		{Type: ir.EventMessageStop, StopReason: ir.StopToolUse},
+	}, nil)
+	resp := evs[len(evs)-1]["response"].(map[string]any)
+	item := resp["output"].([]any)[0].(map[string]any)
+	if item["type"] != "function_call" || item["call_id"] != "call_1" ||
+		item["name"] != "f" || item["arguments"] != `{"a":1}` {
+		t.Errorf("item = %v", item)
+	}
+}
+
+func TestResponsesStreamEmitsReasoningSummaries(t *testing.T) {
+	got := types(respEvents(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "c1", Model: "m"},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{
+			Type: ir.BlockThinking, Thinking: "pondering"}},
+		{Type: ir.EventBlockStop, Index: 0},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil))
+	want := []string{
+		"response.created", "response.in_progress", "response.output_item.added",
+		"response.reasoning_summary_part.added", "response.reasoning_summary_text.delta",
+		"response.reasoning_summary_text.done", "response.reasoning_summary_part.done",
+		"response.output_item.done", "response.completed",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("events = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestResponsesStreamClosesAnItemTheProviderLeftOpen(t *testing.T) {
+	// A client does not treat an item as final until output_item.done. A
+	// stream that ends mid-item would leave it waiting forever.
+	got := types(respEvents(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "c1", Model: "m"},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "hi"}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil))
+	var sawDone, sawCompleted bool
+	for i, ty := range got {
+		if ty == "response.output_item.done" {
+			sawDone = true
+			for _, later := range got[i+1:] {
+				if later == "response.completed" {
+					sawCompleted = true
+				}
+			}
+		}
+	}
+	if !sawDone || !sawCompleted {
+		t.Errorf("events = %v; the open item was not closed before completion", got)
+	}
+}
+
+func TestResponsesStreamReportsTruncationAsIncomplete(t *testing.T) {
+	evs := respEvents(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "c1", Model: "m"},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "half"}},
+		{Type: ir.EventBlockStop, Index: 0},
+		{Type: ir.EventMessageStop, StopReason: ir.StopMaxTokens},
+	}, nil)
+	resp := evs[len(evs)-1]["response"].(map[string]any)
+	if resp["status"] != "incomplete" {
+		t.Errorf("status = %v", resp["status"])
+	}
+	det, _ := resp["incomplete_details"].(map[string]any)
+	if det == nil || det["reason"] != "max_output_tokens" {
+		t.Errorf("incomplete_details = %v", det)
+	}
+}
+
+func TestResponsesStreamEndsAFailedStreamWithResponseFailed(t *testing.T) {
+	// The client has already received content, so it cannot be given a
+	// different response. It must at least be told this one did not finish.
+	evs := respEvents(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "c1", Model: "m"},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "hi"}},
+	}, &ir.Error{Type: ir.ErrOverloaded, Message: "upstream went away"})
+
+	last := evs[len(evs)-1]
+	if last["type"] != "response.failed" {
+		t.Fatalf("last event = %v", last["type"])
+	}
+	resp, _ := last["response"].(map[string]any)
+	e, _ := resp["error"].(map[string]any)
+	if e == nil || e["code"] != string(ir.ErrOverloaded) ||
+		!strings.Contains(e["message"].(string), "went away") {
+		t.Errorf("error = %v", e)
+	}
+	if resp["status"] != "failed" {
+		t.Errorf("status = %v", resp["status"])
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -run TestResponsesStream -v
+```
+
+Expected: FAIL to build — `undefined: WriteResponsesStream`.
+
+- [ ] **Step 3: Write the stream writer**
+
+Create `internal/edge/openai/responses_stream.go`:
+
+```go
+package openai
+
+import (
+	"encoding/json"
+	"errors"
+	"iter"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/sse"
+)
+
+// responsesItem is one open output item. It holds what the closing events need
+// and what the accumulated response needs, which are the same text.
+type responsesItem struct {
+	index  int // the output index, which is also its position in acc.Content
+	kind   string
+	itemID string
+	text   strings.Builder
+}
+
+// responsesStream is the state a semantic stream needs that a chat stream does
+// not: every event carries a sequence number and an output index, every item is
+// opened and closed explicitly, and the terminal event carries the whole
+// response object.
+type responsesStream struct {
+	s   *sse.Writer
+	seq int
+	id  string
+
+	// acc is the response as it accumulates. response.completed returns the
+	// same object the unary path does, and building it here as an ir.Response
+	// is what lets both call responsesBody rather than assembling twice.
+	acc ir.Response
+
+	// open maps an IR block index to its item. The IR block index is not the
+	// output index — openaicompat offsets tool blocks by 1000 to keep them
+	// clear of the text block — so the two are mapped, exactly as chat's
+	// writer maps toolIndex.
+	open map[int]*responsesItem
+	next int
+
+	started   bool
+	completed bool
+}
+
+// WriteResponsesStream converts canonical stream events into Responses semantic
+// events. There is no DONE sentinel: the Responses stream ends at
+// response.completed, and chat's sentinel would put an unparseable line in
+// front of a client that reads every data: line as JSON.
+func WriteResponsesStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error {
+	rs := &responsesStream{s: sse.NewWriter(w), open: map[int]*responsesItem{}}
+	for ev, err := range events {
+		if err != nil {
+			return rs.fail(err)
+		}
+		if serr := rs.handle(ev); serr != nil {
+			return serr
+		}
+	}
+	// A provider that ends without a message_stop still owes the client a
+	// terminal event, or it waits forever.
+	return rs.complete()
+}
+
+func (rs *responsesStream) send(kind string, obj map[string]any) error {
+	obj["type"] = kind
+	obj["sequence_number"] = rs.seq
+	rs.seq++
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return err
+	}
+	return rs.s.Send(kind, string(b))
+}
+
+func (rs *responsesStream) handle(ev ir.StreamEvent) error {
+	switch ev.Type {
+	case ir.EventMessageStart:
+		rs.acc.ID, rs.acc.Model = ev.ID, ev.Model
+		rs.id = responsesID(ev.ID)
+		return rs.ensureStarted()
+	case ir.EventBlockStart:
+		if ev.Delta == nil || ev.Delta.Type != ir.BlockToolUse {
+			return nil
+		}
+		_, err := rs.openTool(ev.Index, ev.Delta.ToolID, ev.Delta.ToolName)
+		return err
+	case ir.EventContentDelta:
+		return rs.delta(ev)
+	case ir.EventBlockStop:
+		return rs.closeItem(ev.Index)
+	case ir.EventMessageDelta:
+		if ev.Usage != nil {
+			rs.acc.Usage = *ev.Usage
+		}
+		return nil
+	case ir.EventMessageStop:
+		rs.acc.StopReason = ev.StopReason
+		return rs.complete()
+	default:
+		return nil
+	}
+}
+
+func (rs *responsesStream) ensureStarted() error {
+	if rs.started {
+		return nil
+	}
+	rs.started = true
+	if rs.id == "" {
+		rs.id = responsesID(rs.acc.ID)
+	}
+	if err := rs.send("response.created", map[string]any{
+		"response": responsesBody(rs.id, &rs.acc, "in_progress", ""),
+	}); err != nil {
+		return err
+	}
+	return rs.send("response.in_progress", map[string]any{
+		"response": responsesBody(rs.id, &rs.acc, "in_progress", ""),
+	})
+}
+
+func (rs *responsesStream) delta(ev ir.StreamEvent) error {
+	if ev.Delta == nil {
+		return nil
+	}
+	switch ev.Delta.Type {
+	case ir.BlockText:
+		if ev.Delta.Text == "" {
+			return nil
+		}
+		it, err := rs.openMessage(ev.Index)
+		if err != nil {
+			return err
+		}
+		it.text.WriteString(ev.Delta.Text)
+		rs.acc.Content[it.index].Text = it.text.String()
+		return rs.send("response.output_text.delta", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "content_index": 0,
+			"delta": ev.Delta.Text, "logprobs": []any{},
+		})
+	case ir.BlockThinking:
+		if ev.Delta.Thinking == "" {
+			return nil
+		}
+		it, err := rs.openReasoning(ev.Index)
+		if err != nil {
+			return err
+		}
+		it.text.WriteString(ev.Delta.Thinking)
+		rs.acc.Content[it.index].Thinking.Text = it.text.String()
+		return rs.send("response.reasoning_summary_text.delta", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "summary_index": 0,
+			"delta": ev.Delta.Thinking,
+		})
+	case ir.BlockToolUse:
+		if ev.Delta.ToolInput == "" {
+			return nil
+		}
+		// A provider that streams arguments without ever opening the block
+		// still has to reach the client, so the item is opened here rather
+		// than dropping the call.
+		it, err := rs.openTool(ev.Index, ev.Delta.ToolID, ev.Delta.ToolName)
+		if err != nil {
+			return err
+		}
+		it.text.WriteString(ev.Delta.ToolInput)
+		rs.acc.Content[it.index].ToolUse.Input = json.RawMessage(it.text.String())
+		return rs.send("response.function_call_arguments.delta", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "delta": ev.Delta.ToolInput,
+		})
+	default:
+		return nil
+	}
+}
+
+// claim allocates an output index and appends the matching accumulator block.
+// The two must stay in step: responsesBody derives an item's id from its
+// position in the final output array, and a delta's item_id has to match it or
+// the client drops the text it assembled.
+func (rs *responsesStream) claim(kind, prefix string, at int, blk ir.ContentBlock) *responsesItem {
+	it := &responsesItem{index: rs.next, kind: kind}
+	it.itemID = responsesItemID(rs.id, prefix, it.index)
+	rs.next++
+	rs.open[at] = it
+	rs.acc.Content = append(rs.acc.Content, blk)
+	return it
+}
+
+func (rs *responsesStream) openMessage(block int) (*responsesItem, error) {
+	if it, ok := rs.open[block]; ok {
+		return it, nil
+	}
+	if err := rs.ensureStarted(); err != nil {
+		return nil, err
+	}
+	it := rs.claim("message", "msg", block, ir.ContentBlock{Type: ir.BlockText})
+	if err := rs.send("response.output_item.added", map[string]any{
+		"output_index": it.index,
+		"item": map[string]any{
+			"type": "message", "id": it.itemID, "status": "in_progress",
+			"role": "assistant", "content": []any{},
+		},
+	}); err != nil {
+		return nil, err
+	}
+	return it, rs.send("response.content_part.added", map[string]any{
+		"item_id": it.itemID, "output_index": it.index, "content_index": 0,
+		"part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}},
+	})
+}
+
+func (rs *responsesStream) openReasoning(block int) (*responsesItem, error) {
+	if it, ok := rs.open[block]; ok {
+		return it, nil
+	}
+	if err := rs.ensureStarted(); err != nil {
+		return nil, err
+	}
+	it := rs.claim("reasoning", "rs", block,
+		ir.ContentBlock{Type: ir.BlockThinking, Thinking: &ir.Thinking{}})
+	if err := rs.send("response.output_item.added", map[string]any{
+		"output_index": it.index,
+		"item": map[string]any{
+			"type": "reasoning", "id": it.itemID, "summary": []any{},
+		},
+	}); err != nil {
+		return nil, err
+	}
+	return it, rs.send("response.reasoning_summary_part.added", map[string]any{
+		"item_id": it.itemID, "output_index": it.index, "summary_index": 0,
+		"part": map[string]any{"type": "summary_text", "text": ""},
+	})
+}
+
+func (rs *responsesStream) openTool(block int, callID, name string) (*responsesItem, error) {
+	if it, ok := rs.open[block]; ok {
+		return it, nil
+	}
+	if err := rs.ensureStarted(); err != nil {
+		return nil, err
+	}
+	it := rs.claim("function_call", "fc", block, ir.ContentBlock{
+		Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: callID, Name: name},
+	})
+	return it, rs.send("response.output_item.added", map[string]any{
+		"output_index": it.index,
+		"item": map[string]any{
+			"type": "function_call", "id": it.itemID, "call_id": callID,
+			"name": name, "arguments": "", "status": "in_progress",
+		},
+	})
+}
+
+func (rs *responsesStream) closeItem(block int) error {
+	it, ok := rs.open[block]
+	if !ok {
+		return nil
+	}
+	delete(rs.open, block)
+	text := it.text.String()
+
+	switch it.kind {
+	case "message":
+		part := map[string]any{"type": "output_text", "text": text, "annotations": []any{}}
+		if err := rs.send("response.output_text.done", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "content_index": 0,
+			"text": text, "logprobs": []any{},
+		}); err != nil {
+			return err
+		}
+		if err := rs.send("response.content_part.done", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "content_index": 0,
+			"part": part,
+		}); err != nil {
+			return err
+		}
+		return rs.send("response.output_item.done", map[string]any{
+			"output_index": it.index,
+			"item": map[string]any{
+				"type": "message", "id": it.itemID, "status": "completed",
+				"role": "assistant", "content": []any{part},
+			},
+		})
+	case "reasoning":
+		summary := map[string]any{"type": "summary_text", "text": text}
+		if err := rs.send("response.reasoning_summary_text.done", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "summary_index": 0, "text": text,
+		}); err != nil {
+			return err
+		}
+		if err := rs.send("response.reasoning_summary_part.done", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "summary_index": 0, "part": summary,
+		}); err != nil {
+			return err
+		}
+		return rs.send("response.output_item.done", map[string]any{
+			"output_index": it.index,
+			"item": map[string]any{
+				"type": "reasoning", "id": it.itemID, "summary": []any{summary},
+			},
+		})
+	default:
+		args := text
+		if args == "" {
+			args = "{}"
+		}
+		tu := rs.acc.Content[it.index].ToolUse
+		if err := rs.send("response.function_call_arguments.done", map[string]any{
+			"item_id": it.itemID, "output_index": it.index, "arguments": args,
+		}); err != nil {
+			return err
+		}
+		return rs.send("response.output_item.done", map[string]any{
+			"output_index": it.index,
+			"item": map[string]any{
+				"type": "function_call", "id": it.itemID, "call_id": tu.ID,
+				"name": tu.Name, "arguments": args, "status": "completed",
+			},
+		})
+	}
+}
+
+// closeAll closes whatever the provider left open, in output order so the
+// events are deterministic.
+func (rs *responsesStream) closeAll() error {
+	blocks := make([]int, 0, len(rs.open))
+	for b := range rs.open {
+		blocks = append(blocks, b)
+	}
+	sort.Ints(blocks)
+	for _, b := range blocks {
+		if err := rs.closeItem(b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rs *responsesStream) complete() error {
+	if rs.completed {
+		return nil
+	}
+	if err := rs.ensureStarted(); err != nil {
+		return err
+	}
+	// A client does not treat an item as final until output_item.done, so an
+	// item still open here would leave it waiting forever.
+	if err := rs.closeAll(); err != nil {
+		return err
+	}
+	rs.completed = true
+	status, incomplete := responsesStatus(rs.acc.StopReason)
+	return rs.send("response.completed", map[string]any{
+		"response": responsesBody(rs.id, &rs.acc, status, incomplete),
+	})
+}
+
+// fail ends a stream the provider could not finish. The client has already
+// received content and cannot be given a different response, so the least
+// wrong thing is to tell it plainly that this one did not complete.
+func (rs *responsesStream) fail(err error) error {
+	var e *ir.Error
+	if !errors.As(err, &e) {
+		e = &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
+	}
+	if serr := rs.ensureStarted(); serr != nil {
+		return serr
+	}
+	if serr := rs.closeAll(); serr != nil {
+		return serr
+	}
+	rs.completed = true
+	body := responsesBody(rs.id, &rs.acc, "failed", "")
+	body["error"] = map[string]any{"code": string(e.Type), "message": e.Message}
+	return rs.send("response.failed", map[string]any{"response": body})
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package.
+
+- [ ] **Step 5: Read the emitted stream rather than only asserting on it**
+
+Add a temporary `t.Log("\n" + w.Body.String())` inside `respEvents`, run
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -run TestResponsesStreamEmitsTheTextLifecycle -v
+```
+
+and **read the raw SSE frames it prints**: confirm each frame has an `event:` line whose name matches its `data.type`, that sequence numbers run 0..n with no gaps, and that the body ends with a blank line after `response.completed`. Remove the `t.Log` before committing. Asserting on parsed maps cannot catch a malformed frame boundary, which is exactly what breaks a real client.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/edge/openai/responses_stream.go internal/edge/openai/responses_stream_test.go
+git commit -m "feat(edge): write the responses semantic stream"
+```
+
+---
+
+### Task 27: The Responses dialect and route
+
+**Files:**
+- Modify: `internal/edge/openai/dialect.go`, `internal/exec/surface.go`, `internal/server/server.go`
+- Test: `internal/edge/openai/dialect_test.go`, `internal/exec/responses_test.go`
+
+**Interfaces:**
+- Consumes: `ParseResponses` (Task 24), `WriteResponses` (Task 25), `WriteResponsesStream` (Task 26).
+- Produces: `openai.NewResponses() *ResponsesDialect` satisfying `edge.Dialect`, and the `POST /v1/responses` route.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
+**Approach:** inline - skip 2: `Dialect` in the same file is the pattern and the three writers are already built.
+
+Responses is chat-shaped, so it becomes a **fourth `edge.Dialect`** rather than a seventh `SurfaceOp`. The route is then one line — `s.ex.Handle(w, r, rd)` — and Responses inherits the attempt loop, the commit rule, the budget gate and the request log without a word of new executor code. That is the whole payoff of Task 6's extraction arriving on the surface that needed it least and benefits most.
+
+`Name()` is `"openai-responses"` rather than `"openai"`. The request row's `dialect` column is how an operator tells a Responses client from a chat client, and both speak OpenAI over the same auth.
+
+**One thing has to be fixed here or the parse warnings vanish.** `chatOp.Build` returns only the adapter's warnings. Task 24's parser is the first inbound parse that produces any, and without appending them the reasoning-item drop is recorded nowhere.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `internal/edge/openai/dialect_test.go`:
+
+```go
+func TestResponsesDialectIsDistinguishableInTheLog(t *testing.T) {
+	// The dialect column is how an operator tells a Responses client from a
+	// chat client, and both speak OpenAI over the same auth.
+	if got := NewResponses().Name(); got != "openai-responses" {
+		t.Errorf("Name() = %q", got)
+	}
+	if NewResponses().Name() == New().Name() {
+		t.Error("the two OpenAI dialects are indistinguishable in the request log")
+	}
+}
+
+func TestResponsesDialectReadsTheSameBearer(t *testing.T) {
+	r := httptest.NewRequest("POST", "/v1/responses", nil)
+	r.Header.Set("Authorization", "bearer sk-x")
+	if got := NewResponses().ProxyToken(r); got != "sk-x" {
+		t.Errorf("ProxyToken = %q", got)
+	}
+}
+
+func TestResponsesDialectSatisfiesEdgeDialect(t *testing.T) {
+	var _ edge.Dialect = NewResponses()
+}
+```
+
+Create `internal/exec/responses_test.go`:
+
+```go
+package exec
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func TestAStatelessResponsesRequestServes(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","model":"gpt-4o","choices":[
+		  {"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
+		  "usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "gpt-4o", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.Handle(w, httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"gpt-4o","input":"hi"}`)), openaiedge.NewResponses())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Object     string `json:"object"`
+		Status     string `json:"status"`
+		OutputText string `json:"output_text"`
+		Store      bool   `json:"store"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Object != "response" || body.Status != "completed" || body.OutputText != "hello" {
+		t.Errorf("body = %s", w.Body.String())
+	}
+	if body.Store {
+		t.Error("store = true; the id is not resumable and the client must be told")
+	}
+	got := rec.only(t)
+	if got.Dialect != "openai-responses" {
+		t.Errorf("dialect = %q", got.Dialect)
+	}
+	if got.Surface != "llm" || got.Status != "success" || got.TokensIn != 3 {
+		t.Errorf("record = %+v", got)
+	}
+}
+
+func TestAStatefulResponsesRequestIsRejectedAndLogged(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a stateful request reached an upstream")
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "gpt-4o", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.Handle(w, httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"gpt-4o","input":"hi","previous_response_id":"resp_dr_x"}`)),
+		openaiedge.NewResponses())
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "previous_response_id") {
+		t.Errorf("body = %s; the error must name what was refused", w.Body.String())
+	}
+	got := rec.only(t)
+	if got.ErrorCode != string(ir.ErrInvalidRequest) || len(got.Attempts) != 0 {
+		t.Errorf("record = %+v", got)
+	}
+}
+
+func TestAResponsesRequestStreamsSemanticEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		f := w.(http.Flusher)
+		for _, chunk := range []string{
+			`{"id":"chatcmpl-1","model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+			`{"id":"chatcmpl-1","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"he"}}]}`,
+			`{"id":"chatcmpl-1","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"llo"}}]}`,
+			`{"id":"chatcmpl-1","model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		} {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+			f.Flush()
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		f.Flush()
+	}))
+	defer upstream.Close()
+
+	e, _ := executorForOp(t, upstream.URL, catalogWith("p", "gpt-4o", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.Handle(w, httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"gpt-4o","input":"hi","stream":true}`)), openaiedge.NewResponses())
+
+	body := w.Body.String()
+	for _, want := range []string{
+		"event: response.created",
+		"event: response.output_item.added",
+		"event: response.output_text.delta",
+		"event: response.output_item.done",
+		"event: response.completed",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("stream is missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "[DONE]") {
+		t.Errorf("the chat sentinel leaked into a responses stream:\n%s", body)
+	}
+	if !strings.Contains(body, `"delta":"he"`) || !strings.Contains(body, `"delta":"llo"`) {
+		t.Errorf("the deltas did not reach the client:\n%s", body)
+	}
+}
+
+func TestAResponsesParseWarningReachesTheRequestRow(t *testing.T) {
+	// The dropped reasoning item is invisible in the response body, so the
+	// request row is the only place it can be seen.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","model":"m","choices":[
+		  {"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "gpt-4o", ir.SurfaceLLM))
+	e.Handle(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(`{"model":"gpt-4o","input":[
+		  {"type":"reasoning","id":"rs_1","summary":[]},{"role":"user","content":"hi"}]}`)),
+		openaiedge.NewResponses())
+
+	got := rec.only(t)
+	if len(got.Warnings) == 0 ||
+		!strings.Contains(strings.Join(got.Warnings, " "), "reasoning") {
+		t.Errorf("warnings = %v", got.Warnings)
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/exec/ -run 'Responses' -v
+```
+
+Expected: FAIL to build — `undefined: NewResponses`.
+
+- [ ] **Step 3: Add the dialect**
+
+Append to `internal/edge/openai/dialect.go`:
+
+```go
+// ResponsesDialect serves /v1/responses. It is a fourth edge.Dialect rather
+// than a seventh SurfaceOp because Responses is chat-shaped: making it a
+// dialect is what lets it inherit the attempt loop, the commit rule, the budget
+// gate and the request log without a word of new executor code.
+type ResponsesDialect struct{}
+
+func NewResponses() *ResponsesDialect { return &ResponsesDialect{} }
+
+// Name is not "openai". The request row's dialect column is how an operator
+// tells a Responses client from a chat client, and both speak OpenAI over the
+// same auth.
+func (d *ResponsesDialect) Name() string { return "openai-responses" }
+
+func (d *ResponsesDialect) ProxyToken(r *http.Request) string {
+	return (&Dialect{}).ProxyToken(r)
+}
+
+func (d *ResponsesDialect) ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
+	return ParseResponses(r, maxBody)
+}
+
+func (d *ResponsesDialect) WriteResponse(w http.ResponseWriter, resp *ir.Response) error {
+	return WriteResponses(w, resp)
+}
+
+func (d *ResponsesDialect) WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error]) error {
+	return WriteResponsesStream(w, events)
+}
+
+// WriteError is chat's. The Responses error body has the same shape, and
+// duplicating it would be two places to keep in step for no difference.
+func (d *ResponsesDialect) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return WriteError(w, e)
+}
+
+var _ edge.Dialect = (*ResponsesDialect)(nil)
+```
+
+- [ ] **Step 4: Carry the inbound parse warnings**
+
+In `internal/exec/surface.go`, `chatOp.Build` returns only the adapter's warnings. Append the request's:
+
+```go
+func (o *chatOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	hr, warns, err := ad.BuildRequest(ctx, tgt, o.req)
+	// The inbound parse's losses travel with the outbound ones. Until phase 5
+	// no dialect produced any, so nothing carried them and the responses
+	// parser's dropped reasoning item would have been recorded nowhere.
+	return hr, append(warns, o.req.Warnings...), err
+}
+```
+
+- [ ] **Step 5: Wire the route**
+
+In `internal/server/server.go`, beside the chat route:
+
+```go
+	rd := openaiedge.NewResponses()
+	mux.HandleFunc("POST /v1/responses", s.authed(rd, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.Handle(w, r, rd)
+	}))
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in all three packages.
+
+- [ ] **Step 7: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add internal/edge/openai/dialect.go internal/edge/openai/dialect_test.go \
+        internal/exec/surface.go internal/exec/responses_test.go internal/server/server.go
+git commit -m "feat(server): serve the responses API"
+```
+
+---
