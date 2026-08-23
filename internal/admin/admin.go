@@ -101,6 +101,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
 
 	s.mux.HandleFunc("GET /api/requests", s.requireSession(s.handleListRequests))
+	s.mux.HandleFunc("GET /api/requests/{id}", s.requireSession(s.handleRequestTrace))
 
 	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))

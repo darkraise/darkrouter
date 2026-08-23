@@ -503,3 +503,91 @@ func TestTheAttemptCountIsPerRequest(t *testing.T) {
 		t.Errorf("attempts = %+v; a failover is what an operator scans for", got)
 	}
 }
+
+func TestRequestTraceCarriesCandidatesSkipsAndAttempts(t *testing.T) {
+	db := migrated(t)
+	db.SeedFailoverTraceForTest(t, "01TRACE")
+
+	tr, ok, err := db.RequestTrace(context.Background(), "01TRACE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("the trace was not found")
+	}
+	if len(tr.Candidates) != 3 {
+		t.Errorf("candidates = %v", tr.Candidates)
+	}
+	if len(tr.Skips) != 2 || tr.Skips[0] != "c/m3:cooling" {
+		t.Errorf("skips = %v; the drawer cannot say why a target was not tried", tr.Skips)
+	}
+	if len(tr.Attempts) != 2 {
+		t.Fatalf("attempts = %+v", tr.Attempts)
+	}
+	if tr.Attempts[0].Seq != 1 || tr.Attempts[1].Outcome != "success" {
+		t.Errorf("attempts are out of order or wrong: %+v", tr.Attempts)
+	}
+	if len(tr.Warnings) != 1 {
+		t.Errorf("warnings = %v", tr.Warnings)
+	}
+	if tr.SurfaceMeta["input_count"].(float64) != 3 {
+		t.Errorf("surface meta = %v", tr.SurfaceMeta)
+	}
+	if tr.Bodies == nil {
+		t.Error("bodies is nil; it must be an empty slice so the drawer can range over it")
+	}
+}
+
+func TestAnUnknownTraceIsAMissRatherThanAnError(t *testing.T) {
+	db := migrated(t)
+	_, ok, err := db.RequestTrace(context.Background(), "does-not-exist")
+	if err != nil {
+		t.Fatalf("a miss was reported as an error: %v", err)
+	}
+	if ok {
+		t.Error("an unknown id was found")
+	}
+}
+
+func TestATraceWithNoCandidatesReturnsEmptySlices(t *testing.T) {
+	// Every list the drawer ranges over must be an array, never null.
+	db := migrated(t)
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01BARE", TS: time.UnixMilli(1), Dialect: "openai",
+		Surface: "llm", RequestedModel: "m", Status: "error",
+	}})
+	tr, ok, err := db.RequestTrace(context.Background(), "01BARE")
+	if err != nil || !ok {
+		t.Fatalf("ok = %v, err = %v", ok, err)
+	}
+	if tr.Candidates == nil || tr.Skips == nil || tr.Warnings == nil ||
+		tr.Attempts == nil || tr.Bodies == nil {
+		t.Errorf("a nil list would render as null: %+v", tr)
+	}
+}
+
+func TestCapturedBodiesAreReadWhenPresent(t *testing.T) {
+	// capture.bodies has no writer, so this inserts directly. The query has to
+	// work the day one lands, and nothing else would exercise it.
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{{
+		ID: "01BODY", TS: time.UnixMilli(1), Dialect: "openai",
+		Surface: "llm", RequestedModel: "m", Status: "success",
+	}})
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO request_bodies (request_id, request_json, response_json, expires_at)
+		 VALUES ('01BODY', '{"in":1}', '{"out":2}', 9999999999999)`); err != nil {
+		t.Fatal(err)
+	}
+	tr, _, err := db.RequestTrace(ctx, "01BODY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Bodies) != 2 {
+		t.Fatalf("bodies = %+v", tr.Bodies)
+	}
+	if tr.Bodies[0].Kind != "request" || tr.Bodies[1].Kind != "response" {
+		t.Errorf("bodies = %+v", tr.Bodies)
+	}
+}

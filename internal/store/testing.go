@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // MigratedForTest opens a migrated database in a temp directory.
@@ -40,4 +41,31 @@ func (d *DB) WriteBatchForTest(t *testing.T, rows []*RequestRecord) {
 	if _, err := w.writeBatch(context.Background(), rows); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// SeedFailoverTraceForTest writes the two-attempt trace the admin handler tests
+// read. It lives beside the other test helpers so both packages assert against
+// one fixture shape rather than two that can drift.
+func (d *DB) SeedFailoverTraceForTest(t *testing.T, id string) {
+	t.Helper()
+	cost := int64(1234)
+	ttft := int64(56)
+	d.WriteBatchForTest(t, []*RequestRecord{{
+		ID: id, TS: time.UnixMilli(1700000000000),
+		Dialect: "openai", Surface: "llm", RequestedModel: "fast",
+		ResolvedAlias: "fast", FinalProviderID: "b", FinalModel: "m2",
+		Status: "success", TokensIn: 10, TokensOut: 20,
+		CostMicros: &cost, TTFTMs: &ttft,
+		Candidates:  []string{"a/m1", "b/m2", "c/m3"},
+		Skips:       []string{"c/m3:cooling", "d/m4:no_credential"},
+		Warnings:    []string{"top_k -> openai: not expressible"},
+		SurfaceMeta: map[string]any{"input_count": 3},
+		Attempts: []AttemptRecord{
+			{Seq: 1, ProviderID: "a", KeyID: "k1", Model: "m1",
+				Outcome: "retryable_provider", StatusCode: 500, LatencyMs: 120,
+				Error: "upstream 500"},
+			{Seq: 2, ProviderID: "b", KeyID: "k2", Model: "m2",
+				Outcome: "success", StatusCode: 200, LatencyMs: 340},
+		},
+	}})
 }
