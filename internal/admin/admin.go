@@ -11,6 +11,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
+	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -43,6 +44,11 @@ type Deps struct {
 	Breaker  *health.Breaker
 	Presets  catalog.Presets
 	Warnings []string
+
+	// Exec is the same executor the proxy port uses. The playground runs real
+	// requests through it so what it verifies is the gateway rather than
+	// itself.
+	Exec *exec.Executor
 
 	// Dev, when non-empty, is the Vite dev server to reverse-proxy unmatched
 	// paths to. It is empty in production.
@@ -99,6 +105,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/providers/{id}/test", s.requireCSRF(s.handleProbe))
 	s.mux.HandleFunc("POST /api/providers/{id}/keys", s.requireCSRF(s.handleAddCredential))
 	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
+
+	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
 
 	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
 	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
