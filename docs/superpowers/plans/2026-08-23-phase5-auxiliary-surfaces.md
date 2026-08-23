@@ -3133,3 +3133,1018 @@ git commit -m "feat(openaicompat): render and parse embeddings"
 ```
 
 ---
+
+### Task 13: The OpenAI embedding edge
+
+**Files:**
+- Modify: `internal/edge/edge.go`
+- Create: `internal/edge/openai/aux.go`
+- Test: `internal/edge/openai/aux_test.go`
+
+**Interfaces:**
+- Consumes: `ir.EmbeddingRequest`, `ir.EmbeddingResponse`, `ir.Embedding` (Task 11).
+- Produces: `edge.EmbeddingDialect`, `openai.ParseEmbedding`, `openai.WriteEmbedding`, and both as methods on `openai.Dialect`. Task 15's route parses and writes through them.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: the wire shape is OpenAI's own `/v1/embeddings` and `parse.go` beside it is the pattern for reading one.
+
+`input` is a **union of four shapes** and there is no Go type that decodes all of them: a bare string, an array of strings, a bare token array, and an array of token arrays. The shape is decided from the first byte and decoded once it is known.
+
+Guessing wrong here is not a formatting nuisance. A token array read as text embeds the literal digits, the call succeeds, and the vector is silently wrong — the client has no way to detect it. That is the same failure class as spec §8's cross-model failover, arriving one layer earlier.
+
+`EmbeddingDialect` is a separate interface rather than four more methods on `Dialect`. The two shapes share nothing: an embedding request has no messages and its response has no content blocks, and every dialect that does not serve embeddings — Anthropic and Gemini both — would have to stub four methods to say so.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/edge/openai/aux_test.go`:
+
+```go
+package openai
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+func embedReq(t *testing.T, body string) *ir.EmbeddingRequest {
+	t.Helper()
+	req, err := ParseEmbedding(httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(body)), 1<<20)
+	if err != nil {
+		t.Fatalf("ParseEmbedding(%s): %v", body, err)
+	}
+	return req
+}
+
+func TestParseEmbeddingNormalizesABareString(t *testing.T) {
+	req := embedReq(t, `{"model":"m","input":"hello"}`)
+	if len(req.Input) != 1 || req.Input[0] != "hello" {
+		t.Errorf("Input = %v, want one element", req.Input)
+	}
+	if len(req.Tokens) != 0 {
+		t.Errorf("Tokens = %v; a string input is not tokens", req.Tokens)
+	}
+}
+
+func TestParseEmbeddingNormalizesAStringArray(t *testing.T) {
+	req := embedReq(t, `{"model":"m","input":["a","b","c"]}`)
+	if len(req.Input) != 3 || req.Input[2] != "c" {
+		t.Errorf("Input = %v", req.Input)
+	}
+}
+
+func TestParseEmbeddingCarriesAFlatTokenArray(t *testing.T) {
+	// A flat array of integers is ONE token array, not many. Reading it as
+	// many would send each token id as a separate embedding input.
+	req := embedReq(t, `{"model":"m","input":[15496,11,995]}`)
+	if len(req.Input) != 0 {
+		t.Errorf("Input = %v; token ids must not become text", req.Input)
+	}
+	if len(req.Tokens) != 1 || len(req.Tokens[0]) != 3 || req.Tokens[0][0] != 15496 {
+		t.Errorf("Tokens = %v, want one array of three", req.Tokens)
+	}
+}
+
+func TestParseEmbeddingCarriesNestedTokenArrays(t *testing.T) {
+	req := embedReq(t, `{"model":"m","input":[[1,2],[3]]}`)
+	if len(req.Tokens) != 2 || len(req.Tokens[1]) != 1 || req.Tokens[1][0] != 3 {
+		t.Errorf("Tokens = %v", req.Tokens)
+	}
+}
+
+func TestParseEmbeddingReadsTheOptionals(t *testing.T) {
+	req := embedReq(t, `{"model":"m","input":"x","encoding_format":"base64","dimensions":256,"user":"u"}`)
+	if req.Model != "m" || req.Encoding != "base64" || req.Dimensions != 256 || req.User != "u" {
+		t.Errorf("request = %+v", req)
+	}
+}
+
+func TestParseEmbeddingRejectsAMissingOrEmptyInput(t *testing.T) {
+	// An absent input is a client bug and must be a 400 rather than an
+	// upstream call that fails less legibly.
+	for _, body := range []string{
+		`{"model":"m"}`,
+		`{"model":"m","input":null}`,
+		`{"model":"m","input":[]}`,
+		`{"model":"m","input":7}`,
+	} {
+		if _, err := ParseEmbedding(httptest.NewRequest("POST", "/v1/embeddings",
+			strings.NewReader(body)), 1<<20); err == nil {
+			t.Errorf("ParseEmbedding(%s) accepted an unusable input", body)
+		}
+	}
+}
+
+func TestParseEmbeddingEnforcesTheBodyCap(t *testing.T) {
+	big := `{"model":"m","input":"` + strings.Repeat("x", 200) + `"}`
+	if _, err := ParseEmbedding(httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(big)), 64); err == nil {
+		t.Error("an oversized body was accepted")
+	}
+}
+
+func TestWriteEmbeddingEmitsFloatVectors(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := WriteEmbedding(w, &ir.EmbeddingResponse{
+		Model: "text-embedding-3-small",
+		Embeddings: []ir.Embedding{
+			{Index: 0, Float: []float32{0.5, -0.25}},
+			{Index: 1, Float: []float32{1}},
+		},
+		Usage: ir.Usage{InputTokens: 9},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Object string `json:"object"`
+		Model  string `json:"model"`
+		Data   []struct {
+			Object    string    `json:"object"`
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		} `json:"data"`
+		Usage struct {
+			PromptTokens int `json:"prompt_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Object != "list" || body.Model != "text-embedding-3-small" {
+		t.Errorf("envelope = %+v", body)
+	}
+	if len(body.Data) != 2 || body.Data[0].Object != "embedding" || body.Data[1].Index != 1 {
+		t.Fatalf("data = %+v", body.Data)
+	}
+	if body.Data[0].Embedding[1] != -0.25 {
+		t.Errorf("vector = %v", body.Data[0].Embedding)
+	}
+	if body.Usage.PromptTokens != 9 || body.Usage.TotalTokens != 9 {
+		t.Errorf("usage = %+v; embeddings report input tokens only", body.Usage)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content-type = %q", ct)
+	}
+}
+
+func TestWriteEmbeddingCarriesBase64Verbatim(t *testing.T) {
+	// The client asked for base64 to avoid the decode. Re-encoding through
+	// floats would change the bytes it receives.
+	w := httptest.NewRecorder()
+	if err := WriteEmbedding(w, &ir.EmbeddingResponse{
+		Model:      "m",
+		Embeddings: []ir.Embedding{{Index: 0, Base64: "AACAPwAAAEA="}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.Body.String(), `"embedding":"AACAPwAAAEA="`) {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestWriteEmbeddingNeverEmitsANullVector(t *testing.T) {
+	// An OpenAI client indexes into this array. null there is a crash, not an
+	// empty vector.
+	w := httptest.NewRecorder()
+	if err := WriteEmbedding(w, &ir.EmbeddingResponse{
+		Model:      "m",
+		Embeddings: []ir.Embedding{{Index: 0}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(w.Body.String(), "null") {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestDialectServesTheEmbeddingSurface(t *testing.T) {
+	var _ interface {
+		ParseEmbedding(*http.Request, int64) (*ir.EmbeddingRequest, error)
+		WriteEmbedding(http.ResponseWriter, *ir.EmbeddingResponse) error
+	} = New()
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -run 'TestParseEmbedding|TestWriteEmbedding|TestDialectServes' -v
+```
+
+Expected: FAIL to build — `undefined: ParseEmbedding`, `undefined: WriteEmbedding`.
+
+- [ ] **Step 3: Declare the interface**
+
+Add to `internal/edge/edge.go`:
+
+```go
+// EmbeddingDialect is the inbound wire form of the embedding surface.
+//
+// It is a separate interface rather than more methods on Dialect because the
+// two shapes share nothing — an embedding request has no messages and its
+// response has no content blocks — and Anthropic and Gemini would each stub
+// four methods to say they do not serve it.
+type EmbeddingDialect interface {
+	Name() string
+	ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error)
+	WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+```
+
+- [ ] **Step 4: Write the parser and the writer**
+
+Create `internal/edge/openai/aux.go`:
+
+```go
+package openai
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// wireEmbeddingRequest holds input as raw JSON deliberately: the field is a
+// union of four shapes and decoding it into any concrete Go type rejects three
+// of them.
+type wireEmbeddingRequest struct {
+	Model          string          `json:"model"`
+	Input          json.RawMessage `json:"input"`
+	EncodingFormat string          `json:"encoding_format"`
+	Dimensions     *int            `json:"dimensions"`
+	User           string          `json:"user"`
+}
+
+func ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBody {
+		return nil, fmt.Errorf("request body exceeds %d bytes", maxBody)
+	}
+	var w wireEmbeddingRequest
+	if err := json.Unmarshal(body, &w); err != nil {
+		return nil, fmt.Errorf("invalid JSON body: %w", err)
+	}
+	texts, tokens, err := parseEmbeddingInput(w.Input)
+	if err != nil {
+		return nil, err
+	}
+	req := &ir.EmbeddingRequest{
+		Model:    w.Model,
+		Input:    texts,
+		Tokens:   tokens,
+		Encoding: w.EncodingFormat,
+		User:     w.User,
+	}
+	if w.Dimensions != nil {
+		req.Dimensions = *w.Dimensions
+	}
+	return req, nil
+}
+
+// parseEmbeddingInput normalizes OpenAI's four accepted input shapes: a bare
+// string, an array of strings, a bare token array, and an array of token
+// arrays.
+//
+// The shape is decided from the first byte because no Go type decodes all four.
+// Guessing wrong is not a formatting nuisance — a token array read as text
+// embeds the literal digits, the call succeeds, and the client has no way to
+// detect that the vector is wrong.
+func parseEmbeddingInput(raw json.RawMessage) ([]string, [][]int, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, nil, errors.New("input is required")
+	}
+	switch trimmed[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return nil, nil, fmt.Errorf("input: %w", err)
+		}
+		return []string{s}, nil, nil
+	case '[':
+		return parseEmbeddingArray(trimmed)
+	default:
+		return nil, nil, errors.New("input must be a string or an array")
+	}
+}
+
+func parseEmbeddingArray(trimmed []byte) ([]string, [][]int, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		return nil, nil, fmt.Errorf("input: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, nil, errors.New("input is empty")
+	}
+	first := bytes.TrimSpace(items[0])
+	if len(first) == 0 {
+		return nil, nil, errors.New("input contains an empty element")
+	}
+	switch first[0] {
+	case '"':
+		out := make([]string, 0, len(items))
+		for i, it := range items {
+			var s string
+			if err := json.Unmarshal(it, &s); err != nil {
+				return nil, nil, fmt.Errorf("input[%d]: %w", i, err)
+			}
+			out = append(out, s)
+		}
+		return out, nil, nil
+	case '[':
+		out := make([][]int, 0, len(items))
+		for i, it := range items {
+			var toks []int
+			if err := json.Unmarshal(it, &toks); err != nil {
+				return nil, nil, fmt.Errorf("input[%d]: %w", i, err)
+			}
+			out = append(out, toks)
+		}
+		return nil, out, nil
+	default:
+		// A flat array of integers is one token array, not many: reading it as
+		// many would ask for one embedding per token id.
+		var toks []int
+		if err := json.Unmarshal(trimmed, &toks); err != nil {
+			return nil, nil, fmt.Errorf("input: %w", err)
+		}
+		return nil, [][]int{toks}, nil
+	}
+}
+
+func WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingResponse) error {
+	data := make([]any, 0, len(resp.Embeddings))
+	for _, e := range resp.Embeddings {
+		row := map[string]any{"object": "embedding", "index": e.Index}
+		if e.IsBase64() {
+			row["embedding"] = e.Base64
+		} else {
+			// Never nil: an OpenAI client indexes into this array, and null
+			// there is a crash rather than an empty vector.
+			v := e.Float
+			if v == nil {
+				v = []float32{}
+			}
+			row["embedding"] = v
+		}
+		data = append(data, row)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(map[string]any{
+		"object": "list",
+		"data":   data,
+		"model":  resp.Model,
+		// Embeddings report input tokens only, so total equals prompt unless a
+		// provider volunteered an output count. Adding them rather than
+		// hardcoding equality keeps an honest total when one does.
+		"usage": map[string]any{
+			"prompt_tokens": resp.Usage.InputTokens,
+			"total_tokens":  resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		},
+	})
+}
+
+func (d *Dialect) ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error) {
+	return ParseEmbedding(r, maxBody)
+}
+
+func (d *Dialect) WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingResponse) error {
+	return WriteEmbedding(w, resp)
+}
+
+var _ edge.EmbeddingDialect = (*Dialect)(nil)
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/edge/openai/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package including phase 1's chat tests.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/edge/edge.go internal/edge/openai/aux.go internal/edge/openai/aux_test.go
+git commit -m "feat(edge): parse and write the embedding shape"
+```
+
+---
+
+### Task 14: RunAux, the auxiliary entry point
+
+**Files:**
+- Modify: `internal/exec/surface.go`
+- Test: `internal/exec/surface_test.go`
+
+**Interfaces:**
+- Consumes: `SurfaceOp`, `resolve` (Tasks 4, 6).
+- Produces: `(*Executor).RunAux(w, r, dialect string, surface ir.Surface, ew errorWriter, build func() (SurfaceOp, error))`. Tasks 15, 16, 18, 19, 22 and 23 each call it exactly once.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Approach:** inline - skip 2: it is `RunSurface` with the parse step moved inside the record's lifetime, and both halves already exist.
+
+`RunSurface` takes an op, so a route must parse its body **before** calling it — and a parse failure would then produce no request row at all. Chat does not behave that way: `Handle` opens the record first and parses second, precisely so that a malformed body is a request the gateway received and refused rather than a request that never happened. Six routes silently dropping their 400s from the log would be a real regression in the only place an operator can see them.
+
+So the parse becomes a closure that runs inside the record's lifetime. `RunSurface` keeps its signature — Task 6's tests call it directly — and both share the tail.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/exec/surface_test.go`:
+
+```go
+package exec
+
+import (
+	"errors"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+func TestRunAuxLogsAMalformedBody(t *testing.T) {
+	// Handle opens its record before parsing, so a 400 is a logged request.
+	// Six auxiliary routes parsing first would drop theirs from the only place
+	// an operator can see them.
+	e, rec := executorForOp(t, "http://127.0.0.1:1", nil)
+	w := httptest.NewRecorder()
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
+	e.RunAux(w, httptest.NewRequest("POST", "/v1/embeddings", nil),
+		"openai", ir.SurfaceEmbedding, op,
+		func() (SurfaceOp, error) { return nil, errors.New("input is required") })
+
+	got := rec.only(t)
+	if got.Surface != string(ir.SurfaceEmbedding) {
+		t.Errorf("surface = %q", got.Surface)
+	}
+	if got.Dialect != "openai" {
+		t.Errorf("dialect = %q", got.Dialect)
+	}
+	if got.ErrorCode != string(ir.ErrInvalidRequest) {
+		t.Errorf("error code = %q, want %q", got.ErrorCode, ir.ErrInvalidRequest)
+	}
+	if got.Status != "error" {
+		t.Errorf("status = %q", got.Status)
+	}
+	if got.ID == "" || w.Header().Get("X-Darkrouter-Request") != got.ID {
+		t.Errorf("request id header = %q, record id = %q",
+			w.Header().Get("X-Darkrouter-Request"), got.ID)
+	}
+	if len(got.Attempts) != 0 {
+		t.Errorf("attempts = %d; a body that never parsed reached an upstream", len(got.Attempts))
+	}
+}
+
+func TestRunAuxRunsTheOpWhenTheBodyParses(t *testing.T) {
+	upstream := httptest.NewServer(jsonOK())
+	defer upstream.Close()
+
+	cat := catalogWith("p", "m", ir.SurfaceEmbedding)
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
+	e, rec := executorForOp(t, upstream.URL, cat)
+
+	e.RunAux(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/embeddings", nil),
+		"openai", ir.SurfaceEmbedding, op,
+		func() (SurfaceOp, error) { return op, nil })
+
+	if op.builds != 1 || op.responds != 1 {
+		t.Fatalf("builds = %d, responds = %d", op.builds, op.responds)
+	}
+	if got := rec.only(t); got.Status != "success" {
+		t.Errorf("status = %q", got.Status)
+	}
+}
+```
+
+Add two helpers beside them, used by this task and every surface task after it:
+
+- `jsonOK()` returns an `http.HandlerFunc` writing `{}` with `Content-Type: application/json`.
+- `catalogWith(providerID, modelID string, surfaces ...ir.Surface) *catalog.Store` builds a one-model live snapshot declaring those surfaces. Task 6's `executorForOp` already accepts a `*catalog.Store`, and its `probe` kind is registered as `openaicompat.New()`.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run TestRunAux -v
+```
+
+Expected: FAIL to build — `e.RunAux undefined`.
+
+- [ ] **Step 3: Split RunSurface and add RunAux**
+
+In `internal/exec/surface.go`, replace `RunSurface`'s body with a call to a shared tail and add `RunAux` beside it:
+
+```go
+// RunSurface is the entry point for a route whose request is already parsed.
+// Handle uses it; Task 6's seam tests drive an op through it directly.
+func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op SurfaceOp) {
+	start := time.Now()
+	rec, done := e.newRecord(start, op)
+	defer done()
+	e.beginResponse(w, rec)
+	e.runOp(w, r, op, rec, start)
+}
+
+// RunAux is RunSurface with the parse step moved inside the record's lifetime.
+//
+// A route that parsed first would produce no request row for a malformed body,
+// and chat does not behave that way: Handle opens its record before parsing so
+// that a 400 is a request the gateway received and refused rather than one that
+// never happened. Six routes dropping their 400s from the log would be a real
+// regression in the only place an operator can see them.
+//
+// ew rather than the op writes the error, because on a parse failure there is
+// no op yet — the dialect is what knows the client's error shape.
+func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
+	dialect string, surface ir.Surface, ew errorWriter,
+	build func() (SurfaceOp, error)) {
+
+	start := time.Now()
+	rec := &store.RequestRecord{
+		ID:      ulid.MustNew(ulid.Timestamp(start), rand.Reader).String(),
+		TS:      start,
+		Dialect: dialect,
+		Surface: string(surface),
+		Status:  "error",
+	}
+	defer func() {
+		total := time.Since(start).Milliseconds()
+		rec.TotalMs = &total
+		e.log(rec)
+	}()
+	e.beginResponse(w, rec)
+
+	op, err := build()
+	if err != nil {
+		rec.ErrorCode = string(ir.ErrInvalidRequest)
+		_ = ew.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
+		return
+	}
+	e.runOp(w, r, op, rec, start)
+}
+
+// beginResponse sets the two headers every route emits before it knows whether
+// it will succeed. Attempts is overwritten by the diagnostics on both the
+// success and the error path; the zero here is what a response that never
+// attempted anything carries.
+func (e *Executor) beginResponse(w http.ResponseWriter, rec *store.RequestRecord) {
+	w.Header().Set("X-Darkrouter-Request", rec.ID)
+	w.Header().Set("X-Darkrouter-Attempts", "0")
+}
+
+func (e *Executor) runOp(w http.ResponseWriter, r *http.Request, op SurfaceOp,
+	rec *store.RequestRecord, start time.Time) {
+
+	cfg := e.store.Current() // one snapshot for this request's whole lifetime
+	res, ok := e.resolve(r.Context(), w, op, op.Query(), rec, cfg, start)
+	if !ok {
+		return
+	}
+	e.runAttempts(w, r, op, cfg, res.Candidates, rec, start, res.ByID, res.Catalog)
+}
+```
+
+`newRecord` from Task 6 keeps its two callers by delegating its own record construction to the same fields listed above; the duplication is four lines and folding it into a shared constructor that takes both an op and a loose dialect string reads worse than either.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in the package. `RunSurface`'s behavior is unchanged — the config snapshot simply moved one call deeper.
+
+- [ ] **Step 5: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/exec/surface.go internal/exec/surface_test.go
+git commit -m "feat(exec): log a malformed auxiliary request body"
+```
+
+---
+
+### Task 15: The embeddings op, route, and the cross-model warning
+
+**Files:**
+- Create: `internal/exec/embed.go`
+- Modify: `internal/server/server.go`
+- Test: `internal/exec/embed_test.go`
+
+**Interfaces:**
+- Consumes: `RunAux` (Task 14), `adapter.Embedder` (Task 11), `edge.EmbeddingDialect` (Task 13).
+- Produces: `(*Executor).HandleEmbeddings(w, r, d edge.EmbeddingDialect)` and the `POST /v1/embeddings` route. Tasks 16 onward copy this file's shape.
+
+**Implementer:** dcc-superpower-companions:impl-opus-low
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 2 = 4
+**Approach:** inline - skip 2: the op's four methods are fixed by `SurfaceOp` and its `Respond` is chat's unary tail with the embedding types substituted.
+
+This is the first surface to run end to end, so it is the one that proves the pipeline. Everything after it is the same file with different types.
+
+Risk is 2 because of spec §8. An embedding request that fails over to a **different model** returns vectors from a different vector space; a client filling an index across that failover corrupts it, and **nothing in the response body signals it**. Darkrouter permits the failover — refusing it would make an embedding alias useless the moment its first provider rate-limits — and records a warning naming both models. The comparison is against the **first candidate's model**, not the name the client sent, because that name is usually an alias and often not a model name at all.
+
+`embedOp` implements `SurfaceOp` directly rather than wrapping `AuxOp`. It carries one piece of per-request state — the first candidate's model — and a closure over that state buys nothing over a struct field.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `internal/exec/embed_test.go`:
+
+```go
+package exec
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+)
+
+// embedUpstream answers /v1/embeddings with one vector, reporting the model it
+// was asked for so a test can tell which candidate served.
+func embedUpstream() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","model":"` + in.Model +
+			`","data":[{"object":"embedding","index":0,"embedding":[0.5,0.25]}],` +
+			`"usage":{"prompt_tokens":4,"total_tokens":4}}`))
+	}
+}
+
+func TestEmbeddingsServeEndToEnd(t *testing.T) {
+	upstream := httptest.NewServer(embedUpstream())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "e5", ir.SurfaceEmbedding))
+	w := httptest.NewRecorder()
+	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"e5","input":["a"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Object string `json:"object"`
+		Data   []struct {
+			Embedding []float64 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Object != "list" || len(body.Data) != 1 || body.Data[0].Embedding[0] != 0.5 {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	got := rec.only(t)
+	if got.Surface != "embedding" || got.Status != "success" {
+		t.Errorf("record = surface %q status %q", got.Surface, got.Status)
+	}
+	if got.TokensIn != 4 || got.TokensOut != 0 {
+		t.Errorf("tokens = %d in, %d out; embeddings report input only", got.TokensIn, got.TokensOut)
+	}
+	if w.Header().Get("X-Darkrouter-Model") != "e5" {
+		t.Errorf("X-Darkrouter-Model = %q; spec §8 requires it always",
+			w.Header().Get("X-Darkrouter-Model"))
+	}
+}
+
+func TestEmbeddingsFailOverToASecondProvider(t *testing.T) {
+	var hits atomic.Int64
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(embedUpstream())
+	defer good.Close()
+
+	e, rec := executorForTwo(t, bad.URL, good.URL,
+		catalogPair("bad", "good", "e5", ir.SurfaceEmbedding))
+	w := httptest.NewRecorder()
+	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"e5","input":["a"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if hits.Load() != 1 {
+		t.Errorf("the failing provider was called %d times", hits.Load())
+	}
+	got := rec.only(t)
+	if len(got.Attempts) != 2 || got.FinalProviderID != "good" {
+		t.Errorf("attempts = %d, final = %q", len(got.Attempts), got.FinalProviderID)
+	}
+	for _, warn := range got.Warnings {
+		if strings.Contains(warn, "vector space") {
+			t.Errorf("a same-model failover raised the cross-model warning: %q", warn)
+		}
+	}
+}
+
+func TestACrossModelEmbeddingFailoverWarns(t *testing.T) {
+	// Spec §8: the vectors come from a different vector space and nothing in
+	// the body says so. The warning on the request row is the only record.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(embedUpstream())
+	defer good.Close()
+
+	e, rec := executorForTwo(t, bad.URL, good.URL,
+		catalogAlias("bad", "e5-small", "good", "e5-large", ir.SurfaceEmbedding))
+	w := httptest.NewRecorder()
+	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"embed","input":["a"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	got := rec.only(t)
+	var found string
+	for _, warn := range got.Warnings {
+		if strings.Contains(warn, "vector space") {
+			found = warn
+		}
+	}
+	if found == "" {
+		t.Fatalf("no cross-model warning in %v", got.Warnings)
+	}
+	if !strings.Contains(found, "e5-small") || !strings.Contains(found, "e5-large") {
+		t.Errorf("warning = %q; it must name both models or it cannot be acted on", found)
+	}
+	if w.Header().Get("X-Darkrouter-Model") != "e5-large" {
+		t.Errorf("X-Darkrouter-Model = %q, want the model that actually served",
+			w.Header().Get("X-Darkrouter-Model"))
+	}
+}
+
+func TestAnEmbeddingRequestWithNoEmbeddingProviderIsRefused(t *testing.T) {
+	// Spec §10's third per-surface case: nothing is attempted and the error
+	// names the fact.
+	upstream := httptest.NewServer(embedUpstream())
+	defer upstream.Close()
+
+	e, rec := executorForOp(t, upstream.URL, catalogWith("p", "chat-only", ir.SurfaceLLM))
+	w := httptest.NewRecorder()
+	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"chat-only","input":["a"]}`)), openaiedge.New())
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "surface") {
+		t.Errorf("body = %s; the error must name the surface as the reason", w.Body.String())
+	}
+	got := rec.only(t)
+	if len(got.Attempts) != 0 {
+		t.Errorf("attempts = %d; a surface no provider offers must attempt nothing", len(got.Attempts))
+	}
+}
+```
+
+Add three catalog helpers beside `catalogWith`, each returning a `*catalog.Store` holding one live snapshot:
+
+- `catalogPair(a, b, model string, surfaces ...ir.Surface)` — the same model on two providers, `a` first.
+- `catalogAlias(aProvider, aModel, bProvider, bModel string, surfaces ...ir.Surface)` — two *different* models, reached through an alias named `embed`. The alias is declared in the config `executorForTwo` builds.
+- `executorForTwo(t, urlA, urlB string, cat *catalog.Store)` — `executorForOp` with two providers, both of kind `probe`, in the order given.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ -run 'TestEmbeddings|TestACrossModel|TestAnEmbeddingRequestWithNo' -v
+```
+
+Expected: FAIL to build — `e.HandleEmbeddings undefined`.
+
+- [ ] **Step 3: Write the op and the route**
+
+Create `internal/exec/embed.go`:
+
+```go
+package exec
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/router"
+)
+
+// embedOp is the embedding surface. It implements SurfaceOp directly rather
+// than wrapping AuxOp because it carries one piece of per-request state, and a
+// closure over that state buys nothing over a field.
+type embedOp struct {
+	d   edge.EmbeddingDialect
+	req *ir.EmbeddingRequest
+
+	// firstModel is the model the first attempt rendered for. Spec §8: an
+	// embedding request that fails over to a different model returns vectors
+	// from a different vector space, a client filling an index across that
+	// failover corrupts it, and nothing in the response body says so. The
+	// comparison is against the first candidate rather than the name the client
+	// sent, which is usually an alias and often not a model name at all.
+	//
+	// Written only from Build, which the loop calls once per attempt on one
+	// goroutine, so no synchronization is needed.
+	firstModel string
+}
+
+func (o *embedOp) Dialect() string { return o.d.Name() }
+
+// Query sets no capability needs: an embedding request does not ask for tools,
+// vision or reasoning, and requiring them would filter out every real embedding
+// model.
+func (o *embedOp) Query() router.Query {
+	return router.Query{Model: o.req.Model, Surface: ir.SurfaceEmbedding}
+}
+
+func (o *embedOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
+	em, ok := ad.(adapter.Embedder)
+	if !ok {
+		// Unreachable through the router, which filters on adapter surfaces.
+		// It is checked anyway because the alternative to failing here is
+		// sending a chat body to an embedding endpoint.
+		return nil, nil, fmt.Errorf("adapter %s does not serve embeddings", ad.Kind())
+	}
+	if o.firstModel == "" {
+		o.firstModel = tgt.Model
+	}
+	return em.BuildEmbedding(ctx, tgt, o.req)
+}
+
+func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
+	em, ok := ac.Adapter.(adapter.Embedder)
+	if !ok {
+		resp.Body.Close()
+		return adapter.OutcomeFatal, &ir.Error{
+			Type: ir.ErrDarkrouter, Message: "adapter does not serve embeddings",
+		}
+	}
+	out, err := em.ParseEmbedding(resp)
+	if err != nil {
+		return failedParse(ac, resp, err)
+	}
+
+	warns := ac.Warns
+	if ac.Cand.Model != o.firstModel {
+		warns = append(warns, ir.Warning{
+			Field:  "model",
+			Target: ac.Cand.ProviderID + "/" + ac.Cand.Model,
+			Reason: "embeddings served by " + ac.Cand.Model + " after " + o.firstModel +
+				" failed; vectors from two models are not in the same vector space " +
+				"and an index filled across this failover is corrupt",
+		})
+	}
+
+	ttft := time.Since(ac.Rec.TS).Milliseconds()
+	ac.Rec.TTFTMs = &ttft
+	applyUsage(ac.Rec, &out.Usage)
+	ac.Rec.FinalProviderID = ac.Cand.ProviderID
+	ac.Rec.FinalModel = ac.Cand.Model
+	// Assigned, not appended: the record must describe the translation the
+	// client received, not every attempt abandoned on the way there.
+	ac.Rec.Warnings = warningStrings(warns)
+
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
+	_ = o.d.WriteEmbedding(cw, out)
+	return adapter.OutcomeSuccess, nil
+}
+
+func (o *embedOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
+	return o.d.WriteError(w, e)
+}
+
+var _ SurfaceOp = (*embedOp)(nil)
+
+// failedParse is chat's parse-failure tail, shared by every auxiliary surface.
+//
+// A 2xx that cannot be read is a provider fault, so it rejoins the outcome path
+// and signals health. A refusal is not: recording it would trip the breaker on
+// a healthy provider, and failing over would re-ask a question every model in
+// the chain will refuse.
+func failedParse(ac *AttemptCtx, resp *http.Response, err error) (adapter.Outcome, *ir.Error) {
+	outcome := outcomeForParseError(err)
+	if last := len(ac.Rec.Attempts) - 1; last >= 0 {
+		ac.Rec.Attempts[last].Outcome = string(outcome)
+		ac.Rec.Attempts[last].Error = err.Error()
+	}
+	if outcome != adapter.OutcomeFatal {
+		ac.Exec.recordHealthFor(ac.Cand, outcome, resp)
+	}
+	var ie *ir.Error
+	if errors.As(err, &ie) {
+		return outcome, ie
+	}
+	return outcome, errorFor(outcome, err)
+}
+
+// HandleEmbeddings serves POST /v1/embeddings.
+func (e *Executor) HandleEmbeddings(w http.ResponseWriter, r *http.Request, d edge.EmbeddingDialect) {
+	maxBody := e.store.Current().Server.MaxBodyBytes
+	e.RunAux(w, r, d.Name(), ir.SurfaceEmbedding, d, func() (SurfaceOp, error) {
+		req, err := d.ParseEmbedding(r, maxBody)
+		if err != nil {
+			return nil, err
+		}
+		return &embedOp{d: d, req: req}, nil
+	})
+}
+```
+
+- [ ] **Step 4: Wire the route**
+
+In `internal/server/server.go`, beside the chat route:
+
+```go
+	mux.HandleFunc("POST /v1/embeddings", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleEmbeddings(w, r, oa)
+	}))
+```
+
+`oa` is the same `*openaiedge.Dialect` the chat route uses: it satisfies `edge.Dialect` for `authed` and `edge.EmbeddingDialect` for the handler, so no second value is constructed.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./internal/exec/ ./internal/server/ -race -count=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+```
+
+Expected: PASS, every test in both packages.
+
+- [ ] **Step 6: Verify the whole suite and formatting**
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go test ./... -race -count=1 && go vet ./... && gofmt -l .
+```
+
+Expected: all packages `ok`, vet silent, `gofmt -l .` prints nothing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/exec/embed.go internal/exec/embed_test.go internal/server/server.go
+git commit -m "feat(exec): serve the embeddings surface"
+```
+
+---
