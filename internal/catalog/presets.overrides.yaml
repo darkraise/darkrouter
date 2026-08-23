@@ -155,6 +155,9 @@ bedrock:
 vertex:
   name: Google Vertex AI
   kind: vertex
+  # Selects the request builder and marks the preset seed-only: Vertex has no
+  # usable listing API, so its catalog comes from models.dev filtered by this.
+  publisher: publishers/google
   base_url: ""
   auth:
     style: gcp-sa
@@ -166,6 +169,7 @@ vertex:
 vertex-anthropic:
   name: Google Vertex AI (Anthropic publisher)
   kind: vertex
+  publisher: publishers/anthropic
   base_url: ""
   auth:
     style: gcp-sa

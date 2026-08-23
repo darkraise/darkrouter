@@ -26,6 +26,10 @@ type DiscoveredModel struct {
 	ContextWindow   int
 	MaxOutputTokens int
 	Capabilities    *ModelCapabilities
+
+	// Publisher selects Vertex's request builder. Empty for a model that came
+	// from a listing endpoint, which is every kind but vertex.
+	Publisher string
 }
 
 // DiscoveryState is one provider's probe bookkeeping.
@@ -92,15 +96,21 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 	// overwrite models.dev's numbers with zeroes.
 	up, err := tx.PrepareContext(ctx,
 		`INSERT INTO models (provider_id, model_id, state, surfaces, missing_streak,
-		                     last_seen_at, discovered_at, context_window, max_output_tokens)
-		 VALUES (?, ?, 'live', '["llm"]', 0, ?, ?, ?, ?)
+		                     last_seen_at, discovered_at, context_window, max_output_tokens,
+		                     publisher)
+		 VALUES (?, ?, 'live', '["llm"]', 0, ?, ?, ?, ?, ?)
 		 ON CONFLICT(provider_id, model_id) DO UPDATE SET
 		     state             = 'live',
 		     missing_streak    = 0,
 		     last_seen_at      = excluded.last_seen_at,
 		     discovered_at     = coalesce(models.discovered_at, excluded.discovered_at),
 		     context_window    = coalesce(excluded.context_window, models.context_window),
-		     max_output_tokens = coalesce(excluded.max_output_tokens, models.max_output_tokens)`)
+		     max_output_tokens = coalesce(excluded.max_output_tokens, models.max_output_tokens),
+		     -- Empty means "the probe did not say", which for every listing
+		     -- kind is always. Overwriting a seeded publisher with it would
+		     -- send every Vertex request to the Google builder.
+		     publisher         = CASE WHEN excluded.publisher = '' THEN models.publisher
+		                              ELSE excluded.publisher END`)
 	if err != nil {
 		return fmt.Errorf("prepare model upsert: %w", err)
 	}
@@ -120,7 +130,7 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 			continue
 		}
 		if _, err := up.ExecContext(ctx, providerID, m.ModelID, ms, ms,
-			nullableInt(m.ContextWindow), nullableInt(m.MaxOutputTokens)); err != nil {
+			nullableInt(m.ContextWindow), nullableInt(m.MaxOutputTokens), m.Publisher); err != nil {
 			return fmt.Errorf("upsert model %q: %w", m.ModelID, err)
 		}
 		if m.Capabilities != nil {
