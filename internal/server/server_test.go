@@ -294,3 +294,36 @@ catalog:
 		t.Errorf("a removed_upstream model was listed: %s", body)
 	}
 }
+
+func TestTheProxyPortIgnoresASessionCookie(t *testing.T) {
+	// Cookies are not port-scoped: a browser logged into the admin port sends
+	// that cookie to the proxy port too. If the proxy ever honored one, every
+	// logged-in operator's browser would be an authenticated proxy client for
+	// any page they visited. Nothing reads cookies here today; this is what
+	// keeps it that way.
+	s := newTestServer(t, "  proxy_token: secret\n")
+
+	r := httptest.NewRequest("GET", "/v1/models", nil)
+	r.AddCookie(&http.Cookie{Name: "darkrouter_session", Value: "a-valid-looking-session"})
+	rec := httptest.NewRecorder()
+	s.ProxyHandler().ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code = %d, want 401; a cookie authenticated a proxy request", rec.Code)
+	}
+}
+
+func TestTheProxyPortStillAcceptsItsBearerToken(t *testing.T) {
+	// The other half: refusing the cookie must not refuse the token.
+	s := newTestServer(t, "  proxy_token: secret\n")
+
+	r := httptest.NewRequest("GET", "/v1/models", nil)
+	r.Header.Set("Authorization", "Bearer secret")
+	r.AddCookie(&http.Cookie{Name: "darkrouter_session", Value: "irrelevant"})
+	rec := httptest.NewRecorder()
+	s.ProxyHandler().ServeHTTP(rec, r)
+
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("code = %d; the bearer token was refused", rec.Code)
+	}
+}
