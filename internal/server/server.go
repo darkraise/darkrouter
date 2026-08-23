@@ -146,6 +146,9 @@ func (s *Server) ProxyHandler() http.Handler {
 	mux.HandleFunc("POST /v1/images/generations", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
 		s.ex.HandleImages(w, r, oa)
 	}))
+	mux.HandleFunc("POST /v1/audio/transcriptions", s.authed(oa, func(w http.ResponseWriter, r *http.Request) {
+		s.ex.HandleTranscriptions(w, r, oa)
+	}))
 	mux.HandleFunc("GET /v1/models", s.authed(oa, s.handleModels))
 
 	an := anthropicedge.New()

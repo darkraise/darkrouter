@@ -191,3 +191,12 @@ func TestAnOversizedAuxBodyReachesTheClientAs413(t *testing.T) {
 		t.Errorf("error code = %q; the row must record what the client was told", got.ErrorCode)
 	}
 }
+
+// executorForCapped is executorForOp with server.max_body_bytes set, so a test
+// can drive the oversized-upload path without building a real large body.
+func executorForCapped(t *testing.T, url string, cat *catalog.Store, maxBody int64) (*Executor, *captureLogger) {
+	t.Helper()
+	e, rec := executorForOp(t, url, cat)
+	e.store.Current().Server.MaxBodyBytes = maxBody
+	return e, rec
+}
