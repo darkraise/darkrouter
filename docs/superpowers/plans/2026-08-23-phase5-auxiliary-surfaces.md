@@ -2562,7 +2562,7 @@ git commit -m "feat(exec): add the auxiliary surface scaffold"
 
 **Interfaces:**
 - Consumes: `ir.Usage`.
-- Produces: `ir.EmbeddingRequest`, `ir.EmbeddingResponse`, `ir.Embedding`, and `adapter.Embedder`. Task 12 implements the interface; Task 14 constructs the request.
+- Produces: `ir.EmbeddingRequest` (with both its `Input` and `Tokens` forms), `ir.EmbeddingResponse`, `ir.Embedding`, and `adapter.Embedder`. Task 12 implements the interface; Task 13 constructs the request.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
@@ -2648,10 +2648,16 @@ package ir
 // EmbeddingRequest is one batched embedding call.
 type EmbeddingRequest struct {
 	Model string
-	// Input is always a slice. OpenAI accepts a bare string, an array of
-	// strings, or an array of token arrays; the edge normalizes all three here
-	// so nothing downstream has to branch on the inbound shape.
+	// Input is the text form, always a slice. OpenAI accepts a bare string or
+	// an array of strings and the edge flattens both here, so nothing
+	// downstream branches on the inbound shape.
 	Input []string
+	// Tokens is the pre-tokenized form. OpenAI also accepts an array of
+	// integers or an array of integer arrays, and those cannot be folded into
+	// Input: Darkrouter has no detokenizer, and rendering token ids as text
+	// would send a different request from the one the client made. Exactly one
+	// of Input and Tokens is ever populated.
+	Tokens [][]int
 	// Encoding is "float" or "base64". Empty means the client did not say.
 	Encoding string
 	// Dimensions is 0 when unset. Zero is not a legal value, so it needs no
@@ -2671,7 +2677,14 @@ func (r *EmbeddingRequest) EncodingOrDefault() string {
 }
 
 // InputCount is the batched item count, recorded on the request row per spec §9.
-func (r *EmbeddingRequest) InputCount() int { return len(r.Input) }
+// It counts whichever form the client sent, because the row records how many
+// items were embedded rather than which encoding carried them.
+func (r *EmbeddingRequest) InputCount() int {
+	if len(r.Tokens) > 0 {
+		return len(r.Tokens)
+	}
+	return len(r.Input)
+}
 
 // Embedding is one vector. Exactly one of Float and Base64 is populated.
 //
@@ -2811,6 +2824,31 @@ func TestBuildEmbeddingRendersTheOpenAIShape(t *testing.T) {
 	in, ok := body["input"].([]any)
 	if !ok || len(in) != 2 {
 		t.Errorf("input = %v", body["input"])
+	}
+}
+
+func TestBuildEmbeddingForwardsTokenInput(t *testing.T) {
+	// A client that sent token ids gets token ids sent upstream. There is no
+	// detokenizer here, so the alternative is not "render as text" — it is
+	// silently embedding something else.
+	hr, _, err := New().BuildEmbedding(context.Background(),
+		&adapter.Target{BaseURL: "https://x/v1", Model: "m"},
+		&ir.EmbeddingRequest{Tokens: [][]int{{1, 2, 3}, {4}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	raw, _ := io.ReadAll(hr.Body)
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	outer, ok := body["input"].([]any)
+	if !ok || len(outer) != 2 {
+		t.Fatalf("input = %v, want two token arrays", body["input"])
+	}
+	inner, ok := outer[0].([]any)
+	if !ok || len(inner) != 3 || inner[0].(float64) != 1 {
+		t.Errorf("input[0] = %v, want [1,2,3]", outer[0])
 	}
 }
 
@@ -2964,10 +3002,17 @@ func (a *Adapter) BuildEmbedding(ctx context.Context, t *adapter.Target,
 
 	body := map[string]any{
 		"model": t.Model,
-		"input": req.Input,
 		// Always sent: applying the default downstream and omitting it here
 		// would make the upstream request differ from the client's.
 		"encoding_format": req.EncodingOrDefault(),
+	}
+	// A pre-tokenized input is forwarded as token ids. Rendering it as text is
+	// not possible — there is no detokenizer here — and sending the text form
+	// of something the client sent as tokens would be a different request.
+	if len(req.Tokens) > 0 {
+		body["input"] = req.Tokens
+	} else {
+		body["input"] = req.Input
 	}
 	// Neither is a legal zero, so absence needs no separate presence flag — and
 	// an explicit dimensions of 0 is a 400 on OpenAI.
