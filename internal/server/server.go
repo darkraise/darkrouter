@@ -91,6 +91,11 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	// credentials through it.
 	authManager := auth.NewManager(auth.Deps{})
 
+	// In-progress OAuth connect attempts. In memory deliberately: a flow lives
+	// for the minute or two an operator spends in a consent screen, and
+	// persisting it would put a PKCE verifier on disk for no benefit.
+	flows := auth.NewFlowStore(10 * time.Minute)
+
 	// A provider whose preset this build no longer ships degrades to its
 	// stored kind and base url. The degradation is free — provider rows carry
 	// both — but losing the preset's quirks and surfaces silently on upgrade
@@ -159,6 +164,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Catalog: cat, Disc: disc, Breaker: breaker,
 		Presets: catalog.Embedded(), Exec: ex,
 		Warnings: startupWarnings,
+		Flows:    flows,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)

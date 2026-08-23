@@ -113,6 +113,4 @@ func (m *Manager) oauthFor(context.Context, Target, Credential) (Authorizer, err
 }
 
 // Placeholder types, given their real definitions in Tasks 8 and 14.
-type TokenStore interface{}
-type OAuthPresets interface{}
 type oauthAccount struct{}
