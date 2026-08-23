@@ -1306,6 +1306,8 @@ type probeOp struct {
 
 func (p *probeOp) Query() router.Query { return p.q }
 
+func (p *probeOp) Dialect() string { return "probe" }
+
 func (p *probeOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
 	p.builds++
 	p.lastInfo = tgt.Info
@@ -1439,6 +1441,12 @@ import (
 // The interface is deliberately four methods split at two joints: rendering the
 // outbound request, and turning a 2xx into client bytes.
 type SurfaceOp interface {
+	// Dialect names the inbound wire form, for the request row's dialect
+	// column. An op knows it; the loop cannot infer it, and the six auxiliary
+	// routes are not all the same dialect as the chat route they share a
+	// package with.
+	Dialect() string
+
 	// Query is what the router filters on. Auxiliary surfaces set no capability
 	// needs — an embedding request does not ask for tools.
 	Query() router.Query
@@ -1600,6 +1608,8 @@ type chatOp struct {
 	req *ir.Request
 }
 
+func (o *chatOp) Dialect() string { return o.d.Name() }
+
 func (o *chatOp) Query() router.Query {
 	needs := o.req.Needs()
 	return router.Query{
@@ -1647,7 +1657,30 @@ func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op Surface
 }
 ```
 
-`newRecord` is the record construction and deferred log that `Handle` and `HandleCount` both open with — extract it alongside, taking the op only for its surface. `Handle` keeps its own body-parsing preamble and then constructs a `chatOp` and calls `RunSurface`; `HandleCount` is unchanged, since it does not run the attempt loop.
+`newRecord` is the record construction and deferred log that `Handle` and `HandleCount` both open with — extract it alongside, taking the op for its dialect and its surface:
+
+```go
+// newRecord opens the request row and returns the closer that emits it. The
+// record is built as the request proceeds and emitted exactly once on every
+// exit path, and Status starts as "error" so a path that forgets to set it is
+// recorded as a failure rather than a silent success.
+func (e *Executor) newRecord(start time.Time, op SurfaceOp) (*store.RequestRecord, func()) {
+	rec := &store.RequestRecord{
+		ID:      ulid.MustNew(ulid.Timestamp(start), rand.Reader).String(),
+		TS:      start,
+		Dialect: op.Dialect(),
+		Surface: string(op.Query().Surface),
+		Status:  "error",
+	}
+	return rec, func() {
+		total := time.Since(start).Milliseconds()
+		rec.TotalMs = &total
+		e.log(rec)
+	}
+}
+```
+
+`RunSurface` sets `X-Darkrouter-Request` and the initial `X-Darkrouter-Attempts: 0` from `rec.ID` immediately after this, exactly as `Handle` does today. `Handle` keeps its own body-parsing preamble and then constructs a `chatOp` and calls `RunSurface`; `HandleCount` is unchanged, since it does not run the attempt loop.
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
@@ -2246,7 +2279,7 @@ git commit -m "feat(exec): supply adapter surfaces to the router"
 
 **Interfaces:**
 - Consumes: `SurfaceOp`, `AttemptCtx`, `CommitWriter` (Tasks 5, 6).
-- Produces: `exec.AuxOp` with `exec.NewAuxOp(router.Query, AuxBuild, AuxRespond, AuxWriteError) *AuxOp`, plus `exec.DecodeJSON` and `exec.ReadCapped`. Tasks 11 onward each construct one.
+- Produces: `exec.AuxOp` with `exec.NewAuxOp(dialect string, q router.Query, build AuxBuild, respond AuxRespond, writeErr AuxWriteError) *AuxOp`, plus `exec.DecodeJSON` and `exec.ReadCapped`. Tasks 11 onward each construct one.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
@@ -2283,7 +2316,7 @@ func TestAuxOpDelegatesToItsClosures(t *testing.T) {
 	q := router.Query{Model: "m", Surface: ir.SurfaceEmbedding}
 	var built, responded, errored bool
 
-	op := NewAuxOp(q,
+	op := NewAuxOp("openai", q,
 		func(ctx context.Context, tgt *adapter.Target, ad adapter.Adapter) (*http.Request, []ir.Warning, error) {
 			built = true
 			return http.NewRequestWithContext(ctx, "POST", "http://x/v1/embeddings", strings.NewReader("{}"))
@@ -2300,6 +2333,9 @@ func TestAuxOpDelegatesToItsClosures(t *testing.T) {
 	if op.Query() != q {
 		t.Errorf("Query() = %+v", op.Query())
 	}
+	if op.Dialect() != "openai" {
+		t.Errorf("Dialect() = %q; the request row would record the wrong wire form", op.Dialect())
+	}
 	if _, _, err := op.Build(context.Background(), &adapter.Target{}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -2315,7 +2351,7 @@ func TestAuxOpDelegatesToItsClosures(t *testing.T) {
 }
 
 func TestAuxOpSatisfiesSurfaceOp(t *testing.T) {
-	var _ SurfaceOp = NewAuxOp(router.Query{}, nil, nil, nil)
+	var _ SurfaceOp = NewAuxOp("openai", router.Query{}, nil, nil, nil)
 }
 
 func TestReadCappedStopsAtTheLimit(t *testing.T) {
@@ -2424,15 +2460,18 @@ type (
 // would be thirty methods of ceremony around a dozen lines of real difference,
 // and every one of them an opportunity to diverge on the parts that must not.
 type AuxOp struct {
+	dialect  string
 	query    router.Query
 	build    AuxBuild
 	respond  AuxRespond
 	writeErr AuxWriteError
 }
 
-func NewAuxOp(q router.Query, build AuxBuild, respond AuxRespond, writeErr AuxWriteError) *AuxOp {
-	return &AuxOp{query: q, build: build, respond: respond, writeErr: writeErr}
+func NewAuxOp(dialect string, q router.Query, build AuxBuild, respond AuxRespond, writeErr AuxWriteError) *AuxOp {
+	return &AuxOp{dialect: dialect, query: q, build: build, respond: respond, writeErr: writeErr}
 }
+
+func (o *AuxOp) Dialect() string { return o.dialect }
 
 func (o *AuxOp) Query() router.Query { return o.query }
 
