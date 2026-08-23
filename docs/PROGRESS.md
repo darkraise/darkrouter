@@ -10,7 +10,7 @@ Last updated: 2026-08-23
 | 2 — Persistence and health | ✅ | ✅ | **Merged to master.** 18 tasks, all done criteria met. |
 | 3 — Routing and failover | ✅ | ✅ | **Merged to master.** 20 tasks, all done criteria met. |
 | 4 — Dialects | ✅ | ✅ | **Complete.** 37 tasks; race-clean, verified live against Groq. |
-| 5 — Auxiliary surfaces | ✅ | — | Not started |
+| 5 — Auxiliary surfaces | ✅ | ✅ | **Complete.** 34 tasks; race-clean, all seven surfaces served. |
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | — | Not started |
 | 8 — Signed and OAuth credentials | ✅ | — | Not started |
@@ -132,6 +132,74 @@ still required and now substitutes the catalog's value. The findings ledger's
 - **Failed attempts still burn tokens invisibly.** `request_attempts` carries no
   usage columns, so tokens spent by failed pre-commit attempts never reach
   `usage_daily`. Untouched by phase 6.
+
+## Closed by phase 5
+
+- **`Adapter.Surfaces()` exists**, closing the item phase 3 carried and phases 4
+  and 6 both deferred. Routing now excludes a provider whose kind Darkrouter
+  cannot speak the surface to, as a filter rather than a runtime error. An
+  adapter that declares nothing serves `llm` only, which is the honest default.
+- **The surface vocabulary matches master design §6.** Seven values, with `tts`
+  and `stt` separate rather than collapsed into one `audio`, and every shipped
+  preset declares them in the corrected spelling.
+- **A YAML-configured provider can reach its preset.** `providers.preset` has
+  existed since migration 0001 and nothing had ever written it: the loader
+  rejected the key, `YAMLSource` dropped it, and `ImportFromConfig` omitted the
+  column. Phase 6 recorded the symptom and filed it as a phase 7 UI concern; it
+  was three lines of plumbing, and rerank could not be served by any configured
+  provider without it. Fixing it also activated `catalog.OrphanedPresets`, which
+  could never fire for a YAML provider before.
+- **A phase 6 merge defect was fixed on the branch** (`f6ae00c`):
+  `merge.surfaces` resolved override → row → preset, but discovery hardcodes
+  `'["llm"]'` into every row it inserts and the sync echoes it, so the row always
+  shadowed the preset and widening a preset had no effect on any discovered
+  model. The preset now outranks the row; an operator override still wins.
+- **A reasoning-block indexing defect in shipped code was fixed.**
+  `internal/adapter/openaicompat/parse.go` emitted reasoning deltas with no
+  block index — the zero value, which is the text block's — and no open or close
+  events, while tool blocks were carefully offset by 1000 to avoid exactly that.
+  It was invisible because every consumer until the Responses stream writer
+  switched on the delta's type and ignored the index.
+
+## Carried forward from phase 5
+
+- **Cost is still never computed.** `applyUsage` leaves `CostMicros` nil on
+  every surface including chat, although phase 6 shipped `catalog.Pricing` with
+  real per-MTok numbers. Nothing in phase 5 changed that, and the item below is
+  why it was not simply switched on.
+- **`ir.Usage.InputTokens` does not mean the same thing across adapters.**
+  Anthropic's `input_tokens` **excludes** cache read and write tokens; OpenAI's
+  `prompt_tokens` and Gemini's `promptTokenCount` **include** them. Each adapter
+  copies its provider's own convention into the same field. Any cost formula
+  written today is therefore wrong for at least one family — it either
+  double-charges cached input or under-charges it — so the IR has to normalize
+  before pricing can be turned on. This is the blocker for the item above, and a
+  real defect in the existing usage plumbing rather than a phase 5 omission.
+- **`capture.bodies` has no writer.** The `request_bodies` table exists from
+  phase 2 and the retention sweep prunes it, but nothing has ever inserted a
+  row. The setting, its `max_bytes` and its `retention` are all inert. Spec §5's
+  "a speech response is never captured even when `capture.bodies` is on" is
+  therefore satisfied by construction rather than by enforcement — what phase 5
+  does enforce is that the body is never held whole, which is the property that
+  matters.
+- **Per-call image pricing has no catalog source.** Spec §9 says cost should
+  come from per-call or per-unit pricing where no usage arrives, but
+  `catalog.Pricing` carries only per-MTok rates and models.dev supplies nothing
+  else. A dall-e call therefore records no cost at all, which is correct but
+  incomplete.
+- **Responses fields the IR does not model are dropped rather than re-emitted.**
+  Spec §5 says they "ride in `Extra` and are re-emitted"; `truncation`,
+  `include`, `service_tier`, `top_logprobs`, `max_tool_calls` and
+  `prompt_cache_key` are instead parsed away without a warning. The response
+  echoes the fields the OpenAI SDK's model requires — tools, tool choice,
+  sampling, instructions, metadata — which is what keeps a client working; the
+  rest are a documented deviation, not an oversight. `truncation` and
+  `max_tool_calls` change the answer's shape, so a client setting them gets
+  behavior it did not ask for with nothing in the trace saying so.
+- **Responses ids are not resolvable, by design.** Returned ids carry a
+  `resp_dr_` prefix and `store: false`; any request echoing one back is refused.
+  A client built around server-side conversation state will not work against
+  Darkrouter and is told so explicitly rather than served an amnesic answer.
 
 ## Open items
 
@@ -279,10 +347,13 @@ command returns the subshell's pid, not the binary's, so `kill "$!"` leaves the
 gateway holding its port and the next start fails to bind. Kill by binary name
 (`ps -C darkrouter -o pid=`) instead.
 
-### 4. One design decision still open
+### 4. One design decision, now settled
 
-The rerank wire shape (findings ledger §2.3). Specs currently adopt Cohere v2
-with a preset-declared path. Revisit before Phase 5.
+The rerank wire shape (findings ledger §2.3). Settled in phase 5: exactly one
+shipped preset declares a `rerank` surface, `cohere`, and neither Jina nor
+Voyage is a preset at all. Cohere v2 is therefore not merely the recommendation
+but the only shape any shipped provider serves, at the path its preset
+declares. No revisit is planned.
 
 ## Phase 1 deviations from spec
 
