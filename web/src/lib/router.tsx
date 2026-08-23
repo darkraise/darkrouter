@@ -11,6 +11,8 @@ import { useQueryClient } from "@tanstack/react-query"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { OverviewScreen } from "../routes/overview"
 import { RequestsScreen } from "../routes/requests"
+import { CatalogScreen } from "../routes/catalog"
+import { PlaygroundScreen } from "../routes/playground"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -69,6 +71,16 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: "/requests",
     component: RequestsScreen,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/catalog",
+    component: CatalogScreen,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/playground",
+    component: PlaygroundScreen,
   }),
   createRoute({
     // A deep link into one trace. The drawer opens from the table, but a
