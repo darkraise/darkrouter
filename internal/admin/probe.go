@@ -114,8 +114,15 @@ func (s *Server) clearCooldowns(ctx context.Context, providerID, keyID string) {
 	if s.deps.Catalog == nil {
 		return
 	}
-	for _, m := range s.deps.Catalog.Snapshot().Offering(providerID) {
-		s.deps.Breaker.Record(healthKey(providerID, keyID, m),
+	// Walked from All() rather than Offering(): Offering maps a MODEL to the
+	// providers serving it, which is the reverse of what is needed here and
+	// would silently return nothing, leaving every triple cooling behind a
+	// passing probe.
+	for _, m := range s.deps.Catalog.Snapshot().All() {
+		if m.ProviderID != providerID {
+			continue
+		}
+		s.deps.Breaker.Record(healthKey(providerID, keyID, m.ModelID),
 			health.Signal{Outcome: adapter.OutcomeSuccess})
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/health"
 )
 
@@ -204,5 +205,49 @@ func TestProbingAnUnknownProviderIs404(t *testing.T) {
 	w := do(t, s, cookie, token, "POST", "/api/providers/nope/test", "")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestASuccessfulProbeClearsTripleCooldownsToo(t *testing.T) {
+	// The other half of spec §4.3's ladder reset, and the half a
+	// credential-only test misses entirely: a triple cooldown lives under a key
+	// WITH a model. Clearing only the credential leaves every model of that
+	// provider cooling behind a probe that just reported OK.
+	upstream := httptest.NewServer(listingUpstream("m1"))
+	defer upstream.Close()
+
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p1", upstream.URL)
+
+	// The probe reads the catalog to learn which models to clear, so the
+	// snapshot has to carry them.
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "p1", ModelID: "m1", State: catalog.StateLive},
+		{ProviderID: "p1", ModelID: "m2", State: catalog.StateLive},
+	}, []string{"p1"}))
+	s.deps.Catalog = cat
+
+	br := s.deps.Breaker
+	for _, model := range []string{"m1", "m2"} {
+		k := health.Key{ProviderID: "p1", KeyID: keyID, Model: model}
+		for i := 0; i < 5; i++ {
+			br.Record(k, health.Signal{
+				Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500,
+			})
+		}
+		if br.Available(k) {
+			t.Fatalf("the fixture did not cool %s", model)
+		}
+	}
+
+	if w := do(t, s, cookie, token, "POST", "/api/providers/p1/test", ""); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	for _, model := range []string{"m1", "m2"} {
+		if !br.Available(health.Key{ProviderID: "p1", KeyID: keyID, Model: model}) {
+			t.Errorf("%s is still cooling after a successful probe", model)
+		}
 	}
 }
