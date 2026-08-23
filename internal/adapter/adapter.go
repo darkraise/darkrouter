@@ -74,6 +74,37 @@ type BodyClassifier interface {
 	ClassifyBody(resp *http.Response, body []byte, err error) Outcome
 }
 
+// SurfaceSet is the set of surfaces an adapter implements.
+type SurfaceSet map[ir.Surface]bool
+
+// Has is nil-safe, because the zero value has to be usable — a map field is
+// easy to leave unset and a panic on the routing path is not an acceptable way
+// to find out.
+func (s SurfaceSet) Has(x ir.Surface) bool { return s[x] }
+
+// SurfaceProvider is implemented by an adapter serving more than chat.
+//
+// Optional rather than a method on Adapter, matching BodyClassifier and
+// TokenCounter above: an adapter that says nothing serves llm only, which is
+// the honest default and keeps a kind whose auxiliary support arrives in a
+// later phase compiling untouched.
+type SurfaceProvider interface {
+	Surfaces() SurfaceSet
+}
+
+// SurfacesOf reports what an adapter implements.
+//
+// The default is llm alone rather than everything. Master design §5.1 makes an
+// unimplemented surface a routing filter, not a runtime error — an operator
+// reading "no provider offers this model on this surface" learns more than one
+// reading a 404 the provider produced.
+func SurfacesOf(a Adapter) SurfaceSet {
+	if sp, ok := a.(SurfaceProvider); ok {
+		return sp.Surfaces()
+	}
+	return SurfaceSet{ir.SurfaceLLM: true}
+}
+
 // TokenCounter is implemented by an adapter whose upstream offers a native
 // token count. OpenAI has no such endpoint, so this is optional rather than a
 // method on Adapter that two thirds of implementations would stub out.

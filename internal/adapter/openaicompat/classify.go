@@ -36,6 +36,25 @@ func New() *Adapter { return &Adapter{} }
 
 func (a *Adapter) Kind() string { return "openaicompat" }
 
+// Surfaces is phase 5 spec §4's openaicompat column. It is the only kind that
+// serves more than chat and embeddings, because OpenAI's own API defines all
+// seven and every OpenAI-compatible upstream inherits the shapes.
+//
+// A provider that serves only some of them is filtered by its *preset*
+// declaration, not here: this says what the adapter can render, and the catalog
+// says what the upstream actually offers.
+func (a *Adapter) Surfaces() adapter.SurfaceSet {
+	return adapter.SurfaceSet{
+		ir.SurfaceLLM:        true,
+		ir.SurfaceEmbedding:  true,
+		ir.SurfaceImage:      true,
+		ir.SurfaceTTS:        true,
+		ir.SurfaceSTT:        true,
+		ir.SurfaceRerank:     true,
+		ir.SurfaceModeration: true,
+	}
+}
+
 func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	return BuildRequest(ctx, t, req)
 }
@@ -58,6 +77,7 @@ func (a *Adapter) Classify(resp *http.Response, err error) adapter.Outcome {
 
 var _ adapter.Adapter = (*Adapter)(nil)
 var _ adapter.BodyClassifier = (*Adapter)(nil)
+var _ adapter.SurfaceProvider = (*Adapter)(nil)
 
 // unknownModelCodes are the error codes OpenAI-compatible providers use when a
 // 400 means "I do not have that model" rather than "your request is malformed".
