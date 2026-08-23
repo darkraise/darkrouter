@@ -50,6 +50,11 @@ type Preset struct {
 	// Empty means none; "ollama" means /api/show. Spec §6.
 	CapabilityProbe string `yaml:"capability_probe,omitempty"`
 
+	// Publisher selects Vertex's request builder and marks a preset as
+	// seed-only: a kind with no listing endpoint, phase 8 spec §4.3. Empty for
+	// every other preset.
+	Publisher string `yaml:"publisher,omitempty"`
+
 	OAuth *OAuth `yaml:"oauth,omitempty"`
 }
 

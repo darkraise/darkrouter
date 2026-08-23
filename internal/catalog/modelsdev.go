@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -31,6 +32,22 @@ type Doc map[string]map[string]Metadata
 
 // Metadata looks one model up. The miss is reported rather than returning a
 // zero value, because a zero context window is a fact the merge acts on.
+// ModelsFor enumerates one provider's models, sorted so a seeded catalog is
+// stable across restarts. Vertex has no listing endpoint, spec §4.3, so this is
+// the only source of model ids for it.
+func (d Doc) ModelsFor(modelsDevID string) []string {
+	models, ok := d[modelsDevID]
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(models))
+	for id := range models {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (d Doc) Metadata(modelsDevID, modelID string) (Metadata, bool) {
 	models, ok := d[modelsDevID]
 	if !ok {

@@ -230,6 +230,17 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 
 	now := time.Now().UTC()
 
+	// A kind with no listing endpoint is seeded from models.dev rather than
+	// probed. Spec §4.3: no credential is spent and no request is made, which
+	// is what "discovery is not pretended" means in practice. The credential
+	// probe confirms reachability separately, on the operator's schedule.
+	if seeded := SeedFromPreset(preset, FallbackDoc()); len(seeded) > 0 {
+		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, now); err != nil {
+			log.Printf("discovery: %s: seed: %v", p.ID, err)
+		}
+		return
+	}
+
 	// A signed listing needs the credential turned into a signature. Unlike an
 	// undiscoverable kind, a strategy that cannot be resolved is a
 	// misconfiguration the operator can fix, so it is recorded rather than

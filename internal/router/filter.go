@@ -77,6 +77,10 @@ func filterTarget(t target, q Query, snap Snapshot,
 		}
 		cands = append(cands, Candidate{
 			ProviderID: p.ID, KeyID: c.ID, Model: t.ModelID, Kind: p.Kind,
+			// Declared in phase 3 and never populated until phase 8. Without
+			// it every Vertex request takes the Google builder regardless of
+			// the model, and every Claude call 400s.
+			Publisher: m.Publisher,
 			// Recorded per candidate rather than per request: a chain can mix
 			// a models.dev-backed model with a locally discovered one, and the
 			// warning belongs to whichever actually served.
