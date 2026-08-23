@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -82,4 +84,49 @@ func TestRunAuxRunsTheOpWhenTheBodyParses(t *testing.T) {
 	if got := rec.only(t); got.Status != "success" {
 		t.Errorf("status = %q", got.Status)
 	}
+}
+
+// failoverPair builds a two-provider executor and the catalog to match. Both
+// providers are of the probe kind and "bad" is tried first. When the two models
+// differ they are wired behind the alias "embed", because an alias lives in
+// configuration rather than in the catalog.
+//
+// The plan specifies catalogPair, catalogAlias and executorForTwo as separate
+// helpers, but catalogAlias returns two values and Go cannot spread those into
+// a longer argument list — the call the plan writes does not compile. One
+// helper that builds both halves is the same fixture without the seam.
+func failoverPair(t *testing.T, urlA, aModel, urlB, bModel string,
+	surfaces ...ir.Surface) (*Executor, *captureLogger) {
+
+	t.Helper()
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "bad", ModelID: aModel, State: catalog.StateLive, Surfaces: surfaces},
+		{ProviderID: "good", ModelID: bModel, State: catalog.StateLive, Surfaces: surfaces},
+	}, []string{"bad", "good"}))
+
+	rec := &captureLogger{}
+	body := `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: bad
+    kind: probe
+    base_url: ` + urlA + `
+    api_key: sk
+    priority: 10
+    models: [` + aModel + `]
+  - id: good
+    kind: probe
+    base_url: ` + urlB + `
+    api_key: sk
+    priority: 1
+    models: [` + bModel + `]
+`
+	if aModel != bModel {
+		body += "aliases:\n  embed: [bad/" + aModel + ", good/" + bModel + "]\n"
+	}
+	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()},
+		Deps{Catalog: cat, Log: rec})
+	return e, rec
 }
