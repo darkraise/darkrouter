@@ -67,8 +67,13 @@ type Executor struct {
 	store    *config.Store
 	src      provider.Source
 	adapters map[string]adapter.Adapter
-	client   *http.Client
-	deps     Deps
+	// adapterSurfaces is what each kind can render, derived from adapters at
+	// construction. It cannot change afterwards, so recomputing it per request
+	// would allocate for a constant — and the router snapshot is meant to hold
+	// frozen inputs rather than derived work.
+	adapterSurfaces map[string]adapter.SurfaceSet
+	client          *http.Client
+	deps            Deps
 }
 
 // New builds the executor. Transport-level timeouts (connect, first_byte) are
@@ -76,8 +81,12 @@ type Executor struct {
 // are documented restart-only. The total timeout is read per request.
 func New(store *config.Store, src provider.Source, adapters map[string]adapter.Adapter, deps Deps) *Executor {
 	t := store.Current().Policy.Timeout
+	surfaces := make(map[string]adapter.SurfaceSet, len(adapters))
+	for kind, ad := range adapters {
+		surfaces[kind] = adapter.SurfacesOf(ad)
+	}
 	return &Executor{
-		store: store, src: src, adapters: adapters, deps: deps,
+		store: store, src: src, adapters: adapters, adapterSurfaces: surfaces, deps: deps,
 		client: &http.Client{
 			// Go follows redirects by default, silently turning a redirected
 			// POST into a body-less GET.

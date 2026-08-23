@@ -1252,3 +1252,75 @@ func TestAnOpThatCommittedCannotRestartTheChain(t *testing.T) {
 		t.Errorf("body = %q; the committed bytes were lost", w.Body.String())
 	}
 }
+
+func TestAnEmbeddingRequestSkipsAChatOnlyAdapter(t *testing.T) {
+	// anthropic declares no surfaces, so it defaults to llm. Its preset could
+	// still claim embeddings — the catalog describes the upstream, not what
+	// Darkrouter can speak — and routing there would fail at the provider.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "p", ModelID: "m", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
+	}}, []string{"p"}))
+
+	rec := &captureLogger{}
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: anthropic
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+		Deps{Catalog: cat, Log: rec})
+
+	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
+	w := httptest.NewRecorder()
+	e.RunSurface(w, httptest.NewRequest("POST", "/v1/embeddings", nil), op, e.store.Current())
+
+	if op.builds != 0 {
+		t.Errorf("the op built %d requests; a chat-only adapter must be filtered before any attempt", op.builds)
+	}
+	got := rec.only(t)
+	var found bool
+	for _, s := range got.Skips {
+		if strings.Contains(s, "adapter_surface") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("skips = %v; the trace does not explain why nothing routed", got.Skips)
+	}
+}
+
+func TestAChatRequestStillRoutesToAChatOnlyAdapter(t *testing.T) {
+	// The obvious regression: constraining the map must not exclude the kind
+	// that only ever served llm.
+	upstream := unaryUpstream()
+	defer upstream.Close()
+
+	e := executorFor(t, `
+server:
+  proxy_listen: ":0"
+providers:
+  - id: p
+    kind: openaicompat
+    base_url: `+upstream.URL+`
+    api_key: sk
+    models: [m]
+`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
