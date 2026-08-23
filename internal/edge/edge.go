@@ -31,6 +31,19 @@ type Dialect interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// EmbeddingDialect is the inbound wire form of the embedding surface.
+//
+// It is a separate interface rather than more methods on Dialect because the
+// two shapes share nothing — an embedding request has no messages and its
+// response has no content blocks — and Anthropic and Gemini would each stub
+// four methods to say they do not serve it.
+type EmbeddingDialect interface {
+	Name() string
+	ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error)
+	WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingResponse) error
+	WriteError(w http.ResponseWriter, e *ir.Error) error
+}
+
 // CountWriter is implemented by a dialect with a token-counting endpoint.
 type CountWriter interface {
 	Dialect
