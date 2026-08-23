@@ -188,8 +188,17 @@ func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
 	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 	op, err := build(cfg)
 	if err != nil {
-		rec.ErrorCode = string(ir.ErrInvalidRequest)
-		_ = ew.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
+		// A parser reporting an oversized body says so in the error it
+		// returns, because only it knows the cap it was given. The typed error
+		// is used whole rather than re-wrapped: err.Error() prepends the type
+		// and would reach the client as "payload_too_large: request body …".
+		e2 := &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()}
+		var ie *ir.Error
+		if errors.As(err, &ie) && ie.Type != "" {
+			e2 = ie
+		}
+		rec.ErrorCode = string(e2.Type)
+		_ = ew.WriteError(w, e2)
 		return
 	}
 	e.runOp(w, r, op, rec, start, cfg)

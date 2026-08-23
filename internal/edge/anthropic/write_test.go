@@ -2,7 +2,9 @@ package anthropic
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -142,5 +144,22 @@ func TestWriteCountUsesInputTokens(t *testing.T) {
 	}
 	if got["input_tokens"].(float64) != 2095 {
 		t.Errorf("body = %v", got)
+	}
+}
+
+func TestAnOversizedPayloadIs413(t *testing.T) {
+	// The status carries the distinction; the body stays inside Anthropic's
+	// documented error vocabulary, which has no size-specific member.
+	w := httptest.NewRecorder()
+	if err := WriteError(w, &ir.Error{
+		Type: ir.ErrPayloadTooLarge, Message: "upload exceeds the configured maximum",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"type":"invalid_request_error"`) {
+		t.Errorf("body = %s; the type must stay in the documented set", w.Body.String())
 	}
 }
