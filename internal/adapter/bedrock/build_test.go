@@ -274,3 +274,28 @@ func TestEscapePathSegmentMatchesTheAWSRule(t *testing.T) {
 		}
 	}
 }
+
+func TestASystemTurnBecomesTheSystemField(t *testing.T) {
+	// The OpenAI edge leaves a developer or system turn as an ir.RoleSystem
+	// message rather than moving it to Request.System. Rendering that as a user
+	// turn silently strips its status, and Converse's messages array admits
+	// only user and assistant anyway.
+	req := simple()
+	req.Messages = append([]ir.Message{{
+		Role: ir.RoleSystem, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "be terse"}},
+	}}, req.Messages...)
+
+	body, _, _ := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	sys, ok := body["system"].([]any)
+	if !ok || len(sys) != 1 || sys[0].(map[string]any)["text"] != "be terse" {
+		t.Fatalf("system = %#v", body["system"])
+	}
+	for _, m := range body["messages"].([]any) {
+		if role := m.(map[string]any)["role"]; role == "system" {
+			t.Errorf("a system role reached the messages array")
+		}
+	}
+	if n := len(body["messages"].([]any)); n != 1 {
+		t.Errorf("messages = %d, want 1: the system turn was not removed", n)
+	}
+}

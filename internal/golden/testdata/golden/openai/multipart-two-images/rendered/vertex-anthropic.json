@@ -1,0 +1,30 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Compare these.",
+          "type": "text"
+        },
+        {
+          "source": {
+            "data": "iVBORw==",
+            "media_type": "image/png",
+            "type": "base64"
+          },
+          "type": "image"
+        },
+        {
+          "source": {
+            "type": "url",
+            "url": "https://example.invalid/second.png"
+          },
+          "type": "image"
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

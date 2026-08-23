@@ -1,0 +1,99 @@
+[
+  {
+    "Type": "message_start",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_start",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "From ",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "message_delta",
+    "Index": 0,
+    "Delta": null,
+    "Usage": {
+      "InputTokens": 7,
+      "OutputTokens": 3,
+      "CacheReadTokens": 0,
+      "CacheWriteTokens": 0,
+      "ReasoningTokens": 0,
+      "Estimated": false
+    },
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_delta",
+    "Index": 0,
+    "Delta": {
+      "Type": "text",
+      "Text": "Google.",
+      "Thinking": "",
+      "Signature": "",
+      "ToolInput": "",
+      "ToolID": "",
+      "ToolName": ""
+    },
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  },
+  {
+    "Type": "content_block_stop",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
+  }
+]

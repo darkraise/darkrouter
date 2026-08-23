@@ -1,0 +1,46 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "id": "call_a",
+          "input": {
+            "url": "https://x.invalid"
+          },
+          "name": "screenshot",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "captured",
+              "type": "text"
+            },
+            {
+              "source": {
+                "data": "iVBORw==",
+                "media_type": "image/png",
+                "type": "base64"
+              },
+              "type": "image"
+            }
+          ],
+          "tool_use_id": "call_a",
+          "type": "tool_result"
+        },
+        {
+          "text": "What is on screen?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

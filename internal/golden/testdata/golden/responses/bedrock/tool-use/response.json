@@ -1,0 +1,14 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {"text": "Checking the weather."},
+        {"toolUse": {"toolUseId": "tu_1", "name": "get_weather", "input": {"city": "Oslo"}}}
+      ]
+    }
+  },
+  "stopReason": "tool_use",
+  "usage": {"inputTokens": 24, "outputTokens": 13, "totalTokens": 37},
+  "metrics": {"latencyMs": 412}
+}

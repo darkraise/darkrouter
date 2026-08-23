@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/xlate"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -35,15 +36,21 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	var warns []ir.Warning
 	body := map[string]any{}
 
-	messages, mw := renderMessages(req)
-	warns = append(warns, mw...)
-	body["messages"] = messages
-
-	if sys := renderSystem(req.System); len(sys) > 0 {
-		// Converse takes system separately. A system turn folded into messages
-		// is a validation error, not a degraded answer.
+	// Converse takes system content in a field of its own, and its messages
+	// array admits only user and assistant. A system turn left in the
+	// conversation would be rendered as a user turn and silently lose its
+	// status, so it is collected first — the shared helper is what makes an
+	// inbound `developer` role and a `system` message behave the same here as
+	// they do for gemini and anthropic.
+	sysBlocks, sysWarns := xlate.CollectSystemBlocks(req, targetName)
+	warns = append(warns, sysWarns...)
+	if sys := renderSystem(sysBlocks); len(sys) > 0 {
 		body["system"] = sys
 	}
+
+	messages, mw := renderMessages(xlate.NonSystemMessages(req.Messages))
+	warns = append(warns, mw...)
+	body["messages"] = messages
 	if cfg := inferenceConfig(req); len(cfg) > 0 {
 		body["inferenceConfig"] = cfg
 	}
@@ -177,10 +184,10 @@ func toolConfig(req *ir.Request) map[string]any {
 // Converse has no tool role: a tool result is user content carrying a toolResult
 // block. Getting that wrong is a 400 on every tool loop, which is why it is the
 // first thing the tests assert.
-func renderMessages(req *ir.Request) ([]any, []ir.Warning) {
+func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
 	var warns []ir.Warning
-	out := make([]any, 0, len(req.Messages))
-	for _, m := range req.Messages {
+	out := make([]any, 0, len(msgs))
+	for _, m := range msgs {
 		role := "user"
 		if m.Role == ir.RoleAssistant {
 			role = "assistant"

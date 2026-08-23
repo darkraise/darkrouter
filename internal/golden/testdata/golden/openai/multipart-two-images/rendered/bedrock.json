@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Compare these."
+        },
+        {
+          "image": {
+            "format": "png",
+            "source": {
+              "bytes": "iVBORw=="
+            }
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

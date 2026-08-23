@@ -1,0 +1,21 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Capital of Norway?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "system": [
+    {
+      "text": "Answer in one word.",
+      "type": "text"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "ID": "",
+  "Model": "",
+  "Content": [
+    {
+      "Type": "text",
+      "Text": "Checking the weather.",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": null,
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    },
+    {
+      "Type": "tool_use",
+      "Text": "",
+      "Media": null,
+      "Thinking": null,
+      "ToolUse": {
+        "ID": "tu_1",
+        "Name": "get_weather",
+        "Input": {
+          "city": "Oslo"
+        }
+      },
+      "ToolResult": null,
+      "CacheControl": null,
+      "Extra": null
+    }
+  ],
+  "StopReason": "tool_use",
+  "Usage": {
+    "InputTokens": 24,
+    "OutputTokens": 13,
+    "CacheReadTokens": 0,
+    "CacheWriteTokens": 0,
+    "ReasoningTokens": 0,
+    "Estimated": false
+  },
+  "Warnings": null,
+  "Extra": null
+}
