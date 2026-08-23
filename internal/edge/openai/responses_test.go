@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -13,6 +14,16 @@ func parseResponses(t *testing.T, body string) (*ir.Request, error) {
 	req, _, _, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
 		strings.NewReader(body)), 1<<20)
 	return req, err
+}
+
+func parseResponsesEcho(t *testing.T, body string) *responsesEcho {
+	t.Helper()
+	_, _, echo, err := ParseResponses(httptest.NewRequest("POST", "/v1/responses",
+		strings.NewReader(body)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return echo
 }
 
 func TestParseResponsesTurnsABareInputIntoAUserTurn(t *testing.T) {
@@ -233,5 +244,205 @@ func TestParseResponsesReportsTheSurface(t *testing.T) {
 	}
 	if pt == nil || pt.Surface != ir.SurfaceLLM || pt.ModelField != "model" {
 		t.Errorf("passthrough = %+v", pt)
+	}
+}
+
+func TestWriteResponsesEmitsItems(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := WriteResponses(w, &ir.Response{
+		ID: "chatcmpl-1", Model: "gpt-4o",
+		Content: []ir.ContentBlock{
+			{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "pondering"}},
+			{Type: ir.BlockText, Text: "the answer"},
+			{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
+				ID: "call_1", Name: "f", Input: []byte(`{"a":1}`)}},
+		},
+		StopReason: ir.StopToolUse,
+		Usage:      ir.Usage{InputTokens: 5, OutputTokens: 7, ReasoningTokens: 3},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID     string `json:"id"`
+		Object string `json:"object"`
+		Status string `json:"status"`
+		Model  string `json:"model"`
+		Store  bool   `json:"store"`
+		Output []struct {
+			Type      string `json:"type"`
+			ID        string `json:"id"`
+			Role      string `json:"role"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+			Content   []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			Summary []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"summary"`
+		} `json:"output"`
+		OutputText string `json:"output_text"`
+		Usage      struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+			OutDetails   struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"output_tokens_details"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Object != "response" || body.Status != "completed" || body.Model != "gpt-4o" {
+		t.Fatalf("body = %s", w.Body.String())
+	}
+	if !strings.HasPrefix(body.ID, "resp_dr_") {
+		t.Errorf("id = %q; it must be legible as non-resumable", body.ID)
+	}
+	if body.Store {
+		t.Error("store = true; Darkrouter persists nothing and the client must be told")
+	}
+	if len(body.Output) != 3 {
+		t.Fatalf("output = %+v", body.Output)
+	}
+	if body.Output[0].Type != "reasoning" || body.Output[0].Summary[0].Text != "pondering" {
+		t.Errorf("reasoning item = %+v", body.Output[0])
+	}
+	if body.Output[1].Type != "message" || body.Output[1].Role != "assistant" ||
+		body.Output[1].Content[0].Type != "output_text" ||
+		body.Output[1].Content[0].Text != "the answer" {
+		t.Errorf("message item = %+v", body.Output[1])
+	}
+	if body.Output[2].Type != "function_call" || body.Output[2].CallID != "call_1" ||
+		body.Output[2].Name != "f" || body.Output[2].Arguments != `{"a":1}` {
+		t.Errorf("function call item = %+v", body.Output[2])
+	}
+	if body.OutputText != "the answer" {
+		t.Errorf("output_text = %q; the SDK convenience field is wrong", body.OutputText)
+	}
+	if body.Usage.InputTokens != 5 || body.Usage.OutputTokens != 7 ||
+		body.Usage.TotalTokens != 12 || body.Usage.OutDetails.ReasoningTokens != 3 {
+		t.Errorf("usage = %+v; Responses names these differently from chat", body.Usage)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content-type = %q", ct)
+	}
+}
+
+func TestWriteResponsesReportsATruncatedAnswerAsIncomplete(t *testing.T) {
+	// A client that reads status "completed" stops asking. A length-truncated
+	// answer is not completed, and Responses has a field that says so.
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{
+		ID: "x", Model: "m",
+		Content:    []ir.ContentBlock{{Type: ir.BlockText, Text: "half an ans"}},
+		StopReason: ir.StopMaxTokens,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Status     string `json:"status"`
+		Incomplete *struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "incomplete" {
+		t.Errorf("status = %q", body.Status)
+	}
+	if body.Incomplete == nil || body.Incomplete.Reason != "max_output_tokens" {
+		t.Errorf("incomplete_details = %+v", body.Incomplete)
+	}
+}
+
+func TestWriteResponsesReportsAFilteredAnswerAsIncomplete(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{
+		ID: "x", Model: "m", StopReason: ir.StopContentFilter,
+		Content: []ir.ContentBlock{{Type: ir.BlockText, Text: ""}},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Status     string `json:"status"`
+		Incomplete *struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.Status != "incomplete" || body.Incomplete == nil ||
+		body.Incomplete.Reason != "content_filter" {
+		t.Errorf("status = %q, incomplete = %+v", body.Status, body.Incomplete)
+	}
+}
+
+func TestWriteResponsesEchoesTheRequiredRequestFields(t *testing.T) {
+	// tools, tool_choice and parallel_tool_calls have no default in the SDK's
+	// Response model; a body omitting them fails strict validation, and the
+	// Agents SDK reads response.tools directly.
+	echo := parseResponsesEcho(t, `{"model":"m","input":"hi","instructions":"be terse",
+	  "temperature":0.25,"top_p":0.9,"parallel_tool_calls":false,
+	  "tools":[{"type":"function","name":"f","parameters":{"type":"object"}}],
+	  "tool_choice":"required"}`)
+
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}, echo); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"tools", "tool_choice", "parallel_tool_calls",
+		"error", "incomplete_details", "instructions", "metadata", "temperature", "top_p"} {
+		if _, present := body[k]; !present {
+			t.Errorf("response omits %q, which the SDK model requires", k)
+		}
+	}
+	tools, _ := body["tools"].([]any)
+	if len(tools) != 1 {
+		t.Errorf("tools = %v; the client's own array must be echoed", body["tools"])
+	}
+	if body["tool_choice"] != "required" {
+		t.Errorf("tool_choice = %v; it must be echoed verbatim, not translated", body["tool_choice"])
+	}
+	if body["parallel_tool_calls"] != false || body["instructions"] != "be terse" {
+		t.Errorf("body = %s", w.Body.String())
+	}
+	if body["temperature"].(float64) != 0.25 || body["top_p"].(float64) != 0.9 {
+		t.Errorf("sampling echo = %v / %v", body["temperature"], body["top_p"])
+	}
+}
+
+func TestWriteResponsesWithNoEchoStillCarriesTheRequiredFields(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["parallel_tool_calls"] != true || body["tool_choice"] != "auto" {
+		t.Errorf("defaults = %v / %v", body["parallel_tool_calls"], body["tool_choice"])
+	}
+	if tools, ok := body["tools"].([]any); !ok || len(tools) != 0 {
+		t.Errorf("tools = %v, want an empty array rather than null", body["tools"])
+	}
+}
+
+func TestWriteResponsesEmitsAnEmptyOutputArrayNotNull(t *testing.T) {
+	// An SDK ranges over output. null there is a crash rather than no items.
+	w := httptest.NewRecorder()
+	if err := WriteResponses(w, &ir.Response{ID: "x", Model: "m"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.Body.String(), `"output":[]`) {
+		t.Errorf("body = %s", w.Body.String())
 	}
 }
