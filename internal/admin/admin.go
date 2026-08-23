@@ -96,6 +96,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/providers", s.requireCSRF(s.handleCreateProvider))
 	s.mux.HandleFunc("PATCH /api/providers/{id}", s.requireCSRF(s.handlePatchProvider))
 	s.mux.HandleFunc("DELETE /api/providers/{id}", s.requireCSRF(s.handleDeleteProvider))
+	s.mux.HandleFunc("POST /api/providers/{id}/test", s.requireCSRF(s.handleProbe))
 	s.mux.HandleFunc("POST /api/providers/{id}/keys", s.requireCSRF(s.handleAddCredential))
 	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
 
