@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -361,4 +364,129 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// RequestTrace is one request in full: what the router produced, what it
+// rejected, and what actually ran.
+//
+// Candidates, Skips and Attempts are three different facts and the drawer shows
+// all three. Attempts alone explains a failover; the other two explain the
+// routing decision, which is the harder question and the reason spec §6 calls
+// this screen the one worth building.
+type RequestTrace struct {
+	RequestSummary
+
+	Candidates  []string
+	Skips       []string
+	Warnings    []string
+	SurfaceMeta map[string]any
+
+	ResponseBytes       int64
+	ResponseContentType string
+
+	Attempts []AttemptRecord
+	// Bodies is always non-nil. capture.bodies has a retention sweep and no
+	// writer, so this is empty today; the query exists so the drawer works the
+	// day a writer lands, and the empty case renders as "not captured".
+	Bodies []RequestBody
+}
+
+// RequestBody is one captured body. The table stores request and response in
+// two columns of one row; they are presented as a list because the drawer
+// ranges over them and a two-field struct would need the same branch twice.
+type RequestBody struct {
+	Kind    string
+	Content string
+}
+
+// RequestTrace reads one request with everything attached.
+//
+// A miss is reported as false rather than as an error: an operator following a
+// stale link must learn the row is gone, and a 500 would say the server broke.
+func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, error) {
+	var tr RequestTrace
+	var traceJSON, warningsJSON, metaJSON string
+
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT id, ts, dialect, surface, requested_model, resolved_alias,
+		        final_provider_id, final_model, status,
+		        tokens_in, tokens_out, cost_micros, ttft_ms, total_ms, error_code,
+		        candidates_json, warnings_json, surface_meta_json,
+		        response_bytes, response_content_type
+		   FROM requests WHERE id = ?`, id).Scan(
+		&tr.ID, &tr.TSMs, &tr.Dialect, &tr.Surface, &tr.RequestedModel, &tr.ResolvedAlias,
+		&tr.FinalProviderID, &tr.FinalModel, &tr.Status,
+		&tr.TokensIn, &tr.TokensOut, &tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
+		&traceJSON, &warningsJSON, &metaJSON,
+		&tr.ResponseBytes, &tr.ResponseContentType)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read trace %q: %w", id, err)
+	}
+
+	// Candidates and skips travel in one column, as the log writer packs them.
+	var trace struct {
+		Candidates []string `json:"candidates"`
+		Skips      []string `json:"skips"`
+	}
+	if err := json.Unmarshal([]byte(traceJSON), &trace); err != nil {
+		return nil, false, fmt.Errorf("read trace %q: %w", id, err)
+	}
+	tr.Candidates, tr.Skips = trace.Candidates, trace.Skips
+	if tr.Candidates == nil {
+		tr.Candidates = []string{}
+	}
+	if tr.Skips == nil {
+		tr.Skips = []string{}
+	}
+	if err := json.Unmarshal([]byte(warningsJSON), &tr.Warnings); err != nil {
+		return nil, false, fmt.Errorf("read trace %q: %w", id, err)
+	}
+	if tr.Warnings == nil {
+		tr.Warnings = []string{}
+	}
+	if err := json.Unmarshal([]byte(metaJSON), &tr.SurfaceMeta); err != nil {
+		return nil, false, fmt.Errorf("read trace %q: %w", id, err)
+	}
+
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error
+		   FROM request_attempts WHERE request_id = ? ORDER BY seq`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
+	}
+	defer rows.Close()
+	tr.Attempts = []AttemptRecord{}
+	for rows.Next() {
+		var a AttemptRecord
+		if err := rows.Scan(&a.Seq, &a.ProviderID, &a.KeyID, &a.Model,
+			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error); err != nil {
+			return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
+		}
+		tr.Attempts = append(tr.Attempts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+
+	// Non-nil so the drawer can range over it. Empty today: capture.bodies has
+	// no writer, which phase 5 recorded and phase 7 does not change.
+	tr.Bodies = []RequestBody{}
+	var reqBody, respBody string
+	berr := d.Read.QueryRowContext(ctx,
+		`SELECT request_json, response_json FROM request_bodies WHERE request_id = ?`,
+		id).Scan(&reqBody, &respBody)
+	if berr == nil {
+		if reqBody != "" {
+			tr.Bodies = append(tr.Bodies, RequestBody{Kind: "request", Content: reqBody})
+		}
+		if respBody != "" {
+			tr.Bodies = append(tr.Bodies, RequestBody{Kind: "response", Content: respBody})
+		}
+	} else if !errors.Is(berr, sql.ErrNoRows) {
+		return nil, false, fmt.Errorf("read bodies %q: %w", id, berr)
+	}
+	return &tr, true, nil
 }

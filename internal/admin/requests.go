@@ -88,3 +88,50 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, body)
 }
+
+func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
+	tr, ok, err := s.deps.DB.RequestTrace(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		// 404 rather than an empty trace: an operator following a stale link
+		// must learn the row is gone rather than see a blank drawer that looks
+		// like a rendering bug.
+		writeError(w, http.StatusNotFound, "no such request")
+		return
+	}
+
+	attempts := make([]map[string]any, 0, len(tr.Attempts))
+	for _, a := range tr.Attempts {
+		attempts = append(attempts, map[string]any{
+			"seq": a.Seq, "provider": a.ProviderID, "key_label": a.KeyID,
+			"model": a.Model, "outcome": a.Outcome, "status_code": a.StatusCode,
+			"latency_ms": a.LatencyMs, "error": a.Error,
+		})
+	}
+	bodies := make([]map[string]any, 0, len(tr.Bodies))
+	for _, b := range tr.Bodies {
+		bodies = append(bodies, map[string]any{"kind": b.Kind, "content": b.Content})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": tr.ID, "ts_ms": tr.TSMs, "dialect": tr.Dialect, "surface": tr.Surface,
+		"model": tr.RequestedModel, "alias": tr.ResolvedAlias,
+		"provider": tr.FinalProviderID, "final_model": tr.FinalModel,
+		"status": tr.Status, "error_code": tr.ErrorCode,
+		"tokens_in": tr.TokensIn, "tokens_out": tr.TokensOut,
+		"cost_micros": tr.CostMicros, "ttft_ms": tr.TTFTMs, "total_ms": tr.TotalMs,
+		// Three separate lists, deliberately. Attempts alone explains a
+		// failover; candidates and skips explain the routing decision.
+		"candidates":            tr.Candidates,
+		"skips":                 tr.Skips,
+		"attempts":              attempts,
+		"warnings":              tr.Warnings,
+		"surface_meta":          tr.SurfaceMeta,
+		"response_bytes":        tr.ResponseBytes,
+		"response_content_type": tr.ResponseContentType,
+		"bodies":                bodies,
+	})
+}
