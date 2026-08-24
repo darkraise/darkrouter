@@ -9,6 +9,8 @@
  */
 
 :root {
+  color-scheme: dark;
+
   --ground: #101214;
   --rail: #14171A;
   --overlay: #22262A;
@@ -51,6 +53,8 @@
 }
 
 body.theme-light {
+  color-scheme: light;
+
   --ground: #E5E8EB;
   --rail: #EEF0F2;
   --overlay: #FFFFFF;
@@ -106,8 +110,10 @@ body.pins-on .pin {
   height: 16px;
   padding: 0 3px;
   border-radius: var(--radius);
-  background: var(--trace-fill);
-  color: var(--ground);
+  /* accent-ink/well clears 4.5:1 in both modes (dark ~9.4:1, light ~6:1);
+     trace-fill/ground only managed ~2.2:1 in light mode. */
+  background: var(--accent-ink);
+  color: var(--well);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
   font-size: 10px;
@@ -122,6 +128,27 @@ body.pins-on .pin {
   font-size: 12.5px;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
+}
+
+/* "Micro data" role: the smallest data face, for things like the rank
+   column or a stat's fine print, still tabular since it is still a number. */
+.micro {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* "Emphasis data" role: table/body data with more visual weight, e.g. a
+   value a screen wants to draw the eye to without promoting it to a
+   30px readout. */
+.data-emph {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
 
 .prose {
@@ -150,6 +177,20 @@ body.pins-on .pin {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--legend);
+}
+
+/* "Section title" role: a panel or block header, one step up from
+   .legend-caps in size and down in tracking. Without this class a later
+   screen's panel headers would need inline styles, which is how a type
+   scale erodes one screen at a time. */
+.section-title {
+  margin: 0 0 8px;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
 }
 
 .readout {
@@ -241,7 +282,10 @@ kbd {
 
 /* Row highlight animates opacity on a full-bleed overlay layer, not the
    background-color itself — background-color never transitions in this
-   product; opacity is the only animated property on hover. */
+   product; opacity is the only animated property on hover. A positioned
+   pseudo-element paints above in-flow text, so the target opacity is a
+   subtle wash (.06), not 1 — at 1 it is an opaque slab that covers the
+   row's own content instead of tinting it. */
 .row::after {
   content: "";
   position: absolute;
@@ -251,7 +295,7 @@ kbd {
   pointer-events: none;
   transition: opacity var(--dur-hover) ease;
 }
-.row:hover::after { opacity: 1; }
+.row:hover::after { opacity: 0.06; }
 
 /* --- State pip -----------------------------------------------------
    A provider identity pip: what a provider IS. Colour comes from a
@@ -310,22 +354,27 @@ kbd {
   background: var(--hairline);
 }
 
+/* All four states share one 7px silhouette footprint so the gutter column
+   never jitters between rows, and split into two families: filled means an
+   attempt happened (served or failed), hollow means it did not (skipped or
+   cooling). Silhouette carries the meaning in greyscale; colour is a second
+   channel on top of it, never the only one. */
 .mark {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: var(--radius);
   background: var(--bezel);
 }
-/* Passed over without an attempt: neither a routing decision nor a health
-   report, so it carries no colour at all. */
-.mark-skipped { background: var(--ink-muted); opacity: 0.45; }
+/* Passed over without an attempt: hollow, 1px --bezel stroke, no fill —
+   neither a routing decision nor a health report, so it carries no state
+   colour, and its hollow silhouette matches "no attempt occurred" rather
+   than the filled attempt outcomes below. */
+.mark-skipped { background: transparent; border: 1px solid var(--bezel); }
 /* The one other place amber is allowed, per the colour-discipline rule. */
 .mark-cooling {
   background: transparent;
   border: 2px solid var(--state-cooling);
-  width: 6px;
-  height: 6px;
 }
 /* This attempt errored — an outcome for that provider, not a routing
    choice, so it takes the failed state colour. */
@@ -422,13 +471,19 @@ kbd {
   opacity: 0.75;
   transition: opacity var(--dur-hover) ease;
 }
-.rail-group .rail-item:first-child { border-top: none; }
+.rail-group .rail-item:first-of-type { border-top: none; }
 .rail-item:hover,
 .rail-item[data-active="true"] { opacity: 1; color: var(--ink); }
 .rail-item[data-active="true"] { color: var(--accent-ink); }
 
+/* Sits directly in .rail, not inside a .rail-group, and .rail carries no
+   horizontal padding — so the -12px left/right margin .rail-item uses to
+   cancel a group's padding has nothing to cancel here and would bleed past
+   both edges instead. Zero it out; .rail's own lack of padding already puts
+   this item flush with the rail edge, which is what the cancellation would
+   have produced anyway. */
 .rail-settings {
-  margin-top: auto;
+  margin: auto 0 0;
   padding-top: var(--section-pad);
   border-top: 1px solid var(--hairline);
 }

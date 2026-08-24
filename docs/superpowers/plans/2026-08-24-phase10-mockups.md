@@ -317,11 +317,10 @@ FRAGMENTS = HERE / "fragments"
 
 # Colour lives in darkrouter-ui.css. A hex in a fragment is a value that
 # escaped the token system and will not follow the light-mode swap.
-# A raw colour hex only appears in a CSS value position — after whitespace, a
-# colon, a comma or a semicolon. Requiring that keeps SVG refs like
-# url(#fade) and anchors like href="#dead" out, since hex-letter ids are
-# ordinary and blocking them would be a gate that cries wolf.
-HEX = re.compile(r"(?<=[\s:,;(])(?<!url\()#[0-9a-fA-F]{3,8}\b")
+# A raw colour hex is any # literal that is not an in-page reference. Excluding
+# url(#…) and href="#…" keeps hex-letter SVG ids and anchors — fade, beef,
+# cafe — out, without exempting fill="#FF0000", which is the real sin.
+HEX = re.compile(r"""(?<!url\()(?<!href=")(?<!href=')#[0-9a-fA-F]{3,8}\b""")
 
 # Attributes that fetch, wherever they appear. The optional scheme catches
 # protocol-relative URLs, which fetch just as happily as an absolute one.
@@ -346,8 +345,15 @@ MAX_FONT_PX = 30.0
 
 
 def class_token(name: str) -> re.Pattern:
-    """Match one class among several. `class="legend prose"` still counts."""
-    return re.compile(rf'class\s*=\s*["\'][^"\']*\b{name}\b[^"\']*["\']')
+    """Match one class among several.
+
+    The delimiter must exclude the hyphen as well as word characters: a plain
+    \b sits at a hyphen, so "legend" would match "legend-caps" and a screen
+    with three group labels reads as having four legends.
+    """
+    return re.compile(
+        rf'class\s*=\s*["\'][^"\']*(?<![\w-]){name}(?![\w-])[^"\']*["\']'
+    )
 
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -425,9 +431,9 @@ def check_fragment(path: Path) -> list[str]:
     if 'data-screen-title=' not in text:
         problems.append(f"{path.name}: missing data-screen-title")
 
-    for forbidden in ("<html", "<head", "<body", "<style"):
-        if forbidden in text.lower():
-            problems.append(f"{path.name}: fragment contains {forbidden}> — fragments are sections only")
+    for forbidden in ("html", "head", "body", "style"):
+        if re.search(rf"<{forbidden}\b", text, re.IGNORECASE):
+            problems.append(f"{path.name}: fragment contains <{forbidden}> — fragments are sections only")
 
     return problems
 
@@ -530,10 +536,45 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build
 import qa
 
+HERE = Path(__file__).resolve().parents[1]
+FRAGMENTS = HERE / "fragments"
+
+# Two fragments that deliberately define the SAME gradient id. Unsuffixed they
+# collide in the assembled document and the second paints with the first one's
+# gradient, which is the failure suffix_svg_ids exists to prevent. The id must
+# not look like a hex colour or the gate flags it.
+_FIXTURE = """<section class="screen" id="s-9{n}-{slug}" data-screen-title="{slug}">
+  <p class="legend">{slug}</p>
+  <b class="pin" data-pin="1">1</b>
+  <svg width="10" height="10" aria-hidden="true">
+    <defs><linearGradient id="graticule"><stop offset="0"/></linearGradient></defs>
+    <rect width="10" height="10" fill="url(#graticule)"/>
+  </svg>
+</section>
+"""
+
 
 class TestBuild(unittest.TestCase):
     def setUp(self):
+        FRAGMENTS.mkdir(exist_ok=True)
+        self.written = []
+        for n, slug in ((0, "alpha"), (1, "beta")):
+            path = FRAGMENTS / f"9{n}-{slug}.html"
+            self.assertFalse(path.exists(), f"{path.name} would clobber a real fragment")
+            path.write_text(_FIXTURE.format(n=n, slug=slug), encoding="utf-8")
+            self.written.append(path)
         self.index, self.artifact = build.build()
+
+    def tearDown(self):
+        for path in self.written:
+            path.unlink(missing_ok=True)
+        # Leave the built files matching the real fragment set rather than
+        # carrying this test's scratch screens into a committed index.
+        if any(FRAGMENTS.glob("*.html")):
+            build.build()
+        else:
+            (HERE / "index.html").unlink(missing_ok=True)
+            (HERE / "artifact.html").unlink(missing_ok=True)
 
     def test_build_produces_both_outputs(self):
         self.assertTrue(self.index.exists())
@@ -570,10 +611,20 @@ class TestBuild(unittest.TestCase):
         self.assertNotIn("fonts.googleapis.com", text)
 
     def test_svg_ids_are_suffixed_per_screen(self):
-        # Two screens may each define a gradient called "fade"; unsuffixed they
-        # collide in one document and the second silently renders the first.
-        problems = [p for p in qa.check_index(self.index) if "duplicate id" in p]
-        self.assertEqual(problems, [])
+        text = self.index.read_text(encoding="utf-8")
+        self.assertIn('id="graticule--s-90-alpha"', text)
+        self.assertIn('id="graticule--s-91-beta"', text)
+        self.assertIn("url(#graticule--s-90-alpha)", text)
+        self.assertIn("url(#graticule--s-91-beta)", text)
+        self.assertEqual(
+            [], [p for p in qa.check_index(self.index) if "duplicate id" in p]
+        )
+
+    def test_every_fragment_reaches_the_built_index(self):
+        text = self.index.read_text(encoding="utf-8")
+        self.assertEqual(2, text.count('class="screen"'))
+        self.assertIn("alpha", text)
+        self.assertIn("beta", text)
 
     def test_built_index_passes_qa(self):
         self.assertEqual(qa.check_index(self.index), [])
@@ -703,7 +754,7 @@ Create `docs/ux/mockups/_shell.html`. The two toggles live here and nowhere else
 
 ```html
 <!doctype html>
-<html lang="en" data-mode="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -725,10 +776,7 @@ Create `docs/ux/mockups/_shell.html`. The two toggles live here and nowhere else
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
         var k = e.key.toLowerCase();
         if (k === "a") document.body.classList.toggle("pins-on");
-        if (k === "t") {
-          var light = document.body.classList.toggle("theme-light");
-          document.documentElement.setAttribute("data-mode", light ? "light" : "dark");
-        }
+        if (k === "t") document.body.classList.toggle("theme-light");
       });
     </script>
   </body>
