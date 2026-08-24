@@ -743,6 +743,81 @@ credential through the API already reloads.
 
 No process was left running and no port was held.
 
+### 10. Phase 9 verification against fakes — done
+
+Task 17's brief calls for a live check against Groq. This environment has no
+`GROQ_KEY` and no local config carrying one — a missing secret, not a network
+problem — and spending the user's paid vendor quota to work around that was
+ruled out. **What follows ran against a locally built binary and a local fake
+upstream. No vendor was contacted, and this section proves the wiring, not
+that Groq accepts the payload.** That gap is unlike phase 8's: phase 9 is
+otherwise fully verifiable live, and remains unrun live for want of a
+credential rather than for want of a reachable protocol.
+
+Run on 2026-08-24. `CGO_ENABLED=0 go build ./cmd/darkrouter` produced a
+**35 MB** static binary, started for real — a background OS process bound to
+real TCP listeners, config loaded from a real YAML file, the admin API driven
+over real HTTP with a real login and session cookie — rather than through
+`internal/e2e`'s in-process `httptest` harness. The fake upstream was a small
+standalone `net/http` server (not `httptest`, which cannot run outside a test
+binary) on port 19090, answering `/v1/chat/completions` (unary and SSE) and
+`/v1/messages` (Anthropic-shaped), and exposing `/_seen` to return the last
+request's headers and body verbatim.
+
+Three providers were configured: `fake-oai` (`openaicompat`, serving
+`fake-model`, kept healthy throughout so the passthrough checks below are
+unaffected by the failover check), `broken` (`openaicompat`, base URL
+`127.0.0.1:1`, unreachable by construction) and `fake-fallback` (`anthropic`),
+the latter two both serving a separate `fallback-model` so the failover check
+cannot accidentally land back on `fake-oai` and take the fast path a second
+time.
+
+- **The fast path is confirmed by trace, not by status code.** An
+  OpenAI-shaped request to `fake-oai` returned 200 with
+  `X-Darkrouter-Attempts: 1`, and `GET /api/requests/{id}` read back
+  `attempts[0].path == "passthrough"`.
+- **An unmodelled parameter reached the provider intact.** `seed: 424242`,
+  which Darkrouter's IR does not model anywhere in `internal/ir` or
+  `internal/edge/openai`, appeared verbatim in the fake's recorded body
+  (`"seed":424242`) and in its reply (`x_fake_saw_seed: 424242`, a value the
+  fake can only have produced by reading the field back out of what it
+  received).
+- **The inbound proxy credential never reached the upstream; the target's own
+  key did.** The fake recorded `Authorization: Bearer sk-fake-upstream-key`
+  (the provider's configured credential) on every call, never the client's
+  `Bearer proxy-throwaway-token`; on the anthropic-kind fallback it recorded
+  `X-Api-Key: sk-fake-fallback-key` and no `Authorization` header at all.
+- **Streamed usage and the stripped-versus-kept pair both hold.** A stream
+  request with no `stream_options` recorded `tokens_in: 12, tokens_out: 5` on
+  the request row, and the client's own SSE body (`stream1.txt`) carried zero
+  chunks with a `usage` key — while the fake's `/_seen` confirmed Darkrouter
+  had injected `"stream_options":{"include_usage":true}` upstream regardless.
+  The same request repeated with `"stream_options":{"include_usage":true}` in
+  the client's own body produced an SSE stream (`stream2.txt`) carrying
+  exactly one `usage`-bearing chunk before `[DONE]`. That pair — absent by
+  default, present on request — is what distinguishes stripping from never
+  receiving; either result alone would have proved nothing.
+- **Failover still translates.** With `broken` at priority 99 in front of
+  `fake-fallback` at priority 1, the trace read `attempts[0]` as
+  `broken/passthrough/retryable_provider` (`dial tcp 127.0.0.1:1: connect:
+  connection refused`) and `attempts[1]` as `fake-fallback/ir/success/200`.
+  The client received a well-formed OpenAI-shaped completion
+  (`"hi from the fallback"`) even though the second attempt answered in
+  Anthropic's wire shape — the IR path translated it back correctly.
+
+**What did not run, and why.** Brief step 6 (timing ten unary requests through
+the gateway against ten direct calls) was not attempted: it exists to catch a
+network-latency confound against a real vendor, and a local fake on loopback
+has no TLS handshake or WAN latency to confound anything, so the measurement
+would say nothing this task's scope needs. Nothing else in the brief's
+substance was skipped, and nothing observed here failed — every check above
+passed on the first run, including the failover case, which is itself worth
+noting as absence of a finding rather than proof one could not exist.
+
+Both processes were tracked by PID from the moment they started. Both were
+killed at the end (`pkill -P` followed by `kill`), and `ss -ltnp` afterward
+showed no listener on 18080, 18081 or 19090.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |
