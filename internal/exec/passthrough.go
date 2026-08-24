@@ -1,6 +1,10 @@
 package exec
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -65,4 +69,72 @@ func presetRejectsStreamOptions(preset string) bool {
 		return false
 	}
 	return catalog.Embedded()[preset].HasQuirk("rejects-stream-options")
+}
+
+// ErrNoModelField means a body-carried dialect's body has no top-level model
+// key to rewrite. Task 9 turns it into a fall back to the IR path rather than a
+// client error: the IR parser produces a proper dialect-shaped message if the
+// body is genuinely invalid, and this function cannot tell the difference.
+var ErrNoModelField = errors.New("exec: passthrough body carries no model field")
+
+// rewriteForward applies master design §4.2's permitted body mutations and
+// returns the bytes to forward. injected reports whether stream_options was
+// added, which is what tells the response forwarder to strip the extra final
+// usage chunk the client never asked for.
+//
+// The guarantee is semantic preservation, not byte preservation: re-encoding
+// compacts whitespace, sorts top-level keys and collapses duplicate top-level
+// keys to the last. HTML escaping is the one consequential difference and it is
+// disabled. When nothing needs changing the original slice is returned
+// unmodified, which is the only path with exact byte fidelity — and the most
+// travelled one, because a client usually asks for the name the target serves.
+func rewriteForward(pt *edge.Passthrough, requested, target, kind string) ([]byte, bool, error) {
+	if pt.ModelField == "" {
+		// URL-carried. The model is not in the body, and no dialect in this
+		// group has a stream_options analogue, so the body is forwarded exactly
+		// as it arrived.
+		return pt.Body, false, nil
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(pt.Body, &top); err != nil {
+		return nil, false, err
+	}
+	if _, ok := top[pt.ModelField]; !ok {
+		return nil, false, ErrNoModelField
+	}
+
+	changed, injected := false, false
+	if requested != target {
+		name, err := json.Marshal(target)
+		if err != nil {
+			return nil, false, err
+		}
+		top[pt.ModelField] = name
+		changed = true
+	}
+	if kind == "openaicompat" && pt.Stream {
+		if _, ok := top["stream_options"]; !ok {
+			// Compatible providers report no stream usage unless asked, and
+			// without this token accounting is blind on the most-travelled
+			// route. Present-but-false is the client's own choice and is left
+			// alone, which also leaves the resulting chunks alone.
+			top["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+			changed, injected = true, true
+		}
+	}
+	if !changed {
+		return pt.Body, false, nil
+	}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	// Without this, <, > and & inside every RawMessage value are escaped —
+	// silently rewriting prompt text on every forwarded request.
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(top); err != nil {
+		return nil, false, err
+	}
+	// Encode appends a newline that no provider wants in a JSON body.
+	return bytes.TrimRight(buf.Bytes(), "\n"), injected, nil
 }

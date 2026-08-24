@@ -1,6 +1,9 @@
 package exec
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -144,4 +147,142 @@ func quirkPresetName(t *testing.T) string {
 	}
 	t.Cleanup(func() { delete(catalog.Embedded(), name) })
 	return name
+}
+
+func TestRewriteSwapsTheModelAndNothingElse(t *testing.T) {
+	pt := &edge.Passthrough{
+		Body: []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],` +
+			`"some_parameter_shipped_last_week":{"nested":true}}`),
+		ModelField: "model", Surface: ir.SurfaceLLM,
+	}
+	body, injected, err := rewriteForward(pt, "claude-sonnet-4-5", "claude-opus-4-5", "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if injected {
+		t.Error("stream_options injected on a non-openaicompat kind")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["model"] != "claude-opus-4-5" {
+		t.Errorf("model = %v", got["model"])
+	}
+	// The unmodelled parameter is the whole point of the phase.
+	if _, ok := got["some_parameter_shipped_last_week"]; !ok {
+		t.Error("an unmodelled top-level field was dropped")
+	}
+	if _, ok := got["stream_options"]; ok {
+		t.Error("a fourth mutation appeared")
+	}
+}
+
+func TestRewriteDoesNotEscapeHTMLSignificantCharacters(t *testing.T) {
+	// json.Marshal escapes <, > and & inside a RawMessage by default, which
+	// would silently rewrite prompt text on every forwarded request.
+	pt := &edge.Passthrough{
+		Body:       []byte(`{"model":"a","messages":[{"role":"user","content":"if x < y && y > z"}]}`),
+		ModelField: "model", Surface: ir.SurfaceLLM,
+	}
+	body, _, err := rewriteForward(pt, "a", "b", "openaicompat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte(`if x < y && y > z`)) {
+		t.Errorf("prompt text was escaped: %s", body)
+	}
+}
+
+func TestRewriteForwardsTheOriginalBytesWhenNothingChanges(t *testing.T) {
+	// The Claude Code case: the client already asked for the name the target
+	// serves, and a unary request needs no injection.
+	raw := []byte(`{"model":"claude-opus-4-5","messages":[{"role":"user","content":"hi"}]}`)
+	pt := &edge.Passthrough{Body: raw, ModelField: "model", Surface: ir.SurfaceLLM}
+
+	body, injected, err := rewriteForward(pt, "claude-opus-4-5", "claude-opus-4-5", "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if injected {
+		t.Error("injected on a unary request")
+	}
+	if &body[0] != &raw[0] {
+		t.Errorf("the body was re-encoded rather than forwarded\n got: %s\nwant: %s", body, raw)
+	}
+}
+
+func TestRewriteInjectsStreamOptionsOnlyWhenAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		body         string
+		kind         string
+		stream       bool
+		wantInjected bool
+	}{
+		{"absent on a streaming openaicompat request",
+			`{"model":"a","stream":true}`, "openaicompat", true, true},
+		{"already present, so the chunk is the client's",
+			`{"model":"a","stream":true,"stream_options":{"include_usage":true}}`,
+			"openaicompat", true, false},
+		{"present but disabled is still the client's choice",
+			`{"model":"a","stream":true,"stream_options":{"include_usage":false}}`,
+			"openaicompat", true, false},
+		{"unary needs no usage chunk", `{"model":"a"}`, "openaicompat", false, false},
+		{"anthropic has no such parameter", `{"model":"a","stream":true}`, "anthropic", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pt := &edge.Passthrough{
+				Body: []byte(tc.body), ModelField: "model",
+				Surface: ir.SurfaceLLM, Stream: tc.stream,
+			}
+			body, injected, err := rewriteForward(pt, "a", "a", tc.kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if injected != tc.wantInjected {
+				t.Errorf("injected = %v, want %v", injected, tc.wantInjected)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatal(err)
+			}
+			_, present := got["stream_options"]
+			if tc.kind == "openaicompat" && tc.stream && !present {
+				t.Error("a streaming openaicompat request must carry stream_options")
+			}
+		})
+	}
+}
+
+func TestRewriteLeavesAURLCarriedBodyUntouched(t *testing.T) {
+	raw := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	pt := &edge.Passthrough{Body: raw, Method: "generateContent", Surface: ir.SurfaceLLM, Stream: true}
+
+	body, injected, err := rewriteForward(pt, "gemini-2.0-flash", "gemini-2.5-pro", "gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if injected {
+		t.Error("Gemini has no stream_options analogue")
+	}
+	if &body[0] != &raw[0] {
+		t.Errorf("a URL-carried body was rewritten: %s", body)
+	}
+}
+
+func TestRewriteReportsAMissingModelField(t *testing.T) {
+	pt := &edge.Passthrough{
+		Body: []byte(`{"messages":[]}`), ModelField: "model", Surface: ir.SurfaceLLM,
+	}
+	if _, _, err := rewriteForward(pt, "a", "b", "openaicompat"); !errors.Is(err, ErrNoModelField) {
+		t.Errorf("err = %v, want ErrNoModelField", err)
+	}
+}
+
+func TestRewriteReportsMalformedJSON(t *testing.T) {
+	pt := &edge.Passthrough{Body: []byte(`{"model":`), ModelField: "model", Surface: ir.SurfaceLLM}
+	if _, _, err := rewriteForward(pt, "a", "b", "openaicompat"); err == nil {
+		t.Fatal("want an error for a malformed body")
+	}
 }
