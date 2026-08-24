@@ -74,7 +74,9 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 		for _, p := range c.Content.Parts {
 			// A part carrying only a thoughtSignature yields an empty thinking
 			// delta on the IR path, which is not content-bearing there either.
-			if p.Text != "" || len(p.FunctionCall) > 0 {
+			// A literal "functionCall": null decodes to a four-byte
+			// RawMessage, so its length alone cannot tell it from a real call.
+			if p.Text != "" || (len(p.FunctionCall) > 0 && string(p.FunctionCall) != "null") {
 				out.Content = true
 			}
 		}

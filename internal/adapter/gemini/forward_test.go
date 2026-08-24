@@ -68,6 +68,8 @@ func TestRecognizeEventOnCandidates(t *testing.T) {
 			`{"candidates":[{"content":{"role":"model","parts":[{"text":"hm","thought":true}]}}]}`, true},
 		{"a function call commits",
 			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"f","args":{}}}]}}]}`, true},
+		{"a literal functionCall null does not commit",
+			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":null}]}}]}`, false},
 		{"a bare thought signature does not commit",
 			`{"candidates":[{"content":{"role":"model","parts":[{"thoughtSignature":"sig"}]}}]}`, false},
 		{"a candidate with no parts does not commit",

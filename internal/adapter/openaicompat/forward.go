@@ -44,9 +44,13 @@ func copyForwardHeader(hr *http.Request, h http.Header) {
 type forwardChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content          string          `json:"content"`
-			ReasoningContent string          `json:"reasoning_content"`
-			ToolCalls        json.RawMessage `json:"tool_calls"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				Function struct {
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage *wireUsage      `json:"usage"`
@@ -69,8 +73,20 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 	}
 	out := adapter.RawEvent{}
 	for _, ch := range c.Choices {
-		if ch.Delta.Content != "" || ch.Delta.ReasoningContent != "" ||
-			len(ch.Delta.ToolCalls) > 0 {
+		// A name-only first tool_calls delta carries empty arguments, and a
+		// literal "tool_calls": null decodes to a slice of length zero — so
+		// neither trips this on its own. Phase 3's content definition is
+		// ToolInput != "", and matching it here keeps this path from
+		// committing one event earlier than the IR path does, the same
+		// parity the anthropic recognizer holds for its own three kinds.
+		toolContent := false
+		for _, tc := range ch.Delta.ToolCalls {
+			if tc.Function.Arguments != "" {
+				toolContent = true
+				break
+			}
+		}
+		if ch.Delta.Content != "" || ch.Delta.ReasoningContent != "" || toolContent {
 			out.Content = true
 			break
 		}
