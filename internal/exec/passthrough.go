@@ -49,9 +49,9 @@ func forwardable(dialect string, pt *edge.Passthrough, c router.Candidate,
 		return nil, false
 	}
 	if pt.Stream && c.Kind == "openaicompat" && presetRejectsStreamOptions(p.Preset) {
-		// The injection spec §5.2 requires would be rejected by this upstream,
-		// so its streaming requests take the IR path. Its unary requests are
-		// unaffected.
+		// The stream_options injection that spec §5.2 requires would be
+		// rejected by this upstream, so its streaming requests take the IR path.
+		// Its unary requests are unaffected.
 		return nil, false
 	}
 	return fw, true

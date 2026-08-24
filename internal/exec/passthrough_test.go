@@ -56,15 +56,24 @@ func TestEligibility(t *testing.T) {
 		},
 		{
 			// SigV4 signs a payload hash: the body must be materialized and
-			// signed, which forwarding it cannot be.
+			// signed, which forwarding it cannot be. This test stops earlier at the
+			// dialect map: anthropic maps to anthropic, not bedrock.
 			name: "bedrock is never eligible", dialect: "anthropic", pt: chatPassthrough(),
 			cand: router.Candidate{Kind: "bedrock"}, ad: bedrockadapter.New(), want: false,
 		},
 		{
-			// The Vertex URL encodes publisher and model together.
+			// The Vertex URL encodes publisher and model together. This test stops
+			// earlier at the dialect map: gemini maps to gemini, not vertex.
 			name: "vertex is never eligible", dialect: "gemini",
 			pt:   &edge.Passthrough{Body: []byte(`{}`), Method: "generateContent", Surface: ir.SurfaceLLM},
 			cand: router.Candidate{Kind: "vertex", Publisher: "google"}, ad: vertexadapter.New(), want: false,
+		},
+		{
+			// This isolates the fourth condition: matching dialect and kind, but the
+			// adapter does not implement Forwarder. This is the branch protecting the
+			// signed-body exclusion.
+			name: "a matching kind whose adapter cannot forward", dialect: "anthropic", pt: chatPassthrough(),
+			cand: router.Candidate{Kind: "anthropic"}, ad: bedrockadapter.New(), want: false,
 		},
 		{
 			// The Responses body is not a chat-completions body, whatever its
@@ -86,6 +95,11 @@ func TestEligibility(t *testing.T) {
 			dialect: "openai",
 			pt:      &edge.Passthrough{Body: []byte(`{}`), Surface: ir.SurfaceLLM},
 			cand:    router.Candidate{Kind: "openaicompat"}, ad: openaicompat.New(), want: false,
+		},
+		{
+			name: "both rewritable identifiers", dialect: "openai",
+			pt:   &edge.Passthrough{Body: []byte(`{}`), ModelField: "model", Method: "generateContent", Surface: ir.SurfaceLLM},
+			cand: router.Candidate{Kind: "openaicompat"}, ad: openaicompat.New(), want: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
