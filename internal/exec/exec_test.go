@@ -1553,6 +1553,56 @@ func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
 	}
 }
 
+func TestAPreCommit400RetryWarnsThatTheBodyWasTranslated(t *testing.T) {
+	// The retry drops the field that caused the rejection and then reports
+	// plain success. Spec §3 rests the fidelity argument on such a field being
+	// dropped "with a warning, which is honest", §10 requires the differential
+	// corpus to assert the IR path recorded one, and §11's second done
+	// criterion requires warnings "recorded for the dropped field". A client
+	// that sent a valid parameter its provider's plan does not cover otherwise
+	// gets a 200 and believes the parameter took effect.
+	//
+	// The warning cannot name the field: encoding/json discards unknown
+	// top-level keys at the edge parser, so by this point nothing knows what
+	// was lost. It can say the body was translated, which is what the client
+	// needs to know.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if bytes.Contains(raw, []byte("some_parameter_shipped_last_week")) {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error",
+				"message":"unexpected field"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	rec, w := runChat(t, up.URL, "anthropic",
+		`{"model":"target-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}],
+		  "some_parameter_shipped_last_week":{"nested":true}}`)
+
+	if w.Code != 200 {
+		t.Fatalf("the client got %d, want the IR retry to have served it: %s", w.Code, w.Body)
+	}
+	var found string
+	for _, got := range rec.Warnings {
+		if strings.Contains(got, "passthrough") {
+			found = got
+		}
+	}
+	if found == "" {
+		t.Fatalf("warnings = %v, want one recording that the forwarded body was "+
+			"rejected and translated instead", rec.Warnings)
+	}
+	if !strings.Contains(found, "translated") {
+		t.Errorf("warning = %q, want it to say the body was translated", found)
+	}
+}
+
 func TestAGeminiRequestRewritesTheURLAndNotTheBody(t *testing.T) {
 	var seen struct {
 		path, query string
