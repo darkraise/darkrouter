@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/sse"
 )
 
 func TestBuildForwardRewritesOnlyTheModelSegment(t *testing.T) {
@@ -53,5 +54,56 @@ func TestBuildForwardRejectsAnEmptyMethod(t *testing.T) {
 		&adapter.Forward{Body: []byte(`{}`), Header: http.Header{}})
 	if err == nil {
 		t.Fatal("want an error for a missing URL operation")
+	}
+}
+func TestRecognizeEventOnCandidates(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		data    string
+		content bool
+	}{
+		{"a text part commits",
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"He"}]}}]}`, true},
+		{"a thought part commits",
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"hm","thought":true}]}}]}`, true},
+		{"a function call commits",
+			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"f","args":{}}}]}}]}`, true},
+		{"a bare thought signature does not commit",
+			`{"candidates":[{"content":{"role":"model","parts":[{"thoughtSignature":"sig"}]}}]}`, false},
+		{"a candidate with no parts does not commit",
+			`{"candidates":[{"finishReason":"STOP"}]}`, false},
+		{"usage metadata alone does not commit",
+			`{"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := New().RecognizeEvent(sse.Event{Data: tc.data})
+			if got.Content != tc.content {
+				t.Errorf("Content = %v, want %v", got.Content, tc.content)
+			}
+		})
+	}
+}
+
+func TestRecognizeEventReportsUsageMetadata(t *testing.T) {
+	got := New().RecognizeEvent(sse.Event{Data: `{"candidates":[],"usageMetadata":
+		{"promptTokenCount":8,"candidatesTokenCount":2,"cachedContentTokenCount":3,
+		 "thoughtsTokenCount":4}}`})
+	if got.Usage == nil {
+		t.Fatal("no usage")
+	}
+	if got.Usage.InputTokens != 8 || got.Usage.OutputTokens != 2 ||
+		got.Usage.CacheReadTokens != 3 || got.Usage.ReasoningTokens != 4 {
+		t.Errorf("usage = %+v", *got.Usage)
+	}
+}
+
+func TestRecognizeEventReportsAPromptFeedbackBlock(t *testing.T) {
+	// Gemini's SSE has no error event type; a refusal arrives as a chunk
+	// carrying promptFeedback.blockReason, and before commit that is a
+	// provider answer rather than content.
+	got := New().RecognizeEvent(sse.Event{
+		Data: `{"promptFeedback":{"blockReason":"SAFETY"}}`})
+	if got.ErrPayload == "" {
+		t.Fatal("a blocked prompt was not recognized")
 	}
 }

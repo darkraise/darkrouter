@@ -3,10 +3,13 @@ package openaicompat
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/sse"
 )
 
 func (a *Adapter) BuildForward(ctx context.Context, t *adapter.Target, f *adapter.Forward) (*http.Request, error) {
@@ -33,6 +36,62 @@ func copyForwardHeader(hr *http.Request, h http.Header) {
 			hr.Header.Add(k, v)
 		}
 	}
+}
+
+// forwardChunk is the subset of a streamed chunk the recognizer reads. It is
+// separate from wireChunk in parse.go on purpose: that one exists to build IR,
+// this one exists to answer three questions without building anything.
+type forwardChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string          `json:"content"`
+			ReasoningContent string          `json:"reasoning_content"`
+			ToolCalls        json.RawMessage `json:"tool_calls"`
+		} `json:"delta"`
+	} `json:"choices"`
+	Usage *wireUsage      `json:"usage"`
+	Error json.RawMessage `json:"error"`
+}
+
+func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
+	if ev.Data == "" || ev.Data == sse.Done {
+		return adapter.RawEvent{}
+	}
+	var c forwardChunk
+	if json.Unmarshal([]byte(ev.Data), &c) != nil {
+		// An unparseable event is not a reason to stop forwarding: after
+		// commit the recognizer's opinion no longer matters, and before it a
+		// silent chunk is not evidence of a fault.
+		return adapter.RawEvent{}
+	}
+	if len(c.Error) > 0 && string(c.Error) != "null" {
+		return adapter.RawEvent{ErrPayload: ev.Data}
+	}
+	out := adapter.RawEvent{}
+	for _, ch := range c.Choices {
+		if ch.Delta.Content != "" || ch.Delta.ReasoningContent != "" ||
+			len(ch.Delta.ToolCalls) > 0 {
+			out.Content = true
+			break
+		}
+	}
+	if c.Usage != nil {
+		u := c.Usage.toIR()
+		out.Usage = &u
+		out.UsageOnly = len(c.Choices) == 0
+	}
+	return out
+}
+
+func (a *Adapter) RecognizeUsage(body []byte) *ir.Usage {
+	var env struct {
+		Usage *wireUsage `json:"usage"`
+	}
+	if json.Unmarshal(body, &env) != nil || env.Usage == nil {
+		return nil
+	}
+	u := env.Usage.toIR()
+	return &u
 }
 
 var _ adapter.Forwarder = (*Adapter)(nil)
