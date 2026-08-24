@@ -1,0 +1,192 @@
+/*
+ * Task 5 — Overview screen partial.
+ *
+ * New component classes this screen introduces: .config-banner (alarm
+ * strip), .live-strip/.live-tile (readout-over-sparkline tiles), .sparkline
+ * (svg trend line, reused by Task 9), .load-bar (per-tile refresh
+ * indicator), .health-grid/.health-tile (provider tiles, .health-tile
+ * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
+ * this screen composes .well/.table/.row/.chip/.mono/.readout/.unit/
+ * .micro/.data-emph/.section-title/.legend-caps/.spec-note/.region from
+ * darkrouter-ui.css unchanged.
+ */
+
+/* --- Region 1: config-invalid banner ----------------------------------
+   Same "value step + opacity wash" construction .row::after and
+   .ladder-row-served::after already use: a positioned pseudo-element
+   painting over in-flow text at low opacity, not a transitioning
+   background-color. --state-failed reports the system's own failure to
+   validate its config, not a provider or a routing decision, so it is a
+   legitimate third use of that token alongside pips and the ladder's
+   failed mark. */
+.config-banner {
+  position: relative;
+  padding: var(--section-pad);
+  border-bottom: 1px solid var(--state-failed);
+  border-radius: var(--radius);
+}
+.config-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.08;
+  pointer-events: none;
+}
+.config-banner-error {
+  margin: 4px 0;
+}
+.config-banner-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+/* --- Region 2: live strip ----------------------------------------------
+   Four equal wells; each stacks a window caption, the readout(s), and a
+   40px trend line. Grid rather than flex so all four sparklines share one
+   baseline regardless of how tall the readout line above them grows. */
+.live-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+}
+.live-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+.live-tile-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-height: 1.2em;
+}
+/* The latency tile's compound p50/p95 pair — two readouts sharing one
+   tile without either one claiming the tile's single primary value slot. */
+.live-tile-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+/* Region 6: the per-tile refresh indicator, sitting flush on the well's
+   own top inner edge. A track plus a narrower filled span rather than one
+   element with a background-position trick, so the determinate width is
+   a plain, inspectable percentage. */
+.load-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--hairline-subtle);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.load-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--trace);
+}
+
+/* svg.sparkline is sized by its box (40px tall, full tile width) and
+   stretched with preserveAspectRatio="none" on the element itself, so the
+   coordinate space of every polyline below can stay a fixed 0..100/0..40
+   regardless of the tile's actual rendered width. */
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin-top: auto;
+}
+.sparkline polyline {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+/* The area under the line, closed back to the baseline in the markup
+   (…,100,40 0,40) rather than filled via CSS, so the same points array
+   draws both the stroke and its wash. Neutral --ink-muted, not --trace —
+   a metric trend is neither a provider state nor a router verdict. */
+.sparkline polygon {
+  stroke: none;
+  fill: var(--ink-muted);
+  opacity: 0.08;
+}
+
+/* --- Region 3: provider health grid ------------------------------------ */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+}
+.health-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+.health-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health-tile-name {
+  color: var(--ink);
+}
+
+/* The one state on this screen only the operator can resolve. Same
+   wash construction as .config-banner, at tile scale — a second, smaller
+   instance of "the system is telling you it needs a human," not a new
+   idiom. */
+.health-tile-alert {
+  position: relative;
+  padding: 4px 6px;
+  border: 1px solid var(--state-failed);
+  border-radius: var(--radius);
+}
+.health-tile-alert::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.08;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.health-tile-alert-text {
+  position: relative;
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+/* --- Region 4: recent failovers -----------------------------------------
+   .row is reused verbatim from Task 3/4's .table, but every existing use
+   of it is a <div>; this is the first <a class="row">, so the browser's
+   default anchor underline needs cancelling the way .toc a already does
+   for its own anchor rows. */
+a.row {
+  text-decoration: none;
+}
+
+/* --- Region 5: ops footer -----------------------------------------------
+   Children set their own .mono face; this class only supplies the
+   hairline that separates the footer from the page above it and the
+   --legend colour every figure inherits unless it's the dropped counter
+   going amber. */
+.ops-footer {
+  margin: var(--gutter) 0 0;
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--hairline);
+  color: var(--legend);
+}
+.ops-footer-dropped[data-alert="true"] {
+  color: var(--state-cooling);
+}

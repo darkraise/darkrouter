@@ -371,7 +371,7 @@ kbd {
   min-width: 28px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
-  color: var(--ink-muted);
+  color: var(--legend);
   text-align: right;
 }
 /* A tick drawn into the spine's approach, not onto the spine itself — sits
@@ -422,10 +422,26 @@ kbd {
    colour, and its hollow silhouette matches "no attempt occurred" rather
    than the filled attempt outcomes below. */
 .mark-skipped { background: transparent; border: 1px solid var(--bezel); }
-/* The one other place amber is allowed, per the colour-discipline rule. */
+/* The one other place amber is allowed, per the colour-discipline rule.
+   A centre dot gives it a second, shape-based channel distinct from
+   .mark-skipped's plain hollow ring, since stroke weight alone (1px vs
+   2px) is the weakest pairing in the greyscale proof — the dot reads as
+   "something is still in there, waiting" even with the amber stripped. */
 .mark-cooling {
+  position: relative;
   background: transparent;
   border: 2px solid var(--state-cooling);
+}
+.mark-cooling::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
 }
 /* This attempt errored — an outcome for that provider, not a routing
    choice, so it takes the failed state colour. */
@@ -446,6 +462,17 @@ kbd {
    at a size step up from the ladder's own 7px so a dense column of them
    still reads as individual marks rather than a smear. */
 .mark-catalog { width: 9px; height: 9px; }
+
+/* The router expands one candidate per (provider, credential, model), so
+   a provider with two configured keys legitimately earns two rows. This
+   footnotes the second (and later) row rather than letting it read as an
+   accidental duplicate — legend weight, off to the side of the id. */
+.credential-tag {
+  margin-left: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--legend);
+}
 
 /* Solid means the row ended here; dashed means the router moved past it
    after a failure. A background gradient gives an exact 3px-on-3px dash
@@ -843,6 +870,802 @@ body.pins-on .pin-note { display: inline; }
   border-top: 1px solid var(--hairline-subtle);
 }
 
+/*
+ * Task 5 — Overview screen partial.
+ *
+ * New component classes this screen introduces: .config-banner (alarm
+ * strip), .live-strip/.live-tile (readout-over-sparkline tiles), .sparkline
+ * (svg trend line, reused by Task 9), .load-bar (per-tile refresh
+ * indicator), .health-grid/.health-tile (provider tiles, .health-tile
+ * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
+ * this screen composes .well/.table/.row/.chip/.mono/.readout/.unit/
+ * .micro/.data-emph/.section-title/.legend-caps/.spec-note/.region from
+ * darkrouter-ui.css unchanged.
+ */
+
+/* --- Region 1: config-invalid banner ----------------------------------
+   Same "value step + opacity wash" construction .row::after and
+   .ladder-row-served::after already use: a positioned pseudo-element
+   painting over in-flow text at low opacity, not a transitioning
+   background-color. --state-failed reports the system's own failure to
+   validate its config, not a provider or a routing decision, so it is a
+   legitimate third use of that token alongside pips and the ladder's
+   failed mark. */
+.config-banner {
+  position: relative;
+  padding: var(--section-pad);
+  border-bottom: 1px solid var(--state-failed);
+  border-radius: var(--radius);
+}
+.config-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.08;
+  pointer-events: none;
+}
+.config-banner-error {
+  margin: 4px 0;
+}
+.config-banner-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+/* --- Region 2: live strip ----------------------------------------------
+   Four equal wells; each stacks a window caption, the readout(s), and a
+   40px trend line. Grid rather than flex so all four sparklines share one
+   baseline regardless of how tall the readout line above them grows. */
+.live-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+}
+.live-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+.live-tile-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-height: 1.2em;
+}
+/* The latency tile's compound p50/p95 pair — two readouts sharing one
+   tile without either one claiming the tile's single primary value slot. */
+.live-tile-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+/* Region 6: the per-tile refresh indicator, sitting flush on the well's
+   own top inner edge. A track plus a narrower filled span rather than one
+   element with a background-position trick, so the determinate width is
+   a plain, inspectable percentage. */
+.load-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--hairline-subtle);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.load-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--trace);
+}
+
+/* svg.sparkline is sized by its box (40px tall, full tile width) and
+   stretched with preserveAspectRatio="none" on the element itself, so the
+   coordinate space of every polyline below can stay a fixed 0..100/0..40
+   regardless of the tile's actual rendered width. */
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin-top: auto;
+}
+.sparkline polyline {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+/* The area under the line, closed back to the baseline in the markup
+   (…,100,40 0,40) rather than filled via CSS, so the same points array
+   draws both the stroke and its wash. Neutral --ink-muted, not --trace —
+   a metric trend is neither a provider state nor a router verdict. */
+.sparkline polygon {
+  stroke: none;
+  fill: var(--ink-muted);
+  opacity: 0.08;
+}
+
+/* --- Region 3: provider health grid ------------------------------------ */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+}
+.health-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+.health-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health-tile-name {
+  color: var(--ink);
+}
+
+/* The one state on this screen only the operator can resolve. Same
+   wash construction as .config-banner, at tile scale — a second, smaller
+   instance of "the system is telling you it needs a human," not a new
+   idiom. */
+.health-tile-alert {
+  position: relative;
+  padding: 4px 6px;
+  border: 1px solid var(--state-failed);
+  border-radius: var(--radius);
+}
+.health-tile-alert::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.08;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.health-tile-alert-text {
+  position: relative;
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+/* --- Region 4: recent failovers -----------------------------------------
+   .row is reused verbatim from Task 3/4's .table, but every existing use
+   of it is a <div>; this is the first <a class="row">, so the browser's
+   default anchor underline needs cancelling the way .toc a already does
+   for its own anchor rows. */
+a.row {
+  text-decoration: none;
+}
+
+/* --- Region 5: ops footer -----------------------------------------------
+   Children set their own .mono face; this class only supplies the
+   hairline that separates the footer from the page above it and the
+   --legend colour every figure inherits unless it's the dropped counter
+   going amber. */
+.ops-footer {
+  margin: var(--gutter) 0 0;
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--hairline);
+  color: var(--legend);
+}
+.ops-footer-dropped[data-alert="true"] {
+  color: var(--state-cooling);
+}
+
+/*
+ * Task 6 — the Requests log ("operate/requests").
+ *
+ * New vocabulary this screen introduces for reuse by Tasks 9 and 12:
+ * .filter-bar, .combo (+ trigger/menu/option/check), .segmented,
+ * .time-range, .view-chip, .chip-failover, .chip-path, .newer-pill,
+ * .table-toolbar, .col-menu, and the .col-* column-width helpers the
+ * request table's header and rows share. Everything else (.table, .row,
+ * .chip, .control, .well, .panel, .legend-caps, .micro, .prose) is reused
+ * as-is from darkrouter-ui.css.
+ */
+
+/* --- Saved views --------------------------------------------------- */
+
+.saved-views {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--section-pad);
+}
+
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.view-chip:hover { opacity: 1; }
+/* Selection state, not provider identity or a routing verdict — the same
+   token the rail's own active item uses, so "selected" reads the same
+   everywhere in the chrome. */
+.view-chip[data-active="true"] {
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  background: var(--overlay);
+  opacity: 1;
+}
+
+/* --- Filter bar ------------------------------------------------------
+   Six real controls in a row, top-aligned so an open combobox or the
+   time-range menu grows downward inside its own column without pushing
+   or overlapping a sibling control — closed siblings just end 30px up
+   from wherever the tallest, open one does. */
+
+.filter-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gutter);
+}
+
+/* --- Combobox ----------------------------------------------------------- */
+
+.combo {
+  display: flex;
+  flex-direction: column;
+}
+
+.combo-trigger {
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: default;
+}
+
+.combo-chevron {
+  color: var(--legend);
+  font-size: 10px;
+}
+
+.combo-menu {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+.combo[data-open="true"] .combo-menu { display: flex; }
+
+.combo-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.combo-option:hover { opacity: 1; }
+
+.combo-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+}
+.combo-option[data-checked="true"] .combo-check,
+.col-menu-item[data-checked="true"] .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.combo-count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* --- Segmented control ----------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-h);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid var(--hairline-subtle);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.segmented-option:last-child { border-right: none; }
+.segmented-option[data-active="true"] {
+  color: var(--accent-ink);
+  background: var(--overlay);
+}
+
+/* --- Time-range picker ------------------------------------------------- */
+
+.time-range {
+  display: flex;
+  flex-direction: column;
+}
+
+.time-range-menu {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px;
+  width: 264px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+.time-range[data-open="true"] .time-range-menu { display: flex; }
+
+.time-range-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.time-range-preset {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.time-range-preset[data-active="true"] {
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  background: var(--well);
+}
+
+.time-range-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-subtle);
+}
+
+.time-range-input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* --- Ghost button --------------------------------------------------- */
+
+.control-ghost {
+  background: transparent;
+  border-color: var(--hairline-subtle);
+  color: var(--ink-muted);
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.control-ghost:hover { opacity: 1; }
+
+/* --- Table toolbar + column-visibility menu --------------------------- */
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.table-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.col-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 240px;
+  margin: 0 0 var(--gutter) auto;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+
+.col-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.col-menu-item:hover { opacity: 1; }
+.col-menu-item[data-checked="false"] { color: var(--ink-muted); }
+
+.col-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--hairline-subtle);
+}
+
+.col-menu-export { color: var(--accent-ink); }
+
+/* --- Request table -----------------------------------------------------
+   .table/.row are shared (darkrouter-ui.css); everything below is the
+   column geometry this screen's header and rows share. */
+
+.table-wrap { position: relative; }
+
+.row-head {
+  border-bottom-color: var(--hairline);
+}
+.row-head .legend-caps { margin: 0; }
+
+.col-time { flex: 0 0 84px; }
+.col-surface { flex: 0 0 84px; }
+.col-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.col-model-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-provider { flex: 0 0 88px; }
+.col-status { flex: 0 0 70px; }
+.col-attempts { flex: 0 0 64px; }
+.col-tokens { flex: 0 0 118px; }
+.col-latency { flex: 0 0 72px; }
+.col-right { text-align: right; }
+
+.status-success { color: var(--state-healthy); }
+.status-error { color: var(--state-failed); }
+
+.text-muted { color: var(--ink-muted); }
+
+/* Routing behaviour — how many candidates the router walked through
+   before this request landed — is what the ROUTER DECIDED, the same
+   split the ladder's --trace/state-colour rule already draws (see
+   .mark-served vs .mark-cooling in darkrouter-ui.css). No single
+   provider on these two rows is reported as cooling, so --state-cooling
+   would misstate what happened; --trace is the routing-verdict channel,
+   and a failover count is exactly that. */
+.chip-failover {
+  border-color: var(--trace);
+  color: var(--trace);
+}
+
+/* Dialect/path annotations — quiet facts about how the request was
+   handled, the same register --legend already carries for secondary
+   captions elsewhere in the system. */
+.chip-path { color: var(--legend); }
+
+/* --- Newer pill ----------------------------------------------------------
+   Floats astride the table's top edge on purpose — that seam is where a
+   queued-rows affordance belongs, not a layout accident. --accent-ink,
+   not --trace: this reports a UI/polling event, not a routing verdict. */
+.newer-pill {
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  background: var(--overlay);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--accent-ink);
+  z-index: 1;
+}
+
+/* --- Empty state ----------------------------------------------------- */
+
+.empty-well {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: var(--gutter);
+}
+
+/* Usage screen (fragments/05-usage.html) — "Graticule Bench".
+ *
+ * .chart-scope is the mandatory ramp override: darkraise-ui's generated
+ * five-colour categorical ramp emits orange-400 and lime-400 at positions 4
+ * and 5 with a sky accent, colliding with the reserved cooling/healthy
+ * colours. Every series here differentiates by FILL TREATMENT against one
+ * hue (--accent-ink) instead: solid, a 60% tint, a 45° hatch, a dot
+ * texture, and a stroked outline with no fill. Declared on an ancestor of
+ * every chart so it wins over any :root ramp by specificity of scope, not
+ * of selector.
+ */
+.chart-scope {
+  --chart-1: var(--accent-ink);
+  --chart-2: color-mix(in srgb, var(--accent-ink) 60%, transparent);
+  --chart-3: url(#usage-hatch);
+  --chart-4: url(#usage-dot);
+  --chart-5: transparent;
+}
+
+/* --- Page layout ------------------------------------------------------ */
+
+.usage-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+
+.usage-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+}
+
+.usage-charts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+
+.usage-tables {
+  display: flex;
+  gap: var(--gutter);
+  align-items: flex-start;
+}
+.usage-tables > div { flex: 1 1 0; min-width: 0; }
+
+/* The per-screen caption already claims .legend, so the footnote — sans,
+   --legend colour, per spec §6.4/§8.3 — gets its own class rather than a
+   second .legend instance, which qa.py's exactly-one rule would reject. */
+.usage-footnote {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+
+/* --- Range picker (segmented control) ---------------------------------- */
+
+.range-picker {
+  display: flex;
+  height: var(--control-h);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.range-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-left: 1px solid var(--hairline);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.range-btn:first-child { border-left: none; }
+.range-btn:hover { opacity: 1; color: var(--ink); }
+.range-btn[data-active="true"] {
+  opacity: 1;
+  background: var(--well);
+  color: var(--accent-ink);
+}
+
+/* --- Chart regions ------------------------------------------------------ */
+
+.usage-chart-panel { padding: var(--section-pad); }
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--section-pad);
+  margin-bottom: 6px;
+}
+
+.chart-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.chart-readout .micro { color: var(--legend); }
+
+.chart-well {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+.chart-svg.chart-svg-short { height: 140px; }
+
+/* The graticule tile: faint etched lines over the well, shared by url(#…)
+   across all three charts on this screen so they read as one substrate
+   rather than three independently gridded widgets. */
+.grat-line {
+  fill: none;
+  stroke: var(--hairline-subtle);
+  stroke-width: 1;
+}
+
+.hatch-line {
+  stroke: var(--accent-ink);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+.dot-mark { fill: var(--accent-ink); opacity: 0.6; }
+
+/* Every stacked band shares one accent-toned edge stroke; on chart-fill-5
+   (fill: transparent) that edge is the entire visible mark — the "outline"
+   member of the five-way fill ramp. */
+.chart-area {
+  stroke: var(--accent-ink);
+  stroke-width: 1;
+  opacity: 0.94;
+}
+.chart-fill-1 { fill: var(--chart-1); }
+.chart-fill-2 { fill: var(--chart-2); }
+.chart-fill-3 { fill: var(--chart-3); }
+.chart-fill-4 { fill: var(--chart-4); }
+.chart-fill-5 { fill: var(--chart-5); }
+
+.chart-bar { fill: var(--trace-fill); stroke: var(--trace); stroke-width: 1; }
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+/* A chart's series key: distinct from .legend (the one per-screen caption
+   qa.py counts) and from .legend-caps (nav-group labels), since a chart
+   legend needs a name of its own. */
+.chart-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
+}
+.chart-key-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.chart-key-swatch { flex: 0 0 auto; display: block; }
+
+/* --- Ranked tables ------------------------------------------------------ */
+
+.rank-table {
+  display: flex;
+  flex-direction: column;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.rank-table-head {
+  color: var(--legend);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rank-table a.row { text-decoration: none; cursor: pointer; }
+
+.rank-col-id { flex: 1 1 auto; min-width: 0; }
+.rank-col-num {
+  flex: 0 0 auto;
+  width: 64px;
+  text-align: right;
+}
+.rank-col-share {
+  flex: 0 0 auto;
+  width: 108px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-track {
+  flex: 1 1 auto;
+  height: 5px;
+  background: var(--hairline-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.share-bar {
+  display: block;
+  height: 100%;
+  background: var(--bezel);
+}
+.share-pct {
+  flex: 0 0 auto;
+  width: 34px;
+  text-align: right;
+}
+
 </style>
   </head>
   <body>
@@ -852,7 +1675,7 @@ body.pins-on .pin-note { display: inline; }
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-05-usage"><span class="toc-n">04</span>usage</a></li></ol></nav>
 <section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -1424,9 +2247,14 @@ body.pins-on .pin-note { display: inline; }
       <p class="prose">
         The same vocabulary at catalog density: rank, a 9px mark, provider
         id, nothing else. Twelve rows read as a barcode of sigils &mdash; the
-        shape of the fleet at a glance, without a single word.
+        shape of the fleet at a glance, without a single word. The router
+        expands one candidate per (provider, credential, model), so a
+        provider with a second configured key earns a second row &mdash;
+        ranks 09&ndash;12 repeat groq, together, deepinfra and openrouter
+        for exactly that reason, each marked <span class="mono">key 2</span>
+        in --legend beside the id.
       </p>
-      <div class="ladder" style="width:180px">
+      <div class="ladder" style="width:220px">
         <div class="ladder-row" style="gap:8px">
           <span class="rank">01</span>
           <span class="mark mark-failed mark-catalog"></span>
@@ -1471,21 +2299,25 @@ body.pins-on .pin-note { display: inline; }
           <span class="rank">09</span>
           <span class="mark mark-cooling mark-catalog"></span>
           <span class="mono target-muted">groq</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
           <span class="rank">10</span>
           <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono target-muted">together</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
           <span class="rank">11</span>
           <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono target-muted">deepinfra</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
           <span class="rank">12</span>
           <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono target-muted">openrouter</span>
+          <span class="credential-tag">key 2</span>
         </div>
       </div>
     </div>
@@ -1762,6 +2594,950 @@ body.pins-on .pin-note { display: inline; }
       </div>
     </div>
 
+  </div>
+</section>
+
+<section class="screen" id="s-02-overview--s-02-overview" data-screen-title="operate/overview">
+  <p class="legend">
+    The screen an operator leaves open: live throughput, error rate,
+    latency and spend over the last five minutes, the health of all eight
+    configured providers, and the failovers routing quietly absorbed.
+    Shown here with the config-invalid banner in its alarmed state and one
+    readout mid-refresh, so both are proven rather than assumed. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#" data-active="true">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/overview</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <div class="config-banner" role="alert">
+            <p class="legend-caps">Config invalid</p>
+            <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Config banner &mdash; GET /api/config {valid,error,serving}. Shown only when valid=false. Error in mono, reassurance in sans.</span></p>
+            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "fast" targets provider "cerebras" model "openai/gpt-oss-120b" but no credential is configured for that provider</p>
+            <p class="prose config-banner-note">The previous configuration is still serving.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Live</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Live strip &mdash; GET /api/overview {requests_per_min,error_rate,window_sec,today_spend{micros,priced}} + &sect;8.2 percentile and series extensions. 30px readout is the type ceiling.</span></p>
+          <div class="live-strip">
+
+            <div class="well live-tile">
+              <p class="spec-note">requests_per_min &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">14.2</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,22 10,18 20,24 30,16 40,20 50,14 60,19 70,23 80,17 90,21 100,15 100,40 0,40"></polygon>
+                <polyline points="0,22 10,18 20,24 30,16 40,20 50,14 60,19 70,23 80,17 90,21 100,15"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <p class="spec-note">error_rate &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">2.4</span><span class="unit">%</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,34 10,35 20,33 30,36 40,10 50,34 60,35 70,33 80,36 90,34 100,35 100,40 0,40"></polygon>
+                <polyline points="0,34 10,35 20,33 30,36 40,10 50,34 60,35 70,33 80,36 90,34 100,35"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <p class="spec-note">latency &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="live-tile-metric"><span class="micro">p50</span><span class="readout">890</span><span class="unit">ms</span></span>
+                <span class="live-tile-metric"><span class="micro">p95</span><span class="readout">4.1</span><span class="unit">s</span></span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,30 10,28 20,26 30,24 40,27 50,20 60,15 70,18 80,10 90,14 100,8 100,40 0,40"></polygon>
+                <polyline points="0,30 10,28 20,26 30,24 40,27 50,20 60,15 70,18 80,10 90,14 100,8"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <div class="load-bar" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="refreshing today_spend">
+                <span class="load-bar-fill" style="width:58%"></span>
+              </div>
+              <p class="spec-note">today_spend &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">$3.47</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,38 10,36 20,33 30,31 40,28 50,25 60,22 70,18 80,14 90,9 100,4 100,40 0,40"></polygon>
+                <polyline points="0,38 10,36 20,33 30,31 40,28 50,25 60,22 70,18 80,14 90,9 100,4"></polyline>
+              </svg>
+            </div>
+
+          </div>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Provider health</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace.</span></p>
+          <div class="health-grid">
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">groq</span>
+              </div>
+              <p class="micro">2 credentials</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="cooling"></span>
+                <span class="mono health-tile-name">cerebras</span>
+              </div>
+              <p class="micro">1 credential &middot; 1 cooling</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">anthropic</span>
+              </div>
+              <p class="micro">1 credential</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">openrouter</span>
+              </div>
+              <p class="micro">3 credentials</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">together</span>
+              </div>
+              <p class="micro">1 credential</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="disabled"></span>
+                <span class="mono health-tile-name">deepinfra</span>
+              </div>
+              <p class="micro">disabled</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="unconfigured"></span>
+                <span class="mono health-tile-name">bedrock</span>
+              </div>
+              <p class="micro">0 credentials</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">vertex</span>
+              </div>
+              <div class="health-tile-alert">
+                <p class="health-tile-alert-text">needs reconnection</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Recent failovers</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
+          <div class="table">
+
+            <a class="row" href="#01HZXK4M9QANE2FTX7RS3JV8CB">
+              <span class="mono" style="min-width:64px">14:22:07</span>
+              <span class="mono" style="flex:1 1 auto">default &rarr; together/openai-gpt-oss-120b</span>
+              <span class="chip">3 attempts</span>
+              <span class="data-emph" style="margin-left:auto">1,847ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK5PWENA3D9RTX2FC6MJQ8">
+              <span class="mono" style="min-width:64px">14:19:52</span>
+              <span class="mono" style="flex:1 1 auto">fast &rarr; cerebras/openai-gpt-oss-120b</span>
+              <span class="chip">2 attempts</span>
+              <span class="data-emph" style="margin-left:auto">612ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK6R2TCEMA9NF3XJ7VQ5WB">
+              <span class="mono" style="min-width:64px">14:11:30</span>
+              <span class="mono" style="flex:1 1 auto">vision &rarr; openrouter/qwen/qwen3-vl-235b</span>
+              <span class="chip">2 attempts</span>
+              <span class="data-emph" style="margin-left:auto">2,104ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK7T4WBNF2CQ9RXM3E6JAP">
+              <span class="mono" style="min-width:64px">13:58:44</span>
+              <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
+              <span class="chip">4 attempts</span>
+              <span class="data-emph" style="margin-left:auto">4,392ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK8V6RCAM9FQ2TXJ5WNE3B">
+              <span class="mono" style="min-width:64px">13:47:19</span>
+              <span class="mono" style="flex:1 1 auto">default &rarr; deepinfra/openai-gpt-oss-120b</span>
+              <span class="chip">2 attempts</span>
+              <span class="data-emph" style="margin-left:auto">890ms</span>
+            </a>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
+          <p class="ops-footer">
+            <span class="mono">v0.9.3</span> &middot;
+            <span class="mono">up 6d 14h</span> &middot;
+            <span class="mono">1,204,881 log records written</span> &middot;
+            <span class="mono ops-footer-dropped" data-alert="false" title="A non-zero value means the usage figures on this screen are a lower bound.">0 dropped</span>
+          </p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-03-requests--s-03-requests" data-screen-title="operate/requests">
+  <p class="legend">
+    Fourteen of the operator's most recent requests under the active saved
+    view and filters, the six real controls that replace today's four
+    free-text boxes, and the states a 3s poll and a keyset cursor put on a
+    live table. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light
+    mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#" data-active="true">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/requests</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
+        <div class="saved-views">
+          <span class="view-chip" data-active="true">failovers only</span>
+          <span class="view-chip">errors today</span>
+          <span class="view-chip">passthrough misses</span>
+        </div>
+
+        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Filter bar &mdash; GET /api/requests?provider=&amp;model=&amp;alias=&amp;status=&amp;surface=&amp;since_ms=&amp;until_ms=. alias/since_ms/until_ms are accepted today and unreachable from the current UI.</span></p>
+        <div class="filter-bar">
+
+          <div class="combo" data-open="true" style="min-width:190px">
+            <button class="control combo-trigger">
+              <span>provider: groq +1</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+            <div class="combo-menu">
+              <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>groq</span><span class="combo-count">2,481</span></span>
+              <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">1,096</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>anthropic</span><span class="combo-count">640</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>openrouter</span><span class="combo-count">312</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>together</span><span class="combo-count">188</span></span>
+            </div>
+          </div>
+
+          <div class="combo" style="min-width:220px">
+            <button class="control combo-trigger">
+              <span>model: any</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+          </div>
+
+          <div class="combo" style="min-width:150px">
+            <button class="control combo-trigger">
+              <span>alias: any</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+          </div>
+
+          <div class="segmented">
+            <span class="segmented-option">llm</span>
+            <span class="segmented-option">embedding</span>
+            <span class="segmented-option">image</span>
+            <span class="segmented-option">stt</span>
+            <span class="segmented-option">tts</span>
+            <span class="segmented-option">rerank</span>
+            <span class="segmented-option">moderation</span>
+          </div>
+
+          <div class="segmented">
+            <span class="segmented-option">success</span>
+            <span class="segmented-option">error</span>
+          </div>
+
+          <div class="time-range" data-open="true">
+            <button class="control combo-trigger" style="width:auto">
+              <span>last 24h</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+            <div class="time-range-menu">
+              <div class="time-range-presets">
+                <span class="time-range-preset">last 1h</span>
+                <span class="time-range-preset" data-active="true">last 24h</span>
+                <span class="time-range-preset">last 7d</span>
+                <span class="time-range-preset">last 30d</span>
+              </div>
+              <div class="time-range-custom">
+                <span class="micro">custom</span>
+                <input class="time-range-input" value="2026-08-23 09:41" readonly>
+                <span class="micro">&rarr;</span>
+                <input class="time-range-input" value="2026-08-24 09:41" readonly>
+              </div>
+            </div>
+          </div>
+
+          <button class="control control-ghost">Reset</button>
+
+        </div>
+
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}.</span></p>
+        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
+        <div class="table-toolbar">
+          <span class="micro">14 of 2,481 requests</span>
+          <div class="table-toolbar-actions">
+            <button class="control">Columns ▾</button>
+          </div>
+        </div>
+        <div class="col-menu">
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>time</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>surface</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>model</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>provider</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>status</span></span>
+          <span class="col-menu-item" data-checked="false"><span class="combo-check">✓</span><span>attempts</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>tokens in/out</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>latency</span></span>
+          <div class="col-menu-sep"></div>
+          <span class="col-menu-item col-menu-export"><span class="combo-check">⇩</span><span>Export CSV&hellip;</span></span>
+        </div>
+
+        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
+        <div class="table-wrap">
+          <span class="newer-pill">▲ 3 newer</span>
+          <div class="table">
+
+            <div class="row row-head">
+              <span class="legend-caps col-time">time</span>
+              <span class="legend-caps col-surface">surface</span>
+              <span class="legend-caps col-model">model</span>
+              <span class="legend-caps col-provider">provider</span>
+              <span class="legend-caps col-status">status</span>
+              <span class="legend-caps col-attempts col-right">attempts</span>
+              <span class="legend-caps col-tokens col-right">tokens in/out</span>
+              <span class="legend-caps col-latency col-right">latency</span>
+            </div>
+
+            <div class="row" data-id="01JG7XQ2M4K8VBNR3TDYW5EZ9C">
+              <span class="mono col-time">09:41:08</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">groq</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">812/246</span>
+              <span class="mono col-latency col-right">184<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JNH9DN65R6PPG2X7R5JQC42E">
+              <span class="mono col-time">09:40:52</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">cerebras</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">1,204/188</span>
+              <span class="mono col-latency col-right">96<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J71HFE865V215DE1CTEWH0AV">
+              <span class="mono col-time">09:40:31</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span><span class="chip chip-failover">failover &times;3</span></span>
+              <span class="mono col-provider">together</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">3</span>
+              <span class="mono col-tokens col-right">640/210</span>
+              <span class="mono col-latency col-right">1,847<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JAGVDCKSQWW7FE4N1EE043E4">
+              <span class="mono col-time">09:40:04</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span><span class="chip chip-failover">failover &times;3</span></span>
+              <span class="mono col-provider">openrouter</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">3</span>
+              <span class="mono col-tokens col-right">1,480/512</span>
+              <span class="mono col-latency col-right">2,240<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JSN6FCCW8VBHXF4W6305FATZ" title="429 rate limited">
+              <span class="mono col-time">09:39:58</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
+              <span class="mono col-provider">anthropic</span>
+              <span class="mono col-status status-error">error</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">0/0</span>
+              <span class="mono col-latency col-right">412<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JJ5E6RHXQAQPDH4AFAXRHEM3">
+              <span class="mono col-time">09:39:40</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
+              <span class="mono col-provider">bedrock</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">2,048/890</span>
+              <span class="mono col-latency col-right">612<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J7492Q9V82KQ2PDF6PT9FABT">
+              <span class="mono col-time">09:39:22</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">gemini-2.5-pro</span></span>
+              <span class="mono col-provider">vertex</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">960/410</span>
+              <span class="mono col-latency col-right">340<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JE2MSH4DMDZSX9G8FGVSQE8Z">
+              <span class="mono col-time">09:39:05</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span><span class="chip chip-path">passthrough</span></span>
+              <span class="mono col-provider">groq</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right" title="estimated from character count &mdash; passthrough requests skip token accounting">&asymp;2,412/643</span>
+              <span class="mono col-latency col-right">128<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J69HJDNDGZG35VH20N8GAWV0">
+              <span class="mono col-time">09:38:47</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text"><span class="text-muted">fast-json &rarr;</span> openai/gpt-oss-120b</span><span class="chip chip-path">translated</span></span>
+              <span class="mono col-provider">cerebras</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">512/96</span>
+              <span class="mono col-latency col-right">102<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J2N4FHZD8YFYTC66VPVTX363" title="timeout &mdash; 30000ms elapsed before first byte">
+              <span class="mono col-time">09:38:20</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">deepinfra</span>
+              <span class="mono col-status status-error">error</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">0/0</span>
+              <span class="mono col-latency col-right">30,000<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J5379AV4RRXG07HN7JVAX0GB">
+              <span class="mono col-time">09:38:02</span>
+              <span class="mono col-surface">embedding</span>
+              <span class="col-model"><span class="mono col-model-text">text-embedding-3-large</span></span>
+              <span class="mono col-provider">together</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">3,204/0</span>
+              <span class="mono col-latency col-right">44<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JM40X64DG8P4FQJAWK0K68G7">
+              <span class="mono col-time">09:37:44</span>
+              <span class="mono col-surface">rerank</span>
+              <span class="col-model"><span class="mono col-model-text">bge-reranker-v2-m3</span></span>
+              <span class="mono col-provider">together</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">1,840/0</span>
+              <span class="mono col-latency col-right">58<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J6KC9QA0MZ17QKF3F55Z488Y">
+              <span class="mono col-time">09:37:20</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">gemini-2.5-pro</span></span>
+              <span class="mono col-provider">openrouter</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">704/298</span>
+              <span class="mono col-latency col-right">288<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JA35B44FS7F25TMGDMFGS8KX">
+              <span class="mono col-time">09:36:58</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">groq</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">1,088/312</span>
+              <span class="mono col-latency col-right">176<span class="unit">ms</span></span>
+            </div>
+
+          </div>
+        </div>
+
+        <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Paging &mdash; keyset on (ts,id) desc, cursor rejected when filters change. Phase 7 &sect;4.2, unchanged.</span></p>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+          <button class="control">Load 25 more &darr;</button>
+          <span class="micro">cursor 01JA35B44FS7F25TMGDMFGS8KX &middot; pages accumulate, they do not replace</span>
+        </div>
+
+        <p class="section-title" style="margin-top:var(--gutter)">Empty state &mdash; no matches</p>
+        <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Empty state &mdash; every empty well says what it would show. Spec &sect;6.11.</span></p>
+        <div class="panel" style="max-width:560px;padding:var(--gutter)">
+          <p class="micro">provider=vertex &middot; status=error &middot; last 1h</p>
+          <div class="well empty-well">
+            <p class="prose">No requests match these filters.</p>
+            <p class="prose">This well would list, per matching request: when it landed, which surface handled it, the alias or model it resolved to, which provider served it, success or error, attempt count, tokens in/out, and total latency &mdash; the same eight columns as the table above.</p>
+            <button class="control control-ghost">Reset filters</button>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-05-usage--s-05-usage" data-screen-title="usage">
+  <p class="legend">
+    Requests, tokens and cost over the selected range, ranked by provider and
+    by model. The chart-heaviest screen in the set — every well below shares
+    one graticule as its gridline. Press <kbd>A</kbd> for pins, <kbd>T</kbd>
+    for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#" data-active="true">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/usage</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+        <div class="usage-page">
+
+          <div class="usage-toolbar">
+            <p style="margin:0"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Range &mdash; GET /api/usage?days=30. Serves up to 365 days today with no screen calling it.</span></p>
+            <div class="range-picker mono" role="tablist" aria-label="range">
+              <a class="range-btn" href="#">7d</a>
+              <a class="range-btn" href="#" data-active="true">30d</a>
+              <a class="range-btn" href="#">90d</a>
+              <a class="range-btn" href="#">365d</a>
+            </div>
+          </div>
+
+          <div class="chart-scope usage-charts">
+
+            <div class="panel usage-chart-panel">
+              <div class="chart-head">
+                <p class="section-title" style="margin:0">Requests over time</p>
+              </div>
+              <p><b class="pin" data-pin="2">2</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <div class="well chart-well">
+                <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="requests per day by provider, last 30 days">
+                  <defs>
+                    <pattern id="usage-grat--s-05-usage" width="90" height="40" patternUnits="userSpaceOnUse">
+                      <path class="grat-line" d="M0 0H90M0 0V40"/>
+                    </pattern>
+                    <pattern id="usage-hatch--s-05-usage" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                      <line class="hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+                    </pattern>
+                    <pattern id="usage-dot--s-05-usage" width="7" height="7" patternUnits="userSpaceOnUse">
+                      <circle class="dot-mark" cx="2" cy="2" r="1"/>
+                    </pattern>
+                  </defs>
+                  <rect x="0" y="0" width="900" height="200" fill="url(#usage-grat--s-05-usage)"/>
+        <path class="chart-area chart-fill-1" d="M10.0,153.3 L40.3,150.7 L70.7,145.2 L101.0,151.5 L131.4,142.8 L161.7,140.0 L192.1,147.4 L222.4,158.3 L252.8,148.4 L283.1,150.9 L313.4,146.0 L343.8,146.4 L374.1,153.9 L404.5,159.7 L434.8,159.1 L465.2,138.8 L495.5,140.4 L525.9,134.2 L556.2,132.0 L586.6,150.1 L616.9,153.1 L647.2,152.1 L677.6,142.6 L707.9,148.8 L738.3,123.8 L768.6,145.6 L799.0,150.9 L829.3,161.7 L859.7,143.6 L890.0,141.6 L890.0,190.0 L859.7,190.0 L829.3,190.0 L799.0,190.0 L768.6,190.0 L738.3,190.0 L707.9,190.0 L677.6,190.0 L647.2,190.0 L616.9,190.0 L586.6,190.0 L556.2,190.0 L525.9,190.0 L495.5,190.0 L465.2,190.0 L434.8,190.0 L404.5,190.0 L374.1,190.0 L343.8,190.0 L313.4,190.0 L283.1,190.0 L252.8,190.0 L222.4,190.0 L192.1,190.0 L161.7,190.0 L131.4,190.0 L101.0,190.0 L70.7,190.0 L40.3,190.0 L10.0,190.0 Z"/>
+        <path class="chart-area chart-fill-2" d="M10.0,130.6 L40.3,123.8 L70.7,122.1 L101.0,128.2 L131.4,114.5 L161.7,112.5 L192.1,122.9 L222.4,141.4 L252.8,115.7 L283.1,122.3 L313.4,120.7 L343.8,111.9 L374.1,127.0 L404.5,137.0 L434.8,134.6 L465.2,111.3 L495.5,114.3 L525.9,104.3 L556.2,97.7 L586.6,127.4 L616.9,131.8 L647.2,131.2 L677.6,111.9 L707.9,119.9 L738.3,85.8 L768.6,116.5 L799.0,121.5 L829.3,142.8 L859.7,117.1 L890.0,111.9 L890.0,141.6 L859.7,143.6 L829.3,161.7 L799.0,150.9 L768.6,145.6 L738.3,123.8 L707.9,148.8 L677.6,142.6 L647.2,152.1 L616.9,153.1 L586.6,150.1 L556.2,132.0 L525.9,134.2 L495.5,140.4 L465.2,138.8 L434.8,159.1 L404.5,159.7 L374.1,153.9 L343.8,146.4 L313.4,146.0 L283.1,150.9 L252.8,148.4 L222.4,158.3 L192.1,147.4 L161.7,140.0 L131.4,142.8 L101.0,151.5 L70.7,145.2 L40.3,150.7 L10.0,153.3 Z"/>
+        <path class="chart-area chart-fill-3" d="M10.0,116.3 L40.3,106.9 L70.7,105.7 L101.0,111.9 L131.4,95.4 L161.7,90.8 L192.1,106.9 L222.4,130.8 L252.8,94.4 L283.1,105.5 L313.4,101.9 L343.8,91.8 L374.1,108.3 L404.5,123.6 L434.8,118.5 L465.2,91.0 L495.5,95.6 L525.9,82.2 L556.2,73.2 L586.6,107.5 L616.9,113.5 L647.2,113.9 L677.6,93.2 L707.9,99.5 L738.3,62.1 L768.6,95.6 L799.0,104.1 L829.3,128.4 L859.7,99.9 L890.0,89.8 L890.0,111.9 L859.7,117.1 L829.3,142.8 L799.0,121.5 L768.6,116.5 L738.3,85.8 L707.9,119.9 L677.6,111.9 L647.2,131.2 L616.9,131.8 L586.6,127.4 L556.2,97.7 L525.9,104.3 L495.5,114.3 L465.2,111.3 L434.8,134.6 L404.5,137.0 L374.1,127.0 L343.8,111.9 L313.4,120.7 L283.1,122.3 L252.8,115.7 L222.4,141.4 L192.1,122.9 L161.7,112.5 L131.4,114.5 L101.0,128.2 L70.7,122.1 L40.3,123.8 L10.0,130.6 Z"/>
+        <path class="chart-area chart-fill-4" d="M10.0,102.1 L40.3,91.2 L70.7,91.2 L101.0,96.0 L131.4,74.8 L161.7,74.6 L192.1,92.4 L222.4,120.7 L252.8,78.4 L283.1,91.8 L313.4,84.0 L343.8,76.4 L374.1,93.6 L404.5,110.5 L434.8,104.9 L465.2,73.0 L495.5,80.6 L525.9,63.1 L556.2,53.3 L586.6,90.2 L616.9,97.1 L647.2,98.7 L677.6,73.6 L707.9,84.4 L738.3,40.8 L768.6,79.2 L799.0,85.6 L829.3,117.5 L859.7,83.6 L890.0,70.4 L890.0,89.8 L859.7,99.9 L829.3,128.4 L799.0,104.1 L768.6,95.6 L738.3,62.1 L707.9,99.5 L677.6,93.2 L647.2,113.9 L616.9,113.5 L586.6,107.5 L556.2,73.2 L525.9,82.2 L495.5,95.6 L465.2,91.0 L434.8,118.5 L404.5,123.6 L374.1,108.3 L343.8,91.8 L313.4,101.9 L283.1,105.5 L252.8,94.4 L222.4,130.8 L192.1,106.9 L161.7,90.8 L131.4,95.4 L101.0,111.9 L70.7,105.7 L40.3,106.9 L10.0,116.3 Z"/>
+        <path class="chart-area chart-fill-5" d="M10.0,95.4 L40.3,82.8 L70.7,83.4 L101.0,87.6 L131.4,64.1 L161.7,64.9 L192.1,83.8 L222.4,114.9 L252.8,68.3 L283.1,84.0 L313.4,75.2 L343.8,67.9 L374.1,86.0 L404.5,103.1 L434.8,97.7 L465.2,61.3 L495.5,70.0 L525.9,53.5 L556.2,43.7 L586.6,80.4 L616.9,90.0 L647.2,91.6 L677.6,63.9 L707.9,75.4 L738.3,30.0 L768.6,69.9 L799.0,75.0 L829.3,111.3 L859.7,74.2 L890.0,59.3 L890.0,70.4 L859.7,83.6 L829.3,117.5 L799.0,85.6 L768.6,79.2 L738.3,40.8 L707.9,84.4 L677.6,73.6 L647.2,98.7 L616.9,97.1 L586.6,90.2 L556.2,53.3 L525.9,63.1 L495.5,80.6 L465.2,73.0 L434.8,104.9 L404.5,110.5 L374.1,93.6 L343.8,76.4 L313.4,84.0 L283.1,91.8 L252.8,78.4 L222.4,120.7 L192.1,92.4 L161.7,74.6 L131.4,74.8 L101.0,96.0 L70.7,91.2 L40.3,91.2 L10.0,102.1 Z"/>
+                </svg>
+                <div class="chart-axis" style="padding:4px 10px 6px">
+      <span class="micro">Jul 26</span>
+      <span class="micro">Aug 2</span>
+      <span class="micro">Aug 9</span>
+      <span class="micro">Aug 16</span>
+      <span class="micro">Aug 24</span>
+                </div>
+              </div>
+              <div class="chart-key">
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-1"/></svg>groq</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-2"/></svg>cerebras</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-3"/></svg>together</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-4"/></svg>openrouter</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-5"/></svg>anthropic</span>
+              </div>
+            </div>
+
+            <div class="panel usage-chart-panel">
+              <div class="chart-head">
+                <p class="section-title" style="margin:0">Tokens over time</p>
+              </div>
+              <p><b class="pin" data-pin="3">3</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <div class="well chart-well">
+                <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="input and output tokens per day, last 30 days">
+                  <rect x="0" y="0" width="900" height="200" fill="url(#usage-grat--s-05-usage)"/>
+        <path class="chart-area chart-fill-1" d="M10.0,111.6 L40.3,96.9 L70.7,107.2 L101.0,103.0 L131.4,96.5 L161.7,92.5 L192.1,110.1 L222.4,131.2 L252.8,92.6 L283.1,97.7 L313.4,90.6 L343.8,86.5 L374.1,107.9 L404.5,122.6 L434.8,118.7 L465.2,92.9 L495.5,95.9 L525.9,72.0 L556.2,72.9 L586.6,109.2 L616.9,103.4 L647.2,111.4 L677.6,99.0 L707.9,99.2 L738.3,72.0 L768.6,102.9 L799.0,97.2 L829.3,131.0 L859.7,91.2 L890.0,84.5 L890.0,190.0 L859.7,190.0 L829.3,190.0 L799.0,190.0 L768.6,190.0 L738.3,190.0 L707.9,190.0 L677.6,190.0 L647.2,190.0 L616.9,190.0 L586.6,190.0 L556.2,190.0 L525.9,190.0 L495.5,190.0 L465.2,190.0 L434.8,190.0 L404.5,190.0 L374.1,190.0 L343.8,190.0 L313.4,190.0 L283.1,190.0 L252.8,190.0 L222.4,190.0 L192.1,190.0 L161.7,190.0 L131.4,190.0 L101.0,190.0 L70.7,190.0 L40.3,190.0 L10.0,190.0 Z"/>
+        <path class="chart-area chart-fill-2" d="M10.0,88.9 L40.3,75.9 L70.7,84.4 L101.0,81.8 L131.4,68.4 L161.7,66.2 L192.1,82.6 L222.4,112.1 L252.8,69.3 L283.1,70.9 L313.4,60.8 L343.8,62.0 L374.1,86.6 L404.5,105.8 L434.8,94.3 L465.2,60.8 L495.5,69.4 L525.9,35.9 L556.2,37.3 L586.6,86.1 L616.9,80.1 L647.2,87.2 L677.6,69.6 L707.9,70.1 L738.3,30.0 L768.6,78.5 L799.0,69.6 L829.3,115.5 L859.7,67.2 L890.0,53.7 L890.0,84.5 L859.7,91.2 L829.3,131.0 L799.0,97.2 L768.6,102.9 L738.3,72.0 L707.9,99.2 L677.6,99.0 L647.2,111.4 L616.9,103.4 L586.6,109.2 L556.2,72.9 L525.9,72.0 L495.5,95.9 L465.2,92.9 L434.8,118.7 L404.5,122.6 L374.1,107.9 L343.8,86.5 L313.4,90.6 L283.1,97.7 L252.8,92.6 L222.4,131.2 L192.1,110.1 L161.7,92.5 L131.4,96.5 L101.0,103.0 L70.7,107.2 L40.3,96.9 L10.0,111.6 Z"/>
+                </svg>
+                <div class="chart-axis" style="padding:4px 10px 6px">
+      <span class="micro">Jul 26</span>
+      <span class="micro">Aug 2</span>
+      <span class="micro">Aug 9</span>
+      <span class="micro">Aug 16</span>
+      <span class="micro">Aug 24</span>
+                </div>
+              </div>
+              <div class="chart-key">
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-1"/></svg>input tokens</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-2"/></svg>output tokens</span>
+              </div>
+            </div>
+
+            <div class="panel usage-chart-panel">
+              <div class="chart-head">
+                <p class="section-title" style="margin:0">Cost over time</p>
+                <div class="chart-readout">
+                  <span class="readout">$79.83</span>
+                  <span class="micro">30d running total</span>
+                </div>
+              </div>
+              <p><b class="pin" data-pin="4">4</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <div class="well chart-well">
+                <svg class="chart-svg chart-svg-short" viewBox="0 0 900 140" preserveAspectRatio="none" role="img" aria-label="cost per day, last 30 days">
+                  <rect x="0" y="0" width="900" height="140" fill="url(#usage-grat--s-05-usage)"/>
+                  <g>
+        <rect class="chart-bar" x="5.7" y="79.0" width="18.6" height="49.0"/>
+        <rect class="chart-bar" x="35.7" y="67.3" width="18.6" height="60.7"/>
+        <rect class="chart-bar" x="65.7" y="70.1" width="18.6" height="57.9"/>
+        <rect class="chart-bar" x="95.7" y="60.1" width="18.6" height="67.9"/>
+        <rect class="chart-bar" x="125.7" y="71.1" width="18.6" height="56.9"/>
+        <rect class="chart-bar" x="155.7" y="53.4" width="18.6" height="74.6"/>
+        <rect class="chart-bar" x="185.7" y="78.7" width="18.6" height="49.3"/>
+        <rect class="chart-bar" x="215.7" y="89.7" width="18.6" height="38.3"/>
+        <rect class="chart-bar" x="245.7" y="56.9" width="18.6" height="71.1"/>
+        <rect class="chart-bar" x="275.7" y="76.2" width="18.6" height="51.8"/>
+        <rect class="chart-bar" x="305.7" y="71.3" width="18.6" height="56.7"/>
+        <rect class="chart-bar" x="335.7" y="53.4" width="18.6" height="74.6"/>
+        <rect class="chart-bar" x="365.7" y="84.5" width="18.6" height="43.5"/>
+        <rect class="chart-bar" x="395.7" y="82.4" width="18.6" height="45.6"/>
+        <rect class="chart-bar" x="425.7" y="65.2" width="18.6" height="62.8"/>
+        <rect class="chart-bar" x="455.7" y="41.1" width="18.6" height="86.9"/>
+        <rect class="chart-bar" x="485.7" y="77.8" width="18.6" height="50.2"/>
+        <rect class="chart-bar" x="515.7" y="64.3" width="18.6" height="63.7"/>
+        <rect class="chart-bar" x="545.7" y="58.5" width="18.6" height="69.5"/>
+        <rect class="chart-bar" x="575.7" y="56.2" width="18.6" height="71.8"/>
+        <rect class="chart-bar" x="605.7" y="62.9" width="18.6" height="65.1"/>
+        <rect class="chart-bar" x="635.7" y="64.3" width="18.6" height="63.7"/>
+        <rect class="chart-bar" x="665.7" y="65.2" width="18.6" height="62.8"/>
+        <rect class="chart-bar" x="695.7" y="77.1" width="18.6" height="50.9"/>
+        <rect class="chart-bar" x="725.7" y="27.1" width="18.6" height="100.9"/>
+        <rect class="chart-bar" x="755.7" y="57.3" width="18.6" height="70.7"/>
+        <rect class="chart-bar" x="785.7" y="62.2" width="18.6" height="65.8"/>
+        <rect class="chart-bar" x="815.7" y="75.2" width="18.6" height="52.8"/>
+        <rect class="chart-bar" x="845.7" y="60.4" width="18.6" height="67.6"/>
+        <rect class="chart-bar" x="875.7" y="75.5" width="18.6" height="52.5"/>
+                  </g>
+                </svg>
+                <div class="chart-axis" style="padding:4px 10px 6px">
+      <span class="micro">Jul 26</span>
+      <span class="micro">Aug 2</span>
+      <span class="micro">Aug 9</span>
+      <span class="micro">Aug 16</span>
+      <span class="micro">Aug 24</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="usage-tables">
+            <div>
+              <p class="section-title">Ranked by provider</p>
+              <p><b class="pin" data-pin="5">5</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
+              <div class="rank-table">
+                <div class="row rank-table-head">
+                  <span class="micro rank-col-id">provider</span>
+                  <span class="micro rank-col-num">requests</span>
+                  <span class="micro rank-col-num">tokens</span>
+                  <span class="micro rank-col-num">cost</span>
+                  <span class="micro rank-col-share">share</span>
+                </div>
+      <a class="row" href="#/requests?provider=groq">
+        <span class="mono rank-col-id">groq</span>
+        <span class="data-emph rank-col-num">6,459</span>
+        <span class="rank-col-num"><span class="data-emph">3.58</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$2.68</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:100.0%"></span></span>
+          <span class="micro share-pct">36.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=cerebras">
+        <span class="mono rank-col-id">cerebras</span>
+        <span class="data-emph rank-col-num">4,028</span>
+        <span class="rank-col-num"><span class="data-emph">2.46</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$2.09</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:62.4%"></span></span>
+          <span class="micro share-pct">22.9%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=together">
+        <span class="mono rank-col-id">together</span>
+        <span class="data-emph rank-col-num">2,772</span>
+        <span class="rank-col-num"><span class="data-emph">1.87</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$2.71</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:42.9%"></span></span>
+          <span class="micro share-pct">15.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=openrouter">
+        <span class="mono rank-col-id">openrouter</span>
+        <span class="data-emph rank-col-num">2,431</span>
+        <span class="rank-col-num"><span class="data-emph">1.73</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$3.21</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:37.6%"></span></span>
+          <span class="micro share-pct">13.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=anthropic">
+        <span class="mono rank-col-id">anthropic</span>
+        <span class="data-emph rank-col-num">1,331</span>
+        <span class="rank-col-num"><span class="data-emph">1.68</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$62.18</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:20.6%"></span></span>
+          <span class="micro share-pct">7.6%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=deepinfra">
+        <span class="mono rank-col-id">deepinfra</span>
+        <span class="data-emph rank-col-num">410</span>
+        <span class="rank-col-num"><span class="data-emph">244.7</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$0.26</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:6.3%"></span></span>
+          <span class="micro share-pct">2.3%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=bedrock">
+        <span class="mono rank-col-id">bedrock</span>
+        <span class="data-emph rank-col-num">96</span>
+        <span class="rank-col-num"><span class="data-emph">125.4</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$4.39</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:1.5%"></span></span>
+          <span class="micro share-pct">0.5%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=vertex">
+        <span class="mono rank-col-id">vertex</span>
+        <span class="data-emph rank-col-num">34</span>
+        <span class="rank-col-num"><span class="data-emph">28.8</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$0.42</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:0.5%"></span></span>
+          <span class="micro share-pct">0.2%</span>
+        </span>
+      </a>
+              </div>
+            </div>
+            <div>
+              <p class="section-title">Ranked by model</p>
+              <p><b class="pin" data-pin="6">6</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
+              <div class="rank-table">
+                <div class="row rank-table-head">
+                  <span class="micro rank-col-id">model</span>
+                  <span class="micro rank-col-num">requests</span>
+                  <span class="micro rank-col-num">tokens</span>
+                  <span class="micro rank-col-num">cost</span>
+                  <span class="micro rank-col-share">share</span>
+                </div>
+      <a class="row" href="#/requests?model=openai%2Fgpt-oss-120b">
+        <span class="mono rank-col-id">openai/gpt-oss-120b</span>
+        <span class="data-emph rank-col-num">6,210</span>
+        <span class="rank-col-num"><span class="data-emph">4.10</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$3.48</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:100.0%"></span></span>
+          <span class="micro share-pct">35.4%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=openai%2Fgpt-oss-20b">
+        <span class="mono rank-col-id">openai/gpt-oss-20b</span>
+        <span class="data-emph rank-col-num">3,480</span>
+        <span class="rank-col-num"><span class="data-emph">1.81</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$0.69</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:56.0%"></span></span>
+          <span class="micro share-pct">19.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=llama-3.3-70b-versatile">
+        <span class="mono rank-col-id">llama-3.3-70b-versatile</span>
+        <span class="data-emph rank-col-num">2,360</span>
+        <span class="rank-col-num"><span class="data-emph">1.65</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$1.24</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:38.0%"></span></span>
+          <span class="micro share-pct">13.4%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=deepseek-v3">
+        <span class="mono rank-col-id">deepseek-v3</span>
+        <span class="data-emph rank-col-num">1,970</span>
+        <span class="rank-col-num"><span class="data-emph">1.60</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$1.76</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:31.7%"></span></span>
+          <span class="micro share-pct">11.2%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=claude-sonnet-4-20250514">
+        <span class="mono rank-col-id">claude-sonnet-4-20250514</span>
+        <span class="data-emph rank-col-num">1,640</span>
+        <span class="rank-col-num"><span class="data-emph">2.26</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$26.03</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:26.4%"></span></span>
+          <span class="micro share-pct">9.3%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=claude-opus-4-20250514">
+        <span class="mono rank-col-id">claude-opus-4-20250514</span>
+        <span class="data-emph rank-col-num">812</span>
+        <span class="rank-col-num"><span class="data-emph">1.31</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$44.45</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:13.1%"></span></span>
+          <span class="micro share-pct">4.6%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=gemini-2.0-flash">
+        <span class="mono rank-col-id">gemini-2.0-flash</span>
+        <span class="data-emph rank-col-num">690</span>
+        <span class="rank-col-num"><span class="data-emph">648.6</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$1.10</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:11.1%"></span></span>
+          <span class="micro share-pct">3.9%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=command-r-plus">
+        <span class="mono rank-col-id">command-r-plus</span>
+        <span class="data-emph rank-col-num">399</span>
+        <span class="rank-col-num"><span class="data-emph">303.2</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$0.86</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:6.4%"></span></span>
+          <span class="micro share-pct">2.3%</span>
+        </span>
+      </a>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p style="margin:0 0 4px"><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Footnote &mdash; request_attempts carries no usage columns, so pre-commit failures never reach usage_daily. Spec &sect;8.3 fixes it; until then the footnote is the truth.</span></p>
+            <p class="usage-footnote">Tokens spent on attempts that failed before commit are not counted here, so these figures understate spend exactly when failover fires.</p>
+            <p style="margin:6px 0 0"><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; .chart-scope &mdash; overrides --chart-1..5. The engine's sky ramp emits orange-400 and lime-400 at positions 4 and 5, colliding with the reserved cooling and healthy colours.</span></p>
+          </div>
+
+        </div>
+      </main>
+    </div>
   </div>
 </section>
 

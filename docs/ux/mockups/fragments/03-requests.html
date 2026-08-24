@@ -1,0 +1,331 @@
+<section class="screen" id="s-03-requests" data-screen-title="operate/requests">
+  <p class="legend">
+    Fourteen of the operator's most recent requests under the active saved
+    view and filters, the six real controls that replace today's four
+    free-text boxes, and the states a 3s poll and a keyset cursor put on a
+    live table. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light
+    mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#" data-active="true">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/requests</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
+        <div class="saved-views">
+          <span class="view-chip" data-active="true">failovers only</span>
+          <span class="view-chip">errors today</span>
+          <span class="view-chip">passthrough misses</span>
+        </div>
+
+        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Filter bar &mdash; GET /api/requests?provider=&amp;model=&amp;alias=&amp;status=&amp;surface=&amp;since_ms=&amp;until_ms=. alias/since_ms/until_ms are accepted today and unreachable from the current UI.</span></p>
+        <div class="filter-bar">
+
+          <div class="combo" data-open="true" style="min-width:190px">
+            <button class="control combo-trigger">
+              <span>provider: groq +1</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+            <div class="combo-menu">
+              <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>groq</span><span class="combo-count">2,481</span></span>
+              <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">1,096</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>anthropic</span><span class="combo-count">640</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>openrouter</span><span class="combo-count">312</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>together</span><span class="combo-count">188</span></span>
+            </div>
+          </div>
+
+          <div class="combo" style="min-width:220px">
+            <button class="control combo-trigger">
+              <span>model: any</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+          </div>
+
+          <div class="combo" style="min-width:150px">
+            <button class="control combo-trigger">
+              <span>alias: any</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+          </div>
+
+          <div class="segmented">
+            <span class="segmented-option">llm</span>
+            <span class="segmented-option">embedding</span>
+            <span class="segmented-option">image</span>
+            <span class="segmented-option">stt</span>
+            <span class="segmented-option">tts</span>
+            <span class="segmented-option">rerank</span>
+            <span class="segmented-option">moderation</span>
+          </div>
+
+          <div class="segmented">
+            <span class="segmented-option">success</span>
+            <span class="segmented-option">error</span>
+          </div>
+
+          <div class="time-range" data-open="true">
+            <button class="control combo-trigger" style="width:auto">
+              <span>last 24h</span>
+              <span class="combo-chevron">▾</span>
+            </button>
+            <div class="time-range-menu">
+              <div class="time-range-presets">
+                <span class="time-range-preset">last 1h</span>
+                <span class="time-range-preset" data-active="true">last 24h</span>
+                <span class="time-range-preset">last 7d</span>
+                <span class="time-range-preset">last 30d</span>
+              </div>
+              <div class="time-range-custom">
+                <span class="micro">custom</span>
+                <input class="time-range-input" value="2026-08-23 09:41" readonly>
+                <span class="micro">&rarr;</span>
+                <input class="time-range-input" value="2026-08-24 09:41" readonly>
+              </div>
+            </div>
+          </div>
+
+          <button class="control control-ghost">Reset</button>
+
+        </div>
+
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}.</span></p>
+        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
+        <div class="table-toolbar">
+          <span class="micro">14 of 2,481 requests</span>
+          <div class="table-toolbar-actions">
+            <button class="control">Columns ▾</button>
+          </div>
+        </div>
+        <div class="col-menu">
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>time</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>surface</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>model</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>provider</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>status</span></span>
+          <span class="col-menu-item" data-checked="false"><span class="combo-check">✓</span><span>attempts</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>tokens in/out</span></span>
+          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>latency</span></span>
+          <div class="col-menu-sep"></div>
+          <span class="col-menu-item col-menu-export"><span class="combo-check">⇩</span><span>Export CSV&hellip;</span></span>
+        </div>
+
+        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
+        <div class="table-wrap">
+          <span class="newer-pill">▲ 3 newer</span>
+          <div class="table">
+
+            <div class="row row-head">
+              <span class="legend-caps col-time">time</span>
+              <span class="legend-caps col-surface">surface</span>
+              <span class="legend-caps col-model">model</span>
+              <span class="legend-caps col-provider">provider</span>
+              <span class="legend-caps col-status">status</span>
+              <span class="legend-caps col-attempts col-right">attempts</span>
+              <span class="legend-caps col-tokens col-right">tokens in/out</span>
+              <span class="legend-caps col-latency col-right">latency</span>
+            </div>
+
+            <div class="row" data-id="01JG7XQ2M4K8VBNR3TDYW5EZ9C">
+              <span class="mono col-time">09:41:08</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">groq</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">812/246</span>
+              <span class="mono col-latency col-right">184<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JNH9DN65R6PPG2X7R5JQC42E">
+              <span class="mono col-time">09:40:52</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">cerebras</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">1,204/188</span>
+              <span class="mono col-latency col-right">96<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J71HFE865V215DE1CTEWH0AV">
+              <span class="mono col-time">09:40:31</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span><span class="chip chip-failover">failover &times;3</span></span>
+              <span class="mono col-provider">together</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">3</span>
+              <span class="mono col-tokens col-right">640/210</span>
+              <span class="mono col-latency col-right">1,847<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JAGVDCKSQWW7FE4N1EE043E4">
+              <span class="mono col-time">09:40:04</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span><span class="chip chip-failover">failover &times;3</span></span>
+              <span class="mono col-provider">openrouter</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">3</span>
+              <span class="mono col-tokens col-right">1,480/512</span>
+              <span class="mono col-latency col-right">2,240<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JSN6FCCW8VBHXF4W6305FATZ" title="429 rate limited">
+              <span class="mono col-time">09:39:58</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
+              <span class="mono col-provider">anthropic</span>
+              <span class="mono col-status status-error">error</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">0/0</span>
+              <span class="mono col-latency col-right">412<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JJ5E6RHXQAQPDH4AFAXRHEM3">
+              <span class="mono col-time">09:39:40</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
+              <span class="mono col-provider">bedrock</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">2,048/890</span>
+              <span class="mono col-latency col-right">612<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J7492Q9V82KQ2PDF6PT9FABT">
+              <span class="mono col-time">09:39:22</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">gemini-2.5-pro</span></span>
+              <span class="mono col-provider">vertex</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">960/410</span>
+              <span class="mono col-latency col-right">340<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JE2MSH4DMDZSX9G8FGVSQE8Z">
+              <span class="mono col-time">09:39:05</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span><span class="chip chip-path">passthrough</span></span>
+              <span class="mono col-provider">groq</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right" title="estimated from character count &mdash; passthrough requests skip token accounting">&asymp;2,412/643</span>
+              <span class="mono col-latency col-right">128<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J69HJDNDGZG35VH20N8GAWV0">
+              <span class="mono col-time">09:38:47</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text"><span class="text-muted">fast-json &rarr;</span> openai/gpt-oss-120b</span><span class="chip chip-path">translated</span></span>
+              <span class="mono col-provider">cerebras</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">512/96</span>
+              <span class="mono col-latency col-right">102<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J2N4FHZD8YFYTC66VPVTX363" title="timeout &mdash; 30000ms elapsed before first byte">
+              <span class="mono col-time">09:38:20</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">deepinfra</span>
+              <span class="mono col-status status-error">error</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">0/0</span>
+              <span class="mono col-latency col-right">30,000<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J5379AV4RRXG07HN7JVAX0GB">
+              <span class="mono col-time">09:38:02</span>
+              <span class="mono col-surface">embedding</span>
+              <span class="col-model"><span class="mono col-model-text">text-embedding-3-large</span></span>
+              <span class="mono col-provider">together</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">3,204/0</span>
+              <span class="mono col-latency col-right">44<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JM40X64DG8P4FQJAWK0K68G7">
+              <span class="mono col-time">09:37:44</span>
+              <span class="mono col-surface">rerank</span>
+              <span class="col-model"><span class="mono col-model-text">bge-reranker-v2-m3</span></span>
+              <span class="mono col-provider">together</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">1,840/0</span>
+              <span class="mono col-latency col-right">58<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01J6KC9QA0MZ17QKF3F55Z488Y">
+              <span class="mono col-time">09:37:20</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">gemini-2.5-pro</span></span>
+              <span class="mono col-provider">openrouter</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">704/298</span>
+              <span class="mono col-latency col-right">288<span class="unit">ms</span></span>
+            </div>
+
+            <div class="row" data-id="01JA35B44FS7F25TMGDMFGS8KX">
+              <span class="mono col-time">09:36:58</span>
+              <span class="mono col-surface">llm</span>
+              <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
+              <span class="mono col-provider">groq</span>
+              <span class="mono col-status status-success">success</span>
+              <span class="mono col-attempts col-right">1</span>
+              <span class="mono col-tokens col-right">1,088/312</span>
+              <span class="mono col-latency col-right">176<span class="unit">ms</span></span>
+            </div>
+
+          </div>
+        </div>
+
+        <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Paging &mdash; keyset on (ts,id) desc, cursor rejected when filters change. Phase 7 &sect;4.2, unchanged.</span></p>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+          <button class="control">Load 25 more &darr;</button>
+          <span class="micro">cursor 01JA35B44FS7F25TMGDMFGS8KX &middot; pages accumulate, they do not replace</span>
+        </div>
+
+        <p class="section-title" style="margin-top:var(--gutter)">Empty state &mdash; no matches</p>
+        <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Empty state &mdash; every empty well says what it would show. Spec &sect;6.11.</span></p>
+        <div class="panel" style="max-width:560px;padding:var(--gutter)">
+          <p class="micro">provider=vertex &middot; status=error &middot; last 1h</p>
+          <div class="well empty-well">
+            <p class="prose">No requests match these filters.</p>
+            <p class="prose">This well would list, per matching request: when it landed, which surface handled it, the alias or model it resolved to, which provider served it, success or error, attempt count, tokens in/out, and total latency &mdash; the same eight columns as the table above.</p>
+            <button class="control control-ghost">Reset filters</button>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
