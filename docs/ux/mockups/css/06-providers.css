@@ -1,0 +1,358 @@
+/*
+ * Task 9 — Providers ("configure/providers").
+ *
+ * New vocabulary this screen introduces: .priority-handle and
+ * .discovery-status (both named by the task's own Interfaces contract and
+ * reused by Task 10), .enable-switch (+ -track/-knob), .drop-indicator,
+ * .prov-row-dragging, the .prov-col-* column geometry, .prov-prio-*
+ * renumbering pair, .discovery-grid, .prov-add (+ -link), and the
+ * .prov-form field vocabulary.
+ *
+ * Reused unchanged: .table/.row/.state-pip/.chip/.control/.control-ghost/
+ * .micro/.mono/.prose/.section-title/.legend-caps/.region/.well/.panel/
+ * .segmented from darkrouter-ui.css; .health-tile/.health-tile-head/
+ * .health-tile-name/.health-tile-alert/.health-tile-alert-text/.ops-footer
+ * from Overview's partial (its header names both as Task 9 consumers);
+ * .row-head/.combo-trigger/.combo-chevron/.text-muted from Requests';
+ * .control-primary from Request trace's; .spec-note from the design
+ * language board, for the per-field annotations.
+ */
+
+/* --- Priority handle -------------------------------------------------
+   The grip for drag-to-reprioritise. Three 1px rules painted with a
+   gradient rather than a glyph or an image: it stays crisp at any zoom,
+   carries no font dependency, and needs no fetched asset. The element
+   itself is the full 30px control height so the hit target matches every
+   other control on the screen, while the visible grip stays 10px — a
+   30px-tall grip would out-weigh the provider id beside it. Dimmed at
+   rest and brought up on hover, which is the one hover animation the
+   motion budget allows. */
+.priority-handle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: var(--control-h);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--bezel) 0 1px,
+    transparent 1px 4px
+  );
+  background-size: 10px 9px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  transition: opacity var(--dur-hover) ease;
+}
+.row:hover .priority-handle { opacity: 1; }
+
+/* --- Enabled switch ---------------------------------------------------
+   `enabled` is configuration, not health and not a routing verdict, so
+   the on state takes --accent-ink — the same token the rail's active item
+   and Requests' active saved view already use for "this is the selected
+   state". The knob's LEFT/RIGHT position, not its colour, is what
+   survives a greyscale proof.
+
+   The knob does not transition. Only three animations exist in this
+   product (hover opacity, disclosure height, value swap) and a sliding
+   knob is none of them, so the two states are drawn, not tweened. */
+.enable-switch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+}
+
+.enable-switch-track {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.enable-switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+
+.enable-switch[data-on="true"] .enable-switch-track {
+  border-color: var(--accent-ink);
+  background: var(--overlay);
+}
+.enable-switch[data-on="true"] .enable-switch-knob {
+  left: 13px;
+  background: var(--accent-ink);
+}
+
+/* --- Discovery status dot ----------------------------------------------
+   Deliberately a CIRCLE while .state-pip is a 2px-radius square: the two
+   marks sit in the same row two columns apart and answer different
+   questions ("is this provider serving" vs "is its model listing still
+   being refreshed"), so they must not read as one repeated mark.
+
+   Hollow --bezel is the base: no current reading, which covers both a
+   provider that has never been probed and one that is not polled while
+   disabled. Filled green is a fresh listing. Stale takes the 2px ring
+   plus centre dot that .mark-cooling already established for "something
+   is still in there, waiting" — the shape carries it without the amber,
+   which is the whole point of the greyscale proof. */
+.discovery-status {
+  position: relative;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--bezel);
+  border-radius: 50%;
+  background: transparent;
+}
+.discovery-status[data-discovery="fresh"] {
+  border-color: var(--state-healthy);
+  background: var(--state-healthy);
+}
+.discovery-status[data-discovery="stale"] {
+  border: 2px solid var(--state-cooling);
+  background: transparent;
+}
+.discovery-status[data-discovery="stale"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
+}
+
+/* --- Region 1: the provider list --------------------------------------
+   .table/.row/.row-head carry the surface and the 30px rhythm; everything
+   here is column geometry. Names are prefixed because three other screens
+   are being drawn against this same concatenated stylesheet and a bare
+   .col-name would be a coin toss. */
+
+/* The header row reserves the handle's column without drawing a grip: a
+   header is not draggable, and a grip there would advertise a gesture the
+   row does not accept. */
+.prov-col-handle { flex: 0 0 16px; }
+
+.prov-col-prio {
+  flex: 0 0 44px;
+  text-align: right;
+  color: var(--ink);
+}
+.prov-col-name {
+  flex: 0 0 128px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.prov-col-kind { flex: 0 0 104px; color: var(--ink-muted); }
+.prov-col-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+.prov-col-creds { flex: 0 0 150px; }
+.prov-col-switch { flex: 0 0 48px; display: flex; align-items: center; }
+.prov-col-disc {
+  flex: 0 0 112px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.prov-col-flag {
+  flex: 0 0 140px;
+  display: flex;
+  align-items: center;
+}
+/* .legend-caps carries its own 6px bottom margin, which a 30px flex row
+   does not collapse — the same zeroing Requests' .row-head already does. */
+.prov-table .row-head .legend-caps { margin: 0; }
+
+/* A row switched off is still a row: it keeps its id, its credentials and
+   its place in the order, so it dims rather than disappearing. Static
+   opacity, not a transition — nothing here is animating. */
+.prov-row[data-enabled="false"] { opacity: 0.5; }
+
+/* --- Region 2: reordering ----------------------------------------------
+   The dragged row is genuinely lifted off the panel, which makes it the
+   one legitimate --shadow-overlay surface on this screen. Its left rule
+   is --trace, the same "this is the row the eye should stop on" mark
+   .ladder-row-served already uses for the candidate that was chosen. */
+.prov-reorder { max-width: 760px; }
+
+.prov-row-dragging {
+  position: relative;
+  z-index: 1;
+  transform: translateX(6px);
+  background: var(--overlay);
+  border-left: 1px solid var(--trace);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* Where the row will land. Two pixels of --trace across the full table
+   width plus a square cap on the leading edge, so the insertion point is
+   readable even where the line crosses a busy row below it. Height stays
+   at the border's own 2px: the indicator must not shove the rows apart,
+   or the list re-lays-out under the cursor mid-drag. */
+.drop-indicator {
+  position: relative;
+  height: 0;
+  border-top: 2px solid var(--trace);
+}
+.drop-indicator::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  background: var(--trace);
+}
+
+/* The priority column while a drag is in flight: the value that is being
+   written and the value it replaces, side by side. The outgoing number is
+   struck through at --legend; the incoming one is --accent-ink, because
+   accent-coloured TEXT takes accent-ink (--trace only reaches 3.93:1 in
+   light mode and fails AA at body size). */
+.prov-col-prio-edit {
+  flex: 0 0 108px;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.prov-prio-was {
+  color: var(--legend);
+  text-decoration: line-through;
+}
+.prov-prio-arrow { color: var(--legend); font-size: 11px; }
+.prov-prio-now { color: var(--accent-ink); }
+
+.prov-reorder-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--legend);
+}
+
+/* --- Region 3: discovery health ---------------------------------------
+   Three tiles, not Overview's four-up .health-grid, because these are
+   three named states side by side rather than a fleet roster. The tile
+   itself is .well.health-tile, reused verbatim. */
+.discovery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gutter);
+}
+
+.discovery-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* A wire field name and the value read out of it, on one line: the field
+   in --legend so the eye lands on the reading, not the label. */
+.discovery-field { color: var(--legend); }
+
+/* --- Region 4: add provider -------------------------------------------- */
+.prov-add {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  flex-wrap: wrap;
+}
+
+/* The secondary route into the same job. A link, not a second button:
+   two buttons side by side would read as two equal choices, and the
+   preset browser is the one an operator should reach for 197 times out of
+   198. --accent-ink because this is accent-coloured text. */
+.prov-add-link {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.prov-add-link:hover { opacity: 1; }
+
+/* --- Region 5: the raw provider form ------------------------------------
+   Three columns on a 12px/20px rhythm. Fields that the selected kind does
+   not use stay visible and inert rather than vanishing, so the form always
+   shows the whole shape of what POST /api/providers accepts. */
+.prov-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--section-pad) var(--gutter);
+  padding: var(--section-pad);
+}
+
+.prov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.prov-field .legend-caps { margin: 0; }
+.prov-field-wide { grid-column: span 2; }
+
+/* An input is a value the operator can change, so it sits on --well: the
+   recessed surface this product already uses for anything that is data
+   rather than chrome, and the one that inverts polarity between themes. */
+.prov-input {
+  display: flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 8px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Not applicable to the selected kind: still there, still labelled, just
+   not accepting a value. Panel rather than well — it is chrome for now,
+   not a data slot. */
+.prov-input-inert {
+  background: var(--panel);
+  border-style: dashed;
+  color: var(--legend);
+}
+
+/* The caret sits inside the field, so the select needs the row layout
+   .combo-trigger already defines; this only stops the button stretching
+   to the grid column's full height. */
+.prov-select { width: 100%; }
+
+.prov-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  padding: 0 var(--section-pad) var(--section-pad);
+}
+
+/* --- Region 6 ------------------------------------------------------------
+   The count line is .ops-footer, reused from Overview's partial exactly as
+   that file's header says it would be: one --legend line under a hairline,
+   summarising the screen above it. It brings its own rule and gutter, so
+   this block deliberately is NOT a .region — two hairlines 25px apart with
+   nothing between them reads as a mistake rather than as a separation. The
+   pin paragraph loses its margin for the same reason: with pins off it is
+   an empty element, and an empty element should not reserve a band. */
+.prov-counts > p:first-child { margin: 0; }

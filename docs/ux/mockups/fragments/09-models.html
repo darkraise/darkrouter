@@ -1,0 +1,847 @@
+<section class="screen" id="s-09-models" data-screen-title="configure/models">
+  <p class="legend">
+    The model catalog with six facets instead of two text boxes and eleven
+    columns instead of six &mdash; pricing, max output tokens, publisher,
+    lifecycle state and, on every row, the merge source that produced its
+    numbers. Below the table: the two models upstream has withdrawn, the
+    detail sheet open on <span class="mono">openai/gpt-oss-120b</span> with
+    its compressed route ladder and the override editor the
+    <span class="mono">model_overrides</span> table has never had, and the
+    read-only aliases summary. Press <kbd>A</kbd> to reveal pins,
+    <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#" data-active="true">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">configure/models</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <!-- ============ Region 1 — facets ============ -->
+        <div class="region">
+          <p class="section-title">Facets</p>
+          <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; GET /api/models?q=&amp;surface=&amp;min_context=&amp;tools=true. min_context and tools are accepted today and unreachable from the current screen.</span></p>
+          <div class="filter-bar">
+
+            <input class="q-input" value="gpt-oss" aria-label="q" readonly>
+
+            <div class="segmented" aria-label="surface">
+              <span class="segmented-option" data-active="true">llm</span>
+              <span class="segmented-option">embedding</span>
+              <span class="segmented-option">image</span>
+              <span class="segmented-option">stt</span>
+              <span class="segmented-option">tts</span>
+              <span class="segmented-option">rerank</span>
+              <span class="segmented-option">moderation</span>
+            </div>
+
+            <div class="segmented" aria-label="capability">
+              <span class="segmented-option" data-active="true">tools</span>
+              <span class="segmented-option">vision</span>
+              <span class="segmented-option">reasoning</span>
+            </div>
+
+            <div class="range-facet">
+              <p class="legend-caps range-label">min_context</p>
+              <input class="range-input" value="32,768" aria-label="min context" readonly>
+              <span class="range-track"><span class="range-fill"></span></span>
+              <input class="range-input range-input-wide" value="1,048,576" aria-label="max context" readonly>
+            </div>
+
+            <div class="segmented" aria-label="price band">
+              <span class="segmented-option">&le;$0.20</span>
+              <span class="segmented-option" data-active="true">$0.20&ndash;1</span>
+              <span class="segmented-option">$1&ndash;5</span>
+              <span class="segmented-option">&gt;$5</span>
+            </div>
+
+            <div class="combo" data-open="true" style="min-width:196px">
+              <button class="control combo-trigger">
+                <span>provider: groq +2</span>
+                <span class="combo-chevron">▾</span>
+              </button>
+              <div class="combo-menu">
+                <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>groq</span><span class="combo-count">184</span></span>
+                <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">31</span></span>
+                <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>together</span><span class="combo-count">212</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>deepinfra</span><span class="combo-count">340</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>openrouter</span><span class="combo-count">417</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>anthropic</span><span class="combo-count">9</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>bedrock</span><span class="combo-count">64</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>vertex</span><span class="combo-count">27</span></span>
+              </div>
+            </div>
+
+            <div class="segmented" aria-label="lifecycle state">
+              <span class="segmented-option" data-active="true">live</span>
+              <span class="segmented-option">stale</span>
+              <span class="segmented-option">removed_upstream</span>
+            </div>
+
+            <button class="control control-ghost">Reset</button>
+
+          </div>
+        </div>
+
+        <!-- ============ Region 2 — the catalog table ============ -->
+        <div class="region">
+          <p class="section-title">Catalog</p>
+          <div class="table-toolbar">
+            <span class="micro">16 of 1,284 models &middot; 2 withheld by the retired filter</span>
+            <div class="table-toolbar-actions">
+              <span class="switch" data-on="false">
+                <span class="switch-track"><span class="switch-knob"></span></span>
+                <span class="switch-label">show retired models</span>
+              </span>
+              <button class="control">Columns ▾</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <div class="table models-table">
+
+              <div class="row row-head">
+                <span class="legend-caps mcol-model">model</span>
+                <span class="legend-caps mcol-providers">providers</span>
+                <span class="legend-caps mcol-surfaces">surfaces</span>
+                <span class="legend-caps mcol-context col-right">context</span>
+                <span class="legend-caps mcol-maxout col-right">max out</span>
+                <span class="legend-caps mcol-in col-right">in $/mtok</span>
+                <span class="legend-caps mcol-out col-right">out $/mtok</span>
+                <span class="legend-caps mcol-publisher">publisher</span>
+                <span class="legend-caps mcol-caps" title="tools &middot; vision &middot; reasoning">caps</span>
+                <span class="legend-caps mcol-source">source</span>
+                <span class="legend-caps mcol-state">state</span>
+              </div>
+
+              <div class="row row-selected">
+                <span class="mono mcol-model">openai/gpt-oss-120b</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+4</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.15</span>
+                <span class="mono mcol-out col-right">$0.60</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">openai/gpt-oss-20b</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+3</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.05</span>
+                <span class="mono mcol-out col-right">$0.20</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">claude-opus-4-20250514</span>
+                <span class="mono mcol-providers">anthropic<span class="prov-more">+3</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">200,000</span>
+                <span class="mono mcol-maxout col-right">32,000</span>
+                <span class="mono mcol-in col-right">$15.00</span>
+                <span class="mono mcol-out col-right">$75.00</span>
+                <span class="mono mcol-publisher">anthropic</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">claude-sonnet-4-20250514</span>
+                <span class="mono mcol-providers">anthropic<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">200,000</span>
+                <span class="mono mcol-maxout col-right">64,000</span>
+                <span class="mono mcol-in col-right">$3.00</span>
+                <span class="mono mcol-out col-right">$15.00</span>
+                <span class="mono mcol-publisher">anthropic</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">gemini-2.5-pro</span>
+                <span class="mono mcol-providers">vertex<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">1,048,576</span>
+                <span class="mono mcol-maxout col-right">65,536</span>
+                <span class="mono mcol-in col-right">$1.25</span>
+                <span class="mono mcol-out col-right">$10.00</span>
+                <span class="mono mcol-publisher">google</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">gemini-2.5-flash</span>
+                <span class="mono mcol-providers">vertex<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">1,048,576</span>
+                <span class="mono mcol-maxout col-right">65,536</span>
+                <span class="mono mcol-in col-right">$0.30</span>
+                <span class="mono mcol-out col-right">$2.50</span>
+                <span class="mono mcol-publisher">google</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">deepseek-ai/DeepSeek-V3</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">8,192</span>
+                <span class="mono mcol-in col-right">$0.60</span>
+                <span class="mono mcol-out col-right">$1.70</span>
+                <span class="mono mcol-publisher">deepseek</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">deepseek-ai/DeepSeek-R1</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">163,840</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.70</span>
+                <span class="mono mcol-out col-right">$2.40</span>
+                <span class="mono mcol-publisher">deepseek</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">meta-llama/Llama-3.3-70B-Instruct</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+3</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.23</span>
+                <span class="mono mcol-out col-right">$0.40</span>
+                <span class="mono mcol-publisher">meta</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row row-inferred" title="inferred — no models.dev entry and no discovery response; these numbers are a guess from the model card">
+                <span class="mono mcol-model">Qwen/Qwen3-235B-A22B</span>
+                <span class="mono mcol-providers">cerebras<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right"><span class="value-guessed">&asymp;262,144</span></span>
+                <span class="mono mcol-maxout col-right"><span class="value-guessed">&asymp;32,768</span></span>
+                <span class="mono mcol-in col-right"><span class="value-guessed">&asymp;$0.20</span></span>
+                <span class="mono mcol-out col-right"><span class="value-guessed">&asymp;$0.60</span></span>
+                <span class="mono mcol-publisher">qwen</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="inferred">&asymp; inferred</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">moonshotai/Kimi-K2-Instruct</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">16,384</span>
+                <span class="mono mcol-in col-right">$1.00</span>
+                <span class="mono mcol-out col-right">$3.00</span>
+                <span class="mono mcol-publisher">moonshotai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">text-embedding-3-large</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">embedding</span>
+                <span class="mono mcol-context col-right">8,191</span>
+                <span class="mono mcol-maxout col-right text-muted">&mdash;</span>
+                <span class="mono mcol-in col-right">$0.13</span>
+                <span class="mono mcol-out col-right text-muted">&mdash;</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="false">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">bge-reranker-v2-m3</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">rerank</span>
+                <span class="mono mcol-context col-right">8,192</span>
+                <span class="mono mcol-maxout col-right text-muted">&mdash;</span>
+                <span class="mono mcol-in col-right">$0.02</span>
+                <span class="mono mcol-out col-right text-muted">&mdash;</span>
+                <span class="mono mcol-publisher">baai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="false">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">whisper-large-v3</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">stt</span>
+                <span class="mono mcol-context col-right text-muted">&mdash;</span>
+                <span class="mono mcol-maxout col-right text-muted">&mdash;</span>
+                <span class="mono mcol-in col-right" title="stt bills per audio hour, not per MTok — $0.04/hr">$0.04</span>
+                <span class="mono mcol-out col-right text-muted">&mdash;</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="false">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row row-inferred" title="inferred — the deepinfra listing carried an id and nothing else; every number on this row is a guess">
+                <span class="mono mcol-model">mistralai/Mistral-Small-3.2-24B-Instruct</span>
+                <span class="mono mcol-providers">deepinfra<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right"><span class="value-guessed">&asymp;131,072</span></span>
+                <span class="mono mcol-maxout col-right"><span class="value-guessed">&asymp;32,768</span></span>
+                <span class="mono mcol-in col-right"><span class="value-guessed">&asymp;$0.06</span></span>
+                <span class="mono mcol-out col-right"><span class="value-guessed">&asymp;$0.18</span></span>
+                <span class="mono mcol-publisher">mistralai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="inferred">&asymp; inferred</span></span>
+                <span class="lifecycle mcol-state" data-state="stale"><span class="lifecycle-mark"></span>stale</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model" title="us.anthropic.claude-3-5-sonnet-20241022-v2:0">us.anthropic.claude-3-5-sonnet-20241022-v2:0</span>
+                <span class="mono mcol-providers">bedrock</span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">200,000</span>
+                <span class="mono mcol-maxout col-right">8,192</span>
+                <span class="mono mcol-in col-right">$3.00</span>
+                <span class="mono mcol-out col-right">$15.00</span>
+                <span class="mono mcol-publisher">anthropic</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="override">override</span></span>
+                <span class="lifecycle mcol-state" data-state="stale"><span class="lifecycle-mark"></span>stale</span>
+              </div>
+
+            </div>
+          </div>
+
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; inferred &mdash; an inferred model routes with a warning, so a guessed row must be visibly a guess.</span></p>
+          <p class="prose">
+            Two rows here were inferred: no models.dev entry, no usable
+            discovery response, so darkrouter guessed from the id and the
+            model card. Every guessed number is prefixed
+            <span class="mono">&asymp;</span> and underlined with a dashed
+            rule, the whole row's left edge breaks into a dashed border, and
+            the source tag repeats the mark &mdash; three channels, none of
+            them a state colour, because a guess is not a health reading.
+            <span class="mono">stale</span> means the last discovery sweep
+            did not see the model but the retention window has not expired;
+            <span class="mono">override</span> means the top of the merge
+            precedence supplied at least one field on that row.
+          </p>
+        </div>
+
+        <!-- ============ Region 3 — removed_upstream ============ -->
+        <div class="region">
+          <p class="section-title">Retired models</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; state is live|stale|removed_upstream. Filter.IncludeRemoved exists and nothing calls it.</span></p>
+          <div class="retired-band">
+            <span class="switch" data-on="false">
+              <span class="switch-track"><span class="switch-knob"></span></span>
+              <span class="switch-label">show retired models</span>
+            </span>
+            <span class="mono">Snapshot.Filter.IncludeRemoved = false</span>
+            <span class="micro">2 models withheld from the table above</span>
+          </div>
+          <p class="spec-note">what the toggle reveals &mdash; struck through, still priced, still addressable by a pinned alias</p>
+          <div class="table models-table">
+            <div class="row row-retired" title="last seen upstream 2026-06-18">
+              <span class="mono mcol-model">mixtral-8x7b-32768</span>
+              <span class="mono mcol-providers">groq</span>
+              <span class="mono mcol-surfaces">llm</span>
+              <span class="mono mcol-context col-right">32,768</span>
+              <span class="mono mcol-maxout col-right">32,768</span>
+              <span class="mono mcol-in col-right">$0.24</span>
+              <span class="mono mcol-out col-right">$0.24</span>
+              <span class="mono mcol-publisher">mistralai</span>
+              <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+              <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+              <span class="lifecycle mcol-state" data-state="removed_upstream"><span class="lifecycle-mark"></span>removed_upstream</span>
+            </div>
+            <div class="row row-retired" title="last seen upstream 2026-07-02">
+              <span class="mono mcol-model">meta-llama/Llama-3.1-405B-Instruct</span>
+              <span class="mono mcol-providers">together<span class="prov-more">+1</span></span>
+              <span class="mono mcol-surfaces">llm</span>
+              <span class="mono mcol-context col-right">131,072</span>
+              <span class="mono mcol-maxout col-right">8,192</span>
+              <span class="mono mcol-in col-right">$3.50</span>
+              <span class="mono mcol-out col-right">$3.50</span>
+              <span class="mono mcol-publisher">meta</span>
+              <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+              <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+              <span class="lifecycle mcol-state" data-state="removed_upstream"><span class="lifecycle-mark"></span>removed_upstream</span>
+            </div>
+          </div>
+          <p class="prose">
+            A retired model is not deleted &mdash; the row stays so a request
+            that still names it gets <span class="mono">model_not_offered</span>
+            against a candidate the operator can actually see, rather than a
+            silent miss. The strike-through says the catalog no longer
+            believes upstream will serve it; the prices stay legible because
+            the last known rate is what the historical usage rows were costed
+            against.
+          </p>
+        </div>
+
+        <!-- ============ Regions 4 and 5 — detail sheet ============ -->
+        <div class="region">
+          <p class="section-title">Model detail sheet &mdash; open</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
+          <div class="panel sheet">
+
+            <div class="sheet-head">
+              <span class="sheet-title">openai/gpt-oss-120b</span>
+              <span class="chip">openai</span>
+              <span class="chip">llm</span>
+              <span class="lifecycle" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              <span class="sheet-meta">
+                <span class="micro">5 offerings &middot; 12 candidates &middot; 3 aliases</span>
+                <button class="chip" type="button" aria-label="close sheet">&times;</button>
+              </span>
+            </div>
+
+            <div class="sheet-body">
+
+              <div class="sheet-split">
+
+                <div class="sheet-col sheet-col-ladder">
+                  <p class="section-title">Route order</p>
+                  <div class="ladder" style="width:220px">
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">01</span>
+                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="mono">groq</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">02</span>
+                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="mono">cerebras</span>
+                    </div>
+                    <div class="ladder-row ladder-row-served" style="gap:8px">
+                      <span class="rank">03</span>
+                      <span class="mark mark-served mark-catalog"></span>
+                      <span class="mono">together</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">04</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">deepinfra</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">05</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">openrouter</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">06</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">anthropic</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">07</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">bedrock</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">08</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">vertex</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">09</span>
+                      <span class="mark mark-cooling mark-catalog"></span>
+                      <span class="mono target-muted">groq</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">10</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">together</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">11</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">deepinfra</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">12</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">openrouter</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                  </div>
+                  <p class="sheet-caption">
+                    Task 4's compressed mode, unmodified. One candidate per
+                    (provider, credential), so groq, together, deepinfra and
+                    openrouter each earn a second row at ranks 09&ndash;12.
+                  </p>
+                </div>
+
+                <div class="sheet-col">
+                  <p class="section-title">Per-provider pricing and traits</p>
+                  <div class="table">
+                    <div class="row row-head">
+                      <span class="legend-caps pcol-provider">provider</span>
+                      <span class="legend-caps pcol-credential">credential</span>
+                      <span class="legend-caps pcol-context col-right">context</span>
+                      <span class="legend-caps pcol-maxout col-right">max out</span>
+                      <span class="legend-caps pcol-in col-right">in $/mtok</span>
+                      <span class="legend-caps pcol-out col-right">out $/mtok</span>
+                      <span class="legend-caps pcol-traits">traits</span>
+                      <span class="legend-caps pcol-source">source</span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">groq</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.15</span>
+                      <span class="mono pcol-out col-right">$0.75</span>
+                      <span class="mono pcol-traits">tools, reasoning, json_schema</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">cerebras</span>
+                      <span class="micro pcol-credential">key 1</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.25</span>
+                      <span class="mono pcol-out col-right">$0.69</span>
+                      <span class="mono pcol-traits">tools, reasoning</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">together</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.15</span>
+                      <span class="mono pcol-out col-right">$0.60</span>
+                      <span class="mono pcol-traits">tools, reasoning, json_schema</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">deepinfra</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">8,192</span>
+                      <span class="mono pcol-in col-right">$0.09</span>
+                      <span class="mono pcol-out col-right">$0.45</span>
+                      <span class="mono pcol-traits">tools</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">openrouter</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.10</span>
+                      <span class="mono pcol-out col-right">$0.50</span>
+                      <span class="mono pcol-traits">tools, reasoning</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    </div>
+                  </div>
+                  <p class="sheet-caption">
+                    Anthropic, bedrock and vertex appear in the ladder because
+                    the alias enumerates them; they carry no offering for this
+                    model and skip with
+                    <span class="mono">model_not_offered</span>.
+                  </p>
+
+                  <p class="section-title" style="margin-top:var(--section-pad)">Merge precedence</p>
+                  <div class="precedence">
+                    <span class="chip precedence-step">model_overrides</span>
+                    <span class="precedence-arrow">&#9656;</span>
+                    <span class="chip precedence-step" data-winner="true">models.dev</span>
+                    <span class="precedence-arrow">&#9656;</span>
+                    <span class="chip precedence-step">discovery</span>
+                    <span class="precedence-arrow">&#9656;</span>
+                    <span class="chip precedence-step">inference</span>
+                  </div>
+                  <p class="sheet-caption">
+                    models.dev wins four of the six merged fields on this
+                    model. <span class="mono">model_overrides</span> is empty
+                    for it, as it is for every model in the catalog &mdash;
+                    the table has never been written to.
+                  </p>
+
+                  <p class="section-title" style="margin-top:var(--section-pad)">Catalog identity</p>
+                  <div class="table">
+                    <div class="row">
+                      <span class="legend-caps icol-key">models.dev id</span>
+                      <span class="mono icol-value">openai/gpt-oss-120b</span>
+                    </div>
+                    <div class="row">
+                      <span class="legend-caps icol-key">upstream ids</span>
+                      <span class="mono icol-value">4 offerings agree &middot; cerebras lists it as gpt-oss-120b</span>
+                    </div>
+                    <div class="row">
+                      <span class="legend-caps icol-key">first seen</span>
+                      <span class="mono icol-value">2026-04-30</span>
+                    </div>
+                    <div class="row">
+                      <span class="legend-caps icol-key">last discovery sweep</span>
+                      <span class="mono icol-value">2026-08-25 09:12 &middot; snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div>
+                <p class="section-title">Merge provenance, per field</p>
+                <div class="table">
+                  <div class="row row-head">
+                    <span class="legend-caps vcol-field">field</span>
+                    <span class="legend-caps vcol-effective">effective value</span>
+                    <span class="legend-caps vcol-from">won by</span>
+                    <span class="legend-caps vcol-contributors">contributors, highest precedence first</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">context_window</span>
+                    <span class="data-emph vcol-effective">131,072</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev 131,072 &middot; discovery 131,072 (5 offerings) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">max_output_tokens</span>
+                    <span class="data-emph vcol-effective">32,768</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev 32,768 &middot; discovery 8,192 (deepinfra) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">capabilities</span>
+                    <span class="data-emph vcol-effective">tools, reasoning</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="discovered">discovered</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev tools &middot; discovery +reasoning (groq, cerebras, together, openrouter) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">surfaces</span>
+                    <span class="data-emph vcol-effective">llm</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev llm &middot; discovery llm (5 offerings) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">publisher</span>
+                    <span class="data-emph vcol-effective">openai</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev openai &middot; discovery &mdash; &middot; inference openai (from the id prefix)</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">pricing</span>
+                    <span class="data-emph vcol-effective text-muted">per offering</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="discovered">provider</span></span>
+                    <span class="micro vcol-contributors">not merged &mdash; each (provider, credential) offering carries its own rate, listed above</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p class="section-title">Override editor</p>
+                <div class="well override-editor">
+
+                  <div class="field-row">
+                    <p class="legend-caps field-label">scope</p>
+                    <div class="segmented" aria-label="override scope">
+                      <span class="segmented-option" data-active="true">groq</span>
+                      <span class="segmented-option">cerebras</span>
+                      <span class="segmented-option">together</span>
+                      <span class="segmented-option">deepinfra</span>
+                      <span class="segmented-option">openrouter</span>
+                    </div>
+                    <span class="field-detected">an override row is keyed (provider, model), so this editor writes one provider at a time</span>
+                  </div>
+
+                  <div class="field-row" data-dirty="false">
+                    <p class="legend-caps field-label">context window</p>
+                    <input class="field-input" value="131,072" aria-label="context window override" readonly>
+                    <span class="field-detected">detected <span class="mono">131,072</span> &middot; models_dev &mdash; unchanged</span>
+                    <button class="control control-ghost field-revert" data-inert="true">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="field-row" data-dirty="true">
+                    <p class="legend-caps field-label">max output</p>
+                    <input class="field-input" value="16,384" aria-label="max output override" readonly>
+                    <span class="field-detected">detected <span class="mono">32,768</span> &middot; models_dev &mdash; overridden</span>
+                    <button class="control control-ghost field-revert">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="field-row" data-dirty="true">
+                    <p class="legend-caps field-label">capabilities</p>
+                    <span class="field-chips">
+                      <span class="cap-toggle" data-on="true"><span class="cap-toggle-box">✓</span>tools</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>vision</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>reasoning</span>
+                    </span>
+                    <span class="field-detected">detected <span class="mono">tools, reasoning</span> &middot; discovery &mdash; reasoning forced off</span>
+                    <button class="control control-ghost field-revert">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="field-row" data-dirty="false">
+                    <p class="legend-caps field-label">surfaces</p>
+                    <span class="field-chips">
+                      <span class="cap-toggle" data-on="true"><span class="cap-toggle-box">✓</span>llm</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>embedding</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>rerank</span>
+                    </span>
+                    <span class="field-detected">detected <span class="mono">llm</span> &middot; models_dev &mdash; unchanged</span>
+                    <button class="control control-ghost field-revert" data-inert="true">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="override-footer">
+                    <button class="control control-primary">Save override</button>
+                    <button class="control control-ghost">Delete override</button>
+                    <span class="micro">
+                      PUT /api/models/groq/openai-gpt-oss-120b/override &middot;
+                      DELETE clears every field at once, not one at a time
+                    </span>
+                  </div>
+
+                </div>
+                <p class="sheet-caption">
+                  Two of the four fields are edited but unsaved &mdash; their
+                  inputs carry an accent edge, which reports a control's own
+                  state, and their per-field revert is live while the two
+                  unchanged fields keep an inert one so the column stays a
+                  column. Nothing here has ever existed: the endpoint, the
+                  editor and the first row of
+                  <span class="mono">model_overrides</span> all arrive
+                  together.
+                </p>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ Region 6 — aliases ============ -->
+        <div class="region">
+          <p class="section-title">Aliases &mdash; read only</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Aliases &mdash; edited on configure/routing, not here.</span></p>
+          <div class="panel" style="padding:var(--section-pad)">
+            <div class="table">
+              <div class="row row-head">
+                <span class="legend-caps acol-alias">alias</span>
+                <span class="legend-caps acol-arrow"></span>
+                <span class="legend-caps acol-target">resolves to</span>
+                <span class="legend-caps acol-surface">surface</span>
+                <span class="legend-caps acol-candidates col-right">candidates</span>
+                <span class="legend-caps acol-requests col-right">requests 24h</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">fast-json</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">openai/gpt-oss-120b</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">12</span>
+                <span class="mono acol-requests col-right">2,481</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">smart</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">claude-opus-4-20250514</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">7</span>
+                <span class="mono acol-requests col-right">640</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">cheap</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">openai/gpt-oss-20b</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">9</span>
+                <span class="mono acol-requests col-right">1,096</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">long-context</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">gemini-2.5-pro</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">4</span>
+                <span class="mono acol-requests col-right">312</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">embed</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">text-embedding-3-large</span>
+                <span class="mono acol-surface">embedding</span>
+                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-requests col-right">188</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">rerank-default</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">bge-reranker-v2-m3</span>
+                <span class="mono acol-surface">rerank</span>
+                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-requests col-right">96</span>
+              </div>
+            </div>
+            <div class="alias-footer">
+              <p class="alias-note">
+                Six aliases point into this catalog. Adding one, reordering
+                its candidates or repointing it is routing policy, so it
+                happens on one screen only &mdash; this panel exists so that
+                opening a model answers "who calls this?" without a second
+                search.
+              </p>
+              <a class="control control-primary link-out" href="#">configure/routing &rarr;</a>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
