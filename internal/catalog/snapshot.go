@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -114,6 +115,12 @@ type Store struct {
 	db  *store.DB
 	src provider.Source
 	cur atomic.Pointer[Snapshot]
+	// rebuilding serializes Rebuild against itself. Reading every source and
+	// then publishing is not atomic, so two overlapping rebuilds let the one
+	// that read older data publish last — and that stale snapshot then serves
+	// routing until something rebuilds again. The request path never takes
+	// this: Snapshot stays a lock-free atomic load.
+	rebuilding sync.Mutex
 }
 
 func NewStore(db *store.DB, src provider.Source) *Store {
@@ -147,6 +154,9 @@ func (s *Store) Rebuild(ctx context.Context) error {
 	if s.db == nil || s.src == nil {
 		return nil
 	}
+	s.rebuilding.Lock()
+	defer s.rebuilding.Unlock()
+
 	providers, err := s.src.Providers(ctx)
 	if err != nil {
 		return fmt.Errorf("catalog rebuild: providers: %w", err)
