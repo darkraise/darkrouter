@@ -9,6 +9,11 @@ import (
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	bedrockadapter "github.com/darkraise/darkrouter/internal/adapter/bedrock"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 )
 
 // renderCase parses a fixture and renders it for one adapter kind.
@@ -233,6 +238,30 @@ func TestEmptyAssistantTurnDoesNotBreakAnyTarget(t *testing.T) {
 		}
 		if len(raw) == 0 {
 			t.Fatalf("%s produced nothing", kind)
+		}
+	}
+}
+
+func TestOnlyThreeKindsAreForwardable(t *testing.T) {
+	// Master design §4.1: bedrock signs a payload hash and vertex encodes the
+	// publisher in its URL, so neither can forward an inbound body. This is a
+	// property of the interface set, not of a predicate somewhere else, and
+	// this test is what says so.
+	for name, ad := range map[string]adapter.Adapter{
+		"openaicompat": openaicompat.New(),
+		"anthropic":    anthropicadapter.New(),
+		"gemini":       geminiadapter.New(),
+	} {
+		if _, ok := ad.(adapter.Forwarder); !ok {
+			t.Errorf("%s must implement Forwarder", name)
+		}
+	}
+	for name, ad := range map[string]adapter.Adapter{
+		"bedrock": bedrockadapter.New(),
+		"vertex":  vertexadapter.New(),
+	} {
+		if _, ok := ad.(adapter.Forwarder); ok {
+			t.Errorf("%s must not implement Forwarder", name)
 		}
 	}
 }
