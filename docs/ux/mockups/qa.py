@@ -13,6 +13,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FRAGMENTS = HERE / "fragments"
+CSS_PARTIALS = HERE / "css"
 
 # Colour lives in darkrouter-ui.css. A hex in a fragment is a value that
 # escaped the token system and will not follow the light-mode swap.
@@ -137,6 +138,15 @@ def check_fragment(path: Path) -> list[str]:
     return problems
 
 
+def check_css_partial(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    problems = []
+    for m in HEX.finditer(text):
+        line = text.count("\n", 0, m.start()) + 1
+        problems.append(f"{path.name}:{line}: raw hex {m.group(0)} — use var(--token) or rgba()")
+    return problems
+
+
 def check_index(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     parser = Balance()
@@ -157,6 +167,9 @@ def main() -> int:
         return 1
     for f in fragments:
         problems.extend(check_fragment(f))
+
+    for f in sorted(CSS_PARTIALS.glob("*.css")):
+        problems.extend(check_css_partial(f))
 
     index = HERE / "index.html"
     if index.exists():

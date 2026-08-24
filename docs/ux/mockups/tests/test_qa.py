@@ -170,6 +170,21 @@ class TestFragmentChecks(unittest.TestCase):
             self.assertEqual(problems, [])
 
 
+class TestCssPartialChecks(unittest.TestCase):
+    def test_raw_hex_in_partial_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "partial.css"
+            f.write_text(".sparkline { color: #ff0000; }\n", encoding="utf-8")
+            problems = qa.check_css_partial(f)
+            self.assertTrue(any("raw hex" in p for p in problems), problems)
+
+    def test_token_reference_in_partial_is_accepted(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "partial.css"
+            f.write_text(".sparkline { color: var(--ink); }\n", encoding="utf-8")
+            self.assertEqual(qa.check_css_partial(f), [])
+
+
 class TestIndexChecks(unittest.TestCase):
     def test_duplicate_ids_are_rejected(self):
         with tempfile.TemporaryDirectory() as d:

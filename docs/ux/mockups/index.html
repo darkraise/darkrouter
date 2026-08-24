@@ -351,19 +351,59 @@ kbd {
 }
 .ladder-row:last-child { border-bottom: none; }
 
+/* Where the request landed: a value step plus a 1px --trace rule down the
+   left edge, so the served row reads as the one the eye should stop on
+   without needing to read a single character of it. */
+.ladder-row-served { border-left: 1px solid var(--trace); }
+.ladder-row-served::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+/* Two-digit zero-padding keeps the gutter's optical width constant past
+   rank nine, which matters once a ladder runs past 9 candidates. */
 .rank {
-  min-width: 18px;
+  position: relative;
+  min-width: 28px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
   text-align: right;
 }
+/* A tick drawn into the spine's approach, not onto the spine itself — sits
+   in the 8px gap .ladder-row's flex gap already reserves, so it needs no
+   layout space of its own. Opt-in per rank (.rank-tick) rather than a bare
+   .rank rule, since a ladder with no .spine has nothing for the tick to
+   run into. Every fifth rank gets the long variant. */
+.rank-tick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  width: 3px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--bezel);
+}
+.rank-tick-major::after { width: 5px; }
+/* Below the served row a candidate's text is still printed, just at the
+   45% opacity the termination rule puts on it — the spine and mark get
+   their own colour treatment instead, so this is text-only and shared
+   across whichever element in the row needs it (rank, target, reason). */
+.text-terminated { opacity: 0.45; }
 
 .spine {
   align-self: stretch;
-  width: 2px;
+  width: 1px;
   background: var(--hairline);
 }
+/* The termination rule: below the served row the run of ink itself gives
+   out, not just the marks sitting on it. */
+.spine-terminated { background: var(--hairline-subtle); }
 
 /* All four states share one 7px silhouette footprint so the gutter column
    never jitters between rows, and split into two families: filled means an
@@ -393,21 +433,41 @@ kbd {
 /* Where the request landed: the router's decision, so trace, never a
    state colour. */
 .mark-served { background: var(--trace-fill); border: 1px solid var(--trace); }
+/* Below the served row a candidate was never reached at all — a smaller,
+   dimmer silhouette than "skipped", which was still a live decision.
+   This one is just where the ink runs out. */
+.mark-terminated {
+  width: 5px;
+  height: 5px;
+  background: transparent;
+  border: 1px solid var(--hairline-subtle);
+}
+/* The compressed catalog reading: rank plus mark plus provider id only,
+   at a size step up from the ladder's own 7px so a dense column of them
+   still reads as individual marks rather than a smear. */
+.mark-catalog { width: 9px; height: 9px; }
 
+/* Solid means the row ended here; dashed means the router moved past it
+   after a failure. A background gradient gives an exact 3px-on-3px dash
+   at any zoom level, which border-style: dashed does not guarantee. */
 .stub {
   flex: 0 0 auto;
-  width: 16px;
+  width: 12px;
   height: 1px;
-  background: var(--hairline);
+  background: var(--trace);
 }
 .stub-dashed {
-  background: none;
-  border-top: 1px dashed var(--hairline);
-  height: 0;
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--state-failed) 0 3px,
+    transparent 3px 6px
+  );
 }
 
 .reason {
   display: flex;
+  flex: 1 1 auto;
   align-items: baseline;
   gap: 6px;
   min-width: 0;
@@ -426,6 +486,40 @@ kbd {
   line-height: 1.55;
   color: var(--ink-muted);
 }
+
+/* The candidate identity itself — provider/model, off the wire, so mono.
+   Fixed width keeps it a column across rows whose reason text varies
+   wildly in length. */
+.target {
+  flex: 0 0 auto;
+  min-width: 230px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+/* A candidate the router passed over keeps its identity legible but
+   unemphasised — nothing happened here, so nothing should draw the eye. */
+.target-muted { color: var(--ink-muted); }
+
+/* A 2px bar in the row's own right margin, width set per row from the
+   ladder's own maximum latency — the ladder becomes a waterfall with no
+   second axis to read. */
+.latency-bar {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 2px;
+  min-width: 2px;
+  max-width: 64px;
+  margin-left: auto;
+  border-radius: var(--radius);
+  background: var(--trace);
+}
+.latency-bar-failed { background: var(--state-failed); }
+
+/* The evidence panel: the same retrospective ladder with every hue
+   stripped, so the four mark states have to stand on silhouette alone. */
+.ladder-grayscale { filter: grayscale(1); }
 
 /* --- Console chrome --------------------------------------------------- */
 
@@ -758,7 +852,7 @@ body.pins-on .pin-note { display: inline; }
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li></ol></nav>
 <section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -1129,6 +1223,543 @@ body.pins-on .pin-note { display: inline; }
         </div>
       </div>
       <p class="prose">Hover each specimen. Nothing else in this product animates &mdash; no page transitions, no entrances, no shimmer, no spinners.</p>
+    </div>
+
+  </div>
+</section>
+
+<section class="screen" id="s-01-ladder-specimen--s-01-ladder-specimen" data-screen-title="ladder specimen">
+  <p class="legend">
+    The routing ladder in its three modes, plus the state gallery that
+    isolates its four marks at 4&times; scale. Nine later screens embed this
+    component; its class names and DOM order below are the contract they
+    copy verbatim, not a variant. Press <kbd>A</kbd> to reveal pins,
+    <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="panel" style="padding:0 var(--gutter)">
+
+    <div class="region">
+      <p class="section-title">Mode 1 &mdash; retrospective (request trace)</p>
+      <p>
+        <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Ladder geometry &mdash; 28px rank gutter, 1px spine, 12px stub lane, then target/reason/latency. Identical in all three modes.</span>
+      </p>
+      <p class="micro">request 01JBXTG4R8ZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
+      <div class="ladder">
+        <div class="ladder-row">
+          <span class="rank">01</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">groq/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">http</span>
+            <span class="reason-prose">429 rate limited</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:2px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">02</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">cerebras/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">timeout</span>
+            <span class="reason-prose">30000ms elapsed before first byte</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:64px"></span>
+        </div>
+        <div class="ladder-row ladder-row-served">
+          <span class="rank">03</span>
+          <span class="spine"></span>
+          <span class="mark mark-served"></span>
+          <span class="stub"></span>
+          <span class="target">together/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">200</span>
+            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+          </span>
+          <span class="latency-bar" style="width:4px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">04</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick rank-tick-major text-terminated">05</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">06</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">07</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">08</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">vertex/gemini-2.5-pro</span>
+        </div>
+      </div>
+      <p>
+        <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Termination rule &mdash; below the served row the spine drops to --hairline-subtle and marks go hollow-5px at 45% opacity. Spec &sect;4.</span>
+      </p>
+      <p class="prose">
+        Ranks 04&ndash;08 were never attempted &mdash; the router stopped at rank
+        03. Their marks shrink to a 5px hollow square in --hairline-subtle,
+        the spine beneath them drops to the same dim token, and their text
+        sits at 45% opacity. The right margin carries a latency bar scaled
+        to the ladder's own maximum (rank 02's 30,000ms timeout), which is
+        why rank 01's 412ms failure and rank 03's 1,847ms serve both read as
+        a thin sliver &mdash; the timeout, not a clock, sets the scale.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Mode 2 &mdash; predictive (routing dry-run)</p>
+      <p>
+        <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Fill vs outline &mdash; filled means it happened (trace), outlined means it would happen (dry-run). No legend needed.</span>
+      </p>
+      <p class="micro">predicted against snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
+      <div class="ladder">
+        <div class="ladder-row">
+          <span class="rank">01</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">groq/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-prose">would attempt if reached</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">02</span>
+          <span class="spine"></span>
+          <span class="mark mark-cooling"></span>
+          <span class="target">cerebras/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">cooling</span>
+            <span class="reason-prose">4m 12s remaining</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">03</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">together/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-prose">would attempt if reached</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">04</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">deepinfra/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-prose">would attempt if reached</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">05</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">openrouter/openai/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-prose">would attempt if reached</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">06</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">anthropic/claude-opus-4-20250514</span>
+          <span class="reason">
+            <span class="reason-code">no_capability</span>
+            <span class="reason-prose">vision demanded, model has none</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">07</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">bedrock/us.anthropic.claude-opus-4</span>
+          <span class="reason">
+            <span class="reason-prose">would attempt if reached</span>
+          </span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">08</span>
+          <span class="spine"></span>
+          <span class="mark mark-skipped"></span>
+          <span class="target">vertex/gemini-2.5-pro</span>
+          <span class="reason">
+            <span class="reason-prose">would attempt if reached</span>
+          </span>
+        </div>
+      </div>
+      <p class="prose">
+        Every mark here is hollow &mdash; a dry-run sends nothing, so nothing
+        can be filled. Rank 02 and rank 06 carry the two skip reasons that
+        would apply if this request ran right now; the other six are plain
+        --bezel hollow squares with no reason at all, since a dry run has
+        no basis to predict past the top of the ladder. No stub, no
+        latency bar &mdash; both describe an attempt, and none occurred.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Mode 3 &mdash; compressed (models catalog)</p>
+      <p class="prose">
+        The same vocabulary at catalog density: rank, a 9px mark, provider
+        id, nothing else. Twelve rows read as a barcode of sigils &mdash; the
+        shape of the fleet at a glance, without a single word.
+      </p>
+      <div class="ladder" style="width:180px">
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">01</span>
+          <span class="mark mark-failed mark-catalog"></span>
+          <span class="mono">groq</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">02</span>
+          <span class="mark mark-failed mark-catalog"></span>
+          <span class="mono">cerebras</span>
+        </div>
+        <div class="ladder-row ladder-row-served" style="gap:8px">
+          <span class="rank">03</span>
+          <span class="mark mark-served mark-catalog"></span>
+          <span class="mono">together</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">04</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">deepinfra</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">05</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">openrouter</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">06</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">anthropic</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">07</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">bedrock</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">08</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">vertex</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">09</span>
+          <span class="mark mark-cooling mark-catalog"></span>
+          <span class="mono target-muted">groq</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">10</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">together</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">11</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">deepinfra</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank">12</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono target-muted">openrouter</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">State gallery</p>
+      <p>
+        <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Solid vs dashed stub &mdash; solid served, dashed attempted-and-failed. Legible at 50% zoom.</span>
+      </p>
+      <div style="display:flex;gap:var(--gutter);flex-wrap:wrap">
+
+        <div>
+          <div style="display:flex;align-items:center;justify-content:center;width:120px;height:64px">
+            <span class="mark mark-skipped" style="transform:scale(4)"></span>
+          </div>
+          <p class="spec-note" style="width:190px">skipped &mdash; hollow 7px, 1px --bezel, no fill, spine runs through undisturbed</p>
+          <div class="ladder" style="width:190px;margin-top:8px">
+            <div class="ladder-row" style="gap:8px">
+              <span class="rank">01</span>
+              <span class="spine"></span>
+              <span class="mark mark-skipped"></span>
+              <span class="mono target-muted">deepinfra</span>
+            </div>
+          </div>
+          <p class="spec-note" style="width:190px">row: target in --ink-muted, no background</p>
+        </div>
+
+        <div>
+          <div style="display:flex;align-items:center;justify-content:center;width:120px;height:64px">
+            <span class="mark mark-cooling" style="transform:scale(4)"></span>
+          </div>
+          <p class="spec-note" style="width:300px">skipped, cooling &mdash; hollow 7px stroked --state-cooling, no fill</p>
+          <div class="ladder" style="width:300px;margin-top:8px">
+            <div class="ladder-row" style="gap:8px">
+              <span class="rank">02</span>
+              <span class="spine"></span>
+              <span class="mark mark-cooling"></span>
+              <span class="mono">cerebras</span>
+              <span class="reason">
+                <span class="reason-code">cooling</span>
+                <span class="reason-prose">4m 12s left</span>
+              </span>
+            </div>
+          </div>
+          <p class="spec-note" style="width:300px">row: reason chip carries the live countdown</p>
+        </div>
+
+        <div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:20px;width:150px;height:64px">
+            <span class="mark mark-failed" style="transform:scale(4)"></span>
+            <span class="stub stub-dashed" style="width:12px;transform:scale(4)"></span>
+          </div>
+          <p class="spec-note" style="width:200px">attempted, failed &mdash; filled 7px --state-failed; stub 12px dashed 3px-on-3px, --state-failed</p>
+          <div class="ladder" style="width:200px;margin-top:8px">
+            <div class="ladder-row" style="gap:8px">
+              <span class="rank">01</span>
+              <span class="spine"></span>
+              <span class="mark mark-failed"></span>
+              <span class="stub stub-dashed"></span>
+              <span class="mono">groq</span>
+              <span class="latency-bar latency-bar-failed" style="width:14px"></span>
+            </div>
+          </div>
+          <p class="spec-note" style="width:200px">row: latency bar reads as time-to-failure, not time-to-serve</p>
+        </div>
+
+        <div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:20px;width:150px;height:64px">
+            <span class="mark mark-served" style="transform:scale(4)"></span>
+            <span class="stub" style="width:12px;transform:scale(4)"></span>
+          </div>
+          <p class="spec-note" style="width:200px">served &mdash; filled 7px --trace-fill, 1px --trace ring; stub 12px solid --trace</p>
+          <div class="ladder" style="width:200px;margin-top:8px">
+            <div class="ladder-row ladder-row-served" style="gap:8px">
+              <span class="rank">03</span>
+              <span class="spine"></span>
+              <span class="mark mark-served"></span>
+              <span class="stub"></span>
+              <span class="mono">together</span>
+              <span class="latency-bar" style="width:18px"></span>
+            </div>
+          </div>
+          <p class="spec-note" style="width:200px">row: 1px --trace left border, --trace wash at 8% opacity</p>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Rank gutter</p>
+      <p>
+        <b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Rank gutter &mdash; zero-padded so the column stays optically stable past nine candidates; every fifth rank ticks 5px.</span>
+      </p>
+      <div style="display:flex;align-items:flex-start;gap:var(--gutter)">
+        <div class="ladder" style="width:120px">
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">01</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">02</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">03</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">04</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick rank-tick-major">05</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">06</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">07</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">08</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick">09</span>
+            <span class="spine"></span>
+          </div>
+          <div class="ladder-row" style="gap:8px">
+            <span class="rank rank-tick rank-tick-major">10</span>
+            <span class="spine"></span>
+          </div>
+        </div>
+        <p class="prose" style="max-width:420px">
+          Two-digit zero-padded ordinals, 11px mono, --legend, right-aligned
+          &mdash; "01" occupies the same optical width as "10" would, so the
+          gutter never re-flows once a ladder grows past nine candidates.
+          A 3px tick reaches from every rank into the spine's approach;
+          every fifth rank (05, 10, &hellip;) draws a 5px tick instead, giving
+          the eye a count without reading a single digit.
+        </p>
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Reason format</p>
+      <p>
+        <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Reason format &mdash; machine_code &middot; plain sentence. The code is what you grep for, the sentence is what you read.</span>
+      </p>
+      <div class="table">
+        <div class="row">
+          <span class="reason">
+            <span class="reason-code">model_not_offered</span>
+            <span class="reason-prose">target does not serve claude-sonnet-4-6</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="reason">
+            <span class="reason-code">cooling</span>
+            <span class="reason-prose">4m 12s remaining</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="reason">
+            <span class="reason-code">no_capability</span>
+            <span class="reason-prose">vision demanded, model has none</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="reason">
+            <span class="reason-code">context</span>
+            <span class="reason-prose">210k requested, 200k available</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="reason">
+            <span class="reason-code">no_credential</span>
+            <span class="reason-prose">no key configured for this provider</span>
+          </span>
+        </div>
+        <div class="row">
+          <span class="reason">
+            <span class="reason-code">adapter_surface</span>
+            <span class="reason-prose">darkrouter's bedrock adapter cannot speak rerank</span>
+          </span>
+        </div>
+      </div>
+      <p class="prose">
+        Every skip and every failure resolves to this one shape &mdash; a
+        stable machine_code in mono ink, a hand-readable sentence in sans
+        --ink-muted. The code is what a log query filters on; the sentence
+        is what an operator reads without opening a runbook.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Greyscale proof</p>
+      <p>
+        <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Greyscale proof &mdash; four states distinguishable with colour removed. Colour is the second channel, never the only one.</span>
+      </p>
+      <p class="prose">
+        A retrospective ladder repeated inside
+        <code class="mono">filter: grayscale(1)</code>, this time carrying
+        one of each state the router can record &mdash; the eight-candidate
+        trace above never skips anything outright, so it alone can't prove
+        this. Rank 01 is skipped outright; rank 02 was skipped because it
+        was still cooling; rank 03 was attempted and failed; rank 04 is
+        where the request was served. Ranks 05&ndash;06 sit below it,
+        terminated. Every state stays legible on silhouette, fill, and stub
+        pattern alone.
+      </p>
+      <div class="ladder-grayscale">
+        <div class="ladder">
+          <div class="ladder-row">
+            <span class="rank">01</span>
+            <span class="spine"></span>
+            <span class="mark mark-skipped"></span>
+            <span class="target target-muted">groq/openai-gpt-oss-120b</span>
+            <span class="reason">
+              <span class="reason-code">no_credential</span>
+              <span class="reason-prose">no key configured for this provider</span>
+            </span>
+          </div>
+          <div class="ladder-row">
+            <span class="rank">02</span>
+            <span class="spine"></span>
+            <span class="mark mark-cooling"></span>
+            <span class="target">cerebras/gpt-oss-120b</span>
+            <span class="reason">
+              <span class="reason-code">cooling</span>
+              <span class="reason-prose">2m 47s remaining at request time</span>
+            </span>
+          </div>
+          <div class="ladder-row">
+            <span class="rank">03</span>
+            <span class="spine"></span>
+            <span class="mark mark-failed"></span>
+            <span class="stub stub-dashed"></span>
+            <span class="target">together/openai-gpt-oss-120b</span>
+            <span class="reason">
+              <span class="reason-code">timeout</span>
+              <span class="reason-prose">30000ms elapsed before first byte</span>
+            </span>
+            <span class="latency-bar latency-bar-failed" style="width:64px"></span>
+          </div>
+          <div class="ladder-row ladder-row-served">
+            <span class="rank">04</span>
+            <span class="spine"></span>
+            <span class="mark mark-served"></span>
+            <span class="stub"></span>
+            <span class="target">deepinfra/gpt-oss-120b</span>
+            <span class="reason">
+              <span class="reason-code">200</span>
+              <span class="reason-prose">612ms total &middot; 96ms time-to-first-token</span>
+            </span>
+            <span class="latency-bar" style="width:2px"></span>
+          </div>
+          <div class="ladder-row">
+            <span class="rank text-terminated">05</span>
+            <span class="spine spine-terminated"></span>
+            <span class="mark mark-terminated"></span>
+            <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
+          </div>
+          <div class="ladder-row">
+            <span class="rank rank-tick rank-tick-major text-terminated">06</span>
+            <span class="spine spine-terminated"></span>
+            <span class="mark mark-terminated"></span>
+            <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
