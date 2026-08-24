@@ -2,12 +2,12 @@
  * Task 5 — Overview screen partial.
  *
  * New component classes this screen introduces: .config-banner (alarm
- * strip), .live-strip/.live-tile (readout-over-sparkline tiles), .sparkline
- * (svg trend line, reused by Task 9), .load-bar (per-tile refresh
- * indicator), .health-grid/.health-tile (provider tiles, .health-tile
+ * strip), .live-strip/.live-tile/.live-tile-caption (readout-over-sparkline
+ * tiles), .sparkline (svg trend line, reused by Task 9), .load-bar (per-tile
+ * refresh indicator), .health-grid/.health-tile (provider tiles, .health-tile
  * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
- * this screen composes .well/.table/.row/.chip/.mono/.readout/.unit/
- * .micro/.data-emph/.section-title/.legend-caps/.spec-note/.region from
+ * this screen composes .well/.table/.row/a.row/.chip/.chip-failover/.mono/
+ * .readout/.unit/.micro/.data-emph/.section-title/.legend-caps/.region from
  * darkrouter-ui.css unchanged.
  */
 
@@ -63,6 +63,20 @@
   flex-wrap: wrap;
   gap: 16px;
   min-height: 1.2em;
+}
+/* A tile caption names the wire field it reads (mono, off the wire) plus,
+   where the readout has one, the window it was aggregated over (sans, a
+   person's gloss) — .spec-note is the design-language specimen's own
+   scoped label, not a general-purpose caption class. */
+.live-tile-caption {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+.live-tile-caption .mono {
+  font-size: 11px;
+  color: var(--legend);
 }
 /* The latency tile's compound p50/p95 pair — two readouts sharing one
    tile without either one claiming the tile's single primary value slot. */
@@ -139,21 +153,22 @@
   color: var(--ink);
 }
 
-/* The one state on this screen only the operator can resolve. Same
-   wash construction as .config-banner, at tile scale — a second, smaller
-   instance of "the system is telling you it needs a human," not a new
-   idiom. */
+/* The one state on this screen only the operator can resolve — not a
+   failure, so it takes --state-cooling (the cooling/attention colour),
+   not --state-failed. Same wash construction as .config-banner, at tile
+   scale, but the amber keeps it from reading as an outage next to the
+   tile's own healthy pip. */
 .health-tile-alert {
   position: relative;
   padding: 4px 6px;
-  border: 1px solid var(--state-failed);
+  border: 1px solid var(--state-cooling);
   border-radius: var(--radius);
 }
 .health-tile-alert::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--state-failed);
+  background: var(--state-cooling);
   opacity: 0.08;
   pointer-events: none;
   border-radius: inherit;
@@ -168,13 +183,8 @@
 }
 
 /* --- Region 4: recent failovers -----------------------------------------
-   .row is reused verbatim from Task 3/4's .table, but every existing use
-   of it is a <div>; this is the first <a class="row">, so the browser's
-   default anchor underline needs cancelling the way .toc a already does
-   for its own anchor rows. */
-a.row {
-  text-decoration: none;
-}
+   .row is reused verbatim from Task 3/4's .table; a.row's underline reset
+   lives in darkrouter-ui.css, shared with Usage's rank tables. */
 
 /* --- Region 5: ops footer -----------------------------------------------
    Children set their own .mono face; this class only supplies the

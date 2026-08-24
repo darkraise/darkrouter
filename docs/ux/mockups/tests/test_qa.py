@@ -40,6 +40,20 @@ class TestFragmentChecks(unittest.TestCase):
             )
             self.assertEqual(qa.check_fragment(f), [])
 
+    def test_html_entity_is_not_raw_hex(self):
+        # &#9662; is a numeric character reference for the ▾ glyph, not a
+        # colour hex that escaped the token system.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "html_entity.html"
+            f.write_text(
+                '<section class="screen" id="s-1-ent" data-screen-title="ent">'
+                '<p class="legend">html entity</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<span class="combo-chevron">&#9662;</span></section>',
+                encoding="utf-8",
+            )
+            self.assertEqual(qa.check_fragment(f), [])
+
     def test_hex_in_svg_fill_is_rejected(self):
         # fill="#FF0000" is the canonical way a raw hex enters an SVG-heavy
         # fragment; the url(#...)/href="#..." exemptions must not swallow it.

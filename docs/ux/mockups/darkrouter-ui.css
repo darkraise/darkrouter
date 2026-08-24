@@ -68,7 +68,7 @@ body.theme-light {
   --trace-fill: #0DA2E7;
   --accent-ink: #0369A0;
   --focus: #0284C5;
-  --state-healthy: #059467;
+  --state-healthy: #047857;
   --state-cooling: #DB7706;
   --state-failed: #DC2828;
 
@@ -259,6 +259,73 @@ kbd {
   white-space: nowrap;
 }
 
+/* A failover count names a routing decision (the router walked through
+   more than one candidate), the same split the ladder's --trace/state-
+   colour rule already draws — so it stays in the trace family, not a
+   neutral chip. Border/rule keeps --trace; the text is --accent-ink, the
+   readable pairing for accent-coloured text (--trace only clears 3.93:1
+   in light mode). Requests and Overview both report it, so both consume
+   this chip rather than reinventing it. */
+.chip-failover {
+  border-color: var(--trace);
+  color: var(--accent-ink);
+}
+
+/* Dialect/path annotations — quiet facts about how a request was handled,
+   the same register --legend already carries for secondary captions. */
+.chip-path { color: var(--legend); }
+
+/* A low-emphasis control variant: same 30px silhouette as .control, no
+   fill, dimmed until hovered. Used for a page-level "Reset" affordance in
+   more than one screen. */
+.control-ghost {
+  background: transparent;
+  border-color: var(--hairline-subtle);
+  color: var(--ink-muted);
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.control-ghost:hover { opacity: 1; }
+
+/* --- Segmented control ---------------------------------------------------
+   One "pick exactly one of N" bar, joined into a single bordered strip
+   with hairline dividers between options. The active option sits on
+   --well — the recessed, "value in effect" surface already used for
+   tables, the ladder, and time-range presets — not --overlay, which the
+   surface hierarchy (see the header comment above) reserves for popovers;
+   an inline selection state is not an elevated surface. */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-h);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 10px;
+  border-right: 1px solid var(--hairline-subtle);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.segmented-option:last-child { border-right: none; }
+.segmented-option:hover { opacity: 1; color: var(--ink); }
+.segmented-option[data-active="true"] {
+  opacity: 1;
+  background: var(--well);
+  color: var(--accent-ink);
+}
+
 /* --- Table / rows ------------------------------------------------------ */
 
 .table {
@@ -279,6 +346,10 @@ kbd {
   border-bottom: 1px solid var(--hairline-subtle);
 }
 .row:last-child { border-bottom: none; }
+/* Every screen with a clickable row (Overview's failover log, Usage's rank
+   tables) makes it an <a class="row">, so the browser's default anchor
+   underline needs cancelling once here rather than once per partial. */
+a.row { text-decoration: none; }
 
 /* Row highlight animates opacity on a full-bleed overlay layer, not the
    background-color itself — background-color never transitions in this

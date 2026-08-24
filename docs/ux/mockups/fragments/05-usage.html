@@ -1,4 +1,4 @@
-<section class="screen" id="s-05-usage" data-screen-title="usage">
+<section class="screen" id="s-05-usage" data-screen-title="operate/usage">
   <p class="legend">
     Requests, tokens and cost over the selected range, ranked by provider and
     by model. The chart-heaviest screen in the set — every well below shares
@@ -38,11 +38,11 @@
 
           <div class="usage-toolbar">
             <p style="margin:0"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Range &mdash; GET /api/usage?days=30. Serves up to 365 days today with no screen calling it.</span></p>
-            <div class="range-picker mono" role="tablist" aria-label="range">
-              <a class="range-btn" href="#">7d</a>
-              <a class="range-btn" href="#" data-active="true">30d</a>
-              <a class="range-btn" href="#">90d</a>
-              <a class="range-btn" href="#">365d</a>
+            <div class="segmented mono" role="tablist" aria-label="range">
+              <a class="segmented-option" href="#">7d</a>
+              <a class="segmented-option" href="#" data-active="true">30d</a>
+              <a class="segmented-option" href="#">90d</a>
+              <a class="segmented-option" href="#">365d</a>
             </div>
           </div>
 
@@ -178,11 +178,11 @@
               <p><b class="pin" data-pin="5">5</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
               <div class="rank-table">
                 <div class="row rank-table-head">
-                  <span class="micro rank-col-id">provider</span>
-                  <span class="micro rank-col-num">requests</span>
-                  <span class="micro rank-col-num">tokens</span>
-                  <span class="micro rank-col-num">cost</span>
-                  <span class="micro rank-col-share">share</span>
+                  <span class="legend-caps rank-col-id">provider</span>
+                  <span class="legend-caps rank-col-num">requests</span>
+                  <span class="legend-caps rank-col-num">tokens</span>
+                  <span class="legend-caps rank-col-num">cost</span>
+                  <span class="legend-caps rank-col-share">share</span>
                 </div>
       <a class="row" href="#/requests?provider=groq">
         <span class="mono rank-col-id">groq</span>
@@ -271,11 +271,11 @@
               <p><b class="pin" data-pin="6">6</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
               <div class="rank-table">
                 <div class="row rank-table-head">
-                  <span class="micro rank-col-id">model</span>
-                  <span class="micro rank-col-num">requests</span>
-                  <span class="micro rank-col-num">tokens</span>
-                  <span class="micro rank-col-num">cost</span>
-                  <span class="micro rank-col-share">share</span>
+                  <span class="legend-caps rank-col-id">model</span>
+                  <span class="legend-caps rank-col-num">requests</span>
+                  <span class="legend-caps rank-col-num">tokens</span>
+                  <span class="legend-caps rank-col-num">cost</span>
+                  <span class="legend-caps rank-col-share">share</span>
                 </div>
       <a class="row" href="#/requests?model=openai%2Fgpt-oss-120b">
         <span class="mono rank-col-id">openai/gpt-oss-120b</span>

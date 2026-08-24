@@ -79,7 +79,7 @@ body.theme-light {
   --trace-fill: #0DA2E7;
   --accent-ink: #0369A0;
   --focus: #0284C5;
-  --state-healthy: #059467;
+  --state-healthy: #047857;
   --state-cooling: #DB7706;
   --state-failed: #DC2828;
 
@@ -270,6 +270,73 @@ kbd {
   white-space: nowrap;
 }
 
+/* A failover count names a routing decision (the router walked through
+   more than one candidate), the same split the ladder's --trace/state-
+   colour rule already draws — so it stays in the trace family, not a
+   neutral chip. Border/rule keeps --trace; the text is --accent-ink, the
+   readable pairing for accent-coloured text (--trace only clears 3.93:1
+   in light mode). Requests and Overview both report it, so both consume
+   this chip rather than reinventing it. */
+.chip-failover {
+  border-color: var(--trace);
+  color: var(--accent-ink);
+}
+
+/* Dialect/path annotations — quiet facts about how a request was handled,
+   the same register --legend already carries for secondary captions. */
+.chip-path { color: var(--legend); }
+
+/* A low-emphasis control variant: same 30px silhouette as .control, no
+   fill, dimmed until hovered. Used for a page-level "Reset" affordance in
+   more than one screen. */
+.control-ghost {
+  background: transparent;
+  border-color: var(--hairline-subtle);
+  color: var(--ink-muted);
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.control-ghost:hover { opacity: 1; }
+
+/* --- Segmented control ---------------------------------------------------
+   One "pick exactly one of N" bar, joined into a single bordered strip
+   with hairline dividers between options. The active option sits on
+   --well — the recessed, "value in effect" surface already used for
+   tables, the ladder, and time-range presets — not --overlay, which the
+   surface hierarchy (see the header comment above) reserves for popovers;
+   an inline selection state is not an elevated surface. */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-h);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 10px;
+  border-right: 1px solid var(--hairline-subtle);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.segmented-option:last-child { border-right: none; }
+.segmented-option:hover { opacity: 1; color: var(--ink); }
+.segmented-option[data-active="true"] {
+  opacity: 1;
+  background: var(--well);
+  color: var(--accent-ink);
+}
+
 /* --- Table / rows ------------------------------------------------------ */
 
 .table {
@@ -290,6 +357,10 @@ kbd {
   border-bottom: 1px solid var(--hairline-subtle);
 }
 .row:last-child { border-bottom: none; }
+/* Every screen with a clickable row (Overview's failover log, Usage's rank
+   tables) makes it an <a class="row">, so the browser's default anchor
+   underline needs cancelling once here rather than once per partial. */
+a.row { text-decoration: none; }
 
 /* Row highlight animates opacity on a full-bleed overlay layer, not the
    background-color itself — background-color never transitions in this
@@ -874,12 +945,12 @@ body.pins-on .pin-note { display: inline; }
  * Task 5 — Overview screen partial.
  *
  * New component classes this screen introduces: .config-banner (alarm
- * strip), .live-strip/.live-tile (readout-over-sparkline tiles), .sparkline
- * (svg trend line, reused by Task 9), .load-bar (per-tile refresh
- * indicator), .health-grid/.health-tile (provider tiles, .health-tile
+ * strip), .live-strip/.live-tile/.live-tile-caption (readout-over-sparkline
+ * tiles), .sparkline (svg trend line, reused by Task 9), .load-bar (per-tile
+ * refresh indicator), .health-grid/.health-tile (provider tiles, .health-tile
  * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
- * this screen composes .well/.table/.row/.chip/.mono/.readout/.unit/
- * .micro/.data-emph/.section-title/.legend-caps/.spec-note/.region from
+ * this screen composes .well/.table/.row/a.row/.chip/.chip-failover/.mono/
+ * .readout/.unit/.micro/.data-emph/.section-title/.legend-caps/.region from
  * darkrouter-ui.css unchanged.
  */
 
@@ -935,6 +1006,20 @@ body.pins-on .pin-note { display: inline; }
   flex-wrap: wrap;
   gap: 16px;
   min-height: 1.2em;
+}
+/* A tile caption names the wire field it reads (mono, off the wire) plus,
+   where the readout has one, the window it was aggregated over (sans, a
+   person's gloss) — .spec-note is the design-language specimen's own
+   scoped label, not a general-purpose caption class. */
+.live-tile-caption {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+.live-tile-caption .mono {
+  font-size: 11px;
+  color: var(--legend);
 }
 /* The latency tile's compound p50/p95 pair — two readouts sharing one
    tile without either one claiming the tile's single primary value slot. */
@@ -1011,21 +1096,22 @@ body.pins-on .pin-note { display: inline; }
   color: var(--ink);
 }
 
-/* The one state on this screen only the operator can resolve. Same
-   wash construction as .config-banner, at tile scale — a second, smaller
-   instance of "the system is telling you it needs a human," not a new
-   idiom. */
+/* The one state on this screen only the operator can resolve — not a
+   failure, so it takes --state-cooling (the cooling/attention colour),
+   not --state-failed. Same wash construction as .config-banner, at tile
+   scale, but the amber keeps it from reading as an outage next to the
+   tile's own healthy pip. */
 .health-tile-alert {
   position: relative;
   padding: 4px 6px;
-  border: 1px solid var(--state-failed);
+  border: 1px solid var(--state-cooling);
   border-radius: var(--radius);
 }
 .health-tile-alert::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--state-failed);
+  background: var(--state-cooling);
   opacity: 0.08;
   pointer-events: none;
   border-radius: inherit;
@@ -1040,13 +1126,8 @@ body.pins-on .pin-note { display: inline; }
 }
 
 /* --- Region 4: recent failovers -----------------------------------------
-   .row is reused verbatim from Task 3/4's .table, but every existing use
-   of it is a <div>; this is the first <a class="row">, so the browser's
-   default anchor underline needs cancelling the way .toc a already does
-   for its own anchor rows. */
-a.row {
-  text-decoration: none;
-}
+   .row is reused verbatim from Task 3/4's .table; a.row's underline reset
+   lives in darkrouter-ui.css, shared with Usage's rank tables. */
 
 /* --- Region 5: ops footer -----------------------------------------------
    Children set their own .mono face; this class only supplies the
@@ -1067,12 +1148,13 @@ a.row {
  * Task 6 — the Requests log ("operate/requests").
  *
  * New vocabulary this screen introduces for reuse by Tasks 9 and 12:
- * .filter-bar, .combo (+ trigger/menu/option/check), .segmented,
- * .time-range, .view-chip, .chip-failover, .chip-path, .newer-pill,
- * .table-toolbar, .col-menu, and the .col-* column-width helpers the
- * request table's header and rows share. Everything else (.table, .row,
- * .chip, .control, .well, .panel, .legend-caps, .micro, .prose) is reused
- * as-is from darkrouter-ui.css.
+ * .filter-bar, .combo (+ trigger/menu/option/check), .time-range,
+ * .view-chip, .newer-pill, .table-toolbar, .col-menu, and the .col-*
+ * column-width helpers the request table's header and rows share.
+ * .segmented, .chip-failover, .chip-path and .control-ghost were promoted
+ * to darkrouter-ui.css once Overview and Usage needed the same controls.
+ * Everything else (.table, .row, .chip, .control, .well, .panel,
+ * .legend-caps, .micro, .prose) is reused as-is from darkrouter-ui.css.
  */
 
 /* --- Saved views --------------------------------------------------- */
@@ -1196,33 +1278,6 @@ a.row {
   color: var(--ink-muted);
 }
 
-/* --- Segmented control ----------------------------------------------- */
-
-.segmented {
-  display: inline-flex;
-  align-items: stretch;
-  height: var(--control-h);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--panel);
-  overflow: hidden;
-}
-
-.segmented-option {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 10px;
-  border-right: 1px solid var(--hairline-subtle);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  color: var(--ink-muted);
-}
-.segmented-option:last-child { border-right: none; }
-.segmented-option[data-active="true"] {
-  color: var(--accent-ink);
-  background: var(--overlay);
-}
-
 /* --- Time-range picker ------------------------------------------------- */
 
 .time-range {
@@ -1236,7 +1291,7 @@ a.row {
   gap: 8px;
   margin-top: 4px;
   padding: 8px;
-  width: 264px;
+  width: 340px;
   background: var(--overlay);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
@@ -1276,7 +1331,7 @@ a.row {
 
 .time-range-input {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 128px;
   height: 24px;
   padding: 0 6px;
   background: var(--well);
@@ -1286,17 +1341,6 @@ a.row {
   font-size: 11px;
   color: var(--ink);
 }
-
-/* --- Ghost button --------------------------------------------------- */
-
-.control-ghost {
-  background: transparent;
-  border-color: var(--hairline-subtle);
-  color: var(--ink-muted);
-  opacity: 0.8;
-  transition: opacity var(--dur-hover) ease;
-}
-.control-ghost:hover { opacity: 1; }
 
 /* --- Table toolbar + column-visibility menu --------------------------- */
 
@@ -1308,16 +1352,24 @@ a.row {
 }
 
 .table-toolbar-actions {
+  position: relative;
   display: flex;
   gap: 8px;
 }
 
+/* The second overlay in this screen (after .combo-menu/.time-range-menu):
+   floats over the table on the same --overlay + --shadow-overlay surface
+   rather than sitting in normal flow, which would push the table down and
+   leave a dead band the width of the menu behind it. */
 .col-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 1px;
   width: 240px;
-  margin: 0 0 var(--gutter) auto;
   padding: 4px;
   background: var(--overlay);
   border: 1px solid var(--hairline);
@@ -1347,7 +1399,13 @@ a.row {
   background: var(--hairline-subtle);
 }
 
+/* Export is an action, not a toggle — its glyph would otherwise inherit
+   .combo-check's color: transparent and read as an unchecked box. */
 .col-menu-export { color: var(--accent-ink); }
+.col-menu-export .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
 
 /* --- Request table -----------------------------------------------------
    .table/.row are shared (darkrouter-ui.css); everything below is the
@@ -1387,22 +1445,8 @@ a.row {
 
 .text-muted { color: var(--ink-muted); }
 
-/* Routing behaviour — how many candidates the router walked through
-   before this request landed — is what the ROUTER DECIDED, the same
-   split the ladder's --trace/state-colour rule already draws (see
-   .mark-served vs .mark-cooling in darkrouter-ui.css). No single
-   provider on these two rows is reported as cooling, so --state-cooling
-   would misstate what happened; --trace is the routing-verdict channel,
-   and a failover count is exactly that. */
-.chip-failover {
-  border-color: var(--trace);
-  color: var(--trace);
-}
-
-/* Dialect/path annotations — quiet facts about how the request was
-   handled, the same register --legend already carries for secondary
-   captions elsewhere in the system. */
-.chip-path { color: var(--legend); }
+/* .chip-failover and .chip-path are shared with Overview's failover log,
+   so both live in darkrouter-ui.css now. */
 
 /* --- Newer pill ----------------------------------------------------------
    Floats astride the table's top edge on purpose — that seam is where a
@@ -1436,6 +1480,248 @@ a.row {
   align-items: flex-start;
   gap: 8px;
   padding: var(--gutter);
+}
+
+/*
+ * Task 7 — Request trace ("operate/requests" detail view).
+ *
+ * New component classes this screen introduces: .trace-header (+ -row/-id/
+ * -route/-route-sep/-route-arrow/-route-target), .status-badge,
+ * .trace-copy-btn, .waterfall-tracks (+ -row/-row-label/-track/-seg/-end/
+ * -total), .readout-strip/.readout-tile, .warning-list (named by the task
+ * brief's own Interfaces contract), .json-tree (+ -row/-depth-N/-toggle/
+ * -key/-string/-punct/-collapsed-count), .control-primary, .trace-footer.
+ * Everything else composes .well/.panel/.chip/.row/.mono/.prose/.readout/
+ * .unit/.micro/.spec-note/.section-title/.empty-well/.chart-well/
+ * .chart-axis/.reason/.reason-code/.reason-prose/.mark/.mark-served/
+ * .mark-failed from darkrouter-ui.css or an earlier screen's partial
+ * unchanged — this is a leaf screen, so no later fragment can depend on
+ * anything declared here staying stable.
+ */
+
+/* --- Region 1: header --------------------------------------------------- */
+
+.trace-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+
+.trace-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trace-id { color: var(--ink); }
+
+/* A generic status pill: box shape from .chip, colour from data-status —
+   the same variant convention .state-pip already uses for provider
+   identity. success/error are the only two request outcomes; the state
+   colours are legitimate here because a request's own status is not a
+   routing verdict, the same reasoning that lets .status-success/-error
+   use them on the Requests table two screens back. */
+.status-badge[data-status="success"] {
+  border-color: var(--state-healthy);
+  color: var(--state-healthy);
+}
+.status-badge[data-status="error"] {
+  border-color: var(--state-failed);
+  color: var(--state-failed);
+}
+
+/* .chip has no hover treatment of its own; this one is a button, so it
+   needs the opacity-on-hover idiom .view-chip already establishes. */
+.trace-copy-btn {
+  cursor: default;
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.trace-copy-btn:hover {
+  opacity: 1;
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.trace-route {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-muted);
+}
+.trace-route-sep,
+.trace-route-arrow { color: var(--legend); }
+.trace-route-target {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* --- Region 3: waterfall -------------------------------------------------
+   Sits inside .well.chart-well, reused verbatim from the Usage screen's
+   partial for the recessed, corner-clipped surface a graticule belongs on.
+   The end-of-bar mark reuses .mark/.mark-served/.mark-failed from the
+   ladder two regions up rather than inventing a second failed/served
+   colour idiom — a served or failed attempt should look like the same
+   fact wherever it appears on this screen. */
+
+.waterfall-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: var(--section-pad);
+}
+
+.waterfall-row {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+}
+
+.waterfall-row-label {
+  flex: 0 0 130px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+/* The graticule: a repeating hairline every third of the track width, so
+   the 0/10,000/20,000/30,000ms axis labels below always land on a line —
+   the same "graticule IS the gridline, no second axis" rule the ladder's
+   own latency-bar and the Usage charts both already follow. */
+.waterfall-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 16px;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--hairline-subtle) 0 1px,
+    transparent 1px calc(100% / 3)
+  );
+}
+
+/* Default fill is neutral --bezel: elapsed time before an outcome is
+   known, the same "nothing has been decided yet" register --bezel already
+   carries on a skipped ladder mark. Only once an outcome exists does a
+   segment take the router-verdict or provider-outcome colour below. */
+.waterfall-seg {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 8px;
+  min-width: 2px;
+  margin-top: -4px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+.waterfall-seg-serve { background: var(--trace); }
+.waterfall-seg-failed { background: var(--state-failed); }
+
+.waterfall-end {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.waterfall-total {
+  flex: 0 0 64px;
+  text-align: right;
+}
+
+/* --- Region 4: readouts --------------------------------------------------
+   A tile shell distinct from Overview's .live-tile on purpose: "live"
+   there names a five-minute rolling window that keeps refreshing; every
+   number in a closed trace is an immutable historical fact, so borrowing
+   that name would misdescribe what these tiles are. */
+
+.readout-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--gutter);
+}
+
+.readout-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--section-pad);
+}
+
+/* --- Region 5: warnings ---------------------------------------------------
+   Named by Task 7's own Interfaces contract as a leaf class with no later
+   consumer. The box is .table's own recipe restated under its own name
+   rather than reused as .table, since a future warnings screen may want to
+   style severity without touching the request/candidate tables' own
+   class. Rows and their code/sentence pair are .row and .reason, reused
+   unchanged — a warning is the same "machine_code, then a sentence" shape
+   the ladder's reason column already established, and reusing it ties the
+   two together instead of inventing a second vocabulary for one idea. */
+.warning-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+/* --- Region 6: surface detail (JSON tree) --------------------------------
+   Approximates darkraise-ui's JsonTreeView per pin 6. Colour stays inside
+   the neutral quartet (ink/ink-muted/legend/bezel) throughout — surface_meta
+   is neither a provider health signal nor a routing verdict, so neither
+   the state colours nor --trace belong on it. */
+
+.json-tree {
+  padding: 8px var(--section-pad);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.json-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: pre;
+}
+.json-depth-1 { padding-left: 16px; }
+.json-depth-2 { padding-left: 32px; }
+
+.json-toggle {
+  display: inline-block;
+  width: 10px;
+  font-size: 9px;
+  color: var(--bezel);
+}
+.json-toggle-collapsed { color: var(--legend); }
+
+.json-key { color: var(--ink); }
+.json-string { color: var(--ink-muted); }
+.json-punct { color: var(--legend); }
+
+/* The truncation notice standing in for a hidden third level — Spec-note
+   register, since it is metadata about the tree, not data from it. */
+.json-collapsed-count {
+  margin: 0 2px;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 10px;
+  color: var(--legend);
+}
+
+/* --- Region 8: open in playground ----------------------------------------
+   .control already proves the 30px control silhouette; this is the one
+   place on the screen that wants to read as the primary action, so it
+   takes the same accent-ink treatment .col-menu-export already uses for
+   its own single emphasised action. */
+.control-primary {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.trace-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* Usage screen (fragments/05-usage.html) — "Graticule Bench".
@@ -1495,40 +1781,11 @@ a.row {
   color: var(--legend);
 }
 
-/* --- Range picker (segmented control) ---------------------------------- */
-
-.range-picker {
-  display: flex;
-  height: var(--control-h);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.range-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  padding: 0 10px;
-  background: var(--panel);
-  border-left: 1px solid var(--hairline);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink-muted);
-  text-decoration: none;
-  opacity: 0.85;
-  transition: opacity var(--dur-hover) ease;
-}
-.range-btn:first-child { border-left: none; }
-.range-btn:hover { opacity: 1; color: var(--ink); }
-.range-btn[data-active="true"] {
-  opacity: 1;
-  background: var(--well);
-  color: var(--accent-ink);
-}
-
-/* --- Chart regions ------------------------------------------------------ */
+/* --- Chart regions ------------------------------------------------------
+   The range picker reuses .segmented/.segmented-option from
+   darkrouter-ui.css — Requests' filter-bar pickers and this range picker
+   are the same "pick exactly one of N" control, no longer reinvented per
+   screen. */
 
 .usage-chart-panel { padding: var(--section-pad); }
 
@@ -1631,8 +1888,13 @@ a.row {
   color: var(--legend);
   border-bottom: 1px solid var(--hairline);
 }
+/* Matches Requests' .row-head .legend-caps: zero the label's own 6px
+   bottom margin, which the shared flex row does not collapse on its own. */
+.rank-table-head .legend-caps { margin: 0; }
 
-.rank-table a.row { text-decoration: none; cursor: pointer; }
+/* a.row's underline reset lives in darkrouter-ui.css, shared with
+   Overview's failover log. */
+.rank-table a.row { cursor: pointer; }
 
 .rank-col-id { flex: 1 1 auto; min-width: 0; }
 .rank-col-num {
@@ -1675,7 +1937,7 @@ a.row {
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-05-usage"><span class="toc-n">04</span>usage</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li></ol></nav>
 <section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -2651,7 +2913,7 @@ a.row {
           <div class="live-strip">
 
             <div class="well live-tile">
-              <p class="spec-note">requests_per_min &middot; over the last 5 min</p>
+              <p class="live-tile-caption"><span class="mono">requests_per_min</span> &middot; over the last 5 min</p>
               <div class="live-tile-value">
                 <span class="readout">14.2</span>
               </div>
@@ -2662,7 +2924,7 @@ a.row {
             </div>
 
             <div class="well live-tile">
-              <p class="spec-note">error_rate &middot; over the last 5 min</p>
+              <p class="live-tile-caption"><span class="mono">error_rate</span> &middot; over the last 5 min</p>
               <div class="live-tile-value">
                 <span class="readout">2.4</span><span class="unit">%</span>
               </div>
@@ -2673,7 +2935,7 @@ a.row {
             </div>
 
             <div class="well live-tile">
-              <p class="spec-note">latency &middot; over the last 5 min</p>
+              <p class="live-tile-caption">latency &middot; over the last 5 min</p>
               <div class="live-tile-value">
                 <span class="live-tile-metric"><span class="micro">p50</span><span class="readout">890</span><span class="unit">ms</span></span>
                 <span class="live-tile-metric"><span class="micro">p95</span><span class="readout">4.1</span><span class="unit">s</span></span>
@@ -2688,7 +2950,7 @@ a.row {
               <div class="load-bar" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="refreshing today_spend">
                 <span class="load-bar-fill" style="width:58%"></span>
               </div>
-              <p class="spec-note">today_spend &middot; over the last 5 min</p>
+              <p class="live-tile-caption"><span class="mono">today_spend</span></p>
               <div class="live-tile-value">
                 <span class="readout">$3.47</span>
               </div>
@@ -2704,7 +2966,7 @@ a.row {
 
         <div class="region">
           <p class="section-title">Provider health</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace. needs_reauth renders its callout in --state-cooling, not --state-failed &mdash; the vertex provider itself is healthy, and reconnecting it is the one state only the operator can fix, the cooling/attention colour rather than an outage.</span></p>
           <div class="health-grid">
 
             <div class="well health-tile">
@@ -2784,35 +3046,35 @@ a.row {
             <a class="row" href="#01HZXK4M9QANE2FTX7RS3JV8CB">
               <span class="mono" style="min-width:64px">14:22:07</span>
               <span class="mono" style="flex:1 1 auto">default &rarr; together/openai-gpt-oss-120b</span>
-              <span class="chip">3 attempts</span>
+              <span class="chip chip-failover">failover &times;3</span>
               <span class="data-emph" style="margin-left:auto">1,847ms</span>
             </a>
 
             <a class="row" href="#01HZXK5PWENA3D9RTX2FC6MJQ8">
               <span class="mono" style="min-width:64px">14:19:52</span>
               <span class="mono" style="flex:1 1 auto">fast &rarr; cerebras/openai-gpt-oss-120b</span>
-              <span class="chip">2 attempts</span>
+              <span class="chip chip-failover">failover &times;2</span>
               <span class="data-emph" style="margin-left:auto">612ms</span>
             </a>
 
             <a class="row" href="#01HZXK6R2TCEMA9NF3XJ7VQ5WB">
               <span class="mono" style="min-width:64px">14:11:30</span>
               <span class="mono" style="flex:1 1 auto">vision &rarr; openrouter/qwen/qwen3-vl-235b</span>
-              <span class="chip">2 attempts</span>
+              <span class="chip chip-failover">failover &times;2</span>
               <span class="data-emph" style="margin-left:auto">2,104ms</span>
             </a>
 
             <a class="row" href="#01HZXK7T4WBNF2CQ9RXM3E6JAP">
               <span class="mono" style="min-width:64px">13:58:44</span>
               <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
-              <span class="chip">4 attempts</span>
+              <span class="chip chip-failover">failover &times;4</span>
               <span class="data-emph" style="margin-left:auto">4,392ms</span>
             </a>
 
             <a class="row" href="#01HZXK8V6RCAM9FQ2TXJ5WNE3B">
               <span class="mono" style="min-width:64px">13:47:19</span>
               <span class="mono" style="flex:1 1 auto">default &rarr; deepinfra/openai-gpt-oss-120b</span>
-              <span class="chip">2 attempts</span>
+              <span class="chip chip-failover">failover &times;2</span>
               <span class="data-emph" style="margin-left:auto">890ms</span>
             </a>
 
@@ -2950,25 +3212,25 @@ a.row {
 
         </div>
 
-        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}.</span></p>
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}. Status stays state colour &mdash; an outcome, whether it's a provider's health or a request's result. The failover chip stays trace/accent-ink &mdash; a routing choice among alternatives, not an outcome.</span></p>
         <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
         <div class="table-toolbar">
           <span class="micro">14 of 2,481 requests</span>
           <div class="table-toolbar-actions">
             <button class="control">Columns ▾</button>
+            <div class="col-menu">
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>time</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>surface</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>model</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>provider</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>status</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>attempts</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>tokens in/out</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>latency</span></span>
+              <div class="col-menu-sep"></div>
+              <span class="col-menu-item col-menu-export"><span class="combo-check">⇩</span><span>Export CSV&hellip;</span></span>
+            </div>
           </div>
-        </div>
-        <div class="col-menu">
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>time</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>surface</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>model</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>provider</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>status</span></span>
-          <span class="col-menu-item" data-checked="false"><span class="combo-check">✓</span><span>attempts</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>tokens in/out</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>latency</span></span>
-          <div class="col-menu-sep"></div>
-          <span class="col-menu-item col-menu-export"><span class="combo-check">⇩</span><span>Export CSV&hellip;</span></span>
         </div>
 
         <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
@@ -3166,7 +3428,296 @@ a.row {
   </div>
 </section>
 
-<section class="screen" id="s-05-usage--s-05-usage" data-screen-title="usage">
+<section class="screen" id="s-04-request-trace--s-04-request-trace" data-screen-title="request trace">
+  <p class="legend">
+    The payoff of the whole design: the request trace, opened from the row
+    Requests already showed for this failover. Same eight-candidate ladder
+    Task 4's specimen renders &mdash; groq's 429, cerebras' 30-second
+    timeout, together's 1,847ms serve &mdash; now followed by the waterfall
+    that explains where the 32 seconds actually went, the token and cost
+    readouts, the two dropped-field warnings, the surface metadata, and the
+    permanently empty Bodies panel. Press <kbd>A</kbd> to reveal pins,
+    <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#" data-active="true">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/requests</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Header &mdash; GET /api/requests/{id} {id,dialect,surface,alias,provider,final_model,status,error_code}.</span></p>
+          <div class="panel trace-header">
+            <div class="trace-header-row">
+              <span class="chip status-badge" data-status="success">success</span>
+              <span class="mono trace-id">01JBXTG4R8ZQCN2VMD9F6K3H7P</span>
+              <button class="chip trace-copy-btn" type="button" aria-label="copy request id">⧉ copy</button>
+            </div>
+            <p class="mono trace-route">
+              <span>openai</span><span class="trace-route-sep">&middot;</span><span>llm</span><span class="trace-route-sep">&middot;</span><span>fast-coder</span><span class="trace-route-arrow">&rarr;</span><span class="trace-route-target">together/openai-gpt-oss-120b</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Routing ladder</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder &mdash; candidates[] and skips[] ("target:reason") and attempts[]{seq,provider,key_label,model,outcome,status_code,latency_ms,error,path}. seq is 0-indexed at source and displayed 1-based.</span></p>
+      <div class="ladder">
+        <div class="ladder-row">
+          <span class="rank">01</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">groq/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">http</span>
+            <span class="reason-prose">429 rate limited</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:2px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">02</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">cerebras/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">timeout</span>
+            <span class="reason-prose">30000ms elapsed before first byte</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:64px"></span>
+        </div>
+        <div class="ladder-row ladder-row-served">
+          <span class="rank">03</span>
+          <span class="spine"></span>
+          <span class="mark mark-served"></span>
+          <span class="stub"></span>
+          <span class="target">together/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">200</span>
+            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+          </span>
+          <span class="latency-bar" style="width:4px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">04</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick rank-tick-major text-terminated">05</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">06</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">07</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">08</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">vertex/gemini-2.5-pro</span>
+        </div>
+      </div>
+          <p class="prose">
+            The router stopped at rank 03. Ranks 04&ndash;08 sit below the
+            termination rule, never attempted.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Waterfall</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Waterfall &mdash; attempts[].latency_ms plus ttft_ms. Graticule doubles as the gridline; no second axis.</span></p>
+          <div class="well chart-well">
+            <div class="waterfall-tracks">
+
+              <div class="waterfall-row">
+                <div class="waterfall-row-label">
+                  <span class="micro">01</span>
+                  <span class="mono">groq</span>
+                </div>
+                <div class="waterfall-track">
+                  <span class="waterfall-seg waterfall-seg-failed" style="width:1.37%"></span>
+                  <span class="mark mark-failed waterfall-end" style="left:1.37%"></span>
+                </div>
+                <span class="micro waterfall-total">412<span class="unit">ms</span></span>
+              </div>
+
+              <div class="waterfall-row">
+                <div class="waterfall-row-label">
+                  <span class="micro">02</span>
+                  <span class="mono">cerebras</span>
+                </div>
+                <div class="waterfall-track">
+                  <span class="waterfall-seg waterfall-seg-failed" style="width:100%"></span>
+                  <span class="mark mark-failed waterfall-end" style="left:100%"></span>
+                </div>
+                <span class="micro waterfall-total">30,000<span class="unit">ms</span></span>
+              </div>
+
+              <div class="waterfall-row">
+                <div class="waterfall-row-label">
+                  <span class="micro">03</span>
+                  <span class="mono">together</span>
+                </div>
+                <div class="waterfall-track">
+                  <span class="waterfall-seg" style="width:0.95%"></span>
+                  <span class="waterfall-seg waterfall-seg-serve" style="left:0.95%;width:5.21%"></span>
+                  <span class="mark mark-served waterfall-end" style="left:6.16%"></span>
+                </div>
+                <span class="micro waterfall-total">1,847<span class="unit">ms</span></span>
+              </div>
+
+            </div>
+            <div class="chart-axis" style="padding:0 var(--section-pad) var(--section-pad)">
+              <span class="micro">0ms</span>
+              <span class="micro">10,000ms</span>
+              <span class="micro">20,000ms</span>
+              <span class="micro">30,000ms</span>
+            </div>
+          </div>
+          <p class="prose">
+            The axis runs to cerebras' 30,000ms timeout, the ladder's own
+            maximum &mdash; the same scale that makes rank 01 and rank 03
+            read as slivers on the ladder does it here too. Bezel marks the
+            wait for a first byte; together's bar turns &mdash;trace once
+            its first token lands at 284ms, then ends in the same
+            served mark the ladder uses for rank 03.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Readouts</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Readouts &mdash; tokens_in/out, cost_micros (null renders an em-dash, never $0.00), ttft_ms, total_ms. Cost needs spec &sect;8.3.</span></p>
+          <div class="readout-strip">
+
+            <div class="well readout-tile">
+              <p class="spec-note">tokens_in</p>
+              <span class="readout">8,412</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">tokens_out</p>
+              <span class="readout">1,904</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">cost_micros</p>
+              <span class="readout">$0.0213</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">cost_micros &middot; gpt-image-1</p>
+              <span class="readout">&mdash;</span>
+              <p class="spec-note">pricing unavailable for this model</p>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">ttft_ms</p>
+              <span class="readout">284</span><span class="unit">ms</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">total_ms</p>
+              <span class="readout">32,259</span><span class="unit">ms</span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Warnings</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Warnings &mdash; warnings[]. Phase 4 dropped-field warnings; this is where a vanished cache_control marker becomes visible.</span></p>
+          <div class="warning-list">
+            <div class="row">
+              <span class="reason">
+                <span class="reason-code">dropped_field</span>
+                <span class="reason-prose">openai&rarr;anthropic: a request parameter was dropped in translation</span>
+              </span>
+            </div>
+            <div class="row">
+              <span class="reason">
+                <span class="reason-code">dropped_field</span>
+                <span class="reason-prose">openai&rarr;together: a cache_control breakpoint was dropped in translation</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Surface detail</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Surface detail &mdash; surface_meta, rendered with darkraise-ui JsonTreeView.</span></p>
+          <div class="well json-tree">
+            <div class="json-row json-depth-0"><span class="json-punct">{</span></div>
+            <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">headers</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">x-request-id</span><span class="json-punct">:</span> <span class="json-string">"01JBXTG4R8ZQCN2VMD9F6K3H7P"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">content-type</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">accept</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span></div>
+            <div class="json-row json-depth-1"><span class="json-punct">},</span></div>
+            <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">client</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">ip</span><span class="json-punct">:</span> <span class="json-string">"10.42.0.18"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">user_agent</span><span class="json-punct">:</span> <span class="json-string">"darkrouter-sdk/1.4.2"</span></div>
+            <div class="json-row json-depth-1"><span class="json-punct">},</span></div>
+            <div class="json-row json-depth-1"><span class="json-toggle json-toggle-collapsed">&#9656;</span><span class="json-key">policy</span><span class="json-punct">:</span> <span class="json-punct">{</span><span class="json-collapsed-count">3 keys</span><span class="json-punct">}</span></div>
+            <div class="json-row json-depth-0"><span class="json-punct">}</span></div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Bodies</p>
+          <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Bodies &mdash; bodies[] is always empty: capture.bodies has a retention sweep and no writer. Saying so beats an empty panel that reads as a bug.</span></p>
+          <div class="well empty-well">
+            <p class="mono" style="margin:0">Not captured.</p>
+            <p class="prose" style="margin:0">Body capture has a retention sweep but no writer yet, so this panel is off by design, not broken.</p>
+          </div>
+        </div>
+
+        <div class="region trace-footer">
+          <p><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; Open in playground &mdash; seeds the playground with this request's model and params. Spec &sect;6.3.</span></p>
+          <button class="control control-primary" type="button">Open in playground &rarr;</button>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-05-usage--s-05-usage" data-screen-title="operate/usage">
   <p class="legend">
     Requests, tokens and cost over the selected range, ranked by provider and
     by model. The chart-heaviest screen in the set — every well below shares
@@ -3206,11 +3757,11 @@ a.row {
 
           <div class="usage-toolbar">
             <p style="margin:0"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Range &mdash; GET /api/usage?days=30. Serves up to 365 days today with no screen calling it.</span></p>
-            <div class="range-picker mono" role="tablist" aria-label="range">
-              <a class="range-btn" href="#">7d</a>
-              <a class="range-btn" href="#" data-active="true">30d</a>
-              <a class="range-btn" href="#">90d</a>
-              <a class="range-btn" href="#">365d</a>
+            <div class="segmented mono" role="tablist" aria-label="range">
+              <a class="segmented-option" href="#">7d</a>
+              <a class="segmented-option" href="#" data-active="true">30d</a>
+              <a class="segmented-option" href="#">90d</a>
+              <a class="segmented-option" href="#">365d</a>
             </div>
           </div>
 
@@ -3346,11 +3897,11 @@ a.row {
               <p><b class="pin" data-pin="5">5</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
               <div class="rank-table">
                 <div class="row rank-table-head">
-                  <span class="micro rank-col-id">provider</span>
-                  <span class="micro rank-col-num">requests</span>
-                  <span class="micro rank-col-num">tokens</span>
-                  <span class="micro rank-col-num">cost</span>
-                  <span class="micro rank-col-share">share</span>
+                  <span class="legend-caps rank-col-id">provider</span>
+                  <span class="legend-caps rank-col-num">requests</span>
+                  <span class="legend-caps rank-col-num">tokens</span>
+                  <span class="legend-caps rank-col-num">cost</span>
+                  <span class="legend-caps rank-col-share">share</span>
                 </div>
       <a class="row" href="#/requests?provider=groq">
         <span class="mono rank-col-id">groq</span>
@@ -3439,11 +3990,11 @@ a.row {
               <p><b class="pin" data-pin="6">6</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
               <div class="rank-table">
                 <div class="row rank-table-head">
-                  <span class="micro rank-col-id">model</span>
-                  <span class="micro rank-col-num">requests</span>
-                  <span class="micro rank-col-num">tokens</span>
-                  <span class="micro rank-col-num">cost</span>
-                  <span class="micro rank-col-share">share</span>
+                  <span class="legend-caps rank-col-id">model</span>
+                  <span class="legend-caps rank-col-num">requests</span>
+                  <span class="legend-caps rank-col-num">tokens</span>
+                  <span class="legend-caps rank-col-num">cost</span>
+                  <span class="legend-caps rank-col-share">share</span>
                 </div>
       <a class="row" href="#/requests?model=openai%2Fgpt-oss-120b">
         <span class="mono rank-col-id">openai/gpt-oss-120b</span>

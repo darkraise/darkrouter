@@ -55,40 +55,11 @@
   color: var(--legend);
 }
 
-/* --- Range picker (segmented control) ---------------------------------- */
-
-.range-picker {
-  display: flex;
-  height: var(--control-h);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.range-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  padding: 0 10px;
-  background: var(--panel);
-  border-left: 1px solid var(--hairline);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink-muted);
-  text-decoration: none;
-  opacity: 0.85;
-  transition: opacity var(--dur-hover) ease;
-}
-.range-btn:first-child { border-left: none; }
-.range-btn:hover { opacity: 1; color: var(--ink); }
-.range-btn[data-active="true"] {
-  opacity: 1;
-  background: var(--well);
-  color: var(--accent-ink);
-}
-
-/* --- Chart regions ------------------------------------------------------ */
+/* --- Chart regions ------------------------------------------------------
+   The range picker reuses .segmented/.segmented-option from
+   darkrouter-ui.css — Requests' filter-bar pickers and this range picker
+   are the same "pick exactly one of N" control, no longer reinvented per
+   screen. */
 
 .usage-chart-panel { padding: var(--section-pad); }
 
@@ -191,8 +162,13 @@
   color: var(--legend);
   border-bottom: 1px solid var(--hairline);
 }
+/* Matches Requests' .row-head .legend-caps: zero the label's own 6px
+   bottom margin, which the shared flex row does not collapse on its own. */
+.rank-table-head .legend-caps { margin: 0; }
 
-.rank-table a.row { text-decoration: none; cursor: pointer; }
+/* a.row's underline reset lives in darkrouter-ui.css, shared with
+   Overview's failover log. */
+.rank-table a.row { cursor: pointer; }
 
 .rank-col-id { flex: 1 1 auto; min-width: 0; }
 .rank-col-num {
