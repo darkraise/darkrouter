@@ -689,9 +689,15 @@ body.pins-on .pin-note { display: inline; }
 }
 
 /* Region 8 (motion): the 160ms height-disclosure specimen. Collapsed to
-   one line; hovering reveals the rest. */
+   one line; hovering reveals the rest. At 24px (border-box: 1px border +
+   2 * var(--section-pad)) the content height is zero, cropping the line
+   instead of showing it. 43px was measured pixel-by-pixel against the
+   actual render: it fits the mono line with no clipping and stops just
+   short of the second paragraph's margin, so no sliver of it bleeds
+   through. --section-pad stays the shared padding rhythm every specimen
+   box uses, so the box grows instead of shrinking its padding. */
 .disclosure {
-  max-height: 24px;
+  max-height: 43px;
   padding: var(--section-pad);
   overflow: hidden;
   background: var(--panel);
