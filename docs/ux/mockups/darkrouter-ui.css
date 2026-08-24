@@ -587,3 +587,147 @@ kbd {
   color: var(--legend);
   font-size: 11px;
 }
+
+/* --- Design-language specimen classes ---------------------------------
+   Everything below exists only because fragments/00-design-language.html
+   has to render a rule as a live specimen rather than describe it, and no
+   class above already did the job. Each is scoped to one numbered region
+   of that screen, so a later screen reusing one is a deliberate choice. */
+
+/* Region 1 (palette): one colour chip per token row. Size and border only
+   — the fill always comes from an inline var(--token), never from here. */
+.swatch {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+/* The annotation sentence beside a numbered .pin badge. A 16px pill has no
+   room for a sentence, so the sentence lives next to it in its own
+   element, hidden and revealed in lockstep with .pin by the same toggle. */
+.pin-note {
+  display: none;
+  margin-left: 6px;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+body.pins-on .pin-note { display: inline; }
+
+/* Region 3 (type scale): the spec string printed beside each role
+   specimen, e.g. "12.5px / Mono 500". Distinct from .legend (the one
+   per-screen caption) and .legend-caps (the uppercase nav-group label). */
+.spec-note {
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* Region 4 (unit rule): the same value set without the size/colour step
+   that separates a number from its unit, so the two renderings sit side
+   by side and the difference is visible instead of asserted. */
+.naive {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Region 5 (surface): the one place --shadow-overlay is allowed to appear
+   outside real overlay chrome (menus, popovers). */
+.surface-overlay {
+  padding: var(--section-pad);
+  background: var(--overlay);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* Region 5 (surface): the radius comparison. border-radius is set per
+   instance inline — geometry, not colour, so qa.py's hex rule is silent
+   on it. */
+.radius-demo {
+  width: 48px;
+  height: 32px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+}
+
+/* Region 6 (density): a generic 30px control silhouette proving
+   var(--control-h) — not a finished button spec; later screens define
+   their own controls. */
+.control {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 var(--section-pad);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* Region 6 (density): a caliper bracket for calling out an exact pixel
+   measurement next to the thing it measures. */
+.measure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.measure::before,
+.measure::after {
+  content: "";
+  width: 1px;
+  height: 8px;
+  background: var(--bezel);
+}
+
+/* Region 8 (motion): the 160ms height-disclosure specimen. Collapsed to
+   one line; hovering reveals the rest. */
+.disclosure {
+  max-height: 24px;
+  padding: var(--section-pad);
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+  transition: max-height var(--dur-disclosure) ease;
+}
+.disclosure:hover { max-height: 90px; }
+
+/* Region 8 (motion): the 90ms cross-fade specimen simulating a live value
+   swap. Only opacity transitions here — background-color never does,
+   anywhere in this product. */
+.value-swap {
+  position: relative;
+  display: inline-block;
+  min-width: 52px;
+  height: 1.45em;
+}
+.value-swap .v-a,
+.value-swap .v-b {
+  display: inline-block;
+  transition: opacity var(--dur-swap) ease;
+}
+.value-swap .v-b {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.value-swap:hover .v-a { opacity: 0; }
+.value-swap:hover .v-b { opacity: 1; }
+
+/* The 8 numbered blocks on the specimen board share one seam-plus-gutter
+   rhythm rather than eight one-off spacing rules, the same convention
+   .rail-group already uses for its own three groups. */
+.region + .region {
+  margin-top: var(--gutter);
+  padding-top: var(--gutter);
+  border-top: 1px solid var(--hairline-subtle);
+}
