@@ -178,6 +178,38 @@ func TestForwardStreamDropsHopByHopAndEncodingHeaders(t *testing.T) {
 	}
 }
 
+func TestForwardStreamCommitsAPreCommitUnterminatedTail(t *testing.T) {
+	// The provider never sent the trailing blank line after the content
+	// event. Without sp.flush() at end of stream, the buffered ping would
+	// reach the client and the content that follows it never would.
+	body := "data: ping\n\ndata: c-first\n"
+	cw, ac := forwardFixture(t)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if !cw.Committed() {
+		t.Error("the unterminated content event should have committed")
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client saw\n%q\nwant\n%q", got, body)
+	}
+}
+
+func TestForwardStreamDeliversAPostCommitUnterminatedTail(t *testing.T) {
+	// The second event, after commit, arrives without a trailing blank line.
+	// A dropped flush would silently swallow it.
+	body := "data: c-first\n\ndata: c-second\n"
+	cw, ac := forwardFixture(t)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client saw\n%q\nwant\n%q", got, body)
+	}
+}
+
 // forwardFixture builds the smallest AttemptCtx forwardStream reads, over a
 // recorder. It uses the same executor constructor the rest of this package's
 // tests use.
