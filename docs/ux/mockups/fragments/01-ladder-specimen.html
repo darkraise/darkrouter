@@ -194,9 +194,14 @@
       <p class="prose">
         The same vocabulary at catalog density: rank, a 9px mark, provider
         id, nothing else. Twelve rows read as a barcode of sigils &mdash; the
-        shape of the fleet at a glance, without a single word.
+        shape of the fleet at a glance, without a single word. The router
+        expands one candidate per (provider, credential, model), so a
+        provider with a second configured key earns a second row &mdash;
+        ranks 09&ndash;12 repeat groq, together, deepinfra and openrouter
+        for exactly that reason, each marked <span class="mono">key 2</span>
+        in --legend beside the id.
       </p>
-      <div class="ladder" style="width:180px">
+      <div class="ladder" style="width:220px">
         <div class="ladder-row" style="gap:8px">
           <span class="rank">01</span>
           <span class="mark mark-failed mark-catalog"></span>
@@ -241,21 +246,25 @@
           <span class="rank">09</span>
           <span class="mark mark-cooling mark-catalog"></span>
           <span class="mono target-muted">groq</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
           <span class="rank">10</span>
           <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono target-muted">together</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
           <span class="rank">11</span>
           <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono target-muted">deepinfra</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
           <span class="rank">12</span>
           <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono target-muted">openrouter</span>
+          <span class="credential-tag">key 2</span>
         </div>
       </div>
     </div>

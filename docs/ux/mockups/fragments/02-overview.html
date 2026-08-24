@@ -1,0 +1,236 @@
+<section class="screen" id="s-02-overview" data-screen-title="operate/overview">
+  <p class="legend">
+    The screen an operator leaves open: live throughput, error rate,
+    latency and spend over the last five minutes, the health of all eight
+    configured providers, and the failovers routing quietly absorbed.
+    Shown here with the config-invalid banner in its alarmed state and one
+    readout mid-refresh, so both are proven rather than assumed. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#" data-active="true">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/overview</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <div class="config-banner" role="alert">
+            <p class="legend-caps">Config invalid</p>
+            <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Config banner &mdash; GET /api/config {valid,error,serving}. Shown only when valid=false. Error in mono, reassurance in sans.</span></p>
+            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "fast" targets provider "cerebras" model "openai/gpt-oss-120b" but no credential is configured for that provider</p>
+            <p class="prose config-banner-note">The previous configuration is still serving.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Live</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Live strip &mdash; GET /api/overview {requests_per_min,error_rate,window_sec,today_spend{micros,priced}} + &sect;8.2 percentile and series extensions. 30px readout is the type ceiling.</span></p>
+          <div class="live-strip">
+
+            <div class="well live-tile">
+              <p class="spec-note">requests_per_min &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">14.2</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,22 10,18 20,24 30,16 40,20 50,14 60,19 70,23 80,17 90,21 100,15 100,40 0,40"></polygon>
+                <polyline points="0,22 10,18 20,24 30,16 40,20 50,14 60,19 70,23 80,17 90,21 100,15"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <p class="spec-note">error_rate &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">2.4</span><span class="unit">%</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,34 10,35 20,33 30,36 40,10 50,34 60,35 70,33 80,36 90,34 100,35 100,40 0,40"></polygon>
+                <polyline points="0,34 10,35 20,33 30,36 40,10 50,34 60,35 70,33 80,36 90,34 100,35"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <p class="spec-note">latency &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="live-tile-metric"><span class="micro">p50</span><span class="readout">890</span><span class="unit">ms</span></span>
+                <span class="live-tile-metric"><span class="micro">p95</span><span class="readout">4.1</span><span class="unit">s</span></span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,30 10,28 20,26 30,24 40,27 50,20 60,15 70,18 80,10 90,14 100,8 100,40 0,40"></polygon>
+                <polyline points="0,30 10,28 20,26 30,24 40,27 50,20 60,15 70,18 80,10 90,14 100,8"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <div class="load-bar" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="refreshing today_spend">
+                <span class="load-bar-fill" style="width:58%"></span>
+              </div>
+              <p class="spec-note">today_spend &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">$3.47</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,38 10,36 20,33 30,31 40,28 50,25 60,22 70,18 80,14 90,9 100,4 100,40 0,40"></polygon>
+                <polyline points="0,38 10,36 20,33 30,31 40,28 50,25 60,22 70,18 80,14 90,9 100,4"></polyline>
+              </svg>
+            </div>
+
+          </div>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Provider health</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace.</span></p>
+          <div class="health-grid">
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">groq</span>
+              </div>
+              <p class="micro">2 credentials</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="cooling"></span>
+                <span class="mono health-tile-name">cerebras</span>
+              </div>
+              <p class="micro">1 credential &middot; 1 cooling</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">anthropic</span>
+              </div>
+              <p class="micro">1 credential</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">openrouter</span>
+              </div>
+              <p class="micro">3 credentials</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">together</span>
+              </div>
+              <p class="micro">1 credential</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="disabled"></span>
+                <span class="mono health-tile-name">deepinfra</span>
+              </div>
+              <p class="micro">disabled</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="unconfigured"></span>
+                <span class="mono health-tile-name">bedrock</span>
+              </div>
+              <p class="micro">0 credentials</p>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono health-tile-name">vertex</span>
+              </div>
+              <div class="health-tile-alert">
+                <p class="health-tile-alert-text">needs reconnection</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Recent failovers</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
+          <div class="table">
+
+            <a class="row" href="#01HZXK4M9QANE2FTX7RS3JV8CB">
+              <span class="mono" style="min-width:64px">14:22:07</span>
+              <span class="mono" style="flex:1 1 auto">default &rarr; together/openai-gpt-oss-120b</span>
+              <span class="chip">3 attempts</span>
+              <span class="data-emph" style="margin-left:auto">1,847ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK5PWENA3D9RTX2FC6MJQ8">
+              <span class="mono" style="min-width:64px">14:19:52</span>
+              <span class="mono" style="flex:1 1 auto">fast &rarr; cerebras/openai-gpt-oss-120b</span>
+              <span class="chip">2 attempts</span>
+              <span class="data-emph" style="margin-left:auto">612ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK6R2TCEMA9NF3XJ7VQ5WB">
+              <span class="mono" style="min-width:64px">14:11:30</span>
+              <span class="mono" style="flex:1 1 auto">vision &rarr; openrouter/qwen/qwen3-vl-235b</span>
+              <span class="chip">2 attempts</span>
+              <span class="data-emph" style="margin-left:auto">2,104ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK7T4WBNF2CQ9RXM3E6JAP">
+              <span class="mono" style="min-width:64px">13:58:44</span>
+              <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
+              <span class="chip">4 attempts</span>
+              <span class="data-emph" style="margin-left:auto">4,392ms</span>
+            </a>
+
+            <a class="row" href="#01HZXK8V6RCAM9FQ2TXJ5WNE3B">
+              <span class="mono" style="min-width:64px">13:47:19</span>
+              <span class="mono" style="flex:1 1 auto">default &rarr; deepinfra/openai-gpt-oss-120b</span>
+              <span class="chip">2 attempts</span>
+              <span class="data-emph" style="margin-left:auto">890ms</span>
+            </a>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
+          <p class="ops-footer">
+            <span class="mono">v0.9.3</span> &middot;
+            <span class="mono">up 6d 14h</span> &middot;
+            <span class="mono">1,204,881 log records written</span> &middot;
+            <span class="mono ops-footer-dropped" data-alert="false" title="A non-zero value means the usage figures on this screen are a lower bound.">0 dropped</span>
+          </p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

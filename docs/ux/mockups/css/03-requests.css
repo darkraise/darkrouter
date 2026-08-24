@@ -1,0 +1,374 @@
+/*
+ * Task 6 — the Requests log ("operate/requests").
+ *
+ * New vocabulary this screen introduces for reuse by Tasks 9 and 12:
+ * .filter-bar, .combo (+ trigger/menu/option/check), .segmented,
+ * .time-range, .view-chip, .chip-failover, .chip-path, .newer-pill,
+ * .table-toolbar, .col-menu, and the .col-* column-width helpers the
+ * request table's header and rows share. Everything else (.table, .row,
+ * .chip, .control, .well, .panel, .legend-caps, .micro, .prose) is reused
+ * as-is from darkrouter-ui.css.
+ */
+
+/* --- Saved views --------------------------------------------------- */
+
+.saved-views {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--section-pad);
+}
+
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.view-chip:hover { opacity: 1; }
+/* Selection state, not provider identity or a routing verdict — the same
+   token the rail's own active item uses, so "selected" reads the same
+   everywhere in the chrome. */
+.view-chip[data-active="true"] {
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  background: var(--overlay);
+  opacity: 1;
+}
+
+/* --- Filter bar ------------------------------------------------------
+   Six real controls in a row, top-aligned so an open combobox or the
+   time-range menu grows downward inside its own column without pushing
+   or overlapping a sibling control — closed siblings just end 30px up
+   from wherever the tallest, open one does. */
+
+.filter-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gutter);
+}
+
+/* --- Combobox ----------------------------------------------------------- */
+
+.combo {
+  display: flex;
+  flex-direction: column;
+}
+
+.combo-trigger {
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: default;
+}
+
+.combo-chevron {
+  color: var(--legend);
+  font-size: 10px;
+}
+
+.combo-menu {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+.combo[data-open="true"] .combo-menu { display: flex; }
+
+.combo-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.combo-option:hover { opacity: 1; }
+
+.combo-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+}
+.combo-option[data-checked="true"] .combo-check,
+.col-menu-item[data-checked="true"] .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.combo-count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* --- Segmented control ----------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-h);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid var(--hairline-subtle);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.segmented-option:last-child { border-right: none; }
+.segmented-option[data-active="true"] {
+  color: var(--accent-ink);
+  background: var(--overlay);
+}
+
+/* --- Time-range picker ------------------------------------------------- */
+
+.time-range {
+  display: flex;
+  flex-direction: column;
+}
+
+.time-range-menu {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px;
+  width: 264px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+.time-range[data-open="true"] .time-range-menu { display: flex; }
+
+.time-range-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.time-range-preset {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.time-range-preset[data-active="true"] {
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  background: var(--well);
+}
+
+.time-range-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-subtle);
+}
+
+.time-range-input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* --- Ghost button --------------------------------------------------- */
+
+.control-ghost {
+  background: transparent;
+  border-color: var(--hairline-subtle);
+  color: var(--ink-muted);
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.control-ghost:hover { opacity: 1; }
+
+/* --- Table toolbar + column-visibility menu --------------------------- */
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.table-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.col-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 240px;
+  margin: 0 0 var(--gutter) auto;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+
+.col-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.col-menu-item:hover { opacity: 1; }
+.col-menu-item[data-checked="false"] { color: var(--ink-muted); }
+
+.col-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--hairline-subtle);
+}
+
+.col-menu-export { color: var(--accent-ink); }
+
+/* --- Request table -----------------------------------------------------
+   .table/.row are shared (darkrouter-ui.css); everything below is the
+   column geometry this screen's header and rows share. */
+
+.table-wrap { position: relative; }
+
+.row-head {
+  border-bottom-color: var(--hairline);
+}
+.row-head .legend-caps { margin: 0; }
+
+.col-time { flex: 0 0 84px; }
+.col-surface { flex: 0 0 84px; }
+.col-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.col-model-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-provider { flex: 0 0 88px; }
+.col-status { flex: 0 0 70px; }
+.col-attempts { flex: 0 0 64px; }
+.col-tokens { flex: 0 0 118px; }
+.col-latency { flex: 0 0 72px; }
+.col-right { text-align: right; }
+
+.status-success { color: var(--state-healthy); }
+.status-error { color: var(--state-failed); }
+
+.text-muted { color: var(--ink-muted); }
+
+/* Routing behaviour — how many candidates the router walked through
+   before this request landed — is what the ROUTER DECIDED, the same
+   split the ladder's --trace/state-colour rule already draws (see
+   .mark-served vs .mark-cooling in darkrouter-ui.css). No single
+   provider on these two rows is reported as cooling, so --state-cooling
+   would misstate what happened; --trace is the routing-verdict channel,
+   and a failover count is exactly that. */
+.chip-failover {
+  border-color: var(--trace);
+  color: var(--trace);
+}
+
+/* Dialect/path annotations — quiet facts about how the request was
+   handled, the same register --legend already carries for secondary
+   captions elsewhere in the system. */
+.chip-path { color: var(--legend); }
+
+/* --- Newer pill ----------------------------------------------------------
+   Floats astride the table's top edge on purpose — that seam is where a
+   queued-rows affordance belongs, not a layout accident. --accent-ink,
+   not --trace: this reports a UI/polling event, not a routing verdict. */
+.newer-pill {
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  background: var(--overlay);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--accent-ink);
+  z-index: 1;
+}
+
+/* --- Empty state ----------------------------------------------------- */
+
+.empty-well {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: var(--gutter);
+}

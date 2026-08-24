@@ -360,7 +360,7 @@ kbd {
   min-width: 28px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
-  color: var(--ink-muted);
+  color: var(--legend);
   text-align: right;
 }
 /* A tick drawn into the spine's approach, not onto the spine itself — sits
@@ -411,10 +411,26 @@ kbd {
    colour, and its hollow silhouette matches "no attempt occurred" rather
    than the filled attempt outcomes below. */
 .mark-skipped { background: transparent; border: 1px solid var(--bezel); }
-/* The one other place amber is allowed, per the colour-discipline rule. */
+/* The one other place amber is allowed, per the colour-discipline rule.
+   A centre dot gives it a second, shape-based channel distinct from
+   .mark-skipped's plain hollow ring, since stroke weight alone (1px vs
+   2px) is the weakest pairing in the greyscale proof — the dot reads as
+   "something is still in there, waiting" even with the amber stripped. */
 .mark-cooling {
+  position: relative;
   background: transparent;
   border: 2px solid var(--state-cooling);
+}
+.mark-cooling::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
 }
 /* This attempt errored — an outcome for that provider, not a routing
    choice, so it takes the failed state colour. */
@@ -435,6 +451,17 @@ kbd {
    at a size step up from the ladder's own 7px so a dense column of them
    still reads as individual marks rather than a smear. */
 .mark-catalog { width: 9px; height: 9px; }
+
+/* The router expands one candidate per (provider, credential, model), so
+   a provider with two configured keys legitimately earns two rows. This
+   footnotes the second (and later) row rather than letting it read as an
+   accidental duplicate — legend weight, off to the side of the id. */
+.credential-tag {
+  margin-left: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--legend);
+}
 
 /* Solid means the row ended here; dashed means the router moved past it
    after a failure. A background gradient gives an exact 3px-on-3px dash

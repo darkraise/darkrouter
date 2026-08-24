@@ -1,0 +1,374 @@
+<section class="screen" id="s-05-usage" data-screen-title="usage">
+  <p class="legend">
+    Requests, tokens and cost over the selected range, ranked by provider and
+    by model. The chart-heaviest screen in the set — every well below shares
+    one graticule as its gridline. Press <kbd>A</kbd> for pins, <kbd>T</kbd>
+    for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#" data-active="true">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/usage</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+        <div class="usage-page">
+
+          <div class="usage-toolbar">
+            <p style="margin:0"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Range &mdash; GET /api/usage?days=30. Serves up to 365 days today with no screen calling it.</span></p>
+            <div class="range-picker mono" role="tablist" aria-label="range">
+              <a class="range-btn" href="#">7d</a>
+              <a class="range-btn" href="#" data-active="true">30d</a>
+              <a class="range-btn" href="#">90d</a>
+              <a class="range-btn" href="#">365d</a>
+            </div>
+          </div>
+
+          <div class="chart-scope usage-charts">
+
+            <div class="panel usage-chart-panel">
+              <div class="chart-head">
+                <p class="section-title" style="margin:0">Requests over time</p>
+              </div>
+              <p><b class="pin" data-pin="2">2</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <div class="well chart-well">
+                <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="requests per day by provider, last 30 days">
+                  <defs>
+                    <pattern id="usage-grat" width="90" height="40" patternUnits="userSpaceOnUse">
+                      <path class="grat-line" d="M0 0H90M0 0V40"/>
+                    </pattern>
+                    <pattern id="usage-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                      <line class="hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+                    </pattern>
+                    <pattern id="usage-dot" width="7" height="7" patternUnits="userSpaceOnUse">
+                      <circle class="dot-mark" cx="2" cy="2" r="1"/>
+                    </pattern>
+                  </defs>
+                  <rect x="0" y="0" width="900" height="200" fill="url(#usage-grat)"/>
+        <path class="chart-area chart-fill-1" d="M10.0,153.3 L40.3,150.7 L70.7,145.2 L101.0,151.5 L131.4,142.8 L161.7,140.0 L192.1,147.4 L222.4,158.3 L252.8,148.4 L283.1,150.9 L313.4,146.0 L343.8,146.4 L374.1,153.9 L404.5,159.7 L434.8,159.1 L465.2,138.8 L495.5,140.4 L525.9,134.2 L556.2,132.0 L586.6,150.1 L616.9,153.1 L647.2,152.1 L677.6,142.6 L707.9,148.8 L738.3,123.8 L768.6,145.6 L799.0,150.9 L829.3,161.7 L859.7,143.6 L890.0,141.6 L890.0,190.0 L859.7,190.0 L829.3,190.0 L799.0,190.0 L768.6,190.0 L738.3,190.0 L707.9,190.0 L677.6,190.0 L647.2,190.0 L616.9,190.0 L586.6,190.0 L556.2,190.0 L525.9,190.0 L495.5,190.0 L465.2,190.0 L434.8,190.0 L404.5,190.0 L374.1,190.0 L343.8,190.0 L313.4,190.0 L283.1,190.0 L252.8,190.0 L222.4,190.0 L192.1,190.0 L161.7,190.0 L131.4,190.0 L101.0,190.0 L70.7,190.0 L40.3,190.0 L10.0,190.0 Z"/>
+        <path class="chart-area chart-fill-2" d="M10.0,130.6 L40.3,123.8 L70.7,122.1 L101.0,128.2 L131.4,114.5 L161.7,112.5 L192.1,122.9 L222.4,141.4 L252.8,115.7 L283.1,122.3 L313.4,120.7 L343.8,111.9 L374.1,127.0 L404.5,137.0 L434.8,134.6 L465.2,111.3 L495.5,114.3 L525.9,104.3 L556.2,97.7 L586.6,127.4 L616.9,131.8 L647.2,131.2 L677.6,111.9 L707.9,119.9 L738.3,85.8 L768.6,116.5 L799.0,121.5 L829.3,142.8 L859.7,117.1 L890.0,111.9 L890.0,141.6 L859.7,143.6 L829.3,161.7 L799.0,150.9 L768.6,145.6 L738.3,123.8 L707.9,148.8 L677.6,142.6 L647.2,152.1 L616.9,153.1 L586.6,150.1 L556.2,132.0 L525.9,134.2 L495.5,140.4 L465.2,138.8 L434.8,159.1 L404.5,159.7 L374.1,153.9 L343.8,146.4 L313.4,146.0 L283.1,150.9 L252.8,148.4 L222.4,158.3 L192.1,147.4 L161.7,140.0 L131.4,142.8 L101.0,151.5 L70.7,145.2 L40.3,150.7 L10.0,153.3 Z"/>
+        <path class="chart-area chart-fill-3" d="M10.0,116.3 L40.3,106.9 L70.7,105.7 L101.0,111.9 L131.4,95.4 L161.7,90.8 L192.1,106.9 L222.4,130.8 L252.8,94.4 L283.1,105.5 L313.4,101.9 L343.8,91.8 L374.1,108.3 L404.5,123.6 L434.8,118.5 L465.2,91.0 L495.5,95.6 L525.9,82.2 L556.2,73.2 L586.6,107.5 L616.9,113.5 L647.2,113.9 L677.6,93.2 L707.9,99.5 L738.3,62.1 L768.6,95.6 L799.0,104.1 L829.3,128.4 L859.7,99.9 L890.0,89.8 L890.0,111.9 L859.7,117.1 L829.3,142.8 L799.0,121.5 L768.6,116.5 L738.3,85.8 L707.9,119.9 L677.6,111.9 L647.2,131.2 L616.9,131.8 L586.6,127.4 L556.2,97.7 L525.9,104.3 L495.5,114.3 L465.2,111.3 L434.8,134.6 L404.5,137.0 L374.1,127.0 L343.8,111.9 L313.4,120.7 L283.1,122.3 L252.8,115.7 L222.4,141.4 L192.1,122.9 L161.7,112.5 L131.4,114.5 L101.0,128.2 L70.7,122.1 L40.3,123.8 L10.0,130.6 Z"/>
+        <path class="chart-area chart-fill-4" d="M10.0,102.1 L40.3,91.2 L70.7,91.2 L101.0,96.0 L131.4,74.8 L161.7,74.6 L192.1,92.4 L222.4,120.7 L252.8,78.4 L283.1,91.8 L313.4,84.0 L343.8,76.4 L374.1,93.6 L404.5,110.5 L434.8,104.9 L465.2,73.0 L495.5,80.6 L525.9,63.1 L556.2,53.3 L586.6,90.2 L616.9,97.1 L647.2,98.7 L677.6,73.6 L707.9,84.4 L738.3,40.8 L768.6,79.2 L799.0,85.6 L829.3,117.5 L859.7,83.6 L890.0,70.4 L890.0,89.8 L859.7,99.9 L829.3,128.4 L799.0,104.1 L768.6,95.6 L738.3,62.1 L707.9,99.5 L677.6,93.2 L647.2,113.9 L616.9,113.5 L586.6,107.5 L556.2,73.2 L525.9,82.2 L495.5,95.6 L465.2,91.0 L434.8,118.5 L404.5,123.6 L374.1,108.3 L343.8,91.8 L313.4,101.9 L283.1,105.5 L252.8,94.4 L222.4,130.8 L192.1,106.9 L161.7,90.8 L131.4,95.4 L101.0,111.9 L70.7,105.7 L40.3,106.9 L10.0,116.3 Z"/>
+        <path class="chart-area chart-fill-5" d="M10.0,95.4 L40.3,82.8 L70.7,83.4 L101.0,87.6 L131.4,64.1 L161.7,64.9 L192.1,83.8 L222.4,114.9 L252.8,68.3 L283.1,84.0 L313.4,75.2 L343.8,67.9 L374.1,86.0 L404.5,103.1 L434.8,97.7 L465.2,61.3 L495.5,70.0 L525.9,53.5 L556.2,43.7 L586.6,80.4 L616.9,90.0 L647.2,91.6 L677.6,63.9 L707.9,75.4 L738.3,30.0 L768.6,69.9 L799.0,75.0 L829.3,111.3 L859.7,74.2 L890.0,59.3 L890.0,70.4 L859.7,83.6 L829.3,117.5 L799.0,85.6 L768.6,79.2 L738.3,40.8 L707.9,84.4 L677.6,73.6 L647.2,98.7 L616.9,97.1 L586.6,90.2 L556.2,53.3 L525.9,63.1 L495.5,80.6 L465.2,73.0 L434.8,104.9 L404.5,110.5 L374.1,93.6 L343.8,76.4 L313.4,84.0 L283.1,91.8 L252.8,78.4 L222.4,120.7 L192.1,92.4 L161.7,74.6 L131.4,74.8 L101.0,96.0 L70.7,91.2 L40.3,91.2 L10.0,102.1 Z"/>
+                </svg>
+                <div class="chart-axis" style="padding:4px 10px 6px">
+      <span class="micro">Jul 26</span>
+      <span class="micro">Aug 2</span>
+      <span class="micro">Aug 9</span>
+      <span class="micro">Aug 16</span>
+      <span class="micro">Aug 24</span>
+                </div>
+              </div>
+              <div class="chart-key">
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-1"/></svg>groq</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-2"/></svg>cerebras</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-3"/></svg>together</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-4"/></svg>openrouter</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-5"/></svg>anthropic</span>
+              </div>
+            </div>
+
+            <div class="panel usage-chart-panel">
+              <div class="chart-head">
+                <p class="section-title" style="margin:0">Tokens over time</p>
+              </div>
+              <p><b class="pin" data-pin="3">3</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <div class="well chart-well">
+                <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="input and output tokens per day, last 30 days">
+                  <rect x="0" y="0" width="900" height="200" fill="url(#usage-grat)"/>
+        <path class="chart-area chart-fill-1" d="M10.0,111.6 L40.3,96.9 L70.7,107.2 L101.0,103.0 L131.4,96.5 L161.7,92.5 L192.1,110.1 L222.4,131.2 L252.8,92.6 L283.1,97.7 L313.4,90.6 L343.8,86.5 L374.1,107.9 L404.5,122.6 L434.8,118.7 L465.2,92.9 L495.5,95.9 L525.9,72.0 L556.2,72.9 L586.6,109.2 L616.9,103.4 L647.2,111.4 L677.6,99.0 L707.9,99.2 L738.3,72.0 L768.6,102.9 L799.0,97.2 L829.3,131.0 L859.7,91.2 L890.0,84.5 L890.0,190.0 L859.7,190.0 L829.3,190.0 L799.0,190.0 L768.6,190.0 L738.3,190.0 L707.9,190.0 L677.6,190.0 L647.2,190.0 L616.9,190.0 L586.6,190.0 L556.2,190.0 L525.9,190.0 L495.5,190.0 L465.2,190.0 L434.8,190.0 L404.5,190.0 L374.1,190.0 L343.8,190.0 L313.4,190.0 L283.1,190.0 L252.8,190.0 L222.4,190.0 L192.1,190.0 L161.7,190.0 L131.4,190.0 L101.0,190.0 L70.7,190.0 L40.3,190.0 L10.0,190.0 Z"/>
+        <path class="chart-area chart-fill-2" d="M10.0,88.9 L40.3,75.9 L70.7,84.4 L101.0,81.8 L131.4,68.4 L161.7,66.2 L192.1,82.6 L222.4,112.1 L252.8,69.3 L283.1,70.9 L313.4,60.8 L343.8,62.0 L374.1,86.6 L404.5,105.8 L434.8,94.3 L465.2,60.8 L495.5,69.4 L525.9,35.9 L556.2,37.3 L586.6,86.1 L616.9,80.1 L647.2,87.2 L677.6,69.6 L707.9,70.1 L738.3,30.0 L768.6,78.5 L799.0,69.6 L829.3,115.5 L859.7,67.2 L890.0,53.7 L890.0,84.5 L859.7,91.2 L829.3,131.0 L799.0,97.2 L768.6,102.9 L738.3,72.0 L707.9,99.2 L677.6,99.0 L647.2,111.4 L616.9,103.4 L586.6,109.2 L556.2,72.9 L525.9,72.0 L495.5,95.9 L465.2,92.9 L434.8,118.7 L404.5,122.6 L374.1,107.9 L343.8,86.5 L313.4,90.6 L283.1,97.7 L252.8,92.6 L222.4,131.2 L192.1,110.1 L161.7,92.5 L131.4,96.5 L101.0,103.0 L70.7,107.2 L40.3,96.9 L10.0,111.6 Z"/>
+                </svg>
+                <div class="chart-axis" style="padding:4px 10px 6px">
+      <span class="micro">Jul 26</span>
+      <span class="micro">Aug 2</span>
+      <span class="micro">Aug 9</span>
+      <span class="micro">Aug 16</span>
+      <span class="micro">Aug 24</span>
+                </div>
+              </div>
+              <div class="chart-key">
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-1"/></svg>input tokens</span>
+    <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-2"/></svg>output tokens</span>
+              </div>
+            </div>
+
+            <div class="panel usage-chart-panel">
+              <div class="chart-head">
+                <p class="section-title" style="margin:0">Cost over time</p>
+                <div class="chart-readout">
+                  <span class="readout">$79.83</span>
+                  <span class="micro">30d running total</span>
+                </div>
+              </div>
+              <p><b class="pin" data-pin="4">4</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <div class="well chart-well">
+                <svg class="chart-svg chart-svg-short" viewBox="0 0 900 140" preserveAspectRatio="none" role="img" aria-label="cost per day, last 30 days">
+                  <rect x="0" y="0" width="900" height="140" fill="url(#usage-grat)"/>
+                  <g>
+        <rect class="chart-bar" x="5.7" y="79.0" width="18.6" height="49.0"/>
+        <rect class="chart-bar" x="35.7" y="67.3" width="18.6" height="60.7"/>
+        <rect class="chart-bar" x="65.7" y="70.1" width="18.6" height="57.9"/>
+        <rect class="chart-bar" x="95.7" y="60.1" width="18.6" height="67.9"/>
+        <rect class="chart-bar" x="125.7" y="71.1" width="18.6" height="56.9"/>
+        <rect class="chart-bar" x="155.7" y="53.4" width="18.6" height="74.6"/>
+        <rect class="chart-bar" x="185.7" y="78.7" width="18.6" height="49.3"/>
+        <rect class="chart-bar" x="215.7" y="89.7" width="18.6" height="38.3"/>
+        <rect class="chart-bar" x="245.7" y="56.9" width="18.6" height="71.1"/>
+        <rect class="chart-bar" x="275.7" y="76.2" width="18.6" height="51.8"/>
+        <rect class="chart-bar" x="305.7" y="71.3" width="18.6" height="56.7"/>
+        <rect class="chart-bar" x="335.7" y="53.4" width="18.6" height="74.6"/>
+        <rect class="chart-bar" x="365.7" y="84.5" width="18.6" height="43.5"/>
+        <rect class="chart-bar" x="395.7" y="82.4" width="18.6" height="45.6"/>
+        <rect class="chart-bar" x="425.7" y="65.2" width="18.6" height="62.8"/>
+        <rect class="chart-bar" x="455.7" y="41.1" width="18.6" height="86.9"/>
+        <rect class="chart-bar" x="485.7" y="77.8" width="18.6" height="50.2"/>
+        <rect class="chart-bar" x="515.7" y="64.3" width="18.6" height="63.7"/>
+        <rect class="chart-bar" x="545.7" y="58.5" width="18.6" height="69.5"/>
+        <rect class="chart-bar" x="575.7" y="56.2" width="18.6" height="71.8"/>
+        <rect class="chart-bar" x="605.7" y="62.9" width="18.6" height="65.1"/>
+        <rect class="chart-bar" x="635.7" y="64.3" width="18.6" height="63.7"/>
+        <rect class="chart-bar" x="665.7" y="65.2" width="18.6" height="62.8"/>
+        <rect class="chart-bar" x="695.7" y="77.1" width="18.6" height="50.9"/>
+        <rect class="chart-bar" x="725.7" y="27.1" width="18.6" height="100.9"/>
+        <rect class="chart-bar" x="755.7" y="57.3" width="18.6" height="70.7"/>
+        <rect class="chart-bar" x="785.7" y="62.2" width="18.6" height="65.8"/>
+        <rect class="chart-bar" x="815.7" y="75.2" width="18.6" height="52.8"/>
+        <rect class="chart-bar" x="845.7" y="60.4" width="18.6" height="67.6"/>
+        <rect class="chart-bar" x="875.7" y="75.5" width="18.6" height="52.5"/>
+                  </g>
+                </svg>
+                <div class="chart-axis" style="padding:4px 10px 6px">
+      <span class="micro">Jul 26</span>
+      <span class="micro">Aug 2</span>
+      <span class="micro">Aug 9</span>
+      <span class="micro">Aug 16</span>
+      <span class="micro">Aug 24</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="usage-tables">
+            <div>
+              <p class="section-title">Ranked by provider</p>
+              <p><b class="pin" data-pin="5">5</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
+              <div class="rank-table">
+                <div class="row rank-table-head">
+                  <span class="micro rank-col-id">provider</span>
+                  <span class="micro rank-col-num">requests</span>
+                  <span class="micro rank-col-num">tokens</span>
+                  <span class="micro rank-col-num">cost</span>
+                  <span class="micro rank-col-share">share</span>
+                </div>
+      <a class="row" href="#/requests?provider=groq">
+        <span class="mono rank-col-id">groq</span>
+        <span class="data-emph rank-col-num">6,459</span>
+        <span class="rank-col-num"><span class="data-emph">3.58</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$2.68</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:100.0%"></span></span>
+          <span class="micro share-pct">36.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=cerebras">
+        <span class="mono rank-col-id">cerebras</span>
+        <span class="data-emph rank-col-num">4,028</span>
+        <span class="rank-col-num"><span class="data-emph">2.46</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$2.09</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:62.4%"></span></span>
+          <span class="micro share-pct">22.9%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=together">
+        <span class="mono rank-col-id">together</span>
+        <span class="data-emph rank-col-num">2,772</span>
+        <span class="rank-col-num"><span class="data-emph">1.87</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$2.71</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:42.9%"></span></span>
+          <span class="micro share-pct">15.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=openrouter">
+        <span class="mono rank-col-id">openrouter</span>
+        <span class="data-emph rank-col-num">2,431</span>
+        <span class="rank-col-num"><span class="data-emph">1.73</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$3.21</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:37.6%"></span></span>
+          <span class="micro share-pct">13.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=anthropic">
+        <span class="mono rank-col-id">anthropic</span>
+        <span class="data-emph rank-col-num">1,331</span>
+        <span class="rank-col-num"><span class="data-emph">1.68</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$62.18</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:20.6%"></span></span>
+          <span class="micro share-pct">7.6%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=deepinfra">
+        <span class="mono rank-col-id">deepinfra</span>
+        <span class="data-emph rank-col-num">410</span>
+        <span class="rank-col-num"><span class="data-emph">244.7</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$0.26</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:6.3%"></span></span>
+          <span class="micro share-pct">2.3%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=bedrock">
+        <span class="mono rank-col-id">bedrock</span>
+        <span class="data-emph rank-col-num">96</span>
+        <span class="rank-col-num"><span class="data-emph">125.4</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$4.39</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:1.5%"></span></span>
+          <span class="micro share-pct">0.5%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?provider=vertex">
+        <span class="mono rank-col-id">vertex</span>
+        <span class="data-emph rank-col-num">34</span>
+        <span class="rank-col-num"><span class="data-emph">28.8</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$0.42</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:0.5%"></span></span>
+          <span class="micro share-pct">0.2%</span>
+        </span>
+      </a>
+              </div>
+            </div>
+            <div>
+              <p class="section-title">Ranked by model</p>
+              <p><b class="pin" data-pin="6">6</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
+              <div class="rank-table">
+                <div class="row rank-table-head">
+                  <span class="micro rank-col-id">model</span>
+                  <span class="micro rank-col-num">requests</span>
+                  <span class="micro rank-col-num">tokens</span>
+                  <span class="micro rank-col-num">cost</span>
+                  <span class="micro rank-col-share">share</span>
+                </div>
+      <a class="row" href="#/requests?model=openai%2Fgpt-oss-120b">
+        <span class="mono rank-col-id">openai/gpt-oss-120b</span>
+        <span class="data-emph rank-col-num">6,210</span>
+        <span class="rank-col-num"><span class="data-emph">4.10</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$3.48</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:100.0%"></span></span>
+          <span class="micro share-pct">35.4%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=openai%2Fgpt-oss-20b">
+        <span class="mono rank-col-id">openai/gpt-oss-20b</span>
+        <span class="data-emph rank-col-num">3,480</span>
+        <span class="rank-col-num"><span class="data-emph">1.81</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$0.69</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:56.0%"></span></span>
+          <span class="micro share-pct">19.8%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=llama-3.3-70b-versatile">
+        <span class="mono rank-col-id">llama-3.3-70b-versatile</span>
+        <span class="data-emph rank-col-num">2,360</span>
+        <span class="rank-col-num"><span class="data-emph">1.65</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$1.24</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:38.0%"></span></span>
+          <span class="micro share-pct">13.4%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=deepseek-v3">
+        <span class="mono rank-col-id">deepseek-v3</span>
+        <span class="data-emph rank-col-num">1,970</span>
+        <span class="rank-col-num"><span class="data-emph">1.60</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$1.76</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:31.7%"></span></span>
+          <span class="micro share-pct">11.2%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=claude-sonnet-4-20250514">
+        <span class="mono rank-col-id">claude-sonnet-4-20250514</span>
+        <span class="data-emph rank-col-num">1,640</span>
+        <span class="rank-col-num"><span class="data-emph">2.26</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$26.03</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:26.4%"></span></span>
+          <span class="micro share-pct">9.3%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=claude-opus-4-20250514">
+        <span class="mono rank-col-id">claude-opus-4-20250514</span>
+        <span class="data-emph rank-col-num">812</span>
+        <span class="rank-col-num"><span class="data-emph">1.31</span><span class="unit">M</span></span>
+        <span class="data-emph rank-col-num">$44.45</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:13.1%"></span></span>
+          <span class="micro share-pct">4.6%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=gemini-2.0-flash">
+        <span class="mono rank-col-id">gemini-2.0-flash</span>
+        <span class="data-emph rank-col-num">690</span>
+        <span class="rank-col-num"><span class="data-emph">648.6</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$1.10</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:11.1%"></span></span>
+          <span class="micro share-pct">3.9%</span>
+        </span>
+      </a>
+      <a class="row" href="#/requests?model=command-r-plus">
+        <span class="mono rank-col-id">command-r-plus</span>
+        <span class="data-emph rank-col-num">399</span>
+        <span class="rank-col-num"><span class="data-emph">303.2</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$0.86</span>
+        <span class="rank-col-share">
+          <span class="share-track"><span class="share-bar" style="width:6.4%"></span></span>
+          <span class="micro share-pct">2.3%</span>
+        </span>
+      </a>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p style="margin:0 0 4px"><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Footnote &mdash; request_attempts carries no usage columns, so pre-commit failures never reach usage_daily. Spec &sect;8.3 fixes it; until then the footnote is the truth.</span></p>
+            <p class="usage-footnote">Tokens spent on attempts that failed before commit are not counted here, so these figures understate spend exactly when failover fires.</p>
+            <p style="margin:6px 0 0"><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; .chart-scope &mdash; overrides --chart-1..5. The engine's sky ramp emits orange-400 and lime-400 at positions 4 and 5, colliding with the reserved cooling and healthy colours.</span></p>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
