@@ -188,9 +188,14 @@ func streamingBody(dialect string) []byte {
 
 // streamMeta is the Gemini path a streaming corpus run needs; the other two
 // dialects carry no path value.
+//
+// alt=sse selects Gemini's event-stream wire form. The array form has no
+// event boundaries for the fast-path recognizer to find and is therefore
+// never passthrough-eligible, so exercising it here would make the "fast"
+// run fall back to the IR path on both legs of the comparison.
 func streamMeta(dialect string) meta {
 	if dialect == "gemini" {
-		return meta{Path: "models/target-model:streamGenerateContent"}
+		return meta{Path: "models/target-model:streamGenerateContent?alt=sse"}
 	}
 	return meta{}
 }
