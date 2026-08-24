@@ -108,7 +108,7 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 		attempts = append(attempts, map[string]any{
 			"seq": a.Seq, "provider": a.ProviderID, "key_label": a.KeyID,
 			"model": a.Model, "outcome": a.Outcome, "status_code": a.StatusCode,
-			"latency_ms": a.LatencyMs, "error": a.Error,
+			"latency_ms": a.LatencyMs, "error": a.Error, "path": a.Path,
 		})
 	}
 	bodies := make([]map[string]any, 0, len(tr.Bodies))

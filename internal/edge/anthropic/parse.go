@@ -161,7 +161,9 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		}
 	}
 
-	return req, &edge.Passthrough{Body: body, ModelField: "model", Surface: ir.SurfaceLLM}, nil
+	return req, &edge.Passthrough{
+		Body: body, ModelField: "model", Surface: ir.SurfaceLLM, Stream: req.Stream,
+	}, nil
 }
 
 // parseContent accepts both the plain-string and block-array forms. Anthropic

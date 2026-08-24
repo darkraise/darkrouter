@@ -258,3 +258,29 @@ func TestParseRequestKeepsAPublicImageURL(t *testing.T) {
 		t.Errorf("media = %+v", m)
 	}
 }
+
+func TestParseCarriesTheStreamFlagOnPassthrough(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"streaming", `{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`, true},
+		{"unary", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(tc.body))
+			_, pt, err := ParseRequest(r, 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pt.Stream != tc.want {
+				t.Errorf("Stream = %v, want %v", pt.Stream, tc.want)
+			}
+			// The model is body-carried here, so there is no URL operation.
+			if pt.Method != "" {
+				t.Errorf("Method = %q, want empty", pt.Method)
+			}
+		})
+	}
+}

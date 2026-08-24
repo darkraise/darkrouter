@@ -4,16 +4,34 @@ package edge
 import (
 	"iter"
 	"net/http"
+	"net/url"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// Passthrough carries what the Phase 9 fast path needs to forward a request
-// without re-rendering it. Phase 1 populates it; nothing consumes it yet.
+// Passthrough carries what the phase 9 fast path needs to forward a request
+// without re-rendering it. Every dialect populates it; eligibility is decided
+// per attempt in the executor, not here.
 type Passthrough struct {
 	Body       []byte // the raw inbound body, retained for replay across attempts
 	ModelField string // top-level JSON key holding the model, or "" when in the URL
 	Surface    ir.Surface
+
+	// Method is the URL-carried operation for a dialect whose model lives in
+	// the path — Gemini's generateContent or streamGenerateContent. Exactly one
+	// of ModelField and Method is set; both empty means the dialect declared no
+	// rewritable identifier and the request is not forwardable.
+	Method string
+
+	// Query is the inbound query string with this dialect's credential
+	// parameter removed. Replayed onto the upstream URL so ?alt=sse survives a
+	// forward, while Darkrouter's own proxy token never leaves the process.
+	Query url.Values
+
+	// Stream mirrors the parsed request's stream flag. The forwarder needs it
+	// to decide on stream_options injection and on which response reader to
+	// use, and it does not hold the ir.Request.
+	Stream bool
 }
 
 type Dialect interface {

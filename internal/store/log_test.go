@@ -331,3 +331,59 @@ func TestSurfaceDetailIsQueryable(t *testing.T) {
 		t.Errorf("id = %q", id)
 	}
 }
+
+func TestAttemptPathRoundTrips(t *testing.T) {
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{Buffer: 8, BatchSize: 1, FlushEvery: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	r := rec("r1")
+	r.Attempts = []AttemptRecord{
+		{Seq: 0, ProviderID: "p", Model: "m", Outcome: "fatal", StatusCode: 400, Path: "passthrough"},
+		{Seq: 1, ProviderID: "p", Model: "m", Outcome: "success", StatusCode: 200, Path: "ir"},
+	}
+	w.Log(r)
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	tr, ok, err := db.RequestTrace(context.Background(), "r1")
+	if err != nil || !ok {
+		t.Fatalf("RequestTrace: %v ok=%v", err, ok)
+	}
+	if len(tr.Attempts) != 2 {
+		t.Fatalf("got %d attempts", len(tr.Attempts))
+	}
+	if tr.Attempts[0].Path != "passthrough" || tr.Attempts[1].Path != "ir" {
+		t.Errorf("paths = %q, %q", tr.Attempts[0].Path, tr.Attempts[1].Path)
+	}
+}
+
+func TestAttemptPathDefaultsToIR(t *testing.T) {
+	// Every row written before this migration, and every caller not yet taught
+	// about the column, means the IR path — which is what each of them took.
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{Buffer: 8, BatchSize: 1, FlushEvery: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	w.Log(rec("r2")) // rec() sets no Path
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	tr, _, err := db.RequestTrace(context.Background(), "r2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Attempts[0].Path != "ir" {
+		t.Errorf("Path = %q, want ir", tr.Attempts[0].Path)
+	}
+}

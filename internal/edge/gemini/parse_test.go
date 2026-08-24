@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,5 +151,50 @@ func TestParseRequestModeAnyWithoutNamesIsAny(t *testing.T) {
 	req := parsed(t, "m:generateContent", "", `{"contents":[],"toolConfig":{"functionCallingConfig":{"mode":"ANY"}}}`)
 	if req.ToolChoice == nil || req.ToolChoice.Mode != "any" {
 		t.Errorf("tool_choice = %+v", req.ToolChoice)
+	}
+}
+
+func TestParseCarriesTheURLOperationAndQuery(t *testing.T) {
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	r := httptest.NewRequest("POST",
+		"/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=secret",
+		bytes.NewReader(body))
+	r.SetPathValue("model", "gemini-2.0-flash:streamGenerateContent")
+
+	_, pt, err := ParseRequest(r, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt.Method != "streamGenerateContent" {
+		t.Errorf("Method = %q, want streamGenerateContent", pt.Method)
+	}
+	if !pt.Stream {
+		t.Error("Stream = false on streamGenerateContent")
+	}
+	if got := pt.Query.Get("alt"); got != "sse" {
+		t.Errorf("alt = %q, want sse", got)
+	}
+	// The inbound proxy token must not be replayed onto the upstream URL:
+	// forwarding it would send Darkrouter's own proxy_token to the vendor.
+	if _, present := pt.Query["key"]; present {
+		t.Error("the inbound credential survived into the forwarded query")
+	}
+}
+
+func TestParseLeavesModelFieldEmptyForURLCarriedModels(t *testing.T) {
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	r := httptest.NewRequest("POST", "/v1beta/models/gemini-2.0-flash:generateContent",
+		bytes.NewReader(body))
+	r.SetPathValue("model", "gemini-2.0-flash:generateContent")
+
+	_, pt, err := ParseRequest(r, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt.ModelField != "" {
+		t.Errorf("ModelField = %q, want empty", pt.ModelField)
+	}
+	if pt.Method != "generateContent" || pt.Stream {
+		t.Errorf("Method = %q Stream = %v", pt.Method, pt.Stream)
 	}
 }

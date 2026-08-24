@@ -56,6 +56,16 @@ type SurfaceOp interface {
 	WriteError(w http.ResponseWriter, e *ir.Error) error
 }
 
+// passthroughOp is implemented by a SurfaceOp whose inbound bytes can be
+// forwarded rather than re-rendered.
+//
+// Optional, matching adapter.TokenCounter: an op that says nothing takes the IR
+// path, which is every auxiliary surface. Multipart and binary bodies are
+// excluded by master design §4.1 and by having nothing to return here.
+type passthroughOp interface {
+	Passthrough() *edge.Passthrough
+}
+
 // AttemptCtx is what Respond needs from the attempt around it. It is a struct
 // rather than six parameters because auxiliary surfaces use different subsets
 // and the list would otherwise grow with every one of them.
@@ -91,7 +101,10 @@ type AttemptCtx struct {
 type chatOp struct {
 	d   edge.Dialect
 	req *ir.Request
+	pt  *edge.Passthrough
 }
+
+func (o *chatOp) Passthrough() *edge.Passthrough { return o.pt }
 
 func (o *chatOp) Dialect() string { return o.d.Name() }
 

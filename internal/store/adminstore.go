@@ -455,7 +455,7 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	}
 
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error
+		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path
 		   FROM request_attempts WHERE request_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
@@ -465,7 +465,7 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	for rows.Next() {
 		var a AttemptRecord
 		if err := rows.Scan(&a.Seq, &a.ProviderID, &a.KeyID, &a.Model,
-			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error); err != nil {
+			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error, &a.Path); err != nil {
 			return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
 		}
 		tr.Attempts = append(tr.Attempts, a)

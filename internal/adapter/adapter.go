@@ -6,8 +6,10 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"net/url"
 
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/sse"
 )
 
 // ModelInfo is what the catalog knows about the model this target names.
@@ -178,4 +180,68 @@ type Transcriber interface {
 // without being read.
 type Speaker interface {
 	BuildSpeech(ctx context.Context, t *Target, req *ir.SpeechRequest) (*http.Request, []ir.Warning, error)
+}
+
+// Forward is one passthrough attempt's outbound request, already rewritten.
+//
+// Body is final: the executor has done the model rewrite and any permitted
+// injection, and a builder that re-encodes it defeats the phase. Header is the
+// inbound allowlist from spec §5.3, filtered before it arrives, and a builder
+// overrides only what the client must not be able to dictate — the credential
+// and the content type.
+type Forward struct {
+	Body   []byte
+	Header http.Header
+	Stream bool
+
+	// Method and Query serve the kinds whose model lives in the URL. Method is
+	// the operation suffix; Query is the inbound query with the inbound
+	// credential already removed. Both are empty for a body-carried kind.
+	Method string
+	Query  url.Values
+}
+
+// RawEvent is what one forwarded SSE event means to the commit rule and to
+// accounting.
+//
+// Deliberately not an ir.StreamEvent: the fast path never reconstructs IR, and
+// a type that could be mistaken for one would invite a future change to start.
+type RawEvent struct {
+	// Content marks a content-bearing event under phase 3's definition — text,
+	// thinking, or tool-input content. Pings, comments, message_start and
+	// role-only deltas are not, because committing on a keepalive forfeits
+	// failover for nothing.
+	Content bool
+	// ErrPayload is a non-empty in-stream error, whatever the status line said.
+	// Anthropic delivers overloaded_error this way under a 200.
+	ErrPayload string
+	// Usage is what this event alone reported. Anthropic splits it across two
+	// events, so the caller merges rather than assigns.
+	Usage *ir.Usage
+	// UsageOnly marks the extra final chunk an injected stream_options
+	// produced, which is stripped when Darkrouter asked for it and the client
+	// did not.
+	UsageOnly bool
+}
+
+// Forwarder is implemented by an adapter whose wire format is close enough to
+// an inbound dialect that a body can be forwarded rather than re-rendered.
+//
+// Optional, like TokenCounter and Embedder above, and for a stronger reason:
+// master design §4.1 excludes bedrock because SigV4 signs a payload hash, and
+// vertex because its URL encodes both publisher and model. Neither implements
+// this interface, so neither can be made eligible by an oversight in a
+// predicate somewhere else, and a sixth kind is ineligible until someone
+// deliberately writes its builder.
+//
+// The two Recognize methods live here rather than in the executor because the
+// usage wire shape already does. A second copy in exec would be the same field
+// sets maintained twice, drifting the first time a vendor adds a category.
+type Forwarder interface {
+	BuildForward(ctx context.Context, t *Target, f *Forward) (*http.Request, error)
+	// RecognizeEvent reads SSE structure only and never builds IR.
+	RecognizeEvent(ev sse.Event) RawEvent
+	// RecognizeUsage reads a complete unary body. A nil return means the body
+	// carried no usage, which is logged as unknown rather than estimated.
+	RecognizeUsage(body []byte) *ir.Usage
 }
