@@ -703,12 +703,17 @@ Expected: OK, 14 tests (8 qa + 6 build).
 ```bash
 cd docs/ux/mockups
 rm fragments/99-smoke.html
-# build.py exits non-zero on an empty fragment set, which is correct; the
-# first real screen arrives in Task 3. Commit the pipeline without an index.
+# index.html and artifact.html still hold the smoke screen that was just
+# deleted. build.py does not refuse an empty fragment set — it would write an
+# index with no screens — so remove the built files rather than rebuilding.
+# The first real index arrives in Task 3.
+rm -f index.html artifact.html
 cd /root/repositories/darkrouter
-git add docs/ux/mockups THIRD_PARTY_NOTICES.md
+git add -A docs/ux/mockups THIRD_PARTY_NOTICES.md
 git commit -m "build(ux): assemble mockup fragments into a self-contained page"
 ```
+
+The committed tree therefore has `build.py`, `qa.py`, `_shell.html`, `_chrome.html`, `darkrouter-ui.css`, `fonts/` and `tests/`, and no fragments and no built output. That is the intended state at the end of this task.
 
 ---
 
@@ -1116,7 +1121,7 @@ git commit -m "feat(ux): design the requests log"
 
 **Interfaces:**
 - Consumes: the `.ladder` contract from Task 4 — copy its markup shape exactly.
-- Produces: `.waterfall`, `.warning-list` — reused by Task 13.
+- Produces: `.waterfall`, `.warning-list` — no later consumer; this is a leaf.
 
 Spec §6.3. This screen is the payoff for the whole design; it is where the ladder earns the spine claim.
 
@@ -1172,7 +1177,7 @@ git commit -m "feat(ux): design the request trace around the ladder"
 
 **Interfaces:**
 - Consumes: Task 3 vocabulary, `.well` in particular — every chart sits in a well and the graticule is its gridline.
-- Produces: `.chart-scope`, `.rank-table` — `.chart-scope` is the class that overrides the colliding chart ramp and Task 13 reuses it.
+- Produces: `.chart-scope`, `.rank-table` — `.chart-scope` overrides the colliding chart ramp and Task 19 re-renders it in light. Declare it in darkrouter-ui.css, not inline, so Task 19 does not redefine it.
 
 Spec §6.4. Page title `operate/usage`. This screen does not exist today.
 
