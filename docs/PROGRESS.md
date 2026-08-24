@@ -146,22 +146,28 @@ Four smaller items are listed at the end of
   retryable provider error, which failed the request over to another provider
   and recorded a health failure against a provider that had answered correctly.
 - **Live verification against Groq has now run — see §11.** It found two
-  defects, both recorded there and both still open: the §9 pre-commit-400
-  fallback drops an unmodelled client field and reports success with no
+  defects, both recorded there and **both since fixed**: the §9 pre-commit-400
+  fallback dropped an unmodelled client field and reported success with no
   warning, against three explicit spec statements; and an admin priority
-  change does not reach routing until something else rebuilds the catalog.
+  change did not reach routing until something else rebuilt the catalog.
   One part of the brief remains unrunnable here: the cross-kind failover case
   (passthrough to the first candidate, IR to a second candidate of a different
   kind) needs an Anthropic or Gemini credential this environment lacks, and
   stays covered by fakes only.
-- **`Discoverer.SweepOnce` ends with a rebuild that is not serialized against
-  concurrent admin catalog writes.** An operator adding a model while a sweep
-  runs could have it vanish from routing until the next rebuild. The mechanism
-  is inferred from the code; the phase's own e2e work only proved the
-  manifestation — a 404 flake in the strict-400 case, traced to the sweep's
-  trailing rebuild publishing a stale snapshot over a test's seeding — and
-  worked around it by disabling discovery in that suite rather than fixing the
-  race. Out of phase 9's scope.
+- **The unserialized catalog rebuild is fixed.** `catalog.Store.Rebuild` reads
+  providers, model rows and overrides and *then* publishes, and nothing made
+  that one step, so two overlapping rebuilds let the one that read older data
+  publish last — its stale snapshot then serving routing until something
+  rebuilt again. The pairing reachable in production is the discovery worker
+  against the models.dev sync worker: both write rows and then rebuild, on
+  independent timers, from independent goroutines. The admin API was never the
+  second writer as this entry previously claimed — its handlers call only
+  `Src.Reload` and never `Rebuild` at all, which turned out to be a **second,
+  separate defect** (§11, finding 2). Both are fixed: `Rebuild` now holds a
+  mutex across its reads and its publish, and the admin write path rebuilds
+  after reloading. `Snapshot()` is untouched and stays a lock-free atomic load,
+  so the request path pays nothing. The e2e harness still disables discovery,
+  which is now a speed choice rather than a workaround.
 - **Array-form Gemini streaming lost its only integration coverage.** Gemini
   clients may ask for a chunked JSON array instead of SSE, and the whole-branch
   review found that form was passthrough-eligible but unservable — the fast
@@ -944,6 +950,16 @@ observed as a plain reproducible sequence rather than a race, and it makes the
 carried-forward catalog item concrete: an operator reprioritising a provider
 in the dashboard sees no effect until the next sweep, up to the 15-minute
 discovery interval away.
+
+**Both findings are fixed.** The §9 fallback now records a warning naming the
+translation (it cannot name the field — `encoding/json` discarded the unknown
+key at the edge parser long before), and `reloadProviders` rebuilds the catalog
+after reloading the source. Each fix went in test-first, and the test for the
+first one reproduces the live symptom exactly: `warnings = []` on a request the
+provider rejected and the retry served. The existing
+`TestAPreCommit400IsRetriedThroughTheIRPath` asserted the two paths but not the
+warning, which is why a passing suite coexisted with a done-criterion
+violation.
 
 Nothing else in the brief's substance was skipped. Both processes were tracked
 by PID from the moment they started, killed at the end (`pkill -P` then
