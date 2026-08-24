@@ -480,7 +480,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd docs/ux/mockups && python3 -m unittest discover -s tests -p 'test_qa.py' -v`
-Expected: OK, 12 tests.
+Expected: OK. Record the count you see; the suite grows as tasks add tests.
 
 - [ ] **Step 5: Commit**
 
@@ -822,7 +822,7 @@ Expected: `build: 1 screen(s) -> index.html (…), artifact.html (…)` then `qa
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `cd docs/ux/mockups && python3 -m unittest discover -s tests -v`
-Expected: OK, 22 tests (14 qa + 8 build).
+Expected: OK. The suite grows as tasks add tests, so record the count you see rather than matching a number written here.
 
 - [ ] **Step 9: Delete the smoke fragment, rebuild, commit**
 
@@ -1977,7 +1977,7 @@ cd docs/ux/mockups
 python3 build.py && python3 qa.py && python3 -m unittest discover -s tests -v
 ```
 
-Expected: 18 fragments, qa PASS, 22 tests OK. Record `index.html`'s size — it should land in the 200–350 KB range; materially larger means an asset was embedded that should not have been.
+Expected: 18 fragments, qa PASS, and the full suite OK. Record `index.html`'s size — it should land in the 200–350 KB range; materially larger means an asset was embedded that should not have been.
 
 - [ ] **Step 2: Screenshot every screen in both modes**
 
