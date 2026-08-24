@@ -14,7 +14,7 @@ Last updated: 2026-08-24
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
-| 9 — Passthrough fast path | ✅ | ✅ | **Complete.** 17 tasks; race-clean, verified against fakes only — no `GROQ_KEY` in this environment for the live check. |
+| 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, verified against fakes only — no `GROQ_KEY` in this environment for the live check. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
