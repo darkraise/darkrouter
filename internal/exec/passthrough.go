@@ -72,8 +72,8 @@ func presetRejectsStreamOptions(preset string) bool {
 }
 
 // ErrNoModelField means a body-carried dialect's body has no top-level model
-// key to rewrite. Task 9 turns it into a fall back to the IR path rather than a
-// client error: the IR parser produces a proper dialect-shaped message if the
+// key to rewrite. The executor falls back to the IR path rather than reporting
+// a client error: the IR parser produces a proper dialect-shaped message if the
 // body is genuinely invalid, and this function cannot tell the difference.
 var ErrNoModelField = errors.New("exec: passthrough body carries no model field")
 
@@ -84,10 +84,11 @@ var ErrNoModelField = errors.New("exec: passthrough body carries no model field"
 //
 // The guarantee is semantic preservation, not byte preservation: re-encoding
 // compacts whitespace, sorts top-level keys and collapses duplicate top-level
-// keys to the last. HTML escaping is the one consequential difference and it is
-// disabled. When nothing needs changing the original slice is returned
-// unmodified, which is the only path with exact byte fidelity — and the most
-// travelled one, because a client usually asks for the name the target serves.
+// keys to the last. HTML escaping is disabled for the re-encode of the body's
+// own values, which is where prompt text lives. When nothing needs changing the
+// original slice is returned unmodified, which is the only path with exact byte
+// fidelity — and the most travelled one, because a client usually asks for the
+// name the target serves.
 func rewriteForward(pt *edge.Passthrough, requested, target, kind string) ([]byte, bool, error) {
 	if pt.ModelField == "" {
 		// URL-carried. The model is not in the body, and no dialect in this
