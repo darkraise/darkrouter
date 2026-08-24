@@ -1,0 +1,513 @@
+/*
+ * Task 11 — the preset browser ("configure/providers", overlay).
+ *
+ * This is the one screen in the product that legitimately paints a shadow,
+ * so nearly everything below exists to build one dialog: a stage that lets
+ * the dimmed page and the dialog occupy the same box, the scrim, and the
+ * dialog surfaces themselves. Reused as-is from darkrouter-ui.css: .panel,
+ * .well, .table, .row, .chip, .control, .control-ghost, .micro, .mono,
+ * .data-emph, .prose, .legend-caps, .section-title, .state-pip. Reused from
+ * 08's sibling partial css/03-requests.css: .combo-check, because a facet
+ * checkbox and a filter-menu checkbox are the same affordance and a second
+ * 12px tick box would be a divergence, not a variant.
+ *
+ * Every class here is prefixed preset- because three other screens are being
+ * drawn into this same concatenated stylesheet at the same time.
+ */
+
+/* --- Stage: the dimmed page and the dialog share one box ---------------
+   A single-cell grid rather than position:absolute. Absolute positioning
+   would take the dialog out of flow, and .chrome clips overflow, so a
+   1200px dialog would be cut off at the bottom of a 720px console. In one
+   grid cell the stage's height is the dialog's height, the page behind
+   keeps its own natural height at the top of the cell, and the scrim
+   stretches over the whole thing. */
+
+.preset-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.preset-stage > * { grid-area: 1 / 1; }
+
+/* The page the overlay opened over. Natural height, pinned to the top of
+   the cell, so what shows around the dialog is a real page edge. */
+.preset-under { align-self: start; }
+
+/* Not a shadow and not a surface — a light-blocking wash, so it is stated
+   as an alpha over whatever is behind it rather than as a token. Dark mode
+   drops the page toward black; light mode washes it with the same ink the
+   text is set in, at a third of the strength, because a light page needs
+   far less dimming before the dialog reads as the foreground.
+
+   It escapes the stage on purpose. A dialog suspends the whole console,
+   not just the region it happens to be drawn in, so the rail and the top
+   bar dim with the table. grid-area:auto takes it out of the stage's one
+   cell so the containing block is the stage's padding box; the negative
+   inset then spreads it past the rail, and .chrome's own overflow:hidden
+   is what trims it back to the console's edges. */
+.preset-scrim {
+  position: absolute;
+  grid-area: auto;
+  inset: -9999px;
+  background: rgba(3, 5, 7, 0.66);
+}
+body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
+
+/* --- The dialog -------------------------------------------------------
+   --overlay plus --shadow-overlay: the single permitted shadow in the
+   product (0 8px 24px -8px). 96px of clearance at the top so the page
+   behind is visibly a page and not just a border. */
+.preset-modal {
+  position: relative;
+  justify-self: center;
+  align-self: start;
+  width: 1040px;
+  max-width: 100%;
+  margin: 96px 0 28px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+
+.preset-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--topbar-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The console speaking to the operator, so sans — the dialog's title is
+   the one string on this screen that did not come off the wire. */
+.preset-modal-title {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.preset-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-modal-close:hover { opacity: 1; }
+
+.preset-modal-body { padding: var(--section-pad); }
+
+.preset-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gutter);
+  min-height: 36px;
+  padding: 0 var(--section-pad);
+  border-top: 1px solid var(--hairline);
+}
+
+/* --- Search -----------------------------------------------------------
+   The browse surface is a .panel laid inside the --overlay dialog, and
+   every data region below is a .well cut into that panel. Wells cannot sit
+   directly on the dialog: in light mode --overlay and --well are the same
+   value, so the recess would vanish. The panel is the step that keeps the
+   dark-darker / light-brighter inversion intact inside an overlay. */
+
+.preset-browse { padding: var(--section-pad); }
+
+.preset-search-block { margin-bottom: var(--section-pad); }
+
+/* Focused, so a --focus border plus a 1px outline. An outline, not a
+   shadow: the dialog owns the only shadow on the screen. */
+.preset-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 10px;
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.preset-search-q {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* A text cursor parked after the query. Static — the product has exactly
+   three animations and none of them is a blink. */
+.preset-caret {
+  width: 1px;
+  height: 15px;
+  margin-left: -4px;
+  background: var(--focus);
+}
+
+.preset-search-count { margin-left: auto; }
+
+.preset-suggest {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+
+.preset-suggest-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--hairline-subtle);
+  text-decoration: none;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-suggest-row:last-child { border-bottom: none; }
+.preset-suggest-row:hover { opacity: 1; }
+
+/* The row the operator picked. Selection is a choice, not an outcome, so
+   it is trace — the same rule .ladder-row-served follows, and the same
+   0.08 wash, so "this is the one" reads identically in both components. */
+.preset-suggest-row[data-picked="true"] { opacity: 1; }
+.preset-suggest-row[data-picked="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.preset-suggest-why {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--legend);
+}
+
+/* --- Facets + results columns ----------------------------------------- */
+
+.preset-cols {
+  display: grid;
+  grid-template-columns: 192px 1fr;
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.preset-facet-group + .preset-facet-group { margin-top: var(--section-pad); }
+
+.preset-facet-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.preset-facet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-facet-row:hover { opacity: 1; }
+
+/* A facet the vocabulary declares but no shipped preset uses. Kept in the
+   list rather than hidden: an operator who knows darkrouter supports
+   query-param auth needs to see that zero presets currently do. */
+.preset-facet-row[data-empty="true"] { opacity: 0.5; }
+
+.preset-facet-count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.preset-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* 2px radius like everything else — a pill-shaped switch would be the only
+   round object in the console. */
+.preset-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  width: 24px;
+  height: 14px;
+  padding: 2px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.preset-toggle-knob {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+.preset-toggle[data-on="true"] {
+  justify-content: flex-end;
+  border-color: var(--trace);
+  background: var(--trace-fill);
+}
+.preset-toggle[data-on="true"] .preset-toggle-knob { background: var(--ink); }
+
+/* --- Results grid ------------------------------------------------------ */
+
+.preset-results-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--section-pad);
+  margin-bottom: 8px;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.preset-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px var(--section-pad);
+  text-decoration: none;
+  opacity: 0.92;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-card:hover { opacity: 1; }
+
+/* The chosen preset. Trace border and the shared 0.08 trace wash — a
+   selection is what was CHOSEN, never a state colour. */
+.preset-card[data-selected="true"] {
+  border-color: var(--trace);
+  opacity: 1;
+}
+.preset-card[data-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.preset-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preset-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.preset-meta-sep { color: var(--legend); }
+
+/* base_url, middle-elided. The truncation is written into the markup
+   rather than done with text-overflow because an end ellipsis would eat
+   the path and leave two dozen cards all reading "https://api…" — the
+   host tells you who it is, the path tells you which API dialect you are
+   about to speak, and both have to survive. */
+.preset-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+/* The preset ships an empty base_url and the endpoint is assembled at
+   create time from region/project/location. Legend weight plus the brace
+   placeholders say "template, not address" without a second line. */
+.preset-url-derived { color: var(--legend); }
+
+.preset-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* Lighter than .chip on purpose: a card carries up to three of these at
+   once, and three 20px chips would outweigh the preset name above them. */
+.preset-surface-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+/* Free tier is an attribute of the vendor's plan, not a health reading and
+   not a routing decision, so it takes neither a state colour nor trace. A
+   --bezel stroke is the loudest neutral available. */
+.preset-free {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* Accent as TEXT, so --accent-ink (5.69:1 in light) and never --trace
+   (3.93:1). Links are the one place that distinction is load-bearing. */
+.preset-link {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--accent-ink);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-link:hover { opacity: 1; text-decoration: underline; }
+
+/* --- Create form, inline under the selected card ----------------------- */
+
+.preset-form {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: var(--gutter);
+  padding: var(--section-pad);
+  border-color: var(--trace);
+}
+
+.preset-field-label { display: block; }
+
+.preset-input {
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.preset-field-note {
+  margin: 6px 0 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+
+.preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--section-pad);
+}
+
+/* The one committing action in the dialog. Outlined in --accent-ink rather
+   than filled, matching how .view-chip and .time-range-preset already mark
+   the live option — this console has no filled buttons. */
+.preset-primary {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* The inventory of everything the operator is not typing. A two-column
+   key/value run rather than prose, because the point is that these are
+   fields, and a field list is what a form would have made them fill in.
+   It sits on --panel, not --well: the form around it is already a well cut
+   into the results grid, and a well inside a well is the same value twice
+   with a hairline between — no recess in either theme. On --panel it is a
+   peer of the id input beside it, which is on --panel for the same reason. */
+.preset-supplies {
+  display: grid;
+  grid-template-columns: 124px 1fr;
+  align-items: baseline;
+  gap: 3px var(--section-pad);
+  padding: 10px var(--section-pad);
+}
+
+.preset-supplies-key {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.preset-supplies-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* A field the preset deliberately declares nothing for. It still earns a
+   row: "cerebras has no quirks" is an answer, and a blank line is not. */
+.preset-supplies-none { color: var(--legend); }
+
+/* --- Footer counts ----------------------------------------------------- */
+
+.preset-counts {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}

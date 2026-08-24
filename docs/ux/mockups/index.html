@@ -1928,6 +1928,1859 @@ body.pins-on .pin-note { display: inline; }
   text-align: right;
 }
 
+/*
+ * Task 9 — Providers ("configure/providers").
+ *
+ * New vocabulary this screen introduces: .priority-handle and
+ * .discovery-status (both named by the task's own Interfaces contract and
+ * reused by Task 10), .enable-switch (+ -track/-knob), .drop-indicator,
+ * .prov-row-dragging, the .prov-col-* column geometry, .prov-prio-*
+ * renumbering pair, .discovery-grid, .prov-add (+ -link), and the
+ * .prov-form field vocabulary.
+ *
+ * Reused unchanged: .table/.row/.state-pip/.chip/.control/.control-ghost/
+ * .micro/.mono/.prose/.section-title/.legend-caps/.region/.well/.panel/
+ * .segmented from darkrouter-ui.css; .health-tile/.health-tile-head/
+ * .health-tile-name/.health-tile-alert/.health-tile-alert-text/.ops-footer
+ * from Overview's partial (its header names both as Task 9 consumers);
+ * .row-head/.combo-trigger/.combo-chevron/.text-muted from Requests';
+ * .control-primary from Request trace's; .spec-note from the design
+ * language board, for the per-field annotations.
+ */
+
+/* --- Priority handle -------------------------------------------------
+   The grip for drag-to-reprioritise. Three 1px rules painted with a
+   gradient rather than a glyph or an image: it stays crisp at any zoom,
+   carries no font dependency, and needs no fetched asset. The element
+   itself is the full 30px control height so the hit target matches every
+   other control on the screen, while the visible grip stays 10px — a
+   30px-tall grip would out-weigh the provider id beside it. Dimmed at
+   rest and brought up on hover, which is the one hover animation the
+   motion budget allows. */
+.priority-handle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: var(--control-h);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--bezel) 0 1px,
+    transparent 1px 4px
+  );
+  background-size: 10px 9px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  transition: opacity var(--dur-hover) ease;
+}
+.row:hover .priority-handle { opacity: 1; }
+
+/* --- Enabled switch ---------------------------------------------------
+   `enabled` is configuration, not health and not a routing verdict, so
+   the on state takes --accent-ink — the same token the rail's active item
+   and Requests' active saved view already use for "this is the selected
+   state". The knob's LEFT/RIGHT position, not its colour, is what
+   survives a greyscale proof.
+
+   The knob does not transition. Only three animations exist in this
+   product (hover opacity, disclosure height, value swap) and a sliding
+   knob is none of them, so the two states are drawn, not tweened. */
+.enable-switch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+}
+
+.enable-switch-track {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.enable-switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+
+.enable-switch[data-on="true"] .enable-switch-track {
+  border-color: var(--accent-ink);
+  background: var(--overlay);
+}
+.enable-switch[data-on="true"] .enable-switch-knob {
+  left: 13px;
+  background: var(--accent-ink);
+}
+
+/* --- Discovery status dot ----------------------------------------------
+   Deliberately a CIRCLE while .state-pip is a 2px-radius square: the two
+   marks sit in the same row two columns apart and answer different
+   questions ("is this provider serving" vs "is its model listing still
+   being refreshed"), so they must not read as one repeated mark.
+
+   Hollow --bezel is the base: no current reading, which covers both a
+   provider that has never been probed and one that is not polled while
+   disabled. Filled green is a fresh listing. Stale takes the 2px ring
+   plus centre dot that .mark-cooling already established for "something
+   is still in there, waiting" — the shape carries it without the amber,
+   which is the whole point of the greyscale proof. */
+.discovery-status {
+  position: relative;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--bezel);
+  border-radius: 50%;
+  background: transparent;
+}
+.discovery-status[data-discovery="fresh"] {
+  border-color: var(--state-healthy);
+  background: var(--state-healthy);
+}
+.discovery-status[data-discovery="stale"] {
+  border: 2px solid var(--state-cooling);
+  background: transparent;
+}
+.discovery-status[data-discovery="stale"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
+}
+
+/* --- Region 1: the provider list --------------------------------------
+   .table/.row/.row-head carry the surface and the 30px rhythm; everything
+   here is column geometry. Names are prefixed because three other screens
+   are being drawn against this same concatenated stylesheet and a bare
+   .col-name would be a coin toss. */
+
+/* The header row reserves the handle's column without drawing a grip: a
+   header is not draggable, and a grip there would advertise a gesture the
+   row does not accept. */
+.prov-col-handle { flex: 0 0 16px; }
+
+.prov-col-prio {
+  flex: 0 0 44px;
+  text-align: right;
+  color: var(--ink);
+}
+.prov-col-name {
+  flex: 0 0 128px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.prov-col-kind { flex: 0 0 104px; color: var(--ink-muted); }
+.prov-col-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+.prov-col-creds { flex: 0 0 150px; }
+.prov-col-switch { flex: 0 0 48px; display: flex; align-items: center; }
+.prov-col-disc {
+  flex: 0 0 112px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.prov-col-flag {
+  flex: 0 0 140px;
+  display: flex;
+  align-items: center;
+}
+/* .legend-caps carries its own 6px bottom margin, which a 30px flex row
+   does not collapse — the same zeroing Requests' .row-head already does. */
+.prov-table .row-head .legend-caps { margin: 0; }
+
+/* A row switched off is still a row: it keeps its id, its credentials and
+   its place in the order, so it dims rather than disappearing. Static
+   opacity, not a transition — nothing here is animating. */
+.prov-row[data-enabled="false"] { opacity: 0.5; }
+
+/* --- Region 2: reordering ----------------------------------------------
+   The dragged row is genuinely lifted off the panel, which makes it the
+   one legitimate --shadow-overlay surface on this screen. Its left rule
+   is --trace, the same "this is the row the eye should stop on" mark
+   .ladder-row-served already uses for the candidate that was chosen. */
+.prov-reorder { max-width: 760px; }
+
+.prov-row-dragging {
+  position: relative;
+  z-index: 1;
+  transform: translateX(6px);
+  background: var(--overlay);
+  border-left: 1px solid var(--trace);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* Where the row will land. Two pixels of --trace across the full table
+   width plus a square cap on the leading edge, so the insertion point is
+   readable even where the line crosses a busy row below it. Height stays
+   at the border's own 2px: the indicator must not shove the rows apart,
+   or the list re-lays-out under the cursor mid-drag. */
+.drop-indicator {
+  position: relative;
+  height: 0;
+  border-top: 2px solid var(--trace);
+}
+.drop-indicator::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  background: var(--trace);
+}
+
+/* The priority column while a drag is in flight: the value that is being
+   written and the value it replaces, side by side. The outgoing number is
+   struck through at --legend; the incoming one is --accent-ink, because
+   accent-coloured TEXT takes accent-ink (--trace only reaches 3.93:1 in
+   light mode and fails AA at body size). */
+.prov-col-prio-edit {
+  flex: 0 0 108px;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.prov-prio-was {
+  color: var(--legend);
+  text-decoration: line-through;
+}
+.prov-prio-arrow { color: var(--legend); font-size: 11px; }
+.prov-prio-now { color: var(--accent-ink); }
+
+.prov-reorder-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--legend);
+}
+
+/* --- Region 3: discovery health ---------------------------------------
+   Three tiles, not Overview's four-up .health-grid, because these are
+   three named states side by side rather than a fleet roster. The tile
+   itself is .well.health-tile, reused verbatim. */
+.discovery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gutter);
+}
+
+.discovery-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* A wire field name and the value read out of it, on one line: the field
+   in --legend so the eye lands on the reading, not the label. */
+.discovery-field { color: var(--legend); }
+
+/* --- Region 4: add provider -------------------------------------------- */
+.prov-add {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  flex-wrap: wrap;
+}
+
+/* The secondary route into the same job. A link, not a second button:
+   two buttons side by side would read as two equal choices, and the
+   preset browser is the one an operator should reach for 197 times out of
+   198. --accent-ink because this is accent-coloured text. */
+.prov-add-link {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.prov-add-link:hover { opacity: 1; }
+
+/* --- Region 5: the raw provider form ------------------------------------
+   Three columns on a 12px/20px rhythm. Fields that the selected kind does
+   not use stay visible and inert rather than vanishing, so the form always
+   shows the whole shape of what POST /api/providers accepts. */
+.prov-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--section-pad) var(--gutter);
+  padding: var(--section-pad);
+}
+
+.prov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.prov-field .legend-caps { margin: 0; }
+.prov-field-wide { grid-column: span 2; }
+
+/* An input is a value the operator can change, so it sits on --well: the
+   recessed surface this product already uses for anything that is data
+   rather than chrome, and the one that inverts polarity between themes. */
+.prov-input {
+  display: flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 8px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Not applicable to the selected kind: still there, still labelled, just
+   not accepting a value. Panel rather than well — it is chrome for now,
+   not a data slot. */
+.prov-input-inert {
+  background: var(--panel);
+  border-style: dashed;
+  color: var(--legend);
+}
+
+/* The caret sits inside the field, so the select needs the row layout
+   .combo-trigger already defines; this only stops the button stretching
+   to the grid column's full height. */
+.prov-select { width: 100%; }
+
+.prov-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  padding: 0 var(--section-pad) var(--section-pad);
+}
+
+/* --- Region 6 ------------------------------------------------------------
+   The count line is .ops-footer, reused from Overview's partial exactly as
+   that file's header says it would be: one --legend line under a hairline,
+   summarising the screen above it. It brings its own rule and gutter, so
+   this block deliberately is NOT a .region — two hairlines 25px apart with
+   nothing between them reads as a mistake rather than as a separation. The
+   pin paragraph loses its margin for the same reason: with pins off it is
+   an empty element, and an empty element should not reserve a band. */
+.prov-counts > p:first-child { margin: 0; }
+
+/*
+ * Task 10 — Provider detail ("configure/providers", one provider open).
+ *
+ * A leaf screen: nothing later consumes what is declared here except the two
+ * names the task's own Interfaces contract reserves for it, .credential-row
+ * and .breaker-panel. Everything else is prefixed pd- so that Tasks 9, 11
+ * and 12, which are written in the same wave and concatenated into the same
+ * stylesheet, cannot collide with it — .pd-switch and .switch are the same
+ * control, and the prefixed name is the one that can only mean this screen.
+ *
+ * Reused unchanged and therefore absent below: .panel, .well, .table, .row,
+ * .chip, .control, .control-ghost, .mono, .micro, .prose, .readout, .unit,
+ * .data-emph, .legend-caps, .section-title, .spec-note, .region, .state-pip,
+ * .ladder, .ladder-row, .target, .reason, .reason-code, .reason-prose,
+ * .mark, .mark-cooling (darkrouter-ui.css), plus .control-primary and
+ * .status-badge from css/04-request-trace.css — the probe's two outcomes are
+ * the same success/error badge a request trace already prints, and inventing
+ * a second pill for the same idea is how a vocabulary splits.
+ */
+
+/* --- Shared panel scaffolding ----------------------------------------- */
+
+.pd-panel { padding: var(--section-pad); }
+
+/* Header strip of a panel: identity first, then the quiet facts about it.
+   Not .trace-header — that one stacks two lines for a request's id and
+   route; this is one line of mixed pips, chips and micro text. */
+.pd-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: var(--section-pad);
+  margin-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+
+.pd-head-id {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* A panel's action row: the button that acts on the panel, and the sentence
+   that says what the button will and will not do. */
+.pd-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  margin-top: var(--section-pad);
+}
+.pd-foot .prose {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ink-muted);
+}
+/* The sentence beside a button is allowed to wrap; the button is not. Without
+   this the flex row shrinks "Run discovery now" to three stacked words and it
+   bursts the 30px control height. */
+.pd-foot .control {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.pd-link { color: var(--accent-ink); }
+
+/* --- Region 1: identity form ------------------------------------------ */
+
+.pd-form {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter) var(--section-pad);
+}
+.pd-span-2 { grid-column: span 2; }
+
+.pd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pd-field .legend-caps { margin: 0; }
+.pd-field .spec-note { margin-top: 2px; }
+
+/* An editable field is a well cut into the panel; a read-only one is not.
+   That is the whole polarity rule doing semantic work: what you can change
+   is recessed and holds the value, what you cannot sits flush with the
+   panel it is printed on, in both modes and without a lock glyph. */
+.pd-input {
+  height: var(--control-h);
+  padding: 0 8px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.pd-input[readonly] {
+  background: var(--panel);
+  border-color: var(--hairline-subtle);
+  color: var(--ink-muted);
+}
+
+/* The value of a read-only field that is a link rather than a string, e.g.
+   the preset this provider was created from. Same box as .pd-input so the
+   grid keeps one baseline. */
+.pd-static {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 8px;
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+/* Enabled is neither provider health nor a routing verdict — it is a
+   selection the operator made, so it takes --accent-ink, the same token the
+   rail's active item and Requests' active saved view already use for "this
+   one is on". No transition: the product has exactly three animations and a
+   sliding knob is not one of them. */
+.pd-switch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 26px;
+  height: 16px;
+  padding: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.pd-switch[data-on="true"] {
+  justify-content: flex-end;
+  border-color: var(--accent-ink);
+}
+
+.pd-switch-knob {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+.pd-switch[data-on="true"] .pd-switch-knob { background: var(--accent-ink); }
+
+/* The switch always carries its own word, so the state survives greyscale
+   and colour stays the second channel. */
+.pd-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+.pd-switch-label { color: var(--ink-muted); }
+
+/* --- Region 2: credentials -------------------------------------------- */
+
+/* Composes .row for its 30px height, padding and seam, then replaces the
+   flex flow with a grid so three rows and the header line up as columns
+   even though the cooling cell is empty on two of them. */
+.credential-row {
+  display: grid;
+  grid-template-columns: 34px 108px 74px 150px 1fr auto;
+  align-items: center;
+}
+
+.credential-row .legend-caps { margin: 0; }
+
+.credential-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  justify-content: flex-end;
+}
+
+/* A row-level text action. .control is a 30px button and would burst a
+   30px row; .chip is a bordered pill and three of them per row read as
+   chrome competing with the data. */
+.pd-row-action {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.pd-row-action:hover { opacity: 1; color: var(--accent-ink); }
+.pd-row-action-danger:hover { color: var(--state-failed); }
+
+/* Amber as a mark, never as text: the ring is the ladder's own cooling mark
+   and the border is a rule, both permitted uses; the words stay --ink-muted,
+   which is what keeps this legible in light mode where --state-cooling
+   measures 3.16:1 against the well behind it. */
+.pd-cooling-chip { border-color: var(--state-cooling); }
+
+/* The mid-replace disclosure. Not a .row: it is taller than 30px by
+   necessity, and it belongs to the credential above it rather than being a
+   peer of it, so it drops the row height and keeps the seam. */
+.credential-replace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+  background: var(--well);
+}
+.credential-replace .spec-note { margin: 0; }
+
+.credential-replace-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.credential-replace-line .pd-input { flex: 1 1 auto; max-width: 320px; }
+
+/* --- Region 3: OAuth account ------------------------------------------- */
+
+/* A run of wire fields printed side by side rather than stacked in a form,
+   because none of them is editable — expiry, last refresh and the next
+   worker run are reports, not inputs. A grid rather than a wrapping flex
+   row: content-sized cells put every field at a different x, which reads as
+   five accidents instead of one instrument. auto-fit collapses the tracks a
+   shorter run does not fill, so the five OAuth fields and the four discovery
+   fields both come out evenly divided. */
+.pd-kvs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--gutter);
+}
+
+.pd-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pd-kv-key { color: var(--legend); }
+.pd-kv-value { color: var(--ink); }
+
+/* --- Region 4: breaker -------------------------------------------------- */
+
+.breaker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-pad);
+  padding: var(--section-pad);
+}
+
+.pd-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--section-pad);
+}
+
+/* The three numbers this region exists to expose, each in its own well so
+   the readout sits at the highest contrast in the frame in both modes. */
+.pd-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px var(--section-pad);
+}
+.pd-stat-key { color: var(--legend); }
+/* The note under the triple list belongs to the list, not to the button row
+   below it; a browser default <p> margin would space it as if it were a
+   third block. */
+.breaker-panel .spec-note { margin: 6px 0 0; }
+.pd-stat-sub { color: var(--ink-muted); }
+
+/* .target sizes itself to its content, so four triples of different lengths
+   start their reason column at four different x positions. A fixed basis
+   makes the list a column again; 300px is the longest triple plus a
+   character, measured against the render. */
+.pd-triple { flex: 0 0 300px; }
+
+/* The empty Model of a credential-level breaker entry. It is a real absence
+   rather than a value, so it prints in the legend register instead of ink. */
+.pd-empty-model { color: var(--legend); }
+
+/* --- Regions 5 and 6: probe result and discovery error ------------------ */
+
+/* A block heading that has to carry data — which credential a result came
+   from, when it ran. .legend-caps alone cannot: it uppercases, and a masked
+   suffix is case-bearing data that must not be rewritten to read …A4F2. */
+.pd-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: var(--section-pad) 0 6px;
+}
+.pd-subhead .legend-caps { margin: 0; }
+
+/* One probe outcome: the badge, then the response fields in wire order. A
+   well, because this is data that came back, not chrome. */
+.pd-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--section-pad);
+  padding: 0 var(--section-pad);
+  min-height: var(--row-h);
+}
+.pd-result + .pd-result { margin-top: 8px; }
+
+.pd-result-fields {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--section-pad);
+  min-width: 0;
+}
+
+/* An inline field:value pair on one line, for a response body read left to
+   right. The stacked .pd-kv is for a column of them. */
+.pd-inline-kv {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pd-error-text {
+  color: var(--state-failed);
+  overflow-wrap: anywhere;
+}
+
+.pd-error-well {
+  display: flex;
+  align-items: baseline;
+  gap: var(--section-pad);
+  padding: 8px var(--section-pad);
+}
+
+.pd-bad { color: var(--state-failed); }
+
+.pd-probe-note { margin: 8px 0 0; color: var(--ink-muted); }
+
+/* --- Region 7: danger zone ---------------------------------------------- */
+
+/* Same construction Overview's .config-banner uses — a --state-failed edge
+   and a low-opacity wash from a pseudo-element, never a transitioning
+   background — under its own name, because that class reports one specific
+   system state (the config failed to validate) and this one is a zone that
+   contains a destructive control. */
+.pd-danger {
+  position: relative;
+  padding: var(--section-pad);
+  border-color: var(--state-failed);
+}
+.pd-danger::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.06;
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+.pd-danger > * { position: relative; }
+
+.pd-control-danger {
+  border-color: var(--state-failed);
+  color: var(--state-failed);
+}
+
+.pd-dangling {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px var(--section-pad);
+  margin-top: var(--section-pad);
+}
+.pd-dangling .prose { margin: 0; }
+
+.pd-alias-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px calc(var(--gutter) * 2);
+}
+.pd-alias {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pd-alias-name { color: var(--ink); }
+
+/*
+ * Task 11 — the preset browser ("configure/providers", overlay).
+ *
+ * This is the one screen in the product that legitimately paints a shadow,
+ * so nearly everything below exists to build one dialog: a stage that lets
+ * the dimmed page and the dialog occupy the same box, the scrim, and the
+ * dialog surfaces themselves. Reused as-is from darkrouter-ui.css: .panel,
+ * .well, .table, .row, .chip, .control, .control-ghost, .micro, .mono,
+ * .data-emph, .prose, .legend-caps, .section-title, .state-pip. Reused from
+ * 08's sibling partial css/03-requests.css: .combo-check, because a facet
+ * checkbox and a filter-menu checkbox are the same affordance and a second
+ * 12px tick box would be a divergence, not a variant.
+ *
+ * Every class here is prefixed preset- because three other screens are being
+ * drawn into this same concatenated stylesheet at the same time.
+ */
+
+/* --- Stage: the dimmed page and the dialog share one box ---------------
+   A single-cell grid rather than position:absolute. Absolute positioning
+   would take the dialog out of flow, and .chrome clips overflow, so a
+   1200px dialog would be cut off at the bottom of a 720px console. In one
+   grid cell the stage's height is the dialog's height, the page behind
+   keeps its own natural height at the top of the cell, and the scrim
+   stretches over the whole thing. */
+
+.preset-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.preset-stage > * { grid-area: 1 / 1; }
+
+/* The page the overlay opened over. Natural height, pinned to the top of
+   the cell, so what shows around the dialog is a real page edge. */
+.preset-under { align-self: start; }
+
+/* Not a shadow and not a surface — a light-blocking wash, so it is stated
+   as an alpha over whatever is behind it rather than as a token. Dark mode
+   drops the page toward black; light mode washes it with the same ink the
+   text is set in, at a third of the strength, because a light page needs
+   far less dimming before the dialog reads as the foreground.
+
+   It escapes the stage on purpose. A dialog suspends the whole console,
+   not just the region it happens to be drawn in, so the rail and the top
+   bar dim with the table. grid-area:auto takes it out of the stage's one
+   cell so the containing block is the stage's padding box; the negative
+   inset then spreads it past the rail, and .chrome's own overflow:hidden
+   is what trims it back to the console's edges. */
+.preset-scrim {
+  position: absolute;
+  grid-area: auto;
+  inset: -9999px;
+  background: rgba(3, 5, 7, 0.66);
+}
+body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
+
+/* --- The dialog -------------------------------------------------------
+   --overlay plus --shadow-overlay: the single permitted shadow in the
+   product (0 8px 24px -8px). 96px of clearance at the top so the page
+   behind is visibly a page and not just a border. */
+.preset-modal {
+  position: relative;
+  justify-self: center;
+  align-self: start;
+  width: 1040px;
+  max-width: 100%;
+  margin: 96px 0 28px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+
+.preset-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--topbar-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The console speaking to the operator, so sans — the dialog's title is
+   the one string on this screen that did not come off the wire. */
+.preset-modal-title {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.preset-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-modal-close:hover { opacity: 1; }
+
+.preset-modal-body { padding: var(--section-pad); }
+
+.preset-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gutter);
+  min-height: 36px;
+  padding: 0 var(--section-pad);
+  border-top: 1px solid var(--hairline);
+}
+
+/* --- Search -----------------------------------------------------------
+   The browse surface is a .panel laid inside the --overlay dialog, and
+   every data region below is a .well cut into that panel. Wells cannot sit
+   directly on the dialog: in light mode --overlay and --well are the same
+   value, so the recess would vanish. The panel is the step that keeps the
+   dark-darker / light-brighter inversion intact inside an overlay. */
+
+.preset-browse { padding: var(--section-pad); }
+
+.preset-search-block { margin-bottom: var(--section-pad); }
+
+/* Focused, so a --focus border plus a 1px outline. An outline, not a
+   shadow: the dialog owns the only shadow on the screen. */
+.preset-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 10px;
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.preset-search-q {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* A text cursor parked after the query. Static — the product has exactly
+   three animations and none of them is a blink. */
+.preset-caret {
+  width: 1px;
+  height: 15px;
+  margin-left: -4px;
+  background: var(--focus);
+}
+
+.preset-search-count { margin-left: auto; }
+
+.preset-suggest {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+
+.preset-suggest-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--hairline-subtle);
+  text-decoration: none;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-suggest-row:last-child { border-bottom: none; }
+.preset-suggest-row:hover { opacity: 1; }
+
+/* The row the operator picked. Selection is a choice, not an outcome, so
+   it is trace — the same rule .ladder-row-served follows, and the same
+   0.08 wash, so "this is the one" reads identically in both components. */
+.preset-suggest-row[data-picked="true"] { opacity: 1; }
+.preset-suggest-row[data-picked="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.preset-suggest-why {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--legend);
+}
+
+/* --- Facets + results columns ----------------------------------------- */
+
+.preset-cols {
+  display: grid;
+  grid-template-columns: 192px 1fr;
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.preset-facet-group + .preset-facet-group { margin-top: var(--section-pad); }
+
+.preset-facet-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.preset-facet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-facet-row:hover { opacity: 1; }
+
+/* A facet the vocabulary declares but no shipped preset uses. Kept in the
+   list rather than hidden: an operator who knows darkrouter supports
+   query-param auth needs to see that zero presets currently do. */
+.preset-facet-row[data-empty="true"] { opacity: 0.5; }
+
+.preset-facet-count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.preset-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* 2px radius like everything else — a pill-shaped switch would be the only
+   round object in the console. */
+.preset-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  width: 24px;
+  height: 14px;
+  padding: 2px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.preset-toggle-knob {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+.preset-toggle[data-on="true"] {
+  justify-content: flex-end;
+  border-color: var(--trace);
+  background: var(--trace-fill);
+}
+.preset-toggle[data-on="true"] .preset-toggle-knob { background: var(--ink); }
+
+/* --- Results grid ------------------------------------------------------ */
+
+.preset-results-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--section-pad);
+  margin-bottom: 8px;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.preset-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px var(--section-pad);
+  text-decoration: none;
+  opacity: 0.92;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-card:hover { opacity: 1; }
+
+/* The chosen preset. Trace border and the shared 0.08 trace wash — a
+   selection is what was CHOSEN, never a state colour. */
+.preset-card[data-selected="true"] {
+  border-color: var(--trace);
+  opacity: 1;
+}
+.preset-card[data-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.preset-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preset-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.preset-meta-sep { color: var(--legend); }
+
+/* base_url, middle-elided. The truncation is written into the markup
+   rather than done with text-overflow because an end ellipsis would eat
+   the path and leave two dozen cards all reading "https://api…" — the
+   host tells you who it is, the path tells you which API dialect you are
+   about to speak, and both have to survive. */
+.preset-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+/* The preset ships an empty base_url and the endpoint is assembled at
+   create time from region/project/location. Legend weight plus the brace
+   placeholders say "template, not address" without a second line. */
+.preset-url-derived { color: var(--legend); }
+
+.preset-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* Lighter than .chip on purpose: a card carries up to three of these at
+   once, and three 20px chips would outweigh the preset name above them. */
+.preset-surface-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+/* Free tier is an attribute of the vendor's plan, not a health reading and
+   not a routing decision, so it takes neither a state colour nor trace. A
+   --bezel stroke is the loudest neutral available. */
+.preset-free {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* Accent as TEXT, so --accent-ink (5.69:1 in light) and never --trace
+   (3.93:1). Links are the one place that distinction is load-bearing. */
+.preset-link {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--accent-ink);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.preset-link:hover { opacity: 1; text-decoration: underline; }
+
+/* --- Create form, inline under the selected card ----------------------- */
+
+.preset-form {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: var(--gutter);
+  padding: var(--section-pad);
+  border-color: var(--trace);
+}
+
+.preset-field-label { display: block; }
+
+.preset-input {
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.preset-field-note {
+  margin: 6px 0 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+
+.preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--section-pad);
+}
+
+/* The one committing action in the dialog. Outlined in --accent-ink rather
+   than filled, matching how .view-chip and .time-range-preset already mark
+   the live option — this console has no filled buttons. */
+.preset-primary {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* The inventory of everything the operator is not typing. A two-column
+   key/value run rather than prose, because the point is that these are
+   fields, and a field list is what a form would have made them fill in.
+   It sits on --panel, not --well: the form around it is already a well cut
+   into the results grid, and a well inside a well is the same value twice
+   with a hairline between — no recess in either theme. On --panel it is a
+   peer of the id input beside it, which is on --panel for the same reason. */
+.preset-supplies {
+  display: grid;
+  grid-template-columns: 124px 1fr;
+  align-items: baseline;
+  gap: 3px var(--section-pad);
+  padding: 10px var(--section-pad);
+}
+
+.preset-supplies-key {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.preset-supplies-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* A field the preset deliberately declares nothing for. It still earns a
+   row: "cerebras has no quirks" is an answer, and a blank line is not. */
+.preset-supplies-none { color: var(--legend); }
+
+/* --- Footer counts ----------------------------------------------------- */
+
+.preset-counts {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/*
+ * Task 12 — the model catalog ("configure/models").
+ *
+ * New vocabulary this screen introduces, and why nothing already in
+ * darkrouter-ui.css or an earlier partial could do the job:
+ *
+ *   .range-facet (+ -label/-track/-fill/-input)  a two-ended numeric facet;
+ *       .segmented picks one of N and .combo picks a set, neither expresses
+ *       a MIN..MAX span, which is what min_context actually is.
+ *   .switch (+ -track/-knob/-label)              a boolean filter toggle;
+ *       .view-chip and .segmented-option both read as "one of several",
+ *       and a lone chip cannot show its own off state.
+ *   .cap-triad/.cap-bit                          a fixed three-slot bit
+ *       field for tools/vision/reasoning. .chip is variable-width, so a
+ *       column of chips jitters; the point here is that the slot stays put
+ *       whether or not the bit is set.
+ *   .cap-toggle                                  the editable form of the
+ *       same triad inside the override editor, where the slots are labelled
+ *       and hit-testable rather than 18px glyphs.
+ *   .source-tag                                  provenance, differentiated
+ *       by border treatment and ink level rather than hue: source is not a
+ *       health reading and not a routing verdict, so it may take neither
+ *       the state colours nor --trace.
+ *   .lifecycle/.lifecycle-mark                   live|stale|removed_upstream,
+ *       neutral for the same reason. .state-pip is provider health and its
+ *       three data-state values are the health values, not these.
+ *   .value-guessed                               a dashed underline on a
+ *       number that inference produced rather than an API.
+ *   .row-inferred / .row-retired                 the row-level readings of
+ *       the two above.
+ *   .prov-more                                   the "+4" continuation count
+ *       in a collapsed list cell.
+ *   .sheet (+ -head/-title/-meta/-block/-split/-col/-caption)  the model
+ *       detail surface. .panel is the surface; these are its internal
+ *       rhythm.
+ *   .precedence (+ -step/-arrow/-step[data-winner])  the merge order strip.
+ *   .field-row (+ -label/-control/-input/-detected/-revert/-chips)  the
+ *       override editor's one repeated unit. .time-range-input is a
+ *       date field inside a popover; this is a labelled form row with a
+ *       detected-value gutter and a per-field revert.
+ *   .alias-note                                  a read-only footnote in
+ *       the aliases panel; .legend is claimed once per screen by qa.py and
+ *       .spec-note is the design-language board's own specimen label.
+ *   .mcol-*/.pcol-*/.vcol-*/.acol-*              column geometry for this
+ *       screen's four tables, the same convention 03-requests.css set with
+ *       .col-*.
+ *
+ * Reused unchanged: .panel/.well/.table/.row/.chip/.control/.control-ghost/
+ * .control-primary/.segmented/.mono/.micro/.data-emph/.prose/.legend-caps/
+ * .section-title/.region/.pin/.pin-note/.spec-note/.ladder/.ladder-row/
+ * .rank/.mark/.mark-catalog/.credential-tag/.target-muted/.filter-bar/
+ * .combo/.combo-trigger/.combo-menu/.combo-option/.combo-check/.combo-count/
+ * .combo-chevron/.table-toolbar/.table-toolbar-actions/.table-wrap/
+ * .row-head/.col-right/.text-muted.
+ */
+
+/* --- Region 1: facets --------------------------------------------------
+   The catalog's query box sits in the same 30px silhouette as .control so
+   the filter bar keeps one baseline; it is an input rather than a trigger
+   because q= is free text, not a chosen value. */
+
+.q-input {
+  width: 200px;
+  height: var(--control-h);
+  padding: 0 var(--section-pad);
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* A span, not one of N. The two ends are real numbers the operator types,
+   and the track between them is the reading — how much of the catalog's
+   full context range the span covers — not a draggable control surface. */
+.range-facet {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.range-label {
+  margin: 0;
+  color: var(--legend);
+}
+
+.range-input {
+  width: 76px;
+  height: 20px;
+  padding: 0 4px;
+  background: var(--well);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-align: right;
+}
+.range-input-wide { width: 84px; }
+
+.range-track {
+  position: relative;
+  width: 56px;
+  height: 3px;
+  border-radius: var(--radius);
+  background: var(--hairline-subtle);
+}
+/* The selected span, in --accent-ink because it reports a control's own
+   state, the same register .view-chip[data-active] and .segmented-option
+   [data-active] already occupy — not a routing verdict, so not --trace. */
+.range-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 18%;
+  right: 0;
+  border-radius: var(--radius);
+  background: var(--accent-ink);
+}
+
+/* --- Region 3: the retired toggle --------------------------------------
+   Rectangular, 2px radius: a pill switch is the one component that always
+   tries to reintroduce a radius this product does not have. Off is the
+   default state, so off is the state that had to look deliberate. */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+
+.switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+  transition: opacity var(--dur-hover) ease;
+}
+.switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
+.switch[data-on="true"] .switch-knob {
+  left: auto;
+  right: 1px;
+  background: var(--accent-ink);
+}
+
+.switch-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.switch[data-on="true"] .switch-label { color: var(--ink); }
+
+/* --- Region 2: capability bit field ------------------------------------
+   Three slots, always all three, so the column reads as a register dump
+   rather than a variable-length list of chips. An unset bit keeps its slot
+   and drops to 30% opacity — silhouette first, exactly as the ladder's
+   marks do. */
+
+.cap-triad {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cap-bit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--ink);
+}
+.cap-bit[data-on="false"] {
+  border-color: var(--hairline);
+  color: var(--ink-muted);
+  opacity: 0.3;
+}
+
+/* --- Region 2: provenance and lifecycle --------------------------------
+   Neither is a health reading and neither is a routing verdict, so neither
+   may take a state colour or --trace. They differentiate on border
+   treatment and ink level instead: dashed means guessed, full ink means an
+   operator asserted it, and the two machine sources sit between. */
+
+.source-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.source-tag[data-source="discovered"] { border-color: var(--hairline-subtle); }
+.source-tag[data-source="inferred"] {
+  border-style: dashed;
+  border-color: var(--bezel);
+}
+.source-tag[data-source="override"] {
+  border-color: var(--bezel);
+  color: var(--ink);
+}
+
+.lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.lifecycle-mark {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius);
+  background: var(--ink-muted);
+}
+.lifecycle[data-state="stale"] { color: var(--legend); }
+.lifecycle[data-state="stale"] .lifecycle-mark {
+  background: transparent;
+  border: 1px solid var(--bezel);
+}
+.lifecycle[data-state="removed_upstream"] { color: var(--legend); }
+.lifecycle[data-state="removed_upstream"] .lifecycle-mark {
+  height: 1px;
+  background: var(--bezel);
+}
+
+/* A number inference produced rather than an API. The row already carries
+   an "≈" in front of each such value; the dashed rule under it is the
+   second, non-textual channel, so the guess survives a squint. */
+.value-guessed {
+  border-bottom: 1px dashed var(--bezel);
+  color: var(--ink-muted);
+}
+
+/* The row-level reading of the same fact: an inferred row routes with a
+   warning, so its left edge breaks. --bezel, not amber — this is not a
+   health reading. */
+.row-inferred { border-left: 1px dashed var(--bezel); }
+
+.row-retired { opacity: 0.6; }
+.row-retired > span { text-decoration: line-through; }
+.row-retired .source-tag,
+.row-retired .lifecycle,
+.row-retired .cap-triad { text-decoration: none; }
+
+/* The collapsed tail of a list cell: "groq +4" says five without spending
+   five columns on it. */
+.prov-more {
+  margin-left: 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* --- Region 2: catalog table geometry ----------------------------------
+   Eleven columns in 1,188px, so the shared 12px row gap drops to 10 here
+   and the model id is the only elastic column. */
+
+.models-table .row { gap: 10px; }
+
+.mcol-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcol-providers { flex: 0 0 98px; }
+.mcol-surfaces { flex: 0 0 70px; }
+.mcol-context { flex: 0 0 80px; }
+.mcol-maxout { flex: 0 0 64px; }
+.mcol-in { flex: 0 0 76px; }
+.mcol-out { flex: 0 0 76px; }
+.mcol-publisher { flex: 0 0 80px; }
+.mcol-caps { flex: 0 0 74px; }
+.mcol-source { flex: 0 0 86px; }
+.mcol-state { flex: 0 0 116px; }
+
+/* --- Regions 4 and 5: the model detail sheet ---------------------------
+   Depicted docked under the table rather than floating over it, for two
+   reasons: a board has to show the sheet and the rows it came from at
+   once, and a floating sheet would have to sit on --overlay, which in
+   light mode is the same value as --well and would flatten every recessed
+   region inside it. --panel keeps the well one step brighter in light and
+   one step darker in dark, which is the whole structural idea. */
+
+.sheet { border-top: 1px solid var(--accent-ink); }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--section-pad);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sheet-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.sheet-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+  padding: var(--section-pad);
+}
+
+.sheet-split {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+}
+.sheet-col { flex: 1 1 0; min-width: 0; }
+.sheet-col-ladder { flex: 0 0 236px; }
+
+.sheet-caption {
+  margin: 6px 0 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+
+.pcol-provider { flex: 0 0 96px; }
+.pcol-credential { flex: 0 0 72px; }
+.pcol-context { flex: 0 0 80px; }
+.pcol-maxout { flex: 0 0 66px; }
+.pcol-in { flex: 0 0 70px; }
+.pcol-out { flex: 0 0 70px; }
+.pcol-traits { flex: 1 1 auto; min-width: 0; }
+.pcol-source { flex: 0 0 96px; }
+
+/* The merge order, left to right, highest precedence first. A step that
+   actually won a field is called out in the provenance table beside it
+   rather than here — this strip is the rule, not the result. */
+.precedence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.precedence-arrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+.precedence-step[data-winner="true"] {
+  border-color: var(--bezel);
+  color: var(--ink);
+}
+
+.vcol-field { flex: 0 0 168px; }
+.vcol-effective { flex: 0 0 150px; }
+.vcol-from { flex: 0 0 104px; }
+.vcol-contributors { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The two-column key/value strip under the pricing table. .legend-caps
+   carries a 6px bottom margin for use as a block label, which would push a
+   30px row off centre, so the key cell cancels it the same way .row-head
+   already does for the table headers. */
+.icol-key { flex: 0 0 168px; margin: 0; }
+.icol-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- Region 5: override editor -----------------------------------------
+   One repeated unit: what the field is, what the override says, what the
+   merge detected without it, and a control that throws the override away
+   for that field alone. The detected gutter is the reason this is not a
+   plain form — an override is only legible next to the value it displaces. */
+
+.override-editor {
+  display: flex;
+  flex-direction: column;
+  padding: 2px var(--section-pad) var(--section-pad);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 38px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.field-row:last-of-type { border-bottom: none; }
+
+.field-label {
+  flex: 0 0 132px;
+  margin: 0;
+}
+
+.field-input {
+  width: 132px;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+/* An edited-but-unsaved field. Accent, not a state colour: nothing has
+   gone right or wrong yet — this is the control reporting its own state,
+   the register .view-chip[data-active] already uses. */
+.field-row[data-dirty="true"] .field-input { border-color: var(--accent-ink); }
+
+.field-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--well);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.cap-toggle[data-on="true"] {
+  border-color: var(--bezel);
+  color: var(--ink);
+}
+.cap-toggle-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+}
+.cap-toggle[data-on="true"] .cap-toggle-box {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.field-detected {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.field-revert {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+/* Nothing to revert to: the field still shows the control so the column
+   stays a column, but it is plainly inert. */
+.field-revert[data-inert="true"] {
+  opacity: 0.35;
+  border-color: var(--hairline-subtle);
+}
+
+.override-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: var(--section-pad);
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--hairline);
+}
+.override-footer .micro { margin-left: auto; text-align: right; }
+
+/* --- Region 6: aliases --------------------------------------------------
+   Read-only here on purpose, so the panel says where the writer lives
+   instead of growing one. */
+
+.acol-alias { flex: 0 0 150px; }
+.acol-arrow { flex: 0 0 14px; color: var(--legend); }
+.acol-target { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acol-surface { flex: 0 0 88px; }
+.acol-candidates { flex: 0 0 104px; }
+.acol-requests { flex: 0 0 110px; }
+
+.alias-note {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+
+.alias-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  margin-top: 10px;
+}
+.alias-footer .alias-note { flex: 1 1 auto; }
+
+/* A .control that is genuinely a navigation link. The base reset keeps an
+   anchor's colour but not its underline, and a 30px control that wraps to
+   two lines stops being a 30px control. */
+.link-out {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+/* The specimen band under the catalog table: the two rows the retired
+   toggle is currently withholding, rendered so the state has a picture. */
+.retired-band {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  flex-wrap: wrap;
+  padding: 8px var(--section-pad);
+  background: var(--panel);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+.retired-band .micro { margin-left: auto; }
+
+/* The catalog row whose detail sheet is open. --trace, and only here: the
+   ladder rule says trace answers "what did the router choose", and a
+   selected row is the same question asked of the operator's own pointer.
+   A second pseudo-element rather than reusing .row::after, which owns the
+   120ms hover wash and would otherwise dim on hover instead of brighten. */
+.row-selected { border-left: 1px solid var(--trace); }
+.row-selected::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
 </style>
   </head>
   <body>
@@ -1937,7 +3790,7 @@ body.pins-on .pin-note { display: inline; }
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li></ol></nav>
 <section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -4087,6 +5940,2065 @@ body.pins-on .pin-note { display: inline; }
           </div>
 
         </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-06-providers--s-06-providers" data-screen-title="configure/providers">
+  <p class="legend">
+    The eight configured providers in the order the router walks them, the
+    drag-and-switch controls that finally give <span class="mono">PATCH
+    /api/providers/{id}</span> a caller, the discovery-health column that
+    makes a six-hour-stale model listing look different from a fresh one,
+    and the raw create form behind the preset browser. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#" data-active="true">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">configure/providers</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p class="section-title">Providers</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; List &mdash; GET /api/providers providers[]{id,name,preset,kind,base_url,priority,enabled,auth_style,credentials[]}.</span></p>
+          <div class="table prov-table">
+
+            <div class="row row-head">
+              <span class="prov-col-handle" aria-hidden="true"></span>
+              <span class="legend-caps prov-col-prio">prio</span>
+              <span class="legend-caps prov-col-name">provider</span>
+              <span class="legend-caps prov-col-kind">kind</span>
+              <span class="legend-caps prov-col-url">base_url</span>
+              <span class="legend-caps prov-col-creds">credentials</span>
+              <span class="legend-caps prov-col-switch">on</span>
+              <span class="legend-caps prov-col-disc">discovery</span>
+              <span class="legend-caps prov-col-flag">flag</span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">100</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">groq</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.groq.com/openai/v1</span>
+              <span class="micro prov-col-creds">2 credentials</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">3m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">90</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="cooling"></span><span class="mono">cerebras</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.cerebras.ai/v1</span>
+              <span class="micro prov-col-creds">1 credential &middot; cooling</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">4m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">80</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">anthropic</span></span>
+              <span class="mono prov-col-kind">anthropic</span>
+              <span class="micro prov-col-url">https://api.anthropic.com/v1</span>
+              <span class="micro prov-col-creds">1 credential</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">3m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">70</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">openrouter</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://openrouter.ai/api/v1</span>
+              <span class="micro prov-col-creds">3 credentials</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">5m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">60</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">together</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.together.xyz/v1</span>
+              <span class="micro prov-col-creds">1 credential</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc" title="last success 6h ago &mdash; 14 consecutive failures"><span class="discovery-status" data-discovery="stale"></span><span class="micro">6h stale</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="false" title="disabled, not deleted — the row keeps its id, its credential and its place in the order">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">50</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="disabled"></span><span class="mono">deepinfra</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.deepinfra.com/v1/openai</span>
+              <span class="micro prov-col-creds">1 credential</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="false"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="idle"></span><span class="micro">not polled</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="false" title="no credential yet — nothing to authenticate a probe or a request with">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">40</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="unconfigured"></span><span class="mono">bedrock</span></span>
+              <span class="mono prov-col-kind">bedrock</span>
+              <span class="micro prov-col-url">https://bedrock-runtime.us-east-1.amazonaws.com</span>
+              <span class="micro prov-col-creds">0 credentials</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="false"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="idle"></span><span class="micro">never run</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">30</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">vertex</span></span>
+              <span class="mono prov-col-kind">vertex</span>
+              <span class="micro prov-col-url">https://us-central1-aiplatform.googleapis.com</span>
+              <span class="micro prov-col-creds">1 credential</span>
+              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">4m ago</span></span>
+              <span class="prov-col-flag"><span class="health-tile-alert"><span class="health-tile-alert-text">needs reconnection</span></span></span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Reordering</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Reorder/enable &mdash; PATCH /api/providers/{id} {name,base_url,priority,enabled,region,project}. Implemented, wired, and called by nothing today.</span></p>
+          <div class="prov-reorder">
+            <div class="table">
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">100</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">groq</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">90</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="cooling"></span><span class="mono">cerebras</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">80</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">anthropic</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+              <div class="drop-indicator" aria-hidden="true"></div>
+
+              <div class="row prov-row prov-row-dragging" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit"><span class="prov-prio-was">60</span><span class="prov-prio-arrow">&rarr;</span><span class="prov-prio-now">70</span></span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">together</span></span>
+                <span class="micro">held &mdash; drop here</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit"><span class="prov-prio-was">70</span><span class="prov-prio-arrow">&rarr;</span><span class="prov-prio-now">60</span></span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">openrouter</span></span>
+                <span class="micro">renumbered</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="false">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">50</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="disabled"></span><span class="mono">deepinfra</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+            </div>
+            <span class="micro prov-reorder-note">
+              on release &mdash; PATCH /api/providers/together {"priority":70} then
+              PATCH /api/providers/openrouter {"priority":60}. Only the rows whose
+              number actually moved are written.
+            </span>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Discovery health</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Discovery health &mdash; provider_discovery{consecutive_failures,last_attempt_at,last_success_at,last_error} via the &sect;8.2 extension. DB.DiscoveryStates is never called by the admin package today.</span></p>
+          <div class="discovery-grid">
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="discovery-status" data-discovery="fresh"></span>
+                <span class="mono health-tile-name">groq</span>
+                <span class="chip">fresh</span>
+              </div>
+              <div class="discovery-lines">
+                <span class="micro"><span class="discovery-field">last success</span> 3m ago</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> 3m ago</span>
+                <span class="micro"><span class="discovery-field">consecutive failures</span> 0</span>
+                <span class="micro"><span class="discovery-field">last error</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> 6 models</span>
+              </div>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="discovery-status" data-discovery="stale"></span>
+                <span class="mono health-tile-name">together</span>
+                <span class="chip">stale</span>
+              </div>
+              <div class="discovery-lines">
+                <span class="micro"><span class="discovery-field">last success</span> 6h ago</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> 40s ago</span>
+                <span class="micro"><span class="discovery-field">consecutive failures</span> 14</span>
+                <span class="micro"><span class="discovery-field">last error</span> 429 rate_limit_exceeded</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> 71 models, 6h old</span>
+              </div>
+              <span class="health-tile-alert"><span class="health-tile-alert-text">Serving normally. Its model listing has not refreshed since 03:12 &mdash; new models will not appear and retired ones still route.</span></span>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="discovery-status" data-discovery="idle"></span>
+                <span class="mono health-tile-name">bedrock</span>
+                <span class="chip">never run</span>
+              </div>
+              <div class="discovery-lines">
+                <span class="micro"><span class="discovery-field">last success</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">consecutive failures</span> 0</span>
+                <span class="micro"><span class="discovery-field">last error</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> no models yet</span>
+              </div>
+            </div>
+
+          </div>
+          <p class="prose">
+            The middle case is the one the product cannot show today. A
+            listing that has failed for six hours renders exactly like one
+            refreshed three minutes ago, because nothing in the admin
+            package reads the discovery table &mdash; so the operator finds
+            out when a model that was retired this morning is still being
+            routed to this afternoon.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Add a provider</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4-5 &middot; Create &mdash; POST /api/providers {id,name,preset,kind,base_url,auth_style,priority,enabled,region,project,location}. location is create-only, not patchable.</span></p>
+          <div class="prov-add">
+            <button class="control control-primary">Add from a preset&hellip;</button>
+            <a class="prov-add-link" href="#">Add without a preset</a>
+            <span class="micro">197 shipped presets &mdash; a preset supplies kind, base_url, auth_style and the quirk set, so the operator supplies an id and a key</span>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Raw provider form</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">4-5 &middot; Create &mdash; POST /api/providers {id,name,preset,kind,base_url,auth_style,priority,enabled,region,project,location}. location is create-only, not patchable.</span></p>
+          <div class="panel">
+            <div class="prov-form">
+
+              <div class="prov-field">
+                <p class="legend-caps">id</p>
+                <span class="prov-input">bedrock-frankfurt</span>
+                <span class="spec-note">primary key, immutable after creation</span>
+              </div>
+
+              <div class="prov-field prov-field-wide">
+                <p class="legend-caps">kind</p>
+                <div class="segmented">
+                  <span class="segmented-option">openaicompat</span>
+                  <span class="segmented-option">anthropic</span>
+                  <span class="segmented-option">gemini</span>
+                  <span class="segmented-option" data-active="true">bedrock</span>
+                  <span class="segmented-option">vertex</span>
+                </div>
+                <span class="spec-note">the adapter family &mdash; decides which of region / project / location below apply</span>
+              </div>
+
+              <div class="prov-field prov-field-wide">
+                <p class="legend-caps">base_url</p>
+                <span class="prov-input">https://bedrock-runtime.eu-central-1.amazonaws.com</span>
+                <span class="spec-note">required unless a preset supplies it</span>
+              </div>
+
+              <div class="prov-field">
+                <p class="legend-caps">auth_style</p>
+                <button class="control combo-trigger prov-select">
+                  <span>sigv4</span>
+                  <span class="combo-chevron">▾</span>
+                </button>
+                <span class="spec-note">bearer &middot; x-api-key &middot; api-key &middot; query-param &middot; none &middot; sigv4 &middot; gcp-sa &middot; oauth</span>
+              </div>
+
+              <div class="prov-field">
+                <p class="legend-caps">priority</p>
+                <span class="prov-input">20</span>
+                <span class="spec-note">walked high to low; lands under vertex at 30</span>
+              </div>
+
+              <div class="prov-field">
+                <p class="legend-caps">enabled</p>
+                <span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span>
+                <span class="spec-note">created enabled unless the body says otherwise</span>
+              </div>
+
+              <div class="prov-field">
+                <p class="legend-caps">region</p>
+                <span class="prov-input">eu-central-1</span>
+                <span class="spec-note">signs every sigv4 request; bedrock only</span>
+              </div>
+
+              <div class="prov-field">
+                <p class="legend-caps">project</p>
+                <span class="prov-input prov-input-inert">vertex only</span>
+                <span class="spec-note">patchable, unlike location</span>
+              </div>
+
+              <div class="prov-field">
+                <p class="legend-caps">location</p>
+                <span class="prov-input prov-input-inert">vertex only</span>
+                <span class="spec-note">create-only &mdash; changing it moves every catalogued model to a different endpoint, which is a new provider</span>
+              </div>
+
+            </div>
+            <div class="prov-form-actions">
+              <button class="control control-primary">Create provider</button>
+              <button class="control control-ghost">Cancel</button>
+              <span class="micro">no preset selected &mdash; kind and base_url are supplied by hand, so nothing is inherited</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="prov-counts">
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Counts &mdash; derived client-side from the list; no endpoint.</span></p>
+          <p class="ops-footer">
+            <span class="mono">8 providers</span> &middot;
+            <span class="mono">6 enabled</span> &middot;
+            <span class="mono">1 cooling</span> &middot;
+            <span class="mono">1 needs reconnection</span> &middot;
+            <span class="mono">197 presets available</span>
+          </p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-07-provider-detail--s-07-provider-detail" data-screen-title="provider detail">
+  <p class="legend">
+    One provider opened from the list &mdash; cerebras, deliberately, because
+    it is the one with something wrong: a rotated key its cooldown ladder is
+    still holding down, a discovery pass that has been failing for six hours,
+    and a probe that answers 401. Four of the seven regions below read state
+    that exists in memory and in SQLite today and is exposed through no
+    endpoint at all. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for
+    light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#" data-active="true">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">configure/providers</span>
+        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p class="section-title">Identity</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Identity &mdash; PATCH /api/providers/{id}. kind, preset and auth_style are not patchable; location is create-only.</span></p>
+          <div class="panel pd-panel">
+            <div class="pd-head">
+              <span class="state-pip" data-state="cooling"></span>
+              <span class="mono pd-head-id">cerebras</span>
+              <span class="chip">priority 90</span>
+              <span class="chip">3 credentials</span>
+              <span class="micro">1 credential cooling &middot; 3 model triples held down &middot; discovery has not succeeded since 08:11:40</span>
+            </div>
+            <div class="pd-form">
+
+              <label class="pd-field">
+                <span class="legend-caps">id</span>
+                <input class="pd-input" value="cerebras" readonly>
+                <span class="spec-note">the routing key. Renaming means deleting and recreating.</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">name</span>
+                <input class="pd-input" value="Cerebras">
+                <span class="spec-note">display only &mdash; nothing routes on it</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">kind</span>
+                <input class="pd-input" value="openaicompat" readonly>
+                <span class="spec-note">create-only. PATCH does not accept kind: changing it would repoint every catalogued model at a different wire protocol.</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">auth_style</span>
+                <input class="pd-input" value="bearer" readonly>
+                <span class="spec-note">from the preset. Not patchable either.</span>
+              </label>
+
+              <label class="pd-field pd-span-2">
+                <span class="legend-caps">base_url</span>
+                <input class="pd-input" value="https://api.cerebras.ai/v1">
+                <span class="spec-note">patchable, and the one field an operator changes to point at a proxy or a regional endpoint</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">priority</span>
+                <input class="pd-input" value="90">
+                <span class="spec-note">higher runs earlier in the ladder</span>
+              </label>
+
+              <div class="pd-field">
+                <span class="legend-caps">enabled</span>
+                <span class="pd-switch-row">
+                  <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+                  <span class="mono pd-switch-label">enabled</span>
+                </span>
+                <span class="spec-note">disabling keeps the provider, its keys and its history; deleting does not</span>
+              </div>
+
+              <div class="pd-field pd-span-2">
+                <span class="legend-caps">preset</span>
+                <span class="pd-static">
+                  <span>cerebras</span>
+                  <span class="micro">Cerebras &middot; llm &middot; free tier</span>
+                  <a class="pd-link" href="https://inference.cerebras.ai">inference.cerebras.ai</a>
+                </span>
+                <span class="spec-note">one of the 197 shipped presets. It seeded kind, base_url and auth_style at creation and is not patchable afterwards.</span>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Credentials</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Credentials &mdash; GET /api/providers credentials[]{id,label,masked,enabled,cooling}. Never plaintext, never ciphertext, no endpoint reveals one. Phase 7 &sect;4.1. Enable/disable/replace need the new PATCH /api/providers/{id}/keys/{keyId}.</span></p>
+          <div class="table">
+
+            <div class="row row-head credential-row">
+              <span class="legend-caps">on</span>
+              <span class="legend-caps">label</span>
+              <span class="legend-caps">masked</span>
+              <span class="legend-caps">breaker</span>
+              <span class="legend-caps">last used</span>
+              <span class="legend-caps">&nbsp;</span>
+            </div>
+
+            <div class="row credential-row">
+              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="mono">primary</span>
+              <span class="mono">&hellip;a4f2</span>
+              <span class="chip pd-cooling-chip"><span class="mark mark-cooling"></span>cooling 4m 12s</span>
+              <span class="micro">14:16:02 &middot; 2m ago</span>
+              <span class="credential-actions">
+                <button class="pd-row-action" type="button">Replace</button>
+                <button class="pd-row-action pd-row-action-danger" type="button">Remove</button>
+              </span>
+            </div>
+
+            <div class="credential-replace">
+              <span class="pd-subhead" style="margin:0">
+                <span class="legend-caps">replace secret</span>
+                <span class="mono">primary &hellip;a4f2</span>
+              </span>
+              <span class="credential-replace-line">
+                <input class="pd-input" type="password" placeholder="paste the replacement key" autocomplete="off">
+                <button class="control control-primary" type="button">Add, then remove &hellip;a4f2</button>
+                <button class="control control-ghost" type="button">Cancel</button>
+              </span>
+              <p class="spec-note">Replace is two calls today: POST /api/providers/{id}/keys adds the new key, DELETE /api/providers/{id}/keys/{keyId} removes the old one. There is no replace route and no enable/disable route, so the switch above and this field both need the new PATCH. The field is write-only in both directions &mdash; what you type is encrypted at rest and never read back, and nothing in the API returns a secret in any form.</p>
+            </div>
+
+            <div class="row credential-row">
+              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="mono">burst</span>
+              <span class="mono">&hellip;7c19</span>
+              <span></span>
+              <span class="micro">14:17:41 &middot; 14s ago</span>
+              <span class="credential-actions">
+                <button class="pd-row-action" type="button">Replace</button>
+                <button class="pd-row-action pd-row-action-danger" type="button">Remove</button>
+              </span>
+            </div>
+
+            <div class="row credential-row">
+              <span class="pd-switch" data-on="false" role="switch" aria-checked="false"><span class="pd-switch-knob"></span></span>
+              <span class="mono">ci</span>
+              <span class="mono">&hellip;0d63</span>
+              <span></span>
+              <span class="micro">2026-08-11 09:22 &middot; disabled since</span>
+              <span class="credential-actions">
+                <button class="pd-row-action" type="button">Replace</button>
+                <button class="pd-row-action pd-row-action-danger" type="button">Remove</button>
+              </span>
+            </div>
+
+          </div>
+          <p class="spec-note">The router expands one candidate per (provider, credential, model), so two enabled keys give cerebras two rows in every ladder it appears in &mdash; which is why disabling a key and deleting it are different acts.</p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">OAuth account &mdash; the anthropic-oauth case</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; OAuth &mdash; POST /api/providers/{id}/oauth/start|complete. Expiry, last refresh and account id need the &sect;8.2 extension.</span></p>
+          <p class="prose">cerebras authenticates with a bearer key, so this panel is dark on its page. It is the same region rendered for a provider whose auth_style is oauth, shown here because it is the second half of what "credentials" means in this product.</p>
+          <div class="panel pd-panel">
+            <div class="pd-head">
+              <span class="state-pip" data-state="healthy"></span>
+              <span class="mono pd-head-id">anthropic</span>
+              <span class="chip">auth_style oauth</span>
+              <span class="micro">preset anthropic-oauth &middot; Anthropic (Claude subscription)</span>
+            </div>
+            <div class="pd-kvs">
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">account</span>
+                <span class="mono pd-kv-value">ops@darkraise.dev</span>
+                <span class="spec-note">returned once by oauth/complete and discarded today</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">expires_at</span>
+                <span class="readout">14:41:20</span>
+                <span class="spec-note"><b class="data-emph">23m 25s</b> remaining &middot; the token, not the connection</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">last_refresh</span>
+                <span class="mono pd-kv-value">14:11:20</span>
+                <span class="spec-note">6m 35s ago, by the worker &mdash; no request paid for it</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">next_refresh</span>
+                <span class="mono pd-kv-value">14:21:07</span>
+                <span class="spec-note">worker interval 5m, jittered 0.5&ndash;1.5&times;, renewing anything inside 15m of expiry</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">state</span>
+                <span class="mono pd-kv-value">connected</span>
+                <span class="spec-note">the only value an operator can see today is its opposite</span>
+              </span>
+
+            </div>
+            <div class="pd-foot">
+              <button class="control" type="button">Reconnect</button>
+              <p class="prose">Today this whole panel is one boolean. Nothing is shown while the refresh keeps working, and the first thing an operator ever learns is "needs reconnection" &mdash; after a refresh has already been refused and requests are already failing. Every field above exists in the token the manager holds; four of the five are simply never returned.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Breaker</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Breaker &mdash; GET /api/health/providers, POST /api/providers/{id}/breaker/reset. Both new. Today clearing a cooldown is only a side effect of Test.</span></p>
+          <div class="panel breaker-panel">
+
+            <div class="pd-stats">
+              <div class="well pd-stat">
+                <span class="micro pd-stat-key">cooling_until</span>
+                <span class="readout">14:22:07</span>
+                <span class="mono pd-stat-sub"><span class="data-emph">4m 12s</span> remaining &middot; credential &hellip;a4f2</span>
+              </div>
+              <div class="well pd-stat">
+                <span class="micro pd-stat-key">backoff_level</span>
+                <span><span class="readout">3</span><span class="unit">of 5</span></span>
+                <span class="mono pd-stat-sub">next trip cools 8s, then 15s</span>
+              </div>
+              <div class="well pd-stat">
+                <span class="micro pd-stat-key">consecutive_failures</span>
+                <span><span class="readout">7</span></span>
+                <span class="mono pd-stat-sub">all 401, first at 14:09:58</span>
+              </div>
+            </div>
+
+            <div>
+              <p class="legend-caps">triples currently cooling</p>
+              <div class="ladder">
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; gpt-oss-120b</span>
+                  <span class="reason">
+                    <span class="reason-code">cooling</span>
+                    <span class="reason-prose">4m 12s remaining &mdash; until 14:22:07, backoff level 3</span>
+                  </span>
+                </div>
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; llama-3.3-70b</span>
+                  <span class="reason">
+                    <span class="reason-code">cooling</span>
+                    <span class="reason-prose">2m 46s remaining &mdash; until 14:20:41, backoff level 2</span>
+                  </span>
+                </div>
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; qwen-3-32b</span>
+                  <span class="reason">
+                    <span class="reason-code">cooling</span>
+                    <span class="reason-prose">2m 03s remaining &mdash; until 14:19:58, backoff level 2</span>
+                  </span>
+                </div>
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; <span class="pd-empty-model">(no model)</span></span>
+                  <span class="reason">
+                    <span class="reason-code">credential-level</span>
+                    <span class="reason-prose">4m 12s remaining &mdash; the empty-model entry holds down every model this key serves</span>
+                  </span>
+                </div>
+              </div>
+              <p class="spec-note">The three readouts report the credential-level entry, which is the one that makes the provider read as cooling in the list. The model triples above it cool and clear on their own ladders and are not derived from it.</p>
+            </div>
+
+            <div class="pd-foot">
+              <button class="control" type="button">Reset breaker</button>
+              <p class="prose">Clears the four entries above and returns backoff_level to 0 without sending anything upstream. Today the only way to clear a cooldown from the console is to click Test and have it succeed, which means an operator who knows the key is fine still cannot say so &mdash; and an operator whose key is not fine gets no way to stop the ladder escalating.</p>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Probe</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Probe &mdash; POST /api/providers/{id}/test {ok,probe,latency_ms,model_count,error}. Bypasses the breaker by design; a rejected key is a 200 with ok:false, not a 5xx.</span></p>
+          <div class="panel pd-panel">
+            <div class="pd-foot" style="margin-top:0">
+              <button class="control control-primary" type="button">Test</button>
+              <p class="prose">One probe per provider at a time, 30s ceiling. It ignores the cooldown above on purpose: the usual reason to press it is to find out whether a cooling provider has recovered.</p>
+            </div>
+
+            <p class="pd-subhead">
+              <span class="legend-caps">last result</span>
+              <span class="micro">credential burst &hellip;7c19 &middot; ran 14:12:38</span>
+            </p>
+            <div class="well pd-result">
+              <span class="chip status-badge" data-status="success">ok</span>
+              <span class="pd-result-fields">
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">model_count</span><span class="data-emph">41</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">284</span></span>
+              </span>
+            </div>
+            <p class="prose pd-probe-note">A successful probe resets the ladder for the credential it ran against &mdash; every triple and the credential-level entry &mdash; and triggers one discovery pass. That is the side effect region 4's Reset breaker button and region 6's Run discovery button exist to separate from it.</p>
+
+            <p class="pd-subhead">
+              <span class="legend-caps">failed variant</span>
+              <span class="micro">credential primary &hellip;a4f2 &middot; ran 14:17:44</span>
+            </p>
+            <div class="well pd-result">
+              <span class="chip status-badge" data-status="error">ok:false</span>
+              <span class="pd-result-fields">
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">1,204</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">error</span><span class="mono pd-error-text">the provider rejected this credential: 401 Unauthorized</span></span>
+              </span>
+            </div>
+            <p class="prose pd-probe-note">A rejected key is a 200 carrying ok:false, not a 5xx: the request to darkrouter succeeded and the answer is bad news. model_count is absent rather than 0 &mdash; nothing was listed, so there is no count to report. A failed probe clears nothing; the cooldown above stands.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Discovery</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Discovery &mdash; POST /api/providers/{id}/discover. New. Discoverer.Trigger fires today only as a side effect of a successful test.</span></p>
+          <div class="panel pd-panel">
+            <div class="pd-kvs">
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">last_attempt_at</span>
+                <span class="mono pd-kv-value">14:15:12</span>
+                <span class="spec-note">2m 43s ago &mdash; the pass is running, it is just failing</span>
+              </span>
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">last_success_at</span>
+                <span class="mono pd-kv-value pd-bad">08:11:40</span>
+                <span class="spec-note">6h 06m ago. The catalog for cerebras is that old.</span>
+              </span>
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">consecutive_failures</span>
+                <span class="data-emph pd-bad">14</span>
+                <span class="spec-note">since the key was rotated upstream</span>
+              </span>
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">models_in_catalog</span>
+                <span class="data-emph">41</span>
+                <span class="spec-note">stale, not gone &mdash; the router still routes on them</span>
+              </span>
+            </div>
+            <div class="well pd-error-well">
+              <span class="micro pd-kv-key">last_error</span>
+              <span class="mono pd-error-text">listing rejected the credential: 401 Unauthorized</span>
+            </div>
+            <div class="pd-foot">
+              <button class="control" type="button">Run discovery now</button>
+              <p class="prose">DB.DiscoveryStates already records all four fields and the admin package never reads them, so a provider whose listing has failed for six hours renders exactly like a healthy one. This is the region that makes stale visible, and the button is the one that lets an operator retry a pass without spending a probe.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Danger zone</p>
+          <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Delete &mdash; DELETE /api/providers/{id} returns dangling_aliases[]. A dangling alias is a warning, not a validation error.</span></p>
+          <div class="panel pd-danger">
+            <div class="pd-foot" style="margin-top:0">
+              <button class="control pd-control-danger" type="button">Delete cerebras</button>
+              <p class="prose">Removes the provider, its three credentials and its breaker state. Requests already logged keep the id and stay readable; the catalog entries go with the next snapshot build.</p>
+            </div>
+            <div class="well pd-dangling">
+              <p class="prose">Two aliases have a cerebras target in their chain and will lose it:</p>
+              <div class="pd-alias-list">
+                <span class="pd-alias">
+                  <span class="mono pd-alias-name">fast-coder</span>
+                  <span class="micro">alias chain, 1 target on cerebras</span>
+                </span>
+                <span class="pd-alias">
+                  <span class="mono pd-alias-name">cheap-embed</span>
+                  <span class="micro">alias chain, 1 target on cerebras</span>
+                </span>
+              </div>
+              <p class="prose">The delete still succeeds and reports them. That is deliberate: if a dangling alias were a validation error instead of a warning, this one click would make every subsequent config reload fail, and the operator would be left with a reload button that keeps failing and no way out of it but SSH.</p>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-08-preset-browser--s-08-preset-browser" data-screen-title="configure/providers &mdash; preset browser">
+  <p class="legend">
+    All 197 shipped presets, browsable by surface, auth kind and free tier,
+    with <span class="mono">cerebras</span> picked and its create form open.
+    Today the same catalogue is one flat dropdown of
+    <span class="mono">name (id)</span>; every other field on this screen is
+    already in the payload that dropdown reads and throws away. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#" data-active="true">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">configure/providers</span>
+        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="preset-stage">
+
+          <div class="preset-under">
+            <p class="section-title">Providers</p>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <button class="control preset-primary">Add provider</button>
+              <button class="control control-ghost">Add without a preset</button>
+            </div>
+            <div class="table">
+              <div class="row">
+                <span class="legend-caps" style="flex:0 0 6px"></span>
+                <span class="legend-caps" style="flex:0 0 180px">provider</span>
+                <span class="legend-caps" style="flex:0 0 140px">kind</span>
+                <span class="legend-caps" style="flex:0 0 90px;text-align:right">priority</span>
+                <span class="legend-caps" style="flex:1 1 auto">credentials</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">groq</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">100</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="cooling"></span>
+                <span class="mono" style="flex:0 0 180px">cerebras</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">90</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">anthropic</span>
+                <span class="mono" style="flex:0 0 140px">anthropic</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">80</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">openrouter</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">70</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">together</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">60</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">deepinfra</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">50</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="failed"></span>
+                <span class="mono" style="flex:0 0 180px">bedrock</span>
+                <span class="mono" style="flex:0 0 140px">bedrock</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">40</span>
+                <span class="micro" style="flex:1 1 auto">0 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">vertex</span>
+                <span class="mono" style="flex:0 0 140px">vertex</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">30</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="preset-scrim"></div>
+
+          <div class="preset-modal">
+            <div class="preset-modal-head">
+              <p class="preset-modal-title">Add a provider from a preset</p>
+              <a class="preset-modal-close" href="#">&times;</a>
+            </div>
+
+            <div class="preset-modal-body">
+              <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Overlay &mdash; the one place in the product with a shadow: 0 8px 24px -8px. Spec &sect;3.3.</span></p>
+              <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
+
+              <div class="panel preset-browse">
+
+                <div class="preset-search-block">
+                  <p class="legend-caps">Search 197 presets</p>
+                  <div class="well preset-search">
+                    <span class="preset-search-q">cere</span><span class="preset-caret"></span>
+                    <span class="micro preset-search-count">3 of 197 match</span>
+                  </div>
+                  <div class="well preset-suggest">
+                    <div class="preset-suggest-row" data-picked="true">
+                      <span class="mono" style="flex:0 0 150px">cerebras</span>
+                      <span class="micro" style="flex:0 0 210px">Cerebras</span>
+                      <span class="micro">openaicompat</span>
+                      <span class="preset-suggest-why">substring &middot; CEREbras</span>
+                    </div>
+                    <div class="preset-suggest-row">
+                      <span class="mono" style="flex:0 0 150px">cohere</span>
+                      <span class="micro" style="flex:0 0 210px">Cohere</span>
+                      <span class="micro">openaicompat</span>
+                      <span class="preset-suggest-why">subsequence &middot; CohERE</span>
+                    </div>
+                    <div class="preset-suggest-row">
+                      <span class="mono" style="flex:0 0 150px">opencode</span>
+                      <span class="micro" style="flex:0 0 210px">OpenCode Free</span>
+                      <span class="micro">openaicompat</span>
+                      <span class="preset-suggest-why">subsequence &middot; openCodE fRee</span>
+                    </div>
+                  </div>
+                </div>
+
+                <p><b class="pin" data-pin="2">2</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
+                <div class="preset-cols">
+
+                  <div class="preset-facets">
+                    <div class="preset-facet-group">
+                      <p class="legend-caps">Surface</p>
+                      <div class="well preset-facet-list">
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>llm</span><span class="preset-facet-count">196</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>embedding</span><span class="preset-facet-count">11</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>image</span><span class="preset-facet-count">3</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>stt</span><span class="preset-facet-count">2</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>tts</span><span class="preset-facet-count">2</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>rerank</span><span class="preset-facet-count">1</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>moderation</span><span class="preset-facet-count">1</span></span>
+                      </div>
+                    </div>
+                    <div class="preset-facet-group">
+                      <p class="legend-caps">Auth kind</p>
+                      <div class="well preset-facet-list">
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>bearer</span><span class="preset-facet-count">178</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>x-api-key</span><span class="preset-facet-count">6</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>api-key</span><span class="preset-facet-count">4</span></span>
+                        <span class="preset-facet-row" data-empty="true"><span class="combo-check">&check;</span><span>query-param</span><span class="preset-facet-count">0</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>none</span><span class="preset-facet-count">5</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>sigv4</span><span class="preset-facet-count">1</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>gcp-sa</span><span class="preset-facet-count">2</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>oauth</span><span class="preset-facet-count">1</span></span>
+                      </div>
+                    </div>
+                    <div class="preset-facet-group">
+                      <p class="legend-caps">Free tier</p>
+                      <div class="well">
+                        <span class="preset-toggle-row">
+                          <span class="preset-toggle" data-on="false"><span class="preset-toggle-knob"></span></span>
+                          <span>free tier only</span>
+                          <span class="preset-facet-count">121</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="preset-results">
+                    <p><b class="pin" data-pin="3">3</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
+                    <div class="preset-results-head">
+                      <span class="micro">12 of 197 presets &middot; unfiltered, sorted by preset id</span>
+                      <span class="micro">&crarr; narrows the grid to the 3 matches</span>
+                    </div>
+                    <div class="preset-grid">
+                <div class="well preset-card" data-selected="true">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Cerebras</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>cerebras</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.cerebras.ai/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://inference.cerebras.ai">inference.cerebras.ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Groq</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>groq</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.groq.com/openai/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">stt</span>
+                    <span class="preset-surface-chip">tts</span>
+                    <a class="preset-link" href="https://groq.com">groq.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-form">
+                  <div>
+                    <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/providers {id,preset}. The preset supplies kind, base_url, auth_style, declared surfaces, quirks, model traits and the models.dev join key.</span></p>
+                    <label class="legend-caps preset-field-label" for="preset-new-id">provider id</label>
+                    <input class="preset-input" id="preset-new-id--s-08-preset-browser" value="cerebras">
+                    <p class="preset-field-note">Prefilled from the preset id and editable. This is the only field you type &mdash; it becomes the provider's key in routing and the left half of every <span class="mono">provider/model</span> pair it serves.</p>
+                    <div class="preset-actions">
+                      <button class="control preset-primary">Add provider</button>
+                      <button class="control control-ghost">Cancel</button>
+                    </div>
+                    <p class="micro" style="margin:10px 0 0">POST /api/providers {"id":"cerebras","preset":"cerebras"}</p>
+                  </div>
+                  <div>
+                    <p class="legend-caps">What the preset supplies</p>
+                    <div class="panel preset-supplies">
+                      <span class="preset-supplies-key">kind</span>
+                      <span class="preset-supplies-val">openaicompat</span>
+                      <span class="preset-supplies-key">base_url</span>
+                      <span class="preset-supplies-val">https://api.cerebras.ai/v1</span>
+                      <span class="preset-supplies-key">auth style</span>
+                      <span class="preset-supplies-val">bearer &mdash; Authorization: Bearer &hellip;</span>
+                      <span class="preset-supplies-key">declared surfaces</span>
+                      <span class="preset-supplies-val">llm</span>
+                      <span class="preset-supplies-key">quirks</span>
+                      <span class="preset-supplies-val preset-supplies-none">none declared</span>
+                      <span class="preset-supplies-key">model traits</span>
+                      <span class="preset-supplies-val preset-supplies-none">none declared</span>
+                      <span class="preset-supplies-key">models.dev key</span>
+                      <span class="preset-supplies-val">cerebras</span>
+                    </div>
+                    <p class="preset-field-note">Eight fields arrive with the preset &mdash; name, kind, base_url, auth style, surfaces, free tier, website and the models.dev join key. The two declared empty are answers too: cerebras needs no request rewriting and no per-model budget overrides, where anthropic declares one quirk and sixteen model traits.</p>
+                  </div>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">DeepInfra</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>deepinfra</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.deepinfra.com/v1/openai</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">embedding</span>
+                    <a class="preset-link" href="https://deepinfra.com">deepinfra.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Together AI</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>together</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.together.xyz/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">embedding</span>
+                    <span class="preset-surface-chip">image</span>
+                    <a class="preset-link" href="https://www.together.ai">www.together.ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">OpenRouter</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>openrouter</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://openrouter.ai/api/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://openrouter.ai">openrouter.ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Anthropic</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>x-api-key</span>
+                  </span>
+                  <span class="preset-url">https://api.anthropic.com/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://platform.claude.com">platform.claude.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Anthropic (Claude subscription)</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>anthropic-oauth</span><span class="preset-meta-sep">&middot;</span><span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>oauth</span>
+                  </span>
+                  <span class="preset-url">https://api.anthropic.com/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://claude.com">claude.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Amazon Bedrock</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>bedrock</span><span class="preset-meta-sep">&middot;</span><span>bedrock</span><span class="preset-meta-sep">&middot;</span><span>sigv4</span>
+                  </span>
+                  <span class="preset-url preset-url-derived" title="base_url is empty in the preset; the endpoint is assembled at create time as https://bedrock-runtime.{region}.amazonaws.com">https://bedrock-runtime.{region}.amazonaws.com</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://aws.amazon.com/bedrock">aws.amazon.com/bedrock &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Google Vertex AI</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>vertex</span><span class="preset-meta-sep">&middot;</span><span>vertex</span><span class="preset-meta-sep">&middot;</span><span>gcp-sa</span>
+                  </span>
+                  <span class="preset-url" title="https://us-central1-aiplatform.googleapis.com/v1/projects">https://us-central1-…googleapis.com/v1/projects</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">embedding</span>
+                    <a class="preset-link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Google Vertex AI (Anthropic publisher)</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>vertex-anthropic</span><span class="preset-meta-sep">&middot;</span><span>vertex</span><span class="preset-meta-sep">&middot;</span><span>gcp-sa</span>
+                  </span>
+                  <span class="preset-url preset-url-derived" title="base_url is empty in the preset; the endpoint is assembled at create time as https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}">https://{location}-aiplatform.…/locations/{location}</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">AgentRouter</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>agentrouter</span><span class="preset-meta-sep">&middot;</span><span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>x-api-key</span>
+                  </span>
+                  <span class="preset-url">https://agentrouter.org/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://agentrouter.org">agentrouter.org &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Agnes AI</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>agnes</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://apihub.agnes-ai.com/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link" href="https://agnes-ai.com">agnes-ai.com &#8599;</a>
+                  </span>
+                </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+
+            <div class="preset-modal-foot">
+              <span class="preset-counts">197 presets &middot; 186 openaicompat &middot; 7 anthropic &middot; 2 vertex &middot; 1 gemini &middot; 1 bedrock</span>
+              <span><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Counts &mdash; derived from the preset list.</span></span>
+            </div>
+          </div>
+
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+<section class="screen" id="s-09-models--s-09-models" data-screen-title="configure/models">
+  <p class="legend">
+    The model catalog with six facets instead of two text boxes and eleven
+    columns instead of six &mdash; pricing, max output tokens, publisher,
+    lifecycle state and, on every row, the merge source that produced its
+    numbers. Below the table: the two models upstream has withdrawn, the
+    detail sheet open on <span class="mono">openai/gpt-oss-120b</span> with
+    its compressed route ladder and the override editor the
+    <span class="mono">model_overrides</span> table has never had, and the
+    read-only aliases summary. Press <kbd>A</kbd> to reveal pins,
+    <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#" data-active="true">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">configure/models</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <!-- ============ Region 1 — facets ============ -->
+        <div class="region">
+          <p class="section-title">Facets</p>
+          <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; GET /api/models?q=&amp;surface=&amp;min_context=&amp;tools=true. min_context and tools are accepted today and unreachable from the current screen.</span></p>
+          <div class="filter-bar">
+
+            <input class="q-input" value="gpt-oss" aria-label="q" readonly>
+
+            <div class="segmented" aria-label="surface">
+              <span class="segmented-option" data-active="true">llm</span>
+              <span class="segmented-option">embedding</span>
+              <span class="segmented-option">image</span>
+              <span class="segmented-option">stt</span>
+              <span class="segmented-option">tts</span>
+              <span class="segmented-option">rerank</span>
+              <span class="segmented-option">moderation</span>
+            </div>
+
+            <div class="segmented" aria-label="capability">
+              <span class="segmented-option" data-active="true">tools</span>
+              <span class="segmented-option">vision</span>
+              <span class="segmented-option">reasoning</span>
+            </div>
+
+            <div class="range-facet">
+              <p class="legend-caps range-label">min_context</p>
+              <input class="range-input" value="32,768" aria-label="min context" readonly>
+              <span class="range-track"><span class="range-fill"></span></span>
+              <input class="range-input range-input-wide" value="1,048,576" aria-label="max context" readonly>
+            </div>
+
+            <div class="segmented" aria-label="price band">
+              <span class="segmented-option">&le;$0.20</span>
+              <span class="segmented-option" data-active="true">$0.20&ndash;1</span>
+              <span class="segmented-option">$1&ndash;5</span>
+              <span class="segmented-option">&gt;$5</span>
+            </div>
+
+            <div class="combo" data-open="true" style="min-width:196px">
+              <button class="control combo-trigger">
+                <span>provider: groq +2</span>
+                <span class="combo-chevron">▾</span>
+              </button>
+              <div class="combo-menu">
+                <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>groq</span><span class="combo-count">184</span></span>
+                <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">31</span></span>
+                <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>together</span><span class="combo-count">212</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>deepinfra</span><span class="combo-count">340</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>openrouter</span><span class="combo-count">417</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>anthropic</span><span class="combo-count">9</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>bedrock</span><span class="combo-count">64</span></span>
+                <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>vertex</span><span class="combo-count">27</span></span>
+              </div>
+            </div>
+
+            <div class="segmented" aria-label="lifecycle state">
+              <span class="segmented-option" data-active="true">live</span>
+              <span class="segmented-option">stale</span>
+              <span class="segmented-option">removed_upstream</span>
+            </div>
+
+            <button class="control control-ghost">Reset</button>
+
+          </div>
+        </div>
+
+        <!-- ============ Region 2 — the catalog table ============ -->
+        <div class="region">
+          <p class="section-title">Catalog</p>
+          <div class="table-toolbar">
+            <span class="micro">16 of 1,284 models &middot; 2 withheld by the retired filter</span>
+            <div class="table-toolbar-actions">
+              <span class="switch" data-on="false">
+                <span class="switch-track"><span class="switch-knob"></span></span>
+                <span class="switch-label">show retired models</span>
+              </span>
+              <button class="control">Columns ▾</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <div class="table models-table">
+
+              <div class="row row-head">
+                <span class="legend-caps mcol-model">model</span>
+                <span class="legend-caps mcol-providers">providers</span>
+                <span class="legend-caps mcol-surfaces">surfaces</span>
+                <span class="legend-caps mcol-context col-right">context</span>
+                <span class="legend-caps mcol-maxout col-right">max out</span>
+                <span class="legend-caps mcol-in col-right">in $/mtok</span>
+                <span class="legend-caps mcol-out col-right">out $/mtok</span>
+                <span class="legend-caps mcol-publisher">publisher</span>
+                <span class="legend-caps mcol-caps" title="tools &middot; vision &middot; reasoning">caps</span>
+                <span class="legend-caps mcol-source">source</span>
+                <span class="legend-caps mcol-state">state</span>
+              </div>
+
+              <div class="row row-selected">
+                <span class="mono mcol-model">openai/gpt-oss-120b</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+4</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.15</span>
+                <span class="mono mcol-out col-right">$0.60</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">openai/gpt-oss-20b</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+3</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.05</span>
+                <span class="mono mcol-out col-right">$0.20</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">claude-opus-4-20250514</span>
+                <span class="mono mcol-providers">anthropic<span class="prov-more">+3</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">200,000</span>
+                <span class="mono mcol-maxout col-right">32,000</span>
+                <span class="mono mcol-in col-right">$15.00</span>
+                <span class="mono mcol-out col-right">$75.00</span>
+                <span class="mono mcol-publisher">anthropic</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">claude-sonnet-4-20250514</span>
+                <span class="mono mcol-providers">anthropic<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">200,000</span>
+                <span class="mono mcol-maxout col-right">64,000</span>
+                <span class="mono mcol-in col-right">$3.00</span>
+                <span class="mono mcol-out col-right">$15.00</span>
+                <span class="mono mcol-publisher">anthropic</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">gemini-2.5-pro</span>
+                <span class="mono mcol-providers">vertex<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">1,048,576</span>
+                <span class="mono mcol-maxout col-right">65,536</span>
+                <span class="mono mcol-in col-right">$1.25</span>
+                <span class="mono mcol-out col-right">$10.00</span>
+                <span class="mono mcol-publisher">google</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">gemini-2.5-flash</span>
+                <span class="mono mcol-providers">vertex<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">1,048,576</span>
+                <span class="mono mcol-maxout col-right">65,536</span>
+                <span class="mono mcol-in col-right">$0.30</span>
+                <span class="mono mcol-out col-right">$2.50</span>
+                <span class="mono mcol-publisher">google</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">deepseek-ai/DeepSeek-V3</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">8,192</span>
+                <span class="mono mcol-in col-right">$0.60</span>
+                <span class="mono mcol-out col-right">$1.70</span>
+                <span class="mono mcol-publisher">deepseek</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">deepseek-ai/DeepSeek-R1</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">163,840</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.70</span>
+                <span class="mono mcol-out col-right">$2.40</span>
+                <span class="mono mcol-publisher">deepseek</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">meta-llama/Llama-3.3-70B-Instruct</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+3</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">32,768</span>
+                <span class="mono mcol-in col-right">$0.23</span>
+                <span class="mono mcol-out col-right">$0.40</span>
+                <span class="mono mcol-publisher">meta</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row row-inferred" title="inferred — no models.dev entry and no discovery response; these numbers are a guess from the model card">
+                <span class="mono mcol-model">Qwen/Qwen3-235B-A22B</span>
+                <span class="mono mcol-providers">cerebras<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right"><span class="value-guessed">&asymp;262,144</span></span>
+                <span class="mono mcol-maxout col-right"><span class="value-guessed">&asymp;32,768</span></span>
+                <span class="mono mcol-in col-right"><span class="value-guessed">&asymp;$0.20</span></span>
+                <span class="mono mcol-out col-right"><span class="value-guessed">&asymp;$0.60</span></span>
+                <span class="mono mcol-publisher">qwen</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="true">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="inferred">&asymp; inferred</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">moonshotai/Kimi-K2-Instruct</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+2</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">131,072</span>
+                <span class="mono mcol-maxout col-right">16,384</span>
+                <span class="mono mcol-in col-right">$1.00</span>
+                <span class="mono mcol-out col-right">$3.00</span>
+                <span class="mono mcol-publisher">moonshotai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">text-embedding-3-large</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">embedding</span>
+                <span class="mono mcol-context col-right">8,191</span>
+                <span class="mono mcol-maxout col-right text-muted">&mdash;</span>
+                <span class="mono mcol-in col-right">$0.13</span>
+                <span class="mono mcol-out col-right text-muted">&mdash;</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="false">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">bge-reranker-v2-m3</span>
+                <span class="mono mcol-providers">together<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">rerank</span>
+                <span class="mono mcol-context col-right">8,192</span>
+                <span class="mono mcol-maxout col-right text-muted">&mdash;</span>
+                <span class="mono mcol-in col-right">$0.02</span>
+                <span class="mono mcol-out col-right text-muted">&mdash;</span>
+                <span class="mono mcol-publisher">baai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="false">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model">whisper-large-v3</span>
+                <span class="mono mcol-providers">groq<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">stt</span>
+                <span class="mono mcol-context col-right text-muted">&mdash;</span>
+                <span class="mono mcol-maxout col-right text-muted">&mdash;</span>
+                <span class="mono mcol-in col-right" title="stt bills per audio hour, not per MTok — $0.04/hr">$0.04</span>
+                <span class="mono mcol-out col-right text-muted">&mdash;</span>
+                <span class="mono mcol-publisher">openai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="false">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                <span class="lifecycle mcol-state" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              </div>
+
+              <div class="row row-inferred" title="inferred — the deepinfra listing carried an id and nothing else; every number on this row is a guess">
+                <span class="mono mcol-model">mistralai/Mistral-Small-3.2-24B-Instruct</span>
+                <span class="mono mcol-providers">deepinfra<span class="prov-more">+1</span></span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right"><span class="value-guessed">&asymp;131,072</span></span>
+                <span class="mono mcol-maxout col-right"><span class="value-guessed">&asymp;32,768</span></span>
+                <span class="mono mcol-in col-right"><span class="value-guessed">&asymp;$0.06</span></span>
+                <span class="mono mcol-out col-right"><span class="value-guessed">&asymp;$0.18</span></span>
+                <span class="mono mcol-publisher">mistralai</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="inferred">&asymp; inferred</span></span>
+                <span class="lifecycle mcol-state" data-state="stale"><span class="lifecycle-mark"></span>stale</span>
+              </div>
+
+              <div class="row">
+                <span class="mono mcol-model" title="us.anthropic.claude-3-5-sonnet-20241022-v2:0">us.anthropic.claude-3-5-sonnet-20241022-v2:0</span>
+                <span class="mono mcol-providers">bedrock</span>
+                <span class="mono mcol-surfaces">llm</span>
+                <span class="mono mcol-context col-right">200,000</span>
+                <span class="mono mcol-maxout col-right">8,192</span>
+                <span class="mono mcol-in col-right">$3.00</span>
+                <span class="mono mcol-out col-right">$15.00</span>
+                <span class="mono mcol-publisher">anthropic</span>
+                <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="true">v</span><span class="cap-bit" data-on="false">r</span></span>
+                <span class="mcol-source"><span class="source-tag" data-source="override">override</span></span>
+                <span class="lifecycle mcol-state" data-state="stale"><span class="lifecycle-mark"></span>stale</span>
+              </div>
+
+            </div>
+          </div>
+
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; inferred &mdash; an inferred model routes with a warning, so a guessed row must be visibly a guess.</span></p>
+          <p class="prose">
+            Two rows here were inferred: no models.dev entry, no usable
+            discovery response, so darkrouter guessed from the id and the
+            model card. Every guessed number is prefixed
+            <span class="mono">&asymp;</span> and underlined with a dashed
+            rule, the whole row's left edge breaks into a dashed border, and
+            the source tag repeats the mark &mdash; three channels, none of
+            them a state colour, because a guess is not a health reading.
+            <span class="mono">stale</span> means the last discovery sweep
+            did not see the model but the retention window has not expired;
+            <span class="mono">override</span> means the top of the merge
+            precedence supplied at least one field on that row.
+          </p>
+        </div>
+
+        <!-- ============ Region 3 — removed_upstream ============ -->
+        <div class="region">
+          <p class="section-title">Retired models</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; state is live|stale|removed_upstream. Filter.IncludeRemoved exists and nothing calls it.</span></p>
+          <div class="retired-band">
+            <span class="switch" data-on="false">
+              <span class="switch-track"><span class="switch-knob"></span></span>
+              <span class="switch-label">show retired models</span>
+            </span>
+            <span class="mono">Snapshot.Filter.IncludeRemoved = false</span>
+            <span class="micro">2 models withheld from the table above</span>
+          </div>
+          <p class="spec-note">what the toggle reveals &mdash; struck through, still priced, still addressable by a pinned alias</p>
+          <div class="table models-table">
+            <div class="row row-retired" title="last seen upstream 2026-06-18">
+              <span class="mono mcol-model">mixtral-8x7b-32768</span>
+              <span class="mono mcol-providers">groq</span>
+              <span class="mono mcol-surfaces">llm</span>
+              <span class="mono mcol-context col-right">32,768</span>
+              <span class="mono mcol-maxout col-right">32,768</span>
+              <span class="mono mcol-in col-right">$0.24</span>
+              <span class="mono mcol-out col-right">$0.24</span>
+              <span class="mono mcol-publisher">mistralai</span>
+              <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+              <span class="mcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+              <span class="lifecycle mcol-state" data-state="removed_upstream"><span class="lifecycle-mark"></span>removed_upstream</span>
+            </div>
+            <div class="row row-retired" title="last seen upstream 2026-07-02">
+              <span class="mono mcol-model">meta-llama/Llama-3.1-405B-Instruct</span>
+              <span class="mono mcol-providers">together<span class="prov-more">+1</span></span>
+              <span class="mono mcol-surfaces">llm</span>
+              <span class="mono mcol-context col-right">131,072</span>
+              <span class="mono mcol-maxout col-right">8,192</span>
+              <span class="mono mcol-in col-right">$3.50</span>
+              <span class="mono mcol-out col-right">$3.50</span>
+              <span class="mono mcol-publisher">meta</span>
+              <span class="cap-triad mcol-caps"><span class="cap-bit" data-on="true">t</span><span class="cap-bit" data-on="false">v</span><span class="cap-bit" data-on="false">r</span></span>
+              <span class="mcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+              <span class="lifecycle mcol-state" data-state="removed_upstream"><span class="lifecycle-mark"></span>removed_upstream</span>
+            </div>
+          </div>
+          <p class="prose">
+            A retired model is not deleted &mdash; the row stays so a request
+            that still names it gets <span class="mono">model_not_offered</span>
+            against a candidate the operator can actually see, rather than a
+            silent miss. The strike-through says the catalog no longer
+            believes upstream will serve it; the prices stay legible because
+            the last known rate is what the historical usage rows were costed
+            against.
+          </p>
+        </div>
+
+        <!-- ============ Regions 4 and 5 — detail sheet ============ -->
+        <div class="region">
+          <p class="section-title">Model detail sheet &mdash; open</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
+          <div class="panel sheet">
+
+            <div class="sheet-head">
+              <span class="sheet-title">openai/gpt-oss-120b</span>
+              <span class="chip">openai</span>
+              <span class="chip">llm</span>
+              <span class="lifecycle" data-state="live"><span class="lifecycle-mark"></span>live</span>
+              <span class="sheet-meta">
+                <span class="micro">5 offerings &middot; 12 candidates &middot; 3 aliases</span>
+                <button class="chip" type="button" aria-label="close sheet">&times;</button>
+              </span>
+            </div>
+
+            <div class="sheet-body">
+
+              <div class="sheet-split">
+
+                <div class="sheet-col sheet-col-ladder">
+                  <p class="section-title">Route order</p>
+                  <div class="ladder" style="width:220px">
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">01</span>
+                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="mono">groq</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">02</span>
+                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="mono">cerebras</span>
+                    </div>
+                    <div class="ladder-row ladder-row-served" style="gap:8px">
+                      <span class="rank">03</span>
+                      <span class="mark mark-served mark-catalog"></span>
+                      <span class="mono">together</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">04</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">deepinfra</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">05</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">openrouter</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">06</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">anthropic</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">07</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">bedrock</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">08</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">vertex</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">09</span>
+                      <span class="mark mark-cooling mark-catalog"></span>
+                      <span class="mono target-muted">groq</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">10</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">together</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">11</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">deepinfra</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank">12</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono target-muted">openrouter</span>
+                      <span class="credential-tag">key 2</span>
+                    </div>
+                  </div>
+                  <p class="sheet-caption">
+                    Task 4's compressed mode, unmodified. One candidate per
+                    (provider, credential), so groq, together, deepinfra and
+                    openrouter each earn a second row at ranks 09&ndash;12.
+                  </p>
+                </div>
+
+                <div class="sheet-col">
+                  <p class="section-title">Per-provider pricing and traits</p>
+                  <div class="table">
+                    <div class="row row-head">
+                      <span class="legend-caps pcol-provider">provider</span>
+                      <span class="legend-caps pcol-credential">credential</span>
+                      <span class="legend-caps pcol-context col-right">context</span>
+                      <span class="legend-caps pcol-maxout col-right">max out</span>
+                      <span class="legend-caps pcol-in col-right">in $/mtok</span>
+                      <span class="legend-caps pcol-out col-right">out $/mtok</span>
+                      <span class="legend-caps pcol-traits">traits</span>
+                      <span class="legend-caps pcol-source">source</span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">groq</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.15</span>
+                      <span class="mono pcol-out col-right">$0.75</span>
+                      <span class="mono pcol-traits">tools, reasoning, json_schema</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">cerebras</span>
+                      <span class="micro pcol-credential">key 1</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.25</span>
+                      <span class="mono pcol-out col-right">$0.69</span>
+                      <span class="mono pcol-traits">tools, reasoning</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">together</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.15</span>
+                      <span class="mono pcol-out col-right">$0.60</span>
+                      <span class="mono pcol-traits">tools, reasoning, json_schema</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">deepinfra</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">8,192</span>
+                      <span class="mono pcol-in col-right">$0.09</span>
+                      <span class="mono pcol-out col-right">$0.45</span>
+                      <span class="mono pcol-traits">tools</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="discovered">discovered</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="mono pcol-provider">openrouter</span>
+                      <span class="micro pcol-credential">key 1 &middot; 2</span>
+                      <span class="mono pcol-context col-right">131,072</span>
+                      <span class="mono pcol-maxout col-right">32,768</span>
+                      <span class="mono pcol-in col-right">$0.10</span>
+                      <span class="mono pcol-out col-right">$0.50</span>
+                      <span class="mono pcol-traits">tools, reasoning</span>
+                      <span class="pcol-source"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    </div>
+                  </div>
+                  <p class="sheet-caption">
+                    Anthropic, bedrock and vertex appear in the ladder because
+                    the alias enumerates them; they carry no offering for this
+                    model and skip with
+                    <span class="mono">model_not_offered</span>.
+                  </p>
+
+                  <p class="section-title" style="margin-top:var(--section-pad)">Merge precedence</p>
+                  <div class="precedence">
+                    <span class="chip precedence-step">model_overrides</span>
+                    <span class="precedence-arrow">&#9656;</span>
+                    <span class="chip precedence-step" data-winner="true">models.dev</span>
+                    <span class="precedence-arrow">&#9656;</span>
+                    <span class="chip precedence-step">discovery</span>
+                    <span class="precedence-arrow">&#9656;</span>
+                    <span class="chip precedence-step">inference</span>
+                  </div>
+                  <p class="sheet-caption">
+                    models.dev wins four of the six merged fields on this
+                    model. <span class="mono">model_overrides</span> is empty
+                    for it, as it is for every model in the catalog &mdash;
+                    the table has never been written to.
+                  </p>
+
+                  <p class="section-title" style="margin-top:var(--section-pad)">Catalog identity</p>
+                  <div class="table">
+                    <div class="row">
+                      <span class="legend-caps icol-key">models.dev id</span>
+                      <span class="mono icol-value">openai/gpt-oss-120b</span>
+                    </div>
+                    <div class="row">
+                      <span class="legend-caps icol-key">upstream ids</span>
+                      <span class="mono icol-value">4 offerings agree &middot; cerebras lists it as gpt-oss-120b</span>
+                    </div>
+                    <div class="row">
+                      <span class="legend-caps icol-key">first seen</span>
+                      <span class="mono icol-value">2026-04-30</span>
+                    </div>
+                    <div class="row">
+                      <span class="legend-caps icol-key">last discovery sweep</span>
+                      <span class="mono icol-value">2026-08-25 09:12 &middot; snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div>
+                <p class="section-title">Merge provenance, per field</p>
+                <div class="table">
+                  <div class="row row-head">
+                    <span class="legend-caps vcol-field">field</span>
+                    <span class="legend-caps vcol-effective">effective value</span>
+                    <span class="legend-caps vcol-from">won by</span>
+                    <span class="legend-caps vcol-contributors">contributors, highest precedence first</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">context_window</span>
+                    <span class="data-emph vcol-effective">131,072</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev 131,072 &middot; discovery 131,072 (5 offerings) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">max_output_tokens</span>
+                    <span class="data-emph vcol-effective">32,768</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev 32,768 &middot; discovery 8,192 (deepinfra) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">capabilities</span>
+                    <span class="data-emph vcol-effective">tools, reasoning</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="discovered">discovered</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev tools &middot; discovery +reasoning (groq, cerebras, together, openrouter) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">surfaces</span>
+                    <span class="data-emph vcol-effective">llm</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev llm &middot; discovery llm (5 offerings) &middot; inference &mdash;</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">publisher</span>
+                    <span class="data-emph vcol-effective">openai</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="models_dev">models_dev</span></span>
+                    <span class="micro vcol-contributors">override &mdash; &middot; models_dev openai &middot; discovery &mdash; &middot; inference openai (from the id prefix)</span>
+                  </div>
+                  <div class="row">
+                    <span class="mono vcol-field">pricing</span>
+                    <span class="data-emph vcol-effective text-muted">per offering</span>
+                    <span class="vcol-from"><span class="source-tag" data-source="discovered">provider</span></span>
+                    <span class="micro vcol-contributors">not merged &mdash; each (provider, credential) offering carries its own rate, listed above</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p class="section-title">Override editor</p>
+                <div class="well override-editor">
+
+                  <div class="field-row">
+                    <p class="legend-caps field-label">scope</p>
+                    <div class="segmented" aria-label="override scope">
+                      <span class="segmented-option" data-active="true">groq</span>
+                      <span class="segmented-option">cerebras</span>
+                      <span class="segmented-option">together</span>
+                      <span class="segmented-option">deepinfra</span>
+                      <span class="segmented-option">openrouter</span>
+                    </div>
+                    <span class="field-detected">an override row is keyed (provider, model), so this editor writes one provider at a time</span>
+                  </div>
+
+                  <div class="field-row" data-dirty="false">
+                    <p class="legend-caps field-label">context window</p>
+                    <input class="field-input" value="131,072" aria-label="context window override" readonly>
+                    <span class="field-detected">detected <span class="mono">131,072</span> &middot; models_dev &mdash; unchanged</span>
+                    <button class="control control-ghost field-revert" data-inert="true">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="field-row" data-dirty="true">
+                    <p class="legend-caps field-label">max output</p>
+                    <input class="field-input" value="16,384" aria-label="max output override" readonly>
+                    <span class="field-detected">detected <span class="mono">32,768</span> &middot; models_dev &mdash; overridden</span>
+                    <button class="control control-ghost field-revert">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="field-row" data-dirty="true">
+                    <p class="legend-caps field-label">capabilities</p>
+                    <span class="field-chips">
+                      <span class="cap-toggle" data-on="true"><span class="cap-toggle-box">✓</span>tools</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>vision</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>reasoning</span>
+                    </span>
+                    <span class="field-detected">detected <span class="mono">tools, reasoning</span> &middot; discovery &mdash; reasoning forced off</span>
+                    <button class="control control-ghost field-revert">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="field-row" data-dirty="false">
+                    <p class="legend-caps field-label">surfaces</p>
+                    <span class="field-chips">
+                      <span class="cap-toggle" data-on="true"><span class="cap-toggle-box">✓</span>llm</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>embedding</span>
+                      <span class="cap-toggle" data-on="false"><span class="cap-toggle-box">✓</span>rerank</span>
+                    </span>
+                    <span class="field-detected">detected <span class="mono">llm</span> &middot; models_dev &mdash; unchanged</span>
+                    <button class="control control-ghost field-revert" data-inert="true">&#8634; revert to detected</button>
+                  </div>
+
+                  <div class="override-footer">
+                    <button class="control control-primary">Save override</button>
+                    <button class="control control-ghost">Delete override</button>
+                    <span class="micro">
+                      PUT /api/models/groq/openai-gpt-oss-120b/override &middot;
+                      DELETE clears every field at once, not one at a time
+                    </span>
+                  </div>
+
+                </div>
+                <p class="sheet-caption">
+                  Two of the four fields are edited but unsaved &mdash; their
+                  inputs carry an accent edge, which reports a control's own
+                  state, and their per-field revert is live while the two
+                  unchanged fields keep an inert one so the column stays a
+                  column. Nothing here has ever existed: the endpoint, the
+                  editor and the first row of
+                  <span class="mono">model_overrides</span> all arrive
+                  together.
+                </p>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ Region 6 — aliases ============ -->
+        <div class="region">
+          <p class="section-title">Aliases &mdash; read only</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Aliases &mdash; edited on configure/routing, not here.</span></p>
+          <div class="panel" style="padding:var(--section-pad)">
+            <div class="table">
+              <div class="row row-head">
+                <span class="legend-caps acol-alias">alias</span>
+                <span class="legend-caps acol-arrow"></span>
+                <span class="legend-caps acol-target">resolves to</span>
+                <span class="legend-caps acol-surface">surface</span>
+                <span class="legend-caps acol-candidates col-right">candidates</span>
+                <span class="legend-caps acol-requests col-right">requests 24h</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">fast-json</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">openai/gpt-oss-120b</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">12</span>
+                <span class="mono acol-requests col-right">2,481</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">smart</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">claude-opus-4-20250514</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">7</span>
+                <span class="mono acol-requests col-right">640</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">cheap</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">openai/gpt-oss-20b</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">9</span>
+                <span class="mono acol-requests col-right">1,096</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">long-context</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">gemini-2.5-pro</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">4</span>
+                <span class="mono acol-requests col-right">312</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">embed</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">text-embedding-3-large</span>
+                <span class="mono acol-surface">embedding</span>
+                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-requests col-right">188</span>
+              </div>
+              <div class="row">
+                <span class="mono acol-alias">rerank-default</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">bge-reranker-v2-m3</span>
+                <span class="mono acol-surface">rerank</span>
+                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-requests col-right">96</span>
+              </div>
+            </div>
+            <div class="alias-footer">
+              <p class="alias-note">
+                Six aliases point into this catalog. Adding one, reordering
+                its candidates or repointing it is routing policy, so it
+                happens on one screen only &mdash; this panel exists so that
+                opening a model answers "who calls this?" without a second
+                search.
+              </p>
+              <a class="control control-primary link-out" href="#">configure/routing &rarr;</a>
+            </div>
+          </div>
+        </div>
+
       </main>
     </div>
   </div>

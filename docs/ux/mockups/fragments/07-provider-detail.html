@@ -1,0 +1,405 @@
+<section class="screen" id="s-07-provider-detail" data-screen-title="provider detail">
+  <p class="legend">
+    One provider opened from the list &mdash; cerebras, deliberately, because
+    it is the one with something wrong: a rotated key its cooldown ladder is
+    still holding down, a discovery pass that has been failing for six hours,
+    and a probe that answers 401. Four of the seven regions below read state
+    that exists in memory and in SQLite today and is exposed through no
+    endpoint at all. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for
+    light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#" data-active="true">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">configure/providers</span>
+        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p class="section-title">Identity</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Identity &mdash; PATCH /api/providers/{id}. kind, preset and auth_style are not patchable; location is create-only.</span></p>
+          <div class="panel pd-panel">
+            <div class="pd-head">
+              <span class="state-pip" data-state="cooling"></span>
+              <span class="mono pd-head-id">cerebras</span>
+              <span class="chip">priority 90</span>
+              <span class="chip">3 credentials</span>
+              <span class="micro">1 credential cooling &middot; 3 model triples held down &middot; discovery has not succeeded since 08:11:40</span>
+            </div>
+            <div class="pd-form">
+
+              <label class="pd-field">
+                <span class="legend-caps">id</span>
+                <input class="pd-input" value="cerebras" readonly>
+                <span class="spec-note">the routing key. Renaming means deleting and recreating.</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">name</span>
+                <input class="pd-input" value="Cerebras">
+                <span class="spec-note">display only &mdash; nothing routes on it</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">kind</span>
+                <input class="pd-input" value="openaicompat" readonly>
+                <span class="spec-note">create-only. PATCH does not accept kind: changing it would repoint every catalogued model at a different wire protocol.</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">auth_style</span>
+                <input class="pd-input" value="bearer" readonly>
+                <span class="spec-note">from the preset. Not patchable either.</span>
+              </label>
+
+              <label class="pd-field pd-span-2">
+                <span class="legend-caps">base_url</span>
+                <input class="pd-input" value="https://api.cerebras.ai/v1">
+                <span class="spec-note">patchable, and the one field an operator changes to point at a proxy or a regional endpoint</span>
+              </label>
+
+              <label class="pd-field">
+                <span class="legend-caps">priority</span>
+                <input class="pd-input" value="90">
+                <span class="spec-note">higher runs earlier in the ladder</span>
+              </label>
+
+              <div class="pd-field">
+                <span class="legend-caps">enabled</span>
+                <span class="pd-switch-row">
+                  <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+                  <span class="mono pd-switch-label">enabled</span>
+                </span>
+                <span class="spec-note">disabling keeps the provider, its keys and its history; deleting does not</span>
+              </div>
+
+              <div class="pd-field pd-span-2">
+                <span class="legend-caps">preset</span>
+                <span class="pd-static">
+                  <span>cerebras</span>
+                  <span class="micro">Cerebras &middot; llm &middot; free tier</span>
+                  <a class="pd-link" href="https://inference.cerebras.ai">inference.cerebras.ai</a>
+                </span>
+                <span class="spec-note">one of the 197 shipped presets. It seeded kind, base_url and auth_style at creation and is not patchable afterwards.</span>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Credentials</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Credentials &mdash; GET /api/providers credentials[]{id,label,masked,enabled,cooling}. Never plaintext, never ciphertext, no endpoint reveals one. Phase 7 &sect;4.1. Enable/disable/replace need the new PATCH /api/providers/{id}/keys/{keyId}.</span></p>
+          <div class="table">
+
+            <div class="row row-head credential-row">
+              <span class="legend-caps">on</span>
+              <span class="legend-caps">label</span>
+              <span class="legend-caps">masked</span>
+              <span class="legend-caps">breaker</span>
+              <span class="legend-caps">last used</span>
+              <span class="legend-caps">&nbsp;</span>
+            </div>
+
+            <div class="row credential-row">
+              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="mono">primary</span>
+              <span class="mono">&hellip;a4f2</span>
+              <span class="chip pd-cooling-chip"><span class="mark mark-cooling"></span>cooling 4m 12s</span>
+              <span class="micro">14:16:02 &middot; 2m ago</span>
+              <span class="credential-actions">
+                <button class="pd-row-action" type="button">Replace</button>
+                <button class="pd-row-action pd-row-action-danger" type="button">Remove</button>
+              </span>
+            </div>
+
+            <div class="credential-replace">
+              <span class="pd-subhead" style="margin:0">
+                <span class="legend-caps">replace secret</span>
+                <span class="mono">primary &hellip;a4f2</span>
+              </span>
+              <span class="credential-replace-line">
+                <input class="pd-input" type="password" placeholder="paste the replacement key" autocomplete="off">
+                <button class="control control-primary" type="button">Add, then remove &hellip;a4f2</button>
+                <button class="control control-ghost" type="button">Cancel</button>
+              </span>
+              <p class="spec-note">Replace is two calls today: POST /api/providers/{id}/keys adds the new key, DELETE /api/providers/{id}/keys/{keyId} removes the old one. There is no replace route and no enable/disable route, so the switch above and this field both need the new PATCH. The field is write-only in both directions &mdash; what you type is encrypted at rest and never read back, and nothing in the API returns a secret in any form.</p>
+            </div>
+
+            <div class="row credential-row">
+              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="mono">burst</span>
+              <span class="mono">&hellip;7c19</span>
+              <span></span>
+              <span class="micro">14:17:41 &middot; 14s ago</span>
+              <span class="credential-actions">
+                <button class="pd-row-action" type="button">Replace</button>
+                <button class="pd-row-action pd-row-action-danger" type="button">Remove</button>
+              </span>
+            </div>
+
+            <div class="row credential-row">
+              <span class="pd-switch" data-on="false" role="switch" aria-checked="false"><span class="pd-switch-knob"></span></span>
+              <span class="mono">ci</span>
+              <span class="mono">&hellip;0d63</span>
+              <span></span>
+              <span class="micro">2026-08-11 09:22 &middot; disabled since</span>
+              <span class="credential-actions">
+                <button class="pd-row-action" type="button">Replace</button>
+                <button class="pd-row-action pd-row-action-danger" type="button">Remove</button>
+              </span>
+            </div>
+
+          </div>
+          <p class="spec-note">The router expands one candidate per (provider, credential, model), so two enabled keys give cerebras two rows in every ladder it appears in &mdash; which is why disabling a key and deleting it are different acts.</p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">OAuth account &mdash; the anthropic-oauth case</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; OAuth &mdash; POST /api/providers/{id}/oauth/start|complete. Expiry, last refresh and account id need the &sect;8.2 extension.</span></p>
+          <p class="prose">cerebras authenticates with a bearer key, so this panel is dark on its page. It is the same region rendered for a provider whose auth_style is oauth, shown here because it is the second half of what "credentials" means in this product.</p>
+          <div class="panel pd-panel">
+            <div class="pd-head">
+              <span class="state-pip" data-state="healthy"></span>
+              <span class="mono pd-head-id">anthropic</span>
+              <span class="chip">auth_style oauth</span>
+              <span class="micro">preset anthropic-oauth &middot; Anthropic (Claude subscription)</span>
+            </div>
+            <div class="pd-kvs">
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">account</span>
+                <span class="mono pd-kv-value">ops@darkraise.dev</span>
+                <span class="spec-note">returned once by oauth/complete and discarded today</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">expires_at</span>
+                <span class="readout">14:41:20</span>
+                <span class="spec-note"><b class="data-emph">23m 25s</b> remaining &middot; the token, not the connection</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">last_refresh</span>
+                <span class="mono pd-kv-value">14:11:20</span>
+                <span class="spec-note">6m 35s ago, by the worker &mdash; no request paid for it</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">next_refresh</span>
+                <span class="mono pd-kv-value">14:21:07</span>
+                <span class="spec-note">worker interval 5m, jittered 0.5&ndash;1.5&times;, renewing anything inside 15m of expiry</span>
+              </span>
+
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">state</span>
+                <span class="mono pd-kv-value">connected</span>
+                <span class="spec-note">the only value an operator can see today is its opposite</span>
+              </span>
+
+            </div>
+            <div class="pd-foot">
+              <button class="control" type="button">Reconnect</button>
+              <p class="prose">Today this whole panel is one boolean. Nothing is shown while the refresh keeps working, and the first thing an operator ever learns is "needs reconnection" &mdash; after a refresh has already been refused and requests are already failing. Every field above exists in the token the manager holds; four of the five are simply never returned.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Breaker</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Breaker &mdash; GET /api/health/providers, POST /api/providers/{id}/breaker/reset. Both new. Today clearing a cooldown is only a side effect of Test.</span></p>
+          <div class="panel breaker-panel">
+
+            <div class="pd-stats">
+              <div class="well pd-stat">
+                <span class="micro pd-stat-key">cooling_until</span>
+                <span class="readout">14:22:07</span>
+                <span class="mono pd-stat-sub"><span class="data-emph">4m 12s</span> remaining &middot; credential &hellip;a4f2</span>
+              </div>
+              <div class="well pd-stat">
+                <span class="micro pd-stat-key">backoff_level</span>
+                <span><span class="readout">3</span><span class="unit">of 5</span></span>
+                <span class="mono pd-stat-sub">next trip cools 8s, then 15s</span>
+              </div>
+              <div class="well pd-stat">
+                <span class="micro pd-stat-key">consecutive_failures</span>
+                <span><span class="readout">7</span></span>
+                <span class="mono pd-stat-sub">all 401, first at 14:09:58</span>
+              </div>
+            </div>
+
+            <div>
+              <p class="legend-caps">triples currently cooling</p>
+              <div class="ladder">
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; gpt-oss-120b</span>
+                  <span class="reason">
+                    <span class="reason-code">cooling</span>
+                    <span class="reason-prose">4m 12s remaining &mdash; until 14:22:07, backoff level 3</span>
+                  </span>
+                </div>
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; llama-3.3-70b</span>
+                  <span class="reason">
+                    <span class="reason-code">cooling</span>
+                    <span class="reason-prose">2m 46s remaining &mdash; until 14:20:41, backoff level 2</span>
+                  </span>
+                </div>
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; qwen-3-32b</span>
+                  <span class="reason">
+                    <span class="reason-code">cooling</span>
+                    <span class="reason-prose">2m 03s remaining &mdash; until 14:19:58, backoff level 2</span>
+                  </span>
+                </div>
+                <div class="ladder-row">
+                  <span class="mark mark-cooling"></span>
+                  <span class="target pd-triple">cerebras &middot; &hellip;a4f2 &middot; <span class="pd-empty-model">(no model)</span></span>
+                  <span class="reason">
+                    <span class="reason-code">credential-level</span>
+                    <span class="reason-prose">4m 12s remaining &mdash; the empty-model entry holds down every model this key serves</span>
+                  </span>
+                </div>
+              </div>
+              <p class="spec-note">The three readouts report the credential-level entry, which is the one that makes the provider read as cooling in the list. The model triples above it cool and clear on their own ladders and are not derived from it.</p>
+            </div>
+
+            <div class="pd-foot">
+              <button class="control" type="button">Reset breaker</button>
+              <p class="prose">Clears the four entries above and returns backoff_level to 0 without sending anything upstream. Today the only way to clear a cooldown from the console is to click Test and have it succeed, which means an operator who knows the key is fine still cannot say so &mdash; and an operator whose key is not fine gets no way to stop the ladder escalating.</p>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Probe</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Probe &mdash; POST /api/providers/{id}/test {ok,probe,latency_ms,model_count,error}. Bypasses the breaker by design; a rejected key is a 200 with ok:false, not a 5xx.</span></p>
+          <div class="panel pd-panel">
+            <div class="pd-foot" style="margin-top:0">
+              <button class="control control-primary" type="button">Test</button>
+              <p class="prose">One probe per provider at a time, 30s ceiling. It ignores the cooldown above on purpose: the usual reason to press it is to find out whether a cooling provider has recovered.</p>
+            </div>
+
+            <p class="pd-subhead">
+              <span class="legend-caps">last result</span>
+              <span class="micro">credential burst &hellip;7c19 &middot; ran 14:12:38</span>
+            </p>
+            <div class="well pd-result">
+              <span class="chip status-badge" data-status="success">ok</span>
+              <span class="pd-result-fields">
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">model_count</span><span class="data-emph">41</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">284</span></span>
+              </span>
+            </div>
+            <p class="prose pd-probe-note">A successful probe resets the ladder for the credential it ran against &mdash; every triple and the credential-level entry &mdash; and triggers one discovery pass. That is the side effect region 4's Reset breaker button and region 6's Run discovery button exist to separate from it.</p>
+
+            <p class="pd-subhead">
+              <span class="legend-caps">failed variant</span>
+              <span class="micro">credential primary &hellip;a4f2 &middot; ran 14:17:44</span>
+            </p>
+            <div class="well pd-result">
+              <span class="chip status-badge" data-status="error">ok:false</span>
+              <span class="pd-result-fields">
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">1,204</span></span>
+                <span class="pd-inline-kv"><span class="micro pd-kv-key">error</span><span class="mono pd-error-text">the provider rejected this credential: 401 Unauthorized</span></span>
+              </span>
+            </div>
+            <p class="prose pd-probe-note">A rejected key is a 200 carrying ok:false, not a 5xx: the request to darkrouter succeeded and the answer is bad news. model_count is absent rather than 0 &mdash; nothing was listed, so there is no count to report. A failed probe clears nothing; the cooldown above stands.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Discovery</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Discovery &mdash; POST /api/providers/{id}/discover. New. Discoverer.Trigger fires today only as a side effect of a successful test.</span></p>
+          <div class="panel pd-panel">
+            <div class="pd-kvs">
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">last_attempt_at</span>
+                <span class="mono pd-kv-value">14:15:12</span>
+                <span class="spec-note">2m 43s ago &mdash; the pass is running, it is just failing</span>
+              </span>
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">last_success_at</span>
+                <span class="mono pd-kv-value pd-bad">08:11:40</span>
+                <span class="spec-note">6h 06m ago. The catalog for cerebras is that old.</span>
+              </span>
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">consecutive_failures</span>
+                <span class="data-emph pd-bad">14</span>
+                <span class="spec-note">since the key was rotated upstream</span>
+              </span>
+              <span class="pd-kv">
+                <span class="micro pd-kv-key">models_in_catalog</span>
+                <span class="data-emph">41</span>
+                <span class="spec-note">stale, not gone &mdash; the router still routes on them</span>
+              </span>
+            </div>
+            <div class="well pd-error-well">
+              <span class="micro pd-kv-key">last_error</span>
+              <span class="mono pd-error-text">listing rejected the credential: 401 Unauthorized</span>
+            </div>
+            <div class="pd-foot">
+              <button class="control" type="button">Run discovery now</button>
+              <p class="prose">DB.DiscoveryStates already records all four fields and the admin package never reads them, so a provider whose listing has failed for six hours renders exactly like a healthy one. This is the region that makes stale visible, and the button is the one that lets an operator retry a pass without spending a probe.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Danger zone</p>
+          <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Delete &mdash; DELETE /api/providers/{id} returns dangling_aliases[]. A dangling alias is a warning, not a validation error.</span></p>
+          <div class="panel pd-danger">
+            <div class="pd-foot" style="margin-top:0">
+              <button class="control pd-control-danger" type="button">Delete cerebras</button>
+              <p class="prose">Removes the provider, its three credentials and its breaker state. Requests already logged keep the id and stay readable; the catalog entries go with the next snapshot build.</p>
+            </div>
+            <div class="well pd-dangling">
+              <p class="prose">Two aliases have a cerebras target in their chain and will lose it:</p>
+              <div class="pd-alias-list">
+                <span class="pd-alias">
+                  <span class="mono pd-alias-name">fast-coder</span>
+                  <span class="micro">alias chain, 1 target on cerebras</span>
+                </span>
+                <span class="pd-alias">
+                  <span class="mono pd-alias-name">cheap-embed</span>
+                  <span class="micro">alias chain, 1 target on cerebras</span>
+                </span>
+              </div>
+              <p class="prose">The delete still succeeds and reports them. That is deliberate: if a dangling alias were a validation error instead of a warning, this one click would make every subsequent config reload fail, and the operator would be left with a reload button that keeps failing and no way out of it but SSH.</p>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
