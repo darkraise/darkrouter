@@ -14,6 +14,32 @@ class TestFragmentChecks(unittest.TestCase):
         problems = qa.check_fragment(FIX / "bad_hex.html")
         self.assertTrue(any("raw hex" in p for p in problems), problems)
 
+    def test_svg_url_reference_is_not_raw_hex(self):
+        # A gradient/mask/filter id made of hex letters (fade, beef, cab...)
+        # is ordinary, not a colour that escaped the token system.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "svg_url.html"
+            f.write_text(
+                '<section class="screen" id="s-1-su" data-screen-title="su">'
+                '<p class="legend">svg url</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<svg><rect fill="url(#fade)"/></svg></section>',
+                encoding="utf-8",
+            )
+            self.assertEqual(qa.check_fragment(f), [])
+
+    def test_hex_looking_anchor_is_not_raw_hex(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "hex_anchor.html"
+            f.write_text(
+                '<section class="screen" id="s-1-ha" data-screen-title="ha">'
+                '<p class="legend">hex anchor</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<a href="#dead">x</a></section>',
+                encoding="utf-8",
+            )
+            self.assertEqual(qa.check_fragment(f), [])
+
     def test_external_resource_is_rejected(self):
         problems = qa.check_fragment(FIX / "bad_external.html")
         self.assertTrue(any("external resource" in p for p in problems), problems)

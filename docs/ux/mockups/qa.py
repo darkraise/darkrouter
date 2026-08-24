@@ -16,7 +16,11 @@ FRAGMENTS = HERE / "fragments"
 
 # Colour lives in darkrouter-ui.css. A hex in a fragment is a value that
 # escaped the token system and will not follow the light-mode swap.
-HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+# A raw colour hex only appears in a CSS value position — after whitespace, a
+# colon, a comma or a semicolon. Requiring that keeps SVG refs like
+# url(#fade) and anchors like href="#dead" out, since hex-letter ids are
+# ordinary and blocking them would be a gate that cries wolf.
+HEX = re.compile(r"(?<=[\s:,;(])(?<!url\()#[0-9a-fA-F]{3,8}\b")
 
 # Attributes that fetch, wherever they appear. The optional scheme catches
 # protocol-relative URLs, which fetch just as happily as an absolute one.
