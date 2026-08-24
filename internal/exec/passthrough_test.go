@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -53,6 +54,27 @@ func TestEligibility(t *testing.T) {
 			dialect: "gemini",
 			pt: &edge.Passthrough{
 				Body: []byte(`{"contents":[]}`), Method: "generateContent", Surface: ir.SurfaceLLM,
+			},
+			cand: router.Candidate{Kind: "gemini"}, ad: geminiadapter.New(), want: true,
+		},
+		{
+			// Array-form streaming has no event boundaries for the recognizer to
+			// find, so it takes the IR path instead. Non-streaming Gemini requests
+			// never reach this check at all.
+			name:    "gemini streaming without alt=sse is ineligible",
+			dialect: "gemini",
+			pt: &edge.Passthrough{
+				Body: []byte(`{"contents":[]}`), Method: "streamGenerateContent",
+				Surface: ir.SurfaceLLM, Stream: true, Query: url.Values{},
+			},
+			cand: router.Candidate{Kind: "gemini"}, ad: geminiadapter.New(), want: false,
+		},
+		{
+			name:    "gemini streaming with alt=sse is eligible",
+			dialect: "gemini",
+			pt: &edge.Passthrough{
+				Body: []byte(`{"contents":[]}`), Method: "streamGenerateContent",
+				Surface: ir.SurfaceLLM, Stream: true, Query: url.Values{"alt": []string{"sse"}},
 			},
 			cand: router.Candidate{Kind: "gemini"}, ad: geminiadapter.New(), want: true,
 		},
