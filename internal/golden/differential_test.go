@@ -56,11 +56,10 @@ type capture struct{ rec *store.RequestRecord }
 func (c *capture) Log(r *store.RequestRecord) { c.rec = r }
 
 type pathResult struct {
-	UpstreamBody   []byte
-	UpstreamHeader http.Header
-	ClientBody     []byte
-	ClientStatus   int
-	Record         *store.RequestRecord
+	UpstreamBody []byte
+	ClientBody   []byte
+	ClientStatus int
+	Record       *store.RequestRecord
 }
 
 // executorFor builds an executor over one provider of the given kind. When
@@ -117,7 +116,6 @@ func bothPaths(t *testing.T, dialect, kind string, m meta, inbound []byte,
 		var got pathResult
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got.UpstreamBody, _ = io.ReadAll(r.Body)
-			got.UpstreamHeader = r.Header.Clone()
 			upstream(w, r)
 		}))
 		cap := &capture{}
@@ -131,6 +129,22 @@ func bothPaths(t *testing.T, dialect, kind string, m meta, inbound []byte,
 		got.ClientBody, got.ClientStatus, got.Record = w.Body.Bytes(), w.Code, cap.rec
 		if got.Record == nil {
 			t.Fatalf("no request record for %s/%s (forward=%v)", dialect, kind, run.forward)
+		}
+
+		// Every comparison downstream is only meaningful if each run actually
+		// took the path it was set up to take. Without this, two identical
+		// failures — or the fast run silently falling back to the IR
+		// rendering — would read as agreement.
+		wantPath := exec.PathIR
+		if run.forward {
+			wantPath = exec.PathPassthrough
+		}
+		if len(got.Record.Attempts) == 0 {
+			t.Fatalf("%s/%s (forward=%v): no attempts recorded", dialect, kind, run.forward)
+		}
+		if gotPath := got.Record.Attempts[len(got.Record.Attempts)-1].Path; gotPath != wantPath {
+			t.Fatalf("%s/%s (forward=%v): final attempt took path %q, want %q",
+				dialect, kind, run.forward, gotPath, wantPath)
 		}
 		*run.out = got
 	}
@@ -319,7 +333,16 @@ func TestDifferentialUsageAgrees(t *testing.T) {
 				canned := readFixture(t, filepath.Join(dir, "upstream.sse"))
 				fast, irp := bothPaths(t, dialect, kind, streamMeta(dialect),
 					streamingBody(dialect), serveBytes(canned, "text/event-stream"))
-				assertSameUsage(t, fast.Record, irp.Record)
+				if bothSucceeded(t, fast, irp) {
+					assertSameUsage(t, fast.Record, irp.Record)
+				}
+				if kind == "openaicompat" {
+					// The canned SSE reports usage regardless of whether the
+					// injection ran, so the token-count agreement above would
+					// stay green even with §5.2's injection deleted. This is
+					// what actually pins the injection to the forwarded body.
+					assertStreamOptionsInjected(t, fast.UpstreamBody)
+				}
 			})
 		}
 		for _, dir := range caseDirs(t, filepath.Join("responses", kind)) {
@@ -327,9 +350,58 @@ func TestDifferentialUsageAgrees(t *testing.T) {
 				canned := readFixture(t, filepath.Join(dir, "response.json"))
 				fast, irp := bothPaths(t, dialect, kind, unaryMeta(dialect), minimalBody(dialect),
 					serveBytes(canned, "application/json"))
-				assertSameUsage(t, fast.Record, irp.Record)
+				if bothSucceeded(t, fast, irp) {
+					assertSameUsage(t, fast.Record, irp.Record)
+				}
 			})
 		}
+	}
+}
+
+// bothSucceeded is the usage comparison's gate. Three rules:
+//
+//  1. The fast run must always have succeeded. It forwards the provider's own
+//     status, and every canned fixture in this corpus serves 200, so anything
+//     else means Darkrouter itself failed, not a legitimate divergence.
+//  2. Usage is compared only when both runs succeeded — a token count from a
+//     run that deliberately errored is not comparable to anything.
+//  3. When the IR run did not succeed, its record must carry a non-empty
+//     ErrorCode. That is what makes skipping the comparison legitimate rather
+//     than a silent pass: it proves the IR path declined this body on
+//     purpose — Gemini's blocked-prompt shape is the recorded case, where the
+//     IR path synthesizes a 400 and the fast path forwards Google's raw 200,
+//     both deliberately — and it is the record's own word for why, not this
+//     test's guess.
+func bothSucceeded(t *testing.T, fast, irp pathResult) bool {
+	t.Helper()
+	if fast.ClientStatus != http.StatusOK {
+		t.Fatalf("passthrough run did not succeed: status %d, body %s", fast.ClientStatus, fast.ClientBody)
+	}
+	if irp.ClientStatus == http.StatusOK {
+		return true
+	}
+	if irp.Record.ErrorCode == "" {
+		t.Fatalf("ir run failed with status %d and no recorded ErrorCode: body %s",
+			irp.ClientStatus, irp.ClientBody)
+	}
+	return false
+}
+
+// assertStreamOptionsInjected checks spec §5.2's claim directly, on the
+// forwarded body the fake provider actually received, rather than inferring
+// it from usage numbers a canned fixture reports unconditionally.
+func assertStreamOptionsInjected(t *testing.T, upstreamBody []byte) {
+	t.Helper()
+	v, ok := topLevelValue(t, upstreamBody, "stream_options")
+	if !ok {
+		t.Fatalf("stream_options was not injected into the forwarded body: %s", upstreamBody)
+	}
+	opts, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("stream_options is not an object: %v", v)
+	}
+	if include, _ := opts["include_usage"].(bool); !include {
+		t.Fatalf("stream_options.include_usage is not true: %v", opts)
 	}
 }
 
