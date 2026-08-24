@@ -316,7 +316,7 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 		}
 
 		attempts++
-		res := e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, true)
+		res := e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, true, nil)
 		if res.Err != nil {
 			lastErr = res.Err
 		}
@@ -333,7 +333,16 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			attempts < maxAttempts && bud.canStartAttempt(time.Now()) {
 
 			attempts++
-			res = e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, false)
+			// The retry drops whatever the provider rejected, and a client told
+			// only "200" would believe its parameter took effect. Naming the
+			// field is not possible here: the edge parser unmarshals into a
+			// fixed struct, so an unmodelled top-level key is already gone.
+			retryWarn := []ir.Warning{{
+				Field: "passthrough", Target: c.ProviderID + "/" + c.Model,
+				Reason: "the provider rejected the forwarded body; it was " +
+					"translated and retried, which drops any field the IR does not model",
+			}}
+			res = e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, false, retryWarn)
 			if res.Err != nil {
 				lastErr = res.Err
 			}
@@ -392,7 +401,8 @@ type attemptResult struct {
 func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	cfg *config.Config, c router.Candidate, p provider.Provider,
 	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
-	cat catalog.Reader, firstModel string, allowForward bool) attemptResult {
+	cat catalog.Reader, firstModel string, allowForward bool,
+	extraWarns []ir.Warning) attemptResult {
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
@@ -416,7 +426,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		Region:     p.Region, Project: p.Project, Location: p.Location,
 		Publisher: c.Publisher,
 	}
-	var warns []ir.Warning
+	warns := append([]ir.Warning(nil), extraWarns...)
 	if iw, ok := inferredWarningFor(c, op.Query()); ok {
 		warns = append(warns, iw)
 	}
