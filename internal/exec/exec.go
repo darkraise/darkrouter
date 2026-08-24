@@ -216,6 +216,8 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 
 	if compressedBody(r) {
+		// Refused before parsing, but still logged: the client sent bytes and
+		// got a response, which is an event the operator's records must cover.
 		start := time.Now()
 		rec, done := e.newRecord(start, d.Name(), string(ir.SurfaceLLM))
 		defer done()
