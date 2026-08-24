@@ -40,6 +40,53 @@ class TestFragmentChecks(unittest.TestCase):
             )
             self.assertEqual(qa.check_fragment(f), [])
 
+    def test_hex_in_svg_fill_is_rejected(self):
+        # fill="#FF0000" is the canonical way a raw hex enters an SVG-heavy
+        # fragment; the url(#...)/href="#..." exemptions must not swallow it.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "svg_fill.html"
+            f.write_text(
+                '<section class="screen" id="s-1-sf" data-screen-title="sf">'
+                '<p class="legend">svg fill</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<svg><rect fill="#FF0000"/></svg></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("raw hex" in p for p in problems), problems)
+
+    def test_legend_caps_is_not_a_legend(self):
+        # A plain \b word boundary sits at a hyphen, so "legend" would match
+        # "legend-caps" and three nav-group labels would read as three extra
+        # legends.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "legend_caps.html"
+            f.write_text(
+                '<section class="screen" id="s-1-lc" data-screen-title="lc">'
+                '<p class="legend">only legend</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<p class="legend-caps">Operate</p>'
+                '<p class="legend-caps">Configure</p>'
+                '<p class="legend-caps">Use</p></section>',
+                encoding="utf-8",
+            )
+            self.assertEqual(qa.check_fragment(f), [])
+
+    def test_header_element_is_allowed_in_a_fragment(self):
+        # <header> is a legitimate content element (a page/section banner),
+        # not the document <head>; a substring check on "<head" would
+        # falsely flag it.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "header_elem.html"
+            f.write_text(
+                '<section class="screen" id="s-1-he" data-screen-title="he">'
+                '<p class="legend">header</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<header class="topbar">x</header></section>',
+                encoding="utf-8",
+            )
+            self.assertEqual(qa.check_fragment(f), [])
+
     def test_external_resource_is_rejected(self):
         problems = qa.check_fragment(FIX / "bad_external.html")
         self.assertTrue(any("external resource" in p for p in problems), problems)

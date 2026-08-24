@@ -16,11 +16,10 @@ FRAGMENTS = HERE / "fragments"
 
 # Colour lives in darkrouter-ui.css. A hex in a fragment is a value that
 # escaped the token system and will not follow the light-mode swap.
-# A raw colour hex only appears in a CSS value position — after whitespace, a
-# colon, a comma or a semicolon. Requiring that keeps SVG refs like
-# url(#fade) and anchors like href="#dead" out, since hex-letter ids are
-# ordinary and blocking them would be a gate that cries wolf.
-HEX = re.compile(r"(?<=[\s:,;(])(?<!url\()#[0-9a-fA-F]{3,8}\b")
+# A raw colour hex is any # literal that is not an in-page reference. Excluding
+# url(#…) and href="#…" keeps hex-letter SVG ids and anchors — fade, beef,
+# cafe — out, without exempting fill="#FF0000", which is the real sin.
+HEX = re.compile(r"""(?<!url\()(?<!href=")(?<!href=')#[0-9a-fA-F]{3,8}\b""")
 
 # Attributes that fetch, wherever they appear. The optional scheme catches
 # protocol-relative URLs, which fetch just as happily as an absolute one.
@@ -45,8 +44,15 @@ MAX_FONT_PX = 30.0
 
 
 def class_token(name: str) -> re.Pattern:
-    """Match one class among several. `class="legend prose"` still counts."""
-    return re.compile(rf'class\s*=\s*["\'][^"\']*\b{name}\b[^"\']*["\']')
+    """Match one class among several.
+
+    The delimiter must exclude the hyphen as well as word characters: a plain
+    \b sits at a hyphen, so "legend" would match "legend-caps" and a screen
+    with three group labels reads as having four legends.
+    """
+    return re.compile(
+        rf'class\s*=\s*["\'][^"\']*(?<![\w-]){name}(?![\w-])[^"\']*["\']'
+    )
 
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -124,9 +130,9 @@ def check_fragment(path: Path) -> list[str]:
     if 'data-screen-title=' not in text:
         problems.append(f"{path.name}: missing data-screen-title")
 
-    for forbidden in ("<html", "<head", "<body", "<style"):
-        if forbidden in text.lower():
-            problems.append(f"{path.name}: fragment contains {forbidden}> — fragments are sections only")
+    for forbidden in ("html", "head", "body", "style"):
+        if re.search(rf"<{forbidden}\b", text, re.IGNORECASE):
+            problems.append(f"{path.name}: fragment contains <{forbidden}> — fragments are sections only")
 
     return problems
 

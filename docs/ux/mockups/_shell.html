@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-mode="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -21,10 +21,7 @@
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
         var k = e.key.toLowerCase();
         if (k === "a") document.body.classList.toggle("pins-on");
-        if (k === "t") {
-          var light = document.body.classList.toggle("theme-light");
-          document.documentElement.setAttribute("data-mode", light ? "light" : "dark");
-        }
+        if (k === "t") document.body.classList.toggle("theme-light");
       });
     </script>
   </body>
