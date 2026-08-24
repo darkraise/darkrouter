@@ -20,7 +20,9 @@ CSS_PARTIALS = HERE / "css"
 # A raw colour hex is any # literal that is not an in-page reference. Excluding
 # url(#…) and href="#…" keeps hex-letter SVG ids and anchors — fade, beef,
 # cafe — out, without exempting fill="#FF0000", which is the real sin.
-HEX = re.compile(r"""(?<!url\()(?<!href=")(?<!href=')#[0-9a-fA-F]{3,8}\b""")
+# The &-lookbehind excludes HTML numeric character references (&#9662;,
+# &#x1F600;) — a glyph escape, not a colour that escaped the token system.
+HEX = re.compile(r"""(?<!&)(?<!url\()(?<!href=")(?<!href=')#[0-9a-fA-F]{3,8}\b""")
 
 # Attributes that fetch, wherever they appear. The optional scheme catches
 # protocol-relative URLs, which fetch just as happily as an absolute one.

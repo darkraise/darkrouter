@@ -114,25 +114,25 @@
 
         </div>
 
-        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}.</span></p>
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}. Status stays state colour &mdash; an outcome, whether it's a provider's health or a request's result. The failover chip stays trace/accent-ink &mdash; a routing choice among alternatives, not an outcome.</span></p>
         <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
         <div class="table-toolbar">
           <span class="micro">14 of 2,481 requests</span>
           <div class="table-toolbar-actions">
             <button class="control">Columns ▾</button>
+            <div class="col-menu">
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>time</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>surface</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>model</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>provider</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>status</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>attempts</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>tokens in/out</span></span>
+              <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>latency</span></span>
+              <div class="col-menu-sep"></div>
+              <span class="col-menu-item col-menu-export"><span class="combo-check">⇩</span><span>Export CSV&hellip;</span></span>
+            </div>
           </div>
-        </div>
-        <div class="col-menu">
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>time</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>surface</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>model</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>provider</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>status</span></span>
-          <span class="col-menu-item" data-checked="false"><span class="combo-check">✓</span><span>attempts</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>tokens in/out</span></span>
-          <span class="col-menu-item" data-checked="true"><span class="combo-check">✓</span><span>latency</span></span>
-          <div class="col-menu-sep"></div>
-          <span class="col-menu-item col-menu-export"><span class="combo-check">⇩</span><span>Export CSV&hellip;</span></span>
         </div>
 
         <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>

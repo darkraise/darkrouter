@@ -52,7 +52,7 @@
           <div class="live-strip">
 
             <div class="well live-tile">
-              <p class="spec-note">requests_per_min &middot; over the last 5 min</p>
+              <p class="live-tile-caption"><span class="mono">requests_per_min</span> &middot; over the last 5 min</p>
               <div class="live-tile-value">
                 <span class="readout">14.2</span>
               </div>
@@ -63,7 +63,7 @@
             </div>
 
             <div class="well live-tile">
-              <p class="spec-note">error_rate &middot; over the last 5 min</p>
+              <p class="live-tile-caption"><span class="mono">error_rate</span> &middot; over the last 5 min</p>
               <div class="live-tile-value">
                 <span class="readout">2.4</span><span class="unit">%</span>
               </div>
@@ -74,7 +74,7 @@
             </div>
 
             <div class="well live-tile">
-              <p class="spec-note">latency &middot; over the last 5 min</p>
+              <p class="live-tile-caption">latency &middot; over the last 5 min</p>
               <div class="live-tile-value">
                 <span class="live-tile-metric"><span class="micro">p50</span><span class="readout">890</span><span class="unit">ms</span></span>
                 <span class="live-tile-metric"><span class="micro">p95</span><span class="readout">4.1</span><span class="unit">s</span></span>
@@ -89,7 +89,7 @@
               <div class="load-bar" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="refreshing today_spend">
                 <span class="load-bar-fill" style="width:58%"></span>
               </div>
-              <p class="spec-note">today_spend &middot; over the last 5 min</p>
+              <p class="live-tile-caption"><span class="mono">today_spend</span></p>
               <div class="live-tile-value">
                 <span class="readout">$3.47</span>
               </div>
@@ -105,7 +105,7 @@
 
         <div class="region">
           <p class="section-title">Provider health</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace. needs_reauth renders its callout in --state-cooling, not --state-failed &mdash; the vertex provider itself is healthy, and reconnecting it is the one state only the operator can fix, the cooling/attention colour rather than an outage.</span></p>
           <div class="health-grid">
 
             <div class="well health-tile">
@@ -185,35 +185,35 @@
             <a class="row" href="#01HZXK4M9QANE2FTX7RS3JV8CB">
               <span class="mono" style="min-width:64px">14:22:07</span>
               <span class="mono" style="flex:1 1 auto">default &rarr; together/openai-gpt-oss-120b</span>
-              <span class="chip">3 attempts</span>
+              <span class="chip chip-failover">failover &times;3</span>
               <span class="data-emph" style="margin-left:auto">1,847ms</span>
             </a>
 
             <a class="row" href="#01HZXK5PWENA3D9RTX2FC6MJQ8">
               <span class="mono" style="min-width:64px">14:19:52</span>
               <span class="mono" style="flex:1 1 auto">fast &rarr; cerebras/openai-gpt-oss-120b</span>
-              <span class="chip">2 attempts</span>
+              <span class="chip chip-failover">failover &times;2</span>
               <span class="data-emph" style="margin-left:auto">612ms</span>
             </a>
 
             <a class="row" href="#01HZXK6R2TCEMA9NF3XJ7VQ5WB">
               <span class="mono" style="min-width:64px">14:11:30</span>
               <span class="mono" style="flex:1 1 auto">vision &rarr; openrouter/qwen/qwen3-vl-235b</span>
-              <span class="chip">2 attempts</span>
+              <span class="chip chip-failover">failover &times;2</span>
               <span class="data-emph" style="margin-left:auto">2,104ms</span>
             </a>
 
             <a class="row" href="#01HZXK7T4WBNF2CQ9RXM3E6JAP">
               <span class="mono" style="min-width:64px">13:58:44</span>
               <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
-              <span class="chip">4 attempts</span>
+              <span class="chip chip-failover">failover &times;4</span>
               <span class="data-emph" style="margin-left:auto">4,392ms</span>
             </a>
 
             <a class="row" href="#01HZXK8V6RCAM9FQ2TXJ5WNE3B">
               <span class="mono" style="min-width:64px">13:47:19</span>
               <span class="mono" style="flex:1 1 auto">default &rarr; deepinfra/openai-gpt-oss-120b</span>
-              <span class="chip">2 attempts</span>
+              <span class="chip chip-failover">failover &times;2</span>
               <span class="data-emph" style="margin-left:auto">890ms</span>
             </a>
 

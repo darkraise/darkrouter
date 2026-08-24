@@ -2,12 +2,13 @@
  * Task 6 — the Requests log ("operate/requests").
  *
  * New vocabulary this screen introduces for reuse by Tasks 9 and 12:
- * .filter-bar, .combo (+ trigger/menu/option/check), .segmented,
- * .time-range, .view-chip, .chip-failover, .chip-path, .newer-pill,
- * .table-toolbar, .col-menu, and the .col-* column-width helpers the
- * request table's header and rows share. Everything else (.table, .row,
- * .chip, .control, .well, .panel, .legend-caps, .micro, .prose) is reused
- * as-is from darkrouter-ui.css.
+ * .filter-bar, .combo (+ trigger/menu/option/check), .time-range,
+ * .view-chip, .newer-pill, .table-toolbar, .col-menu, and the .col-*
+ * column-width helpers the request table's header and rows share.
+ * .segmented, .chip-failover, .chip-path and .control-ghost were promoted
+ * to darkrouter-ui.css once Overview and Usage needed the same controls.
+ * Everything else (.table, .row, .chip, .control, .well, .panel,
+ * .legend-caps, .micro, .prose) is reused as-is from darkrouter-ui.css.
  */
 
 /* --- Saved views --------------------------------------------------- */
@@ -131,33 +132,6 @@
   color: var(--ink-muted);
 }
 
-/* --- Segmented control ----------------------------------------------- */
-
-.segmented {
-  display: inline-flex;
-  align-items: stretch;
-  height: var(--control-h);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--panel);
-  overflow: hidden;
-}
-
-.segmented-option {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 10px;
-  border-right: 1px solid var(--hairline-subtle);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  color: var(--ink-muted);
-}
-.segmented-option:last-child { border-right: none; }
-.segmented-option[data-active="true"] {
-  color: var(--accent-ink);
-  background: var(--overlay);
-}
-
 /* --- Time-range picker ------------------------------------------------- */
 
 .time-range {
@@ -171,7 +145,7 @@
   gap: 8px;
   margin-top: 4px;
   padding: 8px;
-  width: 264px;
+  width: 340px;
   background: var(--overlay);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
@@ -211,7 +185,7 @@
 
 .time-range-input {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 128px;
   height: 24px;
   padding: 0 6px;
   background: var(--well);
@@ -221,17 +195,6 @@
   font-size: 11px;
   color: var(--ink);
 }
-
-/* --- Ghost button --------------------------------------------------- */
-
-.control-ghost {
-  background: transparent;
-  border-color: var(--hairline-subtle);
-  color: var(--ink-muted);
-  opacity: 0.8;
-  transition: opacity var(--dur-hover) ease;
-}
-.control-ghost:hover { opacity: 1; }
 
 /* --- Table toolbar + column-visibility menu --------------------------- */
 
@@ -243,16 +206,24 @@
 }
 
 .table-toolbar-actions {
+  position: relative;
   display: flex;
   gap: 8px;
 }
 
+/* The second overlay in this screen (after .combo-menu/.time-range-menu):
+   floats over the table on the same --overlay + --shadow-overlay surface
+   rather than sitting in normal flow, which would push the table down and
+   leave a dead band the width of the menu behind it. */
 .col-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 1px;
   width: 240px;
-  margin: 0 0 var(--gutter) auto;
   padding: 4px;
   background: var(--overlay);
   border: 1px solid var(--hairline);
@@ -282,7 +253,13 @@
   background: var(--hairline-subtle);
 }
 
+/* Export is an action, not a toggle — its glyph would otherwise inherit
+   .combo-check's color: transparent and read as an unchecked box. */
 .col-menu-export { color: var(--accent-ink); }
+.col-menu-export .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
 
 /* --- Request table -----------------------------------------------------
    .table/.row are shared (darkrouter-ui.css); everything below is the
@@ -322,22 +299,8 @@
 
 .text-muted { color: var(--ink-muted); }
 
-/* Routing behaviour — how many candidates the router walked through
-   before this request landed — is what the ROUTER DECIDED, the same
-   split the ladder's --trace/state-colour rule already draws (see
-   .mark-served vs .mark-cooling in darkrouter-ui.css). No single
-   provider on these two rows is reported as cooling, so --state-cooling
-   would misstate what happened; --trace is the routing-verdict channel,
-   and a failover count is exactly that. */
-.chip-failover {
-  border-color: var(--trace);
-  color: var(--trace);
-}
-
-/* Dialect/path annotations — quiet facts about how the request was
-   handled, the same register --legend already carries for secondary
-   captions elsewhere in the system. */
-.chip-path { color: var(--legend); }
+/* .chip-failover and .chip-path are shared with Overview's failover log,
+   so both live in darkrouter-ui.css now. */
 
 /* --- Newer pill ----------------------------------------------------------
    Floats astride the table's top edge on purpose — that seam is where a
