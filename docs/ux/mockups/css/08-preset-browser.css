@@ -5,11 +5,11 @@
  * so nearly everything below exists to build one dialog: a stage that lets
  * the dimmed page and the dialog occupy the same box, the scrim, and the
  * dialog surfaces themselves. Reused as-is from darkrouter-ui.css: .panel,
- * .well, .table, .row, .chip, .control, .control-ghost, .micro, .mono,
- * .data-emph, .prose, .legend-caps, .section-title, .state-pip. Reused from
- * 08's sibling partial css/03-requests.css: .combo-check, because a facet
- * checkbox and a filter-menu checkbox are the same affordance and a second
- * 12px tick box would be a divergence, not a variant.
+ * .well, .table, .row, .chip, .control, .control-primary, .control-ghost,
+ * .micro, .mono, .data-emph, .prose, .legend-caps, .section-title,
+ * .state-pip, .switch (+ parts), .field-input, .link, .combo-check —
+ * a facet checkbox and a filter-menu checkbox are the same affordance and a
+ * second 12px tick box would be a divergence, not a variant.
  *
  * Every class here is prefixed preset- because three other screens are being
  * drawn into this same concatenated stylesheet at the same time.
@@ -121,11 +121,14 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 }
 
 /* --- Search -----------------------------------------------------------
-   The browse surface is a .panel laid inside the --overlay dialog, and
-   every data region below is a .well cut into that panel. Wells cannot sit
-   directly on the dialog: in light mode --overlay and --well are the same
-   value, so the recess would vanish. The panel is the step that keeps the
-   dark-darker / light-brighter inversion intact inside an overlay. */
+   The browse surface used to be a .panel laid inside the --overlay dialog
+   purely to work around light mode: --overlay and --well were the same
+   value there, so a well cut straight into the dialog would have no
+   recess. Now that the overlay ruling makes --overlay panel-valued in
+   light (with lift from --shadow-overlay and the hairline, not from a
+   brighter fill), that intermediate panel is redundant — a well cut
+   directly into .preset-modal gets the same well/panel step every other
+   well gets. .preset-browse keeps its padding and drops the surface. */
 
 .preset-browse { padding: var(--section-pad); }
 
@@ -172,7 +175,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   display: flex;
   align-items: center;
   gap: var(--section-pad);
-  height: 26px;
+  height: 24px;
   padding: 0 10px;
   border-bottom: 1px solid var(--hairline-subtle);
   text-decoration: none;
@@ -223,7 +226,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 22px;
+  height: 24px;
   padding: 0 8px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
@@ -256,32 +259,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   font-size: 12px;
   color: var(--ink);
 }
-
-/* 2px radius like everything else — a pill-shaped switch would be the only
-   round object in the console. */
-.preset-toggle {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  width: 24px;
-  height: 14px;
-  padding: 2px;
-  border: 1px solid var(--bezel);
-  border-radius: var(--radius);
-  background: var(--well);
-}
-.preset-toggle-knob {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-}
-.preset-toggle[data-on="true"] {
-  justify-content: flex-end;
-  border-color: var(--trace);
-  background: var(--trace-fill);
-}
-.preset-toggle[data-on="true"] .preset-toggle-knob { background: var(--ink); }
 
 /* --- Results grid ------------------------------------------------------ */
 
@@ -407,19 +384,13 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   color: var(--ink-muted);
 }
 
-/* Accent as TEXT, so --accent-ink (5.69:1 in light) and never --trace
-   (3.93:1). Links are the one place that distinction is load-bearing. */
+/* Sizing and position only — colour, underline and the hover opacity
+   idiom come from the shared .link class. */
 .preset-link {
   margin-left: auto;
-  font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
-  color: var(--accent-ink);
-  text-decoration: none;
   white-space: nowrap;
-  opacity: 0.9;
-  transition: opacity var(--dur-hover) ease;
 }
-.preset-link:hover { opacity: 1; text-decoration: underline; }
 
 /* --- Create form, inline under the selected card ----------------------- */
 
@@ -434,16 +405,15 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 .preset-field-label { display: block; }
 
-.preset-input {
+/* This form is a .well cut into the results grid; a well-backed input
+   inside it would flatten to the same value with no recess in either
+   theme. Panel is the step that keeps a value distinguishable from its
+   container here — the same reason .preset-supplies below sits on panel
+   rather than well. */
+.preset-form .field-input {
   width: 100%;
-  height: var(--control-h);
   padding: 0 10px;
   background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
 }
 
 .preset-field-note {
@@ -459,14 +429,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   align-items: center;
   gap: 8px;
   margin-top: var(--section-pad);
-}
-
-/* The one committing action in the dialog. Outlined in --accent-ink rather
-   than filled, matching how .view-chip and .time-range-preset already mark
-   the live option — this console has no filled buttons. */
-.preset-primary {
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
 }
 
 /* The inventory of everything the operator is not typing. A two-column

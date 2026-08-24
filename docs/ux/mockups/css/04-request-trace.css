@@ -2,17 +2,17 @@
  * Task 7 — Request trace ("operate/requests" detail view).
  *
  * New component classes this screen introduces: .trace-header (+ -row/-id/
- * -route/-route-sep/-route-arrow/-route-target), .status-badge,
- * .trace-copy-btn, .waterfall-tracks (+ -row/-row-label/-track/-seg/-end/
- * -total), .readout-strip/.readout-tile, .warning-list (named by the task
- * brief's own Interfaces contract), .json-tree (+ -row/-depth-N/-toggle/
- * -key/-string/-punct/-collapsed-count), .control-primary, .trace-footer.
+ * -route/-route-sep/-route-arrow/-route-target), .trace-copy-btn,
+ * .waterfall-tracks (+ -row/-row-label/-track/-seg/-end/-total),
+ * .readout-strip/.readout-tile, .warning-list (named by the task brief's
+ * own Interfaces contract), .json-tree (+ -row/-depth-N/-toggle/-key/
+ * -string/-punct/-collapsed-count), .trace-footer.
  * Everything else composes .well/.panel/.chip/.row/.mono/.prose/.readout/
  * .unit/.micro/.spec-note/.section-title/.empty-well/.chart-well/
  * .chart-axis/.reason/.reason-code/.reason-prose/.mark/.mark-served/
- * .mark-failed from darkrouter-ui.css or an earlier screen's partial
- * unchanged — this is a leaf screen, so no later fragment can depend on
- * anything declared here staying stable.
+ * .mark-failed/.control-primary/.status-badge from darkrouter-ui.css or an
+ * earlier screen's partial unchanged — this is a leaf screen, so no later
+ * fragment can depend on anything declared here staying stable.
  */
 
 /* --- Region 1: header --------------------------------------------------- */
@@ -31,21 +31,6 @@
 }
 
 .trace-id { color: var(--ink); }
-
-/* A generic status pill: box shape from .chip, colour from data-status —
-   the same variant convention .state-pip already uses for provider
-   identity. success/error are the only two request outcomes; the state
-   colours are legitimate here because a request's own status is not a
-   routing verdict, the same reasoning that lets .status-success/-error
-   use them on the Requests table two screens back. */
-.status-badge[data-status="success"] {
-  border-color: var(--state-healthy);
-  color: var(--state-healthy);
-}
-.status-badge[data-status="error"] {
-  border-color: var(--state-failed);
-  color: var(--state-failed);
-}
 
 /* .chip has no hover treatment of its own; this one is a button, so it
    needs the opacity-on-hover idiom .view-chip already establishes. */
@@ -140,6 +125,14 @@
   top: 50%;
   transform: translate(-50%, -50%);
 }
+/* .mark-served already gets a boundary from its two-tone trace/trace-fill
+   fill; .mark-failed has only the one state-failed token, so its end-cap
+   sitting on a bar of the identical colour has no edge and reads as one
+   shape with the bar instead of a discrete mark. A 1px ring in the
+   track's own background punches a boundary the same way a keyline
+   would, giving the failed cap the same discrete-mark legibility the
+   served cap gets from its fill. */
+.waterfall-end.mark-failed { border: 1px solid var(--well); }
 
 .waterfall-total {
   flex: 0 0 64px;
@@ -225,15 +218,7 @@
   color: var(--legend);
 }
 
-/* --- Region 8: open in playground ----------------------------------------
-   .control already proves the 30px control silhouette; this is the one
-   place on the screen that wants to read as the primary action, so it
-   takes the same accent-ink treatment .col-menu-export already uses for
-   its own single emphasised action. */
-.control-primary {
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
-}
+/* --- Region 8: open in playground ---------------------------------------- */
 
 .trace-footer {
   display: flex;

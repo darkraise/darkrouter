@@ -31,7 +31,7 @@
         <div class="row">
           <span class="swatch" style="background:var(--overlay)"></span>
           <span class="mono" style="min-width:140px">--overlay</span>
-          <span class="micro">vs --ink-muted &mdash; dark 5.81:1 &middot; light 6.10:1</span>
+          <span class="micro">vs --ink-muted &mdash; dark 5.81:1 &middot; light 5.84:1 (light: same hex as --panel)</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--well)"></span>
@@ -166,6 +166,14 @@
         --trace and --bezel. A healthy provider (groq) can still be
         skipped; a cooling one (cerebras) can still serve. State colour
         never appears in the gutter; --trace never appears on a pip.
+        A third, narrower use of --state-failed exists alongside these
+        two: the DESTRUCTIVE AFFORDANCE on a control whose action removes
+        something (a delete button's border and hover text) rather than
+        reporting an outcome that already happened. It is defensible
+        precisely because a destructive click produces a failed-shaped
+        result &mdash; the row is gone &mdash; but it is a third, named
+        thing, not a variant reading of a request's status or a
+        provider's health, and it never appears on a pip or a ladder mark.
       </p>
     </div>
 
@@ -280,6 +288,16 @@
           </div>
         </div>
       </div>
+      <p class="prose">
+        In light mode, --overlay carries the same hex as --panel &mdash;
+        its lift comes entirely from --shadow-overlay and the 1px
+        --hairline border, not from sitting brighter than what is behind
+        it. Dark mode is unchanged: dark --overlay is already brighter
+        than --panel on its own. Either way, a well cut into an overlay
+        steps down to --well exactly as a well cut into a panel does, so
+        a dropdown's search box or a dialog's data region reads the same
+        recessed value everywhere in the product.
+      </p>
     </div>
 
     <div class="region">

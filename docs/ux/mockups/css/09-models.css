@@ -7,9 +7,6 @@
  *   .range-facet (+ -label/-track/-fill/-input)  a two-ended numeric facet;
  *       .segmented picks one of N and .combo picks a set, neither expresses
  *       a MIN..MAX span, which is what min_context actually is.
- *   .switch (+ -track/-knob/-label)              a boolean filter toggle;
- *       .view-chip and .segmented-option both read as "one of several",
- *       and a lone chip cannot show its own off state.
  *   .cap-triad/.cap-bit                          a fixed three-slot bit
  *       field for tools/vision/reasoning. .chip is variable-width, so a
  *       column of chips jitters; the point here is that the slot stays put
@@ -51,25 +48,22 @@
  * .rank/.mark/.mark-catalog/.credential-tag/.target-muted/.filter-bar/
  * .combo/.combo-trigger/.combo-menu/.combo-option/.combo-check/.combo-count/
  * .combo-chevron/.table-toolbar/.table-toolbar-actions/.table-wrap/
- * .row-head/.col-right/.text-muted.
+ * .row-head/.col-right/.text-muted/.switch (+ parts)/.field (+ -span-2)/
+ * .field-input/.link.
  */
 
 /* --- Region 1: facets --------------------------------------------------
    The catalog's query box sits in the same 30px silhouette as .control so
    the filter bar keeps one baseline; it is an input rather than a trigger
-   because q= is free text, not a chosen value. */
+   because q= is free text, not a chosen value. .field-input supplies the
+   look; this is only the one width this screen's box needs. */
 
-.q-input {
-  width: 200px;
-  height: var(--control-h);
-  padding: 0 var(--section-pad);
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
-}
+.q-input { width: 200px; padding: 0 var(--section-pad); }
+/* readonly here is only what keeps a static mockup from looking typable —
+   an operator would type into this box in the real product, unlike a
+   Provider-detail field .field-input[readonly] marks as not patchable —
+   so it keeps the live input's own well/ink weight instead of dimming. */
+.q-input[readonly] { background: var(--well); color: var(--ink); }
 
 /* A span, not one of N. The two ends are real numbers the operator types,
    and the track between them is the reading — how much of the catalog's
@@ -124,52 +118,6 @@
   border-radius: var(--radius);
   background: var(--accent-ink);
 }
-
-/* --- Region 3: the retired toggle --------------------------------------
-   Rectangular, 2px radius: a pill switch is the one component that always
-   tries to reintroduce a radius this product does not have. Off is the
-   default state, so off is the state that had to look deliberate. */
-
-.switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--control-h);
-}
-
-.switch-track {
-  position: relative;
-  flex: 0 0 auto;
-  width: 26px;
-  height: 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--well);
-}
-
-.switch-knob {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-  transition: opacity var(--dur-hover) ease;
-}
-.switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
-.switch[data-on="true"] .switch-knob {
-  left: auto;
-  right: 1px;
-  background: var(--accent-ink);
-}
-
-.switch-label {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  color: var(--ink-muted);
-}
-.switch[data-on="true"] .switch-label { color: var(--ink); }
 
 /* --- Region 2: capability bit field ------------------------------------
    Three slots, always all three, so the column reads as a register dump
@@ -309,14 +257,23 @@
 .mcol-state { flex: 0 0 116px; }
 
 /* --- Regions 4 and 5: the model detail sheet ---------------------------
-   Depicted docked under the table rather than floating over it, for two
-   reasons: a board has to show the sheet and the rows it came from at
-   once, and a floating sheet would have to sit on --overlay, which in
-   light mode is the same value as --well and would flatten every recessed
-   region inside it. --panel keeps the well one step brighter in light and
-   one step darker in dark, which is the whole structural idea. */
+   Docked under the table rather than floating as a positioned overlay —
+   a board has to show the sheet and the rows it came from at once — but
+   it now carries the --overlay surface and its one shadow rather than
+   --panel. --panel was only ever a workaround: in light mode --overlay
+   and --well used to share a value, which would have flattened every
+   recessed region inside a floated sheet. Now that the overlay ruling
+   makes --overlay panel-valued in light, the well/overlay step is the
+   same one every well already gets, so the sheet can read as what it
+   is — the one elevated surface open on the page, same as a popover. */
 
-.sheet { border-top: 1px solid var(--accent-ink); }
+.sheet {
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-top: 1px solid var(--accent-ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
 
 .sheet-head {
   display: flex;
@@ -416,12 +373,17 @@
   padding: 2px var(--section-pad) var(--section-pad);
 }
 
+/* This is a primary form, not a sub-row — its controls stand at the full
+   30px control height rather than a table's 24px sub-row height, so an
+   override reads with the same weight as the value it is about to
+   replace. min-height grows with the control and keeps the same spare
+   room for a two-line .field-detected wrap. */
 .field-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  min-height: 38px;
+  min-height: 44px;
   padding: 4px 0;
   border-bottom: 1px solid var(--hairline-subtle);
 }
@@ -432,16 +394,18 @@
   margin: 0;
 }
 
-.field-input {
+/* .field-input supplies the look; this editor only needs its own width
+   and a step down in size to sit comfortably in a dense field list. */
+.override-editor .field-input {
   width: 132px;
-  height: 24px;
   padding: 0 6px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+}
+/* readonly is the same static-mockup device as .q-input's above: every
+   value here is one an operator could type over, so it stays on the live
+   input's well/ink weight rather than the "not patchable" dimming. */
+.override-editor input.field-input[readonly] {
+  background: var(--well);
   color: var(--ink);
 }
 /* An edited-but-unsaved field. Accent, not a state colour: nothing has
@@ -459,7 +423,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 24px;
+  height: var(--control-h);
   padding: 0 8px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
@@ -498,7 +462,7 @@
 }
 
 .field-revert {
-  height: 24px;
+  height: var(--control-h);
   padding: 0 8px;
   font-size: 11px;
 }

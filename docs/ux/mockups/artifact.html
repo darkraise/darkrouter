@@ -62,7 +62,15 @@ body.theme-light {
 
   --ground: #E5E8EB;
   --rail: #EEF0F2;
-  --overlay: #FFFFFF;
+  /* Ruling: panel-valued, not white. Light panel-to-well is only 1.045:1
+     total, so a well recessed into an overlay would be indistinguishable
+     from the overlay itself if --overlay stayed #FFFFFF. Overlay's lift in
+     light comes entirely from --shadow-overlay and the 1px --hairline
+     border — the "dropdowns and dialogs are panels lifted off the
+     chassis" claim above, stated in the token itself. Dark is unchanged:
+     dark overlay is already brighter than panel, so a well recessed into
+     it gets the same step every other well gets without this. */
+  --overlay: #F9FAFB;
   --ink: #1A2128;
   --ink-muted: #5A636D;
   --legend: #68737D;
@@ -785,6 +793,365 @@ a.row { text-decoration: none; }
   font-size: 11px;
 }
 
+/* --- Promoted cross-screen vocabulary ----------------------------------
+   Consolidation pass: components four or more screens each drew their own
+   copy of. Promoted here once, with every local clone deleted and every
+   consumer repointed, so the set describes one component rather than
+   several variants that happen to look alike. */
+
+/* A boolean control's on-state is a UI SELECTION, not a router verdict, so
+   it takes --accent-ink — the same token the rail's active item and
+   Requests' active saved view already use for "this one is chosen". The
+   knob is drawn, not tweened: this product has exactly three animations
+   (hover opacity, disclosure height, value swap) and a sliding knob is
+   none of them. 26x14, well track — the one shape every screen adopts;
+   Provider detail's 26x16 and the preset browser's 24x14 both round to
+   this. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+.switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+.switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
+.switch[data-on="true"] .switch-knob {
+  left: auto;
+  right: 1px;
+  background: var(--accent-ink);
+}
+.switch-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.switch[data-on="true"] .switch-label { color: var(--ink); }
+
+/* The one committing action on a screen. Outlined in --accent-ink rather
+   than filled — this console has no filled buttons. */
+.control-primary {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* A generic status pill: box shape from .chip, colour from data-status.
+   success/error are outcomes — a request's own result or a probe's own
+   result — never a routing verdict, which is the same reasoning that lets
+   .status-success/-error use the state colours on the Requests table. */
+.status-badge[data-status="success"] {
+  border-color: var(--state-healthy);
+  color: var(--state-healthy);
+}
+.status-badge[data-status="error"] {
+  border-color: var(--state-failed);
+  color: var(--state-failed);
+}
+
+/* A table header row: the hairline it sits on is one step darker than a
+   body row's, and its .legend-caps labels lose their own bottom margin,
+   which a 30px flex row does not collapse on its own. */
+.row-head { border-bottom-color: var(--hairline); }
+.row-head .legend-caps { margin: 0; }
+
+/* The grip for drag-to-reprioritise. Three 1px rules painted with a
+   gradient rather than a glyph or an image: it stays crisp at any zoom,
+   carries no font dependency, and needs no fetched asset. Dimmed at rest,
+   brought up on hover — the one hover animation the motion budget allows
+   for a row's own chrome. */
+.priority-handle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: var(--control-h);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--bezel) 0 1px,
+    transparent 1px 4px
+  );
+  background-size: 10px 9px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  transition: opacity var(--dur-hover) ease;
+}
+.row:hover .priority-handle { opacity: 1; }
+
+/* Where a dragged row will land: 2px of --trace across the row width plus
+   a square cap on the leading edge, so the insertion point stays readable
+   crossing a busy row. Height stays at the border's own 2px so the list
+   does not re-lay-out under the cursor mid-drag. */
+.drop-indicator {
+  position: relative;
+  height: 0;
+  border-top: 2px solid var(--trace);
+}
+.drop-indicator::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  background: var(--trace);
+}
+
+/* A provider's discovery-health dot. Deliberately a CIRCLE while
+   .state-pip is a 2px-radius square: the two marks answer different
+   questions ("is this provider serving" vs "is its model listing still
+   being refreshed") and must not read as one repeated mark. Hollow
+   --bezel is the base — no current reading. Stale takes the 2px ring plus
+   centre dot .mark-cooling already established for "something is still
+   in there, waiting", so the shape carries it without spending amber on
+   a fourth thing. */
+.discovery-status {
+  position: relative;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--bezel);
+  border-radius: 50%;
+  background: transparent;
+}
+.discovery-status[data-discovery="fresh"] {
+  border-color: var(--state-healthy);
+  background: var(--state-healthy);
+}
+.discovery-status[data-discovery="stale"] {
+  border: 2px solid var(--state-cooling);
+  background: transparent;
+}
+.discovery-status[data-discovery="stale"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
+}
+
+/* --- Combobox ------------------------------------------------------------
+   A multi-select trigger plus its popover menu. The popover sits on
+   --overlay + --shadow-overlay: the surface hierarchy's one elevated
+   value, never --panel or --well. */
+.combo {
+  display: flex;
+  flex-direction: column;
+}
+
+.combo-trigger {
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: default;
+}
+
+.combo-chevron {
+  color: var(--legend);
+  font-size: 10px;
+}
+
+.combo-menu {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
+.combo[data-open="true"] .combo-menu { display: flex; }
+
+.combo-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.combo-option:hover { opacity: 1; }
+
+.combo-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+}
+.combo-option[data-checked="true"] .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.combo-count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* A row of real filter controls, top-aligned so an open combobox or menu
+   grows downward inside its own column without pushing or overlapping a
+   sibling — closed siblings just end 30px up from wherever the tallest,
+   open one does. */
+.filter-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gutter);
+}
+
+/* The bar above a data table: a result count on the left, actions on the
+   right. */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.table-toolbar-actions {
+  position: relative;
+  display: flex;
+  gap: 8px;
+}
+
+/* The positioning context a table needs to float something astride its
+   own edge — a queued-rows pill, an absolutely-positioned column menu. */
+.table-wrap { position: relative; }
+
+.col-right { text-align: right; }
+.text-muted { color: var(--ink-muted); }
+
+/* --- Form field vocabulary ----------------------------------------------
+   One repeated unit across every settings form and read-only fact panel
+   in the product: a label, a value, and a note about it. The grid that
+   lays out a run of fields stays local per screen — a screen's column
+   count follows its own field count — but the field wrapper and the
+   input control itself are the same everywhere an operator edits or
+   reads a value. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.field .legend-caps { margin: 0; }
+.field .spec-note { margin-top: 2px; }
+.field-span-2 { grid-column: span 2; }
+
+/* An input is a value the operator can change, so it sits on --well: the
+   recessed surface this product already uses for anything that is data
+   rather than chrome, and the one that inverts polarity between themes. */
+.field-input {
+  height: var(--control-h);
+  padding: 0 8px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+/* Read-only: still a fact worth a well's worth of weight, just not one
+   this control can change right now. */
+.field-input[readonly] {
+  background: var(--panel);
+  border-color: var(--hairline-subtle);
+  color: var(--ink-muted);
+}
+/* Not applicable to the current selection, which is a different fact
+   from read-only: still there, still labelled, just not accepting a
+   value at all. Dashed says "there is nothing to read here" where a
+   solid border would say "there is, you just cannot change it". */
+.field-input-inert {
+  background: var(--panel);
+  border-style: dashed;
+  color: var(--legend);
+}
+
+/* The value of a read-only field that is a link or a short composite
+   rather than a plain string. Same box as .field-input so the grid keeps
+   one baseline. */
+.field-static {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 8px;
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+/* A run of read-only wire fields printed side by side rather than
+   stacked in a form. auto-fit collapses the tracks a shorter run does
+   not fill, so a run of four fields and a run of five both come out
+   evenly divided. */
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--gutter);
+}
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.kv-key { color: var(--legend); }
+.kv-value { color: var(--ink); }
+
+/* The one inline text link in the product — an operator-facing anchor to
+   another site or another screen, distinct from .link-out's button-
+   styled navigation. RULING: always underlined. An underline is the
+   accessible affordance that does not depend on colour alone, so it
+   applies whether or not the link is being hovered. --accent-ink because
+   this is accent-coloured text (--trace only reaches 3.93:1 in light
+   mode and fails AA at body size). */
+.link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.link:hover { opacity: 1; }
+
 /* --- Design-language specimen classes ---------------------------------
    Everything below exists only because fragments/00-design-language.html
    has to render a rule as a live specimen rather than describe it, and no
@@ -1141,13 +1508,15 @@ body.pins-on .pin-note { display: inline; }
 /*
  * Task 6 — the Requests log ("operate/requests").
  *
- * New vocabulary this screen introduces for reuse by Tasks 9 and 12:
- * .filter-bar, .combo (+ trigger/menu/option/check), .time-range,
- * .view-chip, .newer-pill, .table-toolbar, .col-menu, and the .col-*
- * column-width helpers the request table's header and rows share.
- * .segmented, .chip-failover, .chip-path and .control-ghost were promoted
- * to darkrouter-ui.css once Overview and Usage needed the same controls.
- * Everything else (.table, .row, .chip, .control, .well, .panel,
+ * New vocabulary this screen introduces: .time-range, .view-chip,
+ * .newer-pill, .col-menu, and the .col-* column-width helpers the request
+ * table's header and rows share. .segmented, .chip-failover, .chip-path
+ * and .control-ghost were promoted to darkrouter-ui.css once Overview and
+ * Usage needed the same controls; .filter-bar, .combo (+ trigger/menu/
+ * option/check/count), .table-toolbar (+ -actions), .table-wrap,
+ * .col-right, .text-muted and .row-head were promoted there in the
+ * consolidation pass once Providers, Models and Playground needed them
+ * too. Everything else (.table, .row, .chip, .control, .well, .panel,
  * .legend-caps, .micro, .prose) is reused as-is from darkrouter-ui.css.
  */
 
@@ -1185,91 +1554,11 @@ body.pins-on .pin-note { display: inline; }
   opacity: 1;
 }
 
-/* --- Filter bar ------------------------------------------------------
-   Six real controls in a row, top-aligned so an open combobox or the
-   time-range menu grows downward inside its own column without pushing
-   or overlapping a sibling control — closed siblings just end 30px up
-   from wherever the tallest, open one does. */
-
-.filter-bar {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: var(--gutter);
-}
-
-/* --- Combobox ----------------------------------------------------------- */
-
-.combo {
-  display: flex;
-  flex-direction: column;
-}
-
-.combo-trigger {
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  cursor: default;
-}
-
-.combo-chevron {
-  color: var(--legend);
-  font-size: 10px;
-}
-
-.combo-menu {
-  display: none;
-  flex-direction: column;
-  gap: 1px;
-  margin-top: 4px;
-  padding: 4px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
-}
-.combo[data-open="true"] .combo-menu { display: flex; }
-
-.combo-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 24px;
-  padding: 0 6px;
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
-  opacity: 0.85;
-  transition: opacity var(--dur-hover) ease;
-}
-.combo-option:hover { opacity: 1; }
-
-.combo-check {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--bezel);
-  border-radius: var(--radius);
-  font-size: 9px;
-  line-height: 1;
-  color: transparent;
-}
-.combo-option[data-checked="true"] .combo-check,
+/* A column-menu tick reuses .combo-check for the same reason a facet
+   checkbox does: one 12px tick box, not a second one per menu type. */
 .col-menu-item[data-checked="true"] .combo-check {
   border-color: var(--accent-ink);
   color: var(--accent-ink);
-}
-
-.combo-count {
-  margin-left: auto;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
-  color: var(--ink-muted);
 }
 
 /* --- Time-range picker ------------------------------------------------- */
@@ -1336,20 +1625,9 @@ body.pins-on .pin-note { display: inline; }
   color: var(--ink);
 }
 
-/* --- Table toolbar + column-visibility menu --------------------------- */
-
-.table-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.table-toolbar-actions {
-  position: relative;
-  display: flex;
-  gap: 8px;
-}
+/* --- Column-visibility menu --------------------------------------------
+   .table-toolbar (+ -actions) is the shared toolbar shell; only the
+   column menu it opens is this screen's own. */
 
 /* The second overlay in this screen (after .combo-menu/.time-range-menu):
    floats over the table on the same --overlay + --shadow-overlay surface
@@ -1402,15 +1680,9 @@ body.pins-on .pin-note { display: inline; }
 }
 
 /* --- Request table -----------------------------------------------------
-   .table/.row are shared (darkrouter-ui.css); everything below is the
-   column geometry this screen's header and rows share. */
-
-.table-wrap { position: relative; }
-
-.row-head {
-  border-bottom-color: var(--hairline);
-}
-.row-head .legend-caps { margin: 0; }
+   .table/.row/.table-wrap/.row-head are shared (darkrouter-ui.css);
+   everything below is the column geometry this screen's header and rows
+   share. */
 
 .col-time { flex: 0 0 84px; }
 .col-surface { flex: 0 0 84px; }
@@ -1432,12 +1704,9 @@ body.pins-on .pin-note { display: inline; }
 .col-attempts { flex: 0 0 64px; }
 .col-tokens { flex: 0 0 118px; }
 .col-latency { flex: 0 0 72px; }
-.col-right { text-align: right; }
 
 .status-success { color: var(--state-healthy); }
 .status-error { color: var(--state-failed); }
-
-.text-muted { color: var(--ink-muted); }
 
 /* .chip-failover and .chip-path are shared with Overview's failover log,
    so both live in darkrouter-ui.css now. */
@@ -1480,17 +1749,17 @@ body.pins-on .pin-note { display: inline; }
  * Task 7 — Request trace ("operate/requests" detail view).
  *
  * New component classes this screen introduces: .trace-header (+ -row/-id/
- * -route/-route-sep/-route-arrow/-route-target), .status-badge,
- * .trace-copy-btn, .waterfall-tracks (+ -row/-row-label/-track/-seg/-end/
- * -total), .readout-strip/.readout-tile, .warning-list (named by the task
- * brief's own Interfaces contract), .json-tree (+ -row/-depth-N/-toggle/
- * -key/-string/-punct/-collapsed-count), .control-primary, .trace-footer.
+ * -route/-route-sep/-route-arrow/-route-target), .trace-copy-btn,
+ * .waterfall-tracks (+ -row/-row-label/-track/-seg/-end/-total),
+ * .readout-strip/.readout-tile, .warning-list (named by the task brief's
+ * own Interfaces contract), .json-tree (+ -row/-depth-N/-toggle/-key/
+ * -string/-punct/-collapsed-count), .trace-footer.
  * Everything else composes .well/.panel/.chip/.row/.mono/.prose/.readout/
  * .unit/.micro/.spec-note/.section-title/.empty-well/.chart-well/
  * .chart-axis/.reason/.reason-code/.reason-prose/.mark/.mark-served/
- * .mark-failed from darkrouter-ui.css or an earlier screen's partial
- * unchanged — this is a leaf screen, so no later fragment can depend on
- * anything declared here staying stable.
+ * .mark-failed/.control-primary/.status-badge from darkrouter-ui.css or an
+ * earlier screen's partial unchanged — this is a leaf screen, so no later
+ * fragment can depend on anything declared here staying stable.
  */
 
 /* --- Region 1: header --------------------------------------------------- */
@@ -1509,21 +1778,6 @@ body.pins-on .pin-note { display: inline; }
 }
 
 .trace-id { color: var(--ink); }
-
-/* A generic status pill: box shape from .chip, colour from data-status —
-   the same variant convention .state-pip already uses for provider
-   identity. success/error are the only two request outcomes; the state
-   colours are legitimate here because a request's own status is not a
-   routing verdict, the same reasoning that lets .status-success/-error
-   use them on the Requests table two screens back. */
-.status-badge[data-status="success"] {
-  border-color: var(--state-healthy);
-  color: var(--state-healthy);
-}
-.status-badge[data-status="error"] {
-  border-color: var(--state-failed);
-  color: var(--state-failed);
-}
 
 /* .chip has no hover treatment of its own; this one is a button, so it
    needs the opacity-on-hover idiom .view-chip already establishes. */
@@ -1618,6 +1872,14 @@ body.pins-on .pin-note { display: inline; }
   top: 50%;
   transform: translate(-50%, -50%);
 }
+/* .mark-served already gets a boundary from its two-tone trace/trace-fill
+   fill; .mark-failed has only the one state-failed token, so its end-cap
+   sitting on a bar of the identical colour has no edge and reads as one
+   shape with the bar instead of a discrete mark. A 1px ring in the
+   track's own background punches a boundary the same way a keyline
+   would, giving the failed cap the same discrete-mark legibility the
+   served cap gets from its fill. */
+.waterfall-end.mark-failed { border: 1px solid var(--well); }
 
 .waterfall-total {
   flex: 0 0 64px;
@@ -1703,15 +1965,7 @@ body.pins-on .pin-note { display: inline; }
   color: var(--legend);
 }
 
-/* --- Region 8: open in playground ----------------------------------------
-   .control already proves the 30px control silhouette; this is the one
-   place on the screen that wants to read as the primary action, so it
-   takes the same accent-ink treatment .col-menu-export already uses for
-   its own single emphasised action. */
-.control-primary {
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
-}
+/* --- Region 8: open in playground ---------------------------------------- */
 
 .trace-footer {
   display: flex;
@@ -1925,134 +2179,20 @@ body.pins-on .pin-note { display: inline; }
 /*
  * Task 9 — Providers ("configure/providers").
  *
- * New vocabulary this screen introduces: .priority-handle and
- * .discovery-status (both named by the task's own Interfaces contract and
- * reused by Task 10), .enable-switch (+ -track/-knob), .drop-indicator,
- * .prov-row-dragging, the .prov-col-* column geometry, .prov-prio-*
- * renumbering pair, .discovery-grid, .prov-add (+ -link), and the
- * .prov-form field vocabulary.
+ * New vocabulary this screen introduces: .prov-row-dragging, the
+ * .prov-col-* column geometry, .prov-prio-* renumbering pair,
+ * .discovery-grid, .prov-add (+ -link), and the .prov-form grid.
  *
  * Reused unchanged: .table/.row/.state-pip/.chip/.control/.control-ghost/
  * .micro/.mono/.prose/.section-title/.legend-caps/.region/.well/.panel/
- * .segmented from darkrouter-ui.css; .health-tile/.health-tile-head/
- * .health-tile-name/.health-tile-alert/.health-tile-alert-text/.ops-footer
- * from Overview's partial (its header names both as Task 9 consumers);
- * .row-head/.combo-trigger/.combo-chevron/.text-muted from Requests';
- * .control-primary from Request trace's; .spec-note from the design
- * language board, for the per-field annotations.
+ * .segmented/.switch (+ parts)/.control-primary/.row-head/.combo-trigger/
+ * .combo-chevron/.text-muted/.priority-handle/.drop-indicator/
+ * .discovery-status/.field (+ -span-2)/.field-input (+ -inert) from
+ * darkrouter-ui.css; .health-tile/.health-tile-head/.health-tile-name/
+ * .health-tile-alert/.health-tile-alert-text/.ops-footer from Overview's
+ * partial (its header names both as Task 9 consumers); .spec-note from
+ * the design language board, for the per-field annotations.
  */
-
-/* --- Priority handle -------------------------------------------------
-   The grip for drag-to-reprioritise. Three 1px rules painted with a
-   gradient rather than a glyph or an image: it stays crisp at any zoom,
-   carries no font dependency, and needs no fetched asset. The element
-   itself is the full 30px control height so the hit target matches every
-   other control on the screen, while the visible grip stays 10px — a
-   30px-tall grip would out-weigh the provider id beside it. Dimmed at
-   rest and brought up on hover, which is the one hover animation the
-   motion budget allows. */
-.priority-handle {
-  flex: 0 0 auto;
-  width: 16px;
-  height: var(--control-h);
-  background-image: repeating-linear-gradient(
-    to bottom,
-    var(--bezel) 0 1px,
-    transparent 1px 4px
-  );
-  background-size: 10px 9px;
-  background-position: center;
-  background-repeat: no-repeat;
-  opacity: 0.55;
-  transition: opacity var(--dur-hover) ease;
-}
-.row:hover .priority-handle { opacity: 1; }
-
-/* --- Enabled switch ---------------------------------------------------
-   `enabled` is configuration, not health and not a routing verdict, so
-   the on state takes --accent-ink — the same token the rail's active item
-   and Requests' active saved view already use for "this is the selected
-   state". The knob's LEFT/RIGHT position, not its colour, is what
-   survives a greyscale proof.
-
-   The knob does not transition. Only three animations exist in this
-   product (hover opacity, disclosure height, value swap) and a sliding
-   knob is none of them, so the two states are drawn, not tweened. */
-.enable-switch {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  height: var(--control-h);
-}
-
-.enable-switch-track {
-  position: relative;
-  width: 26px;
-  height: 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--panel);
-}
-
-.enable-switch-knob {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-}
-
-.enable-switch[data-on="true"] .enable-switch-track {
-  border-color: var(--accent-ink);
-  background: var(--overlay);
-}
-.enable-switch[data-on="true"] .enable-switch-knob {
-  left: 13px;
-  background: var(--accent-ink);
-}
-
-/* --- Discovery status dot ----------------------------------------------
-   Deliberately a CIRCLE while .state-pip is a 2px-radius square: the two
-   marks sit in the same row two columns apart and answer different
-   questions ("is this provider serving" vs "is its model listing still
-   being refreshed"), so they must not read as one repeated mark.
-
-   Hollow --bezel is the base: no current reading, which covers both a
-   provider that has never been probed and one that is not polled while
-   disabled. Filled green is a fresh listing. Stale takes the 2px ring
-   plus centre dot that .mark-cooling already established for "something
-   is still in there, waiting" — the shape carries it without the amber,
-   which is the whole point of the greyscale proof. */
-.discovery-status {
-  position: relative;
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border: 1px solid var(--bezel);
-  border-radius: 50%;
-  background: transparent;
-}
-.discovery-status[data-discovery="fresh"] {
-  border-color: var(--state-healthy);
-  background: var(--state-healthy);
-}
-.discovery-status[data-discovery="stale"] {
-  border: 2px solid var(--state-cooling);
-  background: transparent;
-}
-.discovery-status[data-discovery="stale"]::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 2px;
-  height: 2px;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: var(--state-cooling);
-}
 
 /* --- Region 1: the provider list --------------------------------------
    .table/.row/.row-head carry the surface and the 30px rhythm; everything
@@ -2125,26 +2265,6 @@ body.pins-on .pin-note { display: inline; }
   box-shadow: var(--shadow-overlay);
 }
 
-/* Where the row will land. Two pixels of --trace across the full table
-   width plus a square cap on the leading edge, so the insertion point is
-   readable even where the line crosses a busy row below it. Height stays
-   at the border's own 2px: the indicator must not shove the rows apart,
-   or the list re-lays-out under the cursor mid-drag. */
-.drop-indicator {
-  position: relative;
-  height: 0;
-  border-top: 2px solid var(--trace);
-}
-.drop-indicator::before {
-  content: "";
-  position: absolute;
-  top: -3px;
-  left: 0;
-  width: 4px;
-  height: 4px;
-  background: var(--trace);
-}
-
 /* The priority column while a drag is in flight: the value that is being
    written and the value it replaces, side by side. The outgoing number is
    struck through at --legend; the incoming one is --accent-ink, because
@@ -2215,7 +2335,9 @@ body.pins-on .pin-note { display: inline; }
 /* --- Region 5: the raw provider form ------------------------------------
    Three columns on a 12px/20px rhythm. Fields that the selected kind does
    not use stay visible and inert rather than vanishing, so the form always
-   shows the whole shape of what POST /api/providers accepts. */
+   shows the whole shape of what POST /api/providers accepts. .field and
+   .field-input are the shared vocabulary; only the column count is this
+   screen's own. */
 .prov-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2223,40 +2345,15 @@ body.pins-on .pin-note { display: inline; }
   padding: var(--section-pad);
 }
 
-.prov-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.prov-field .legend-caps { margin: 0; }
-.prov-field-wide { grid-column: span 2; }
-
-/* An input is a value the operator can change, so it sits on --well: the
-   recessed surface this product already uses for anything that is data
-   rather than chrome, and the one that inverts polarity between themes. */
-.prov-input {
+/* This form's values are printed as static spans, not live inputs, so
+   they need the centering and truncation a real <input> gets from the
+   browser for free. */
+.prov-form .field-input {
   display: flex;
   align-items: center;
-  height: var(--control-h);
-  padding: 0 8px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
-  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* Not applicable to the selected kind: still there, still labelled, just
-   not accepting a value. Panel rather than well — it is chrome for now,
-   not a data slot. */
-.prov-input-inert {
-  background: var(--panel);
-  border-style: dashed;
-  color: var(--legend);
 }
 
 /* The caret sits inside the field, so the select needs the row layout
@@ -2288,17 +2385,17 @@ body.pins-on .pin-note { display: inline; }
  * names the task's own Interfaces contract reserves for it, .credential-row
  * and .breaker-panel. Everything else is prefixed pd- so that Tasks 9, 11
  * and 12, which are written in the same wave and concatenated into the same
- * stylesheet, cannot collide with it — .pd-switch and .switch are the same
- * control, and the prefixed name is the one that can only mean this screen.
+ * stylesheet, cannot collide with it.
  *
  * Reused unchanged and therefore absent below: .panel, .well, .table, .row,
  * .chip, .control, .control-ghost, .mono, .micro, .prose, .readout, .unit,
  * .data-emph, .legend-caps, .section-title, .spec-note, .region, .state-pip,
  * .ladder, .ladder-row, .target, .reason, .reason-code, .reason-prose,
- * .mark, .mark-cooling (darkrouter-ui.css), plus .control-primary and
- * .status-badge from css/04-request-trace.css — the probe's two outcomes are
- * the same success/error badge a request trace already prints, and inventing
- * a second pill for the same idea is how a vocabulary splits.
+ * .mark, .mark-cooling, .control-primary, .status-badge, .switch (+ parts),
+ * .field (+ -span-2), .field-input, .field-static, .kv-grid, .kv (+ -key/
+ * -value), .discovery-status (darkrouter-ui.css) — the probe's two outcomes
+ * are the same success/error badge a request trace already prints, and
+ * inventing a second pill for the same idea is how a vocabulary splits.
  */
 
 /* --- Shared panel scaffolding ----------------------------------------- */
@@ -2345,100 +2442,24 @@ body.pins-on .pin-note { display: inline; }
 
 .pd-link { color: var(--accent-ink); }
 
-/* --- Region 1: identity form ------------------------------------------ */
+/* --- Region 1: identity form ------------------------------------------
+   .field (+ -span-2) and .field-input are the shared vocabulary; only the
+   4-column count is this screen's own. */
 
 .pd-form {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--gutter) var(--section-pad);
 }
-.pd-span-2 { grid-column: span 2; }
 
-.pd-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.pd-field .legend-caps { margin: 0; }
-.pd-field .spec-note { margin-top: 2px; }
-
-/* An editable field is a well cut into the panel; a read-only one is not.
-   That is the whole polarity rule doing semantic work: what you can change
-   is recessed and holds the value, what you cannot sits flush with the
-   panel it is printed on, in both modes and without a lock glyph. */
-.pd-input {
-  height: var(--control-h);
-  padding: 0 8px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
-}
-.pd-input[readonly] {
-  background: var(--panel);
-  border-color: var(--hairline-subtle);
-  color: var(--ink-muted);
-}
-
-/* The value of a read-only field that is a link rather than a string, e.g.
-   the preset this provider was created from. Same box as .pd-input so the
-   grid keeps one baseline. */
-.pd-static {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--control-h);
-  padding: 0 8px;
-  border: 1px solid var(--hairline-subtle);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink-muted);
-}
-
-/* Enabled is neither provider health nor a routing verdict — it is a
-   selection the operator made, so it takes --accent-ink, the same token the
-   rail's active item and Requests' active saved view already use for "this
-   one is on". No transition: the product has exactly three animations and a
-   sliding knob is not one of them. */
-.pd-switch {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 26px;
-  height: 16px;
-  padding: 2px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--well);
-}
-.pd-switch[data-on="true"] {
-  justify-content: flex-end;
-  border-color: var(--accent-ink);
-}
-
-.pd-switch-knob {
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-}
-.pd-switch[data-on="true"] .pd-switch-knob { background: var(--accent-ink); }
-
-/* The switch always carries its own word, so the state survives greyscale
-   and colour stays the second channel. */
+/* The switch always carries its own word beside it, so the state survives
+   greyscale and colour stays the second channel. */
 .pd-switch-row {
   display: flex;
   align-items: center;
   gap: 8px;
   height: var(--control-h);
 }
-.pd-switch-label { color: var(--ink-muted); }
 
 /* --- Region 2: credentials -------------------------------------------- */
 
@@ -2501,31 +2522,9 @@ body.pins-on .pin-note { display: inline; }
   align-items: center;
   gap: 8px;
 }
-.credential-replace-line .pd-input { flex: 1 1 auto; max-width: 320px; }
+.credential-replace-line .field-input { flex: 1 1 auto; max-width: 320px; }
 
 /* --- Region 3: OAuth account ------------------------------------------- */
-
-/* A run of wire fields printed side by side rather than stacked in a form,
-   because none of them is editable — expiry, last refresh and the next
-   worker run are reports, not inputs. A grid rather than a wrapping flex
-   row: content-sized cells put every field at a different x, which reads as
-   five accidents instead of one instrument. auto-fit collapses the tracks a
-   shorter run does not fill, so the five OAuth fields and the four discovery
-   fields both come out evenly divided. */
-.pd-kvs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--gutter);
-}
-
-.pd-kv {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.pd-kv-key { color: var(--legend); }
-.pd-kv-value { color: var(--ink); }
 
 /* --- Region 4: breaker -------------------------------------------------- */
 
@@ -2601,7 +2600,7 @@ body.pins-on .pin-note { display: inline; }
 }
 
 /* An inline field:value pair on one line, for a response body read left to
-   right. The stacked .pd-kv is for a column of them. */
+   right. The stacked .kv is for a column of them. */
 .pd-inline-kv {
   display: inline-flex;
   align-items: baseline;
@@ -2681,11 +2680,11 @@ body.pins-on .pin-note { display: inline; }
  * so nearly everything below exists to build one dialog: a stage that lets
  * the dimmed page and the dialog occupy the same box, the scrim, and the
  * dialog surfaces themselves. Reused as-is from darkrouter-ui.css: .panel,
- * .well, .table, .row, .chip, .control, .control-ghost, .micro, .mono,
- * .data-emph, .prose, .legend-caps, .section-title, .state-pip. Reused from
- * 08's sibling partial css/03-requests.css: .combo-check, because a facet
- * checkbox and a filter-menu checkbox are the same affordance and a second
- * 12px tick box would be a divergence, not a variant.
+ * .well, .table, .row, .chip, .control, .control-primary, .control-ghost,
+ * .micro, .mono, .data-emph, .prose, .legend-caps, .section-title,
+ * .state-pip, .switch (+ parts), .field-input, .link, .combo-check —
+ * a facet checkbox and a filter-menu checkbox are the same affordance and a
+ * second 12px tick box would be a divergence, not a variant.
  *
  * Every class here is prefixed preset- because three other screens are being
  * drawn into this same concatenated stylesheet at the same time.
@@ -2797,11 +2796,14 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 }
 
 /* --- Search -----------------------------------------------------------
-   The browse surface is a .panel laid inside the --overlay dialog, and
-   every data region below is a .well cut into that panel. Wells cannot sit
-   directly on the dialog: in light mode --overlay and --well are the same
-   value, so the recess would vanish. The panel is the step that keeps the
-   dark-darker / light-brighter inversion intact inside an overlay. */
+   The browse surface used to be a .panel laid inside the --overlay dialog
+   purely to work around light mode: --overlay and --well were the same
+   value there, so a well cut straight into the dialog would have no
+   recess. Now that the overlay ruling makes --overlay panel-valued in
+   light (with lift from --shadow-overlay and the hairline, not from a
+   brighter fill), that intermediate panel is redundant — a well cut
+   directly into .preset-modal gets the same well/panel step every other
+   well gets. .preset-browse keeps its padding and drops the surface. */
 
 .preset-browse { padding: var(--section-pad); }
 
@@ -2848,7 +2850,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   display: flex;
   align-items: center;
   gap: var(--section-pad);
-  height: 26px;
+  height: 24px;
   padding: 0 10px;
   border-bottom: 1px solid var(--hairline-subtle);
   text-decoration: none;
@@ -2899,7 +2901,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 22px;
+  height: 24px;
   padding: 0 8px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
@@ -2932,32 +2934,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   font-size: 12px;
   color: var(--ink);
 }
-
-/* 2px radius like everything else — a pill-shaped switch would be the only
-   round object in the console. */
-.preset-toggle {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  width: 24px;
-  height: 14px;
-  padding: 2px;
-  border: 1px solid var(--bezel);
-  border-radius: var(--radius);
-  background: var(--well);
-}
-.preset-toggle-knob {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-}
-.preset-toggle[data-on="true"] {
-  justify-content: flex-end;
-  border-color: var(--trace);
-  background: var(--trace-fill);
-}
-.preset-toggle[data-on="true"] .preset-toggle-knob { background: var(--ink); }
 
 /* --- Results grid ------------------------------------------------------ */
 
@@ -3083,19 +3059,13 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   color: var(--ink-muted);
 }
 
-/* Accent as TEXT, so --accent-ink (5.69:1 in light) and never --trace
-   (3.93:1). Links are the one place that distinction is load-bearing. */
+/* Sizing and position only — colour, underline and the hover opacity
+   idiom come from the shared .link class. */
 .preset-link {
   margin-left: auto;
-  font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
-  color: var(--accent-ink);
-  text-decoration: none;
   white-space: nowrap;
-  opacity: 0.9;
-  transition: opacity var(--dur-hover) ease;
 }
-.preset-link:hover { opacity: 1; text-decoration: underline; }
 
 /* --- Create form, inline under the selected card ----------------------- */
 
@@ -3110,16 +3080,15 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 .preset-field-label { display: block; }
 
-.preset-input {
+/* This form is a .well cut into the results grid; a well-backed input
+   inside it would flatten to the same value with no recess in either
+   theme. Panel is the step that keeps a value distinguishable from its
+   container here — the same reason .preset-supplies below sits on panel
+   rather than well. */
+.preset-form .field-input {
   width: 100%;
-  height: var(--control-h);
   padding: 0 10px;
   background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
 }
 
 .preset-field-note {
@@ -3135,14 +3104,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   align-items: center;
   gap: 8px;
   margin-top: var(--section-pad);
-}
-
-/* The one committing action in the dialog. Outlined in --accent-ink rather
-   than filled, matching how .view-chip and .time-range-preset already mark
-   the live option — this console has no filled buttons. */
-.preset-primary {
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
 }
 
 /* The inventory of everything the operator is not typing. A two-column
@@ -3197,9 +3158,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
  *   .range-facet (+ -label/-track/-fill/-input)  a two-ended numeric facet;
  *       .segmented picks one of N and .combo picks a set, neither expresses
  *       a MIN..MAX span, which is what min_context actually is.
- *   .switch (+ -track/-knob/-label)              a boolean filter toggle;
- *       .view-chip and .segmented-option both read as "one of several",
- *       and a lone chip cannot show its own off state.
  *   .cap-triad/.cap-bit                          a fixed three-slot bit
  *       field for tools/vision/reasoning. .chip is variable-width, so a
  *       column of chips jitters; the point here is that the slot stays put
@@ -3241,25 +3199,22 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
  * .rank/.mark/.mark-catalog/.credential-tag/.target-muted/.filter-bar/
  * .combo/.combo-trigger/.combo-menu/.combo-option/.combo-check/.combo-count/
  * .combo-chevron/.table-toolbar/.table-toolbar-actions/.table-wrap/
- * .row-head/.col-right/.text-muted.
+ * .row-head/.col-right/.text-muted/.switch (+ parts)/.field (+ -span-2)/
+ * .field-input/.link.
  */
 
 /* --- Region 1: facets --------------------------------------------------
    The catalog's query box sits in the same 30px silhouette as .control so
    the filter bar keeps one baseline; it is an input rather than a trigger
-   because q= is free text, not a chosen value. */
+   because q= is free text, not a chosen value. .field-input supplies the
+   look; this is only the one width this screen's box needs. */
 
-.q-input {
-  width: 200px;
-  height: var(--control-h);
-  padding: 0 var(--section-pad);
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
-}
+.q-input { width: 200px; padding: 0 var(--section-pad); }
+/* readonly here is only what keeps a static mockup from looking typable —
+   an operator would type into this box in the real product, unlike a
+   Provider-detail field .field-input[readonly] marks as not patchable —
+   so it keeps the live input's own well/ink weight instead of dimming. */
+.q-input[readonly] { background: var(--well); color: var(--ink); }
 
 /* A span, not one of N. The two ends are real numbers the operator types,
    and the track between them is the reading — how much of the catalog's
@@ -3314,52 +3269,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   border-radius: var(--radius);
   background: var(--accent-ink);
 }
-
-/* --- Region 3: the retired toggle --------------------------------------
-   Rectangular, 2px radius: a pill switch is the one component that always
-   tries to reintroduce a radius this product does not have. Off is the
-   default state, so off is the state that had to look deliberate. */
-
-.switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--control-h);
-}
-
-.switch-track {
-  position: relative;
-  flex: 0 0 auto;
-  width: 26px;
-  height: 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--well);
-}
-
-.switch-knob {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-  transition: opacity var(--dur-hover) ease;
-}
-.switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
-.switch[data-on="true"] .switch-knob {
-  left: auto;
-  right: 1px;
-  background: var(--accent-ink);
-}
-
-.switch-label {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  color: var(--ink-muted);
-}
-.switch[data-on="true"] .switch-label { color: var(--ink); }
 
 /* --- Region 2: capability bit field ------------------------------------
    Three slots, always all three, so the column reads as a register dump
@@ -3499,14 +3408,23 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 .mcol-state { flex: 0 0 116px; }
 
 /* --- Regions 4 and 5: the model detail sheet ---------------------------
-   Depicted docked under the table rather than floating over it, for two
-   reasons: a board has to show the sheet and the rows it came from at
-   once, and a floating sheet would have to sit on --overlay, which in
-   light mode is the same value as --well and would flatten every recessed
-   region inside it. --panel keeps the well one step brighter in light and
-   one step darker in dark, which is the whole structural idea. */
+   Docked under the table rather than floating as a positioned overlay —
+   a board has to show the sheet and the rows it came from at once — but
+   it now carries the --overlay surface and its one shadow rather than
+   --panel. --panel was only ever a workaround: in light mode --overlay
+   and --well used to share a value, which would have flattened every
+   recessed region inside a floated sheet. Now that the overlay ruling
+   makes --overlay panel-valued in light, the well/overlay step is the
+   same one every well already gets, so the sheet can read as what it
+   is — the one elevated surface open on the page, same as a popover. */
 
-.sheet { border-top: 1px solid var(--accent-ink); }
+.sheet {
+  background: var(--overlay);
+  border: 1px solid var(--hairline);
+  border-top: 1px solid var(--accent-ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+}
 
 .sheet-head {
   display: flex;
@@ -3606,12 +3524,17 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   padding: 2px var(--section-pad) var(--section-pad);
 }
 
+/* This is a primary form, not a sub-row — its controls stand at the full
+   30px control height rather than a table's 24px sub-row height, so an
+   override reads with the same weight as the value it is about to
+   replace. min-height grows with the control and keeps the same spare
+   room for a two-line .field-detected wrap. */
 .field-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  min-height: 38px;
+  min-height: 44px;
   padding: 4px 0;
   border-bottom: 1px solid var(--hairline-subtle);
 }
@@ -3622,16 +3545,18 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   margin: 0;
 }
 
-.field-input {
+/* .field-input supplies the look; this editor only needs its own width
+   and a step down in size to sit comfortably in a dense field list. */
+.override-editor .field-input {
   width: 132px;
-  height: 24px;
   padding: 0 6px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+}
+/* readonly is the same static-mockup device as .q-input's above: every
+   value here is one an operator could type over, so it stays on the live
+   input's well/ink weight rather than the "not patchable" dimming. */
+.override-editor input.field-input[readonly] {
+  background: var(--well);
   color: var(--ink);
 }
 /* An edited-but-unsaved field. Accent, not a state colour: nothing has
@@ -3649,7 +3574,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 24px;
+  height: var(--control-h);
   padding: 0 8px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
@@ -3688,7 +3613,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 }
 
 .field-revert {
-  height: 24px;
+  height: var(--control-h);
   padding: 0 8px;
   font-size: 11px;
 }
@@ -3792,13 +3717,11 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
  * Reused unchanged from darkrouter-ui.css: .panel/.well/.table/.row/
  * .ladder (+ every ladder part, predictive mode)/.chip/.control/
  * .control-ghost/.mono/.micro/.prose/.unit/.section-title/.legend-caps/
- * .region/.pin/.pin-note. Reused from finished screens' partials, the
- * same way Task 9 reused Task 5's tiles: .priority-handle,
- * .drop-indicator, .prov-row-dragging and the .prov-prio-was/-arrow/-now
- * renumbering pair from Providers' (a drag-to-reorder list must look
- * identical on both screens or the gesture reads as two features);
- * .row-head from Requests'; .control-primary from Request trace's;
- * .spec-note from the design-language board.
+ * .region/.pin/.pin-note/.priority-handle/.drop-indicator/.row-head/
+ * .control-primary. Reused from Providers' partial: .prov-row-dragging
+ * and the .prov-prio-was/-arrow/-now renumbering pair (a drag-to-reorder
+ * list must look identical on both screens or the gesture reads as two
+ * features). .spec-note is reused from the design-language board.
  */
 
 /* --- Region 1: route preview -----------------------------------------
@@ -4255,14 +4178,13 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
  * Task 14 — the Playground ("use/playground").
  *
  * Reused unchanged from darkrouter-ui.css: .panel, .well, .table, .row,
- * .chip, .chip-path, .chip-failover, .control, .control-ghost, .segmented,
- * .segmented-option, .state-pip, .readout, .unit, .micro, .prose,
- * .legend-caps, .section-title, .region, .measure.
- * Reused from earlier screens' partials: .combo / .combo-trigger /
- * .combo-chevron (Task 6), .json-tree and its key/string/punct/toggle/depth
- * family plus .control-primary, .readout-tile and .trace-id (Task 7),
- * .switch / .switch-track / .switch-knob / .switch-label, .range-track,
- * .range-fill, .range-input and .link-out (Task 12).
+ * .chip, .chip-path, .chip-failover, .control, .control-primary,
+ * .control-ghost, .segmented, .segmented-option, .state-pip, .readout,
+ * .unit, .micro, .prose, .legend-caps, .section-title, .region, .measure,
+ * .combo (+ -trigger/-chevron), .switch (+ -track/-knob/-label).
+ * Reused from earlier screens' partials: .json-tree and its key/string/
+ * punct/toggle/depth family plus .readout-tile and .trace-id (Task 7),
+ * .range-track, .range-fill, .range-input and .link-out (Task 12).
  *
  * Everything below is prefixed pg- because three other screens are being
  * drawn against this stylesheet at the same time and a bare .turn or
@@ -5453,7 +5375,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li></ol></nav>
 <section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -5487,7 +5409,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <div class="row">
           <span class="swatch" style="background:var(--overlay)"></span>
           <span class="mono" style="min-width:140px">--overlay</span>
-          <span class="micro">vs --ink-muted &mdash; dark 5.81:1 &middot; light 6.10:1</span>
+          <span class="micro">vs --ink-muted &mdash; dark 5.81:1 &middot; light 5.84:1 (light: same hex as --panel)</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--well)"></span>
@@ -5622,6 +5544,14 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         --trace and --bezel. A healthy provider (groq) can still be
         skipped; a cooling one (cerebras) can still serve. State colour
         never appears in the gutter; --trace never appears on a pip.
+        A third, narrower use of --state-failed exists alongside these
+        two: the DESTRUCTIVE AFFORDANCE on a control whose action removes
+        something (a delete button's border and hover text) rather than
+        reporting an outcome that already happened. It is defensible
+        precisely because a destructive click produces a failed-shaped
+        result &mdash; the row is gone &mdash; but it is a third, named
+        thing, not a variant reading of a request's status or a
+        provider's health, and it never appears on a pip or a ladder mark.
       </p>
     </div>
 
@@ -5736,6 +5666,16 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </div>
         </div>
       </div>
+      <p class="prose">
+        In light mode, --overlay carries the same hex as --panel &mdash;
+        its lift comes entirely from --shadow-overlay and the 1px
+        --hairline border, not from sitting brighter than what is behind
+        it. Dark mode is unchanged: dark --overlay is already brighter
+        than --panel on its own. Either way, a well cut into an overlay
+        steps down to --well exactly as a well cut into a panel does, so
+        a dropdown's search box or a dialog's data region reads the same
+        recessed value everywhere in the product.
+      </p>
     </div>
 
     <div class="region">
@@ -6498,7 +6438,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="state-pip" data-state="cooling"></span>
                 <span class="mono health-tile-name">cerebras</span>
               </div>
-              <p class="micro">1 credential &middot; 1 cooling</p>
+              <p class="micro">3 credentials &middot; 1 cooling</p>
             </div>
 
             <div class="well health-tile">
@@ -6522,7 +6462,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="state-pip" data-state="healthy"></span>
                 <span class="mono health-tile-name">together</span>
               </div>
-              <p class="micro">1 credential</p>
+              <p class="micro">2 credentials</p>
             </div>
 
             <div class="well health-tile">
@@ -6856,7 +6796,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <div class="row" data-id="01J69HJDNDGZG35VH20N8GAWV0">
               <span class="mono col-time">09:38:47</span>
               <span class="mono col-surface">llm</span>
-              <span class="col-model"><span class="mono col-model-text"><span class="text-muted">fast-json &rarr;</span> openai/gpt-oss-120b</span><span class="chip chip-path">translated</span></span>
+              <span class="col-model"><span class="mono col-model-text"><span class="text-muted">fast-coder &rarr;</span> openai/gpt-oss-120b</span><span class="chip chip-path">translated</span></span>
               <span class="mono col-provider">cerebras</span>
               <span class="mono col-status status-success">success</span>
               <span class="mono col-attempts col-right">1</span>
@@ -6944,7 +6884,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-04-request-trace--s-04-request-trace" data-screen-title="request trace">
+<section class="screen" id="s-04-request-trace--s-04-request-trace" data-screen-title="operate/requests &mdash; request trace">
   <p class="legend">
     The payoff of the whole design: the request trace, opened from the row
     Requests already showed for this failover. Same eight-candidate ladder
@@ -7154,7 +7094,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
             <div class="well readout-tile">
               <p class="spec-note">cost_micros</p>
-              <span class="readout">$0.0213</span>
+              <span class="readout">$0.0024</span>
             </div>
 
             <div class="well readout-tile">
@@ -7287,7 +7227,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <div class="chart-head">
                 <p class="section-title" style="margin:0">Requests over time</p>
               </div>
-              <p><b class="pin" data-pin="2">2</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
+              <p><b class="pin" data-pin="2">2</b><b class="pin" data-pin="3">3</b><b class="pin" data-pin="4">4</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
               <div class="well chart-well">
                 <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="requests per day by provider, last 30 days">
                   <defs>
@@ -7329,7 +7269,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <div class="chart-head">
                 <p class="section-title" style="margin:0">Tokens over time</p>
               </div>
-              <p><b class="pin" data-pin="3">3</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
               <div class="well chart-well">
                 <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="input and output tokens per day, last 30 days">
                   <rect x="0" y="0" width="900" height="200" fill="url(#usage-grat--s-05-usage)"/>
@@ -7358,7 +7297,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="micro">30d running total</span>
                 </div>
               </div>
-              <p><b class="pin" data-pin="4">4</b><span class="pin-note">2-4 &middot; Charts &mdash; GET /api/usage daily series + the &sect;8.2 group_by=provider|model extension. usage_daily already carries the detail; the endpoint currently aggregates it away.</span></p>
               <div class="well chart-well">
                 <svg class="chart-svg chart-svg-short" viewBox="0 0 900 140" preserveAspectRatio="none" role="img" aria-label="cost per day, last 30 days">
                   <rect x="0" y="0" width="900" height="140" fill="url(#usage-grat--s-05-usage)"/>
@@ -7410,7 +7348,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <div class="usage-tables">
             <div>
               <p class="section-title">Ranked by provider</p>
-              <p><b class="pin" data-pin="5">5</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
+              <p><b class="pin" data-pin="5">5</b><b class="pin" data-pin="6">6</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
               <div class="rank-table">
                 <div class="row rank-table-head">
                   <span class="legend-caps rank-col-id">provider</span>
@@ -7503,7 +7441,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
             <div>
               <p class="section-title">Ranked by model</p>
-              <p><b class="pin" data-pin="6">6</b><span class="pin-note">5-6 &middot; Ranked tables &mdash; clicking a row navigates to /requests pre-filtered to that provider or model. The interaction that turns a chart into an investigation.</span></p>
               <div class="rank-table">
                 <div class="row rank-table-head">
                   <span class="legend-caps rank-col-id">model</span>
@@ -7671,7 +7608,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono prov-col-kind">openaicompat</span>
               <span class="micro prov-col-url">https://api.groq.com/openai/v1</span>
               <span class="micro prov-col-creds">2 credentials</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
               <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">3m ago</span></span>
               <span class="prov-col-flag"></span>
             </div>
@@ -7682,9 +7619,9 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="prov-col-name"><span class="state-pip" data-state="cooling"></span><span class="mono">cerebras</span></span>
               <span class="mono prov-col-kind">openaicompat</span>
               <span class="micro prov-col-url">https://api.cerebras.ai/v1</span>
-              <span class="micro prov-col-creds">1 credential &middot; cooling</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
-              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">4m ago</span></span>
+              <span class="micro prov-col-creds">3 credentials &middot; 1 cooling</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc" title="last success 08:11:40 &mdash; 14 consecutive failures, 401 Unauthorized"><span class="discovery-status" data-discovery="stale"></span><span class="micro">6h stale</span></span>
               <span class="prov-col-flag"></span>
             </div>
 
@@ -7695,7 +7632,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono prov-col-kind">anthropic</span>
               <span class="micro prov-col-url">https://api.anthropic.com/v1</span>
               <span class="micro prov-col-creds">1 credential</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
               <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">3m ago</span></span>
               <span class="prov-col-flag"></span>
             </div>
@@ -7707,7 +7644,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono prov-col-kind">openaicompat</span>
               <span class="micro prov-col-url">https://openrouter.ai/api/v1</span>
               <span class="micro prov-col-creds">3 credentials</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
               <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">5m ago</span></span>
               <span class="prov-col-flag"></span>
             </div>
@@ -7718,20 +7655,20 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">together</span></span>
               <span class="mono prov-col-kind">openaicompat</span>
               <span class="micro prov-col-url">https://api.together.xyz/v1</span>
-              <span class="micro prov-col-creds">1 credential</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
-              <span class="prov-col-disc" title="last success 6h ago &mdash; 14 consecutive failures"><span class="discovery-status" data-discovery="stale"></span><span class="micro">6h stale</span></span>
+              <span class="micro prov-col-creds">2 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">5m ago</span></span>
               <span class="prov-col-flag"></span>
             </div>
 
-            <div class="row prov-row" data-enabled="false" title="disabled, not deleted — the row keeps its id, its credential and its place in the order">
+            <div class="row prov-row" data-enabled="false" title="disabled, not deleted — the row keeps its id, its credentials and its place in the order">
               <span class="priority-handle" aria-hidden="true"></span>
               <span class="mono prov-col-prio">50</span>
               <span class="prov-col-name"><span class="state-pip" data-state="disabled"></span><span class="mono">deepinfra</span></span>
               <span class="mono prov-col-kind">openaicompat</span>
               <span class="micro prov-col-url">https://api.deepinfra.com/v1/openai</span>
-              <span class="micro prov-col-creds">1 credential</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="false"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="micro prov-col-creds">2 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="false"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
               <span class="prov-col-disc"><span class="discovery-status" data-discovery="idle"></span><span class="micro">not polled</span></span>
               <span class="prov-col-flag"></span>
             </div>
@@ -7743,7 +7680,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono prov-col-kind">bedrock</span>
               <span class="micro prov-col-url">https://bedrock-runtime.us-east-1.amazonaws.com</span>
               <span class="micro prov-col-creds">0 credentials</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="false"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-switch"><span class="switch" data-on="false"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
               <span class="prov-col-disc"><span class="discovery-status" data-discovery="idle"></span><span class="micro">never run</span></span>
               <span class="prov-col-flag"></span>
             </div>
@@ -7755,7 +7692,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono prov-col-kind">vertex</span>
               <span class="micro prov-col-url">https://us-central1-aiplatform.googleapis.com</span>
               <span class="micro prov-col-creds">1 credential</span>
-              <span class="prov-col-switch"><span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span></span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
               <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">4m ago</span></span>
               <span class="prov-col-flag"><span class="health-tile-alert"><span class="health-tile-alert-text">needs reconnection</span></span></span>
             </div>
@@ -7845,17 +7782,17 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <div class="well health-tile">
               <div class="health-tile-head">
                 <span class="discovery-status" data-discovery="stale"></span>
-                <span class="mono health-tile-name">together</span>
+                <span class="mono health-tile-name">cerebras</span>
                 <span class="chip">stale</span>
               </div>
               <div class="discovery-lines">
-                <span class="micro"><span class="discovery-field">last success</span> 6h ago</span>
-                <span class="micro"><span class="discovery-field">last attempt</span> 40s ago</span>
+                <span class="micro"><span class="discovery-field">last success</span> 08:11:40</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> 2m 43s ago</span>
                 <span class="micro"><span class="discovery-field">consecutive failures</span> 14</span>
-                <span class="micro"><span class="discovery-field">last error</span> 429 rate_limit_exceeded</span>
-                <span class="micro"><span class="discovery-field">catalogued</span> 71 models, 6h old</span>
+                <span class="micro"><span class="discovery-field">last error</span> 401 Unauthorized</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> 41 models, 6h old</span>
               </div>
-              <span class="health-tile-alert"><span class="health-tile-alert-text">Serving normally. Its model listing has not refreshed since 03:12 &mdash; new models will not appear and retired ones still route.</span></span>
+              <span class="health-tile-alert"><span class="health-tile-alert-text">Cooling on its primary credential, still serving on burst. Its model listing has not refreshed since 08:11:40 &mdash; new models will not appear and retired ones still route.</span></span>
             </div>
 
             <div class="well health-tile">
@@ -7886,7 +7823,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
         <div class="region">
           <p class="section-title">Add a provider</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4-5 &middot; Create &mdash; POST /api/providers {id,name,preset,kind,base_url,auth_style,priority,enabled,region,project,location}. location is create-only, not patchable.</span></p>
+          <p><b class="pin" data-pin="4">4</b><b class="pin" data-pin="5">5</b><span class="pin-note">4-5 &middot; Create &mdash; POST /api/providers {id,name,preset,kind,base_url,auth_style,priority,enabled,region,project,location}. location is create-only, not patchable.</span></p>
           <div class="prov-add">
             <button class="control control-primary">Add from a preset&hellip;</button>
             <a class="prov-add-link" href="#">Add without a preset</a>
@@ -7896,17 +7833,16 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
         <div class="region">
           <p class="section-title">Raw provider form</p>
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">4-5 &middot; Create &mdash; POST /api/providers {id,name,preset,kind,base_url,auth_style,priority,enabled,region,project,location}. location is create-only, not patchable.</span></p>
           <div class="panel">
             <div class="prov-form">
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">id</p>
-                <span class="prov-input">bedrock-frankfurt</span>
+                <span class="field-input">bedrock-frankfurt</span>
                 <span class="spec-note">primary key, immutable after creation</span>
               </div>
 
-              <div class="prov-field prov-field-wide">
+              <div class="field field-span-2">
                 <p class="legend-caps">kind</p>
                 <div class="segmented">
                   <span class="segmented-option">openaicompat</span>
@@ -7918,13 +7854,13 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="spec-note">the adapter family &mdash; decides which of region / project / location below apply</span>
               </div>
 
-              <div class="prov-field prov-field-wide">
+              <div class="field field-span-2">
                 <p class="legend-caps">base_url</p>
-                <span class="prov-input">https://bedrock-runtime.eu-central-1.amazonaws.com</span>
+                <span class="field-input">https://bedrock-runtime.eu-central-1.amazonaws.com</span>
                 <span class="spec-note">required unless a preset supplies it</span>
               </div>
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">auth_style</p>
                 <button class="control combo-trigger prov-select">
                   <span>sigv4</span>
@@ -7933,33 +7869,33 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="spec-note">bearer &middot; x-api-key &middot; api-key &middot; query-param &middot; none &middot; sigv4 &middot; gcp-sa &middot; oauth</span>
               </div>
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">priority</p>
-                <span class="prov-input">20</span>
+                <span class="field-input">20</span>
                 <span class="spec-note">walked high to low; lands under vertex at 30</span>
               </div>
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">enabled</p>
-                <span class="enable-switch" data-on="true"><span class="enable-switch-track"><span class="enable-switch-knob"></span></span></span>
+                <span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
                 <span class="spec-note">created enabled unless the body says otherwise</span>
               </div>
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">region</p>
-                <span class="prov-input">eu-central-1</span>
+                <span class="field-input">eu-central-1</span>
                 <span class="spec-note">signs every sigv4 request; bedrock only</span>
               </div>
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">project</p>
-                <span class="prov-input prov-input-inert">vertex only</span>
+                <span class="field-input field-input-inert">vertex only</span>
                 <span class="spec-note">patchable, unlike location</span>
               </div>
 
-              <div class="prov-field">
+              <div class="field">
                 <p class="legend-caps">location</p>
-                <span class="prov-input prov-input-inert">vertex only</span>
+                <span class="field-input field-input-inert">vertex only</span>
                 <span class="spec-note">create-only &mdash; changing it moves every catalogued model to a different endpoint, which is a new provider</span>
               </div>
 
@@ -7988,7 +7924,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-07-provider-detail--s-07-provider-detail" data-screen-title="provider detail">
+<section class="screen" id="s-07-provider-detail--s-07-provider-detail" data-screen-title="configure/providers &mdash; provider detail">
   <p class="legend">
     One provider opened from the list &mdash; cerebras, deliberately, because
     it is the one with something wrong: a rotated key its cooldown ladder is
@@ -8024,7 +7960,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <div class="chrome-main">
       <header class="topbar">
         <span class="topbar-title">configure/providers</span>
-        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
       </header>
       <main class="content">
 
@@ -8041,57 +7977,57 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
             <div class="pd-form">
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">id</span>
-                <input class="pd-input" value="cerebras" readonly>
+                <input class="field-input" value="cerebras" readonly>
                 <span class="spec-note">the routing key. Renaming means deleting and recreating.</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">name</span>
-                <input class="pd-input" value="Cerebras">
+                <input class="field-input" value="Cerebras">
                 <span class="spec-note">display only &mdash; nothing routes on it</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">kind</span>
-                <input class="pd-input" value="openaicompat" readonly>
+                <input class="field-input" value="openaicompat" readonly>
                 <span class="spec-note">create-only. PATCH does not accept kind: changing it would repoint every catalogued model at a different wire protocol.</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">auth_style</span>
-                <input class="pd-input" value="bearer" readonly>
+                <input class="field-input" value="bearer" readonly>
                 <span class="spec-note">from the preset. Not patchable either.</span>
               </label>
 
-              <label class="pd-field pd-span-2">
+              <label class="field field-span-2">
                 <span class="legend-caps">base_url</span>
-                <input class="pd-input" value="https://api.cerebras.ai/v1">
+                <input class="field-input" value="https://api.cerebras.ai/v1">
                 <span class="spec-note">patchable, and the one field an operator changes to point at a proxy or a regional endpoint</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">priority</span>
-                <input class="pd-input" value="90">
+                <input class="field-input" value="90">
                 <span class="spec-note">higher runs earlier in the ladder</span>
               </label>
 
-              <div class="pd-field">
+              <div class="field">
                 <span class="legend-caps">enabled</span>
                 <span class="pd-switch-row">
-                  <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
-                  <span class="mono pd-switch-label">enabled</span>
+                  <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                  <span class="mono switch-label">enabled</span>
                 </span>
                 <span class="spec-note">disabling keeps the provider, its keys and its history; deleting does not</span>
               </div>
 
-              <div class="pd-field pd-span-2">
+              <div class="field field-span-2">
                 <span class="legend-caps">preset</span>
-                <span class="pd-static">
+                <span class="field-static">
                   <span>cerebras</span>
                   <span class="micro">Cerebras &middot; llm &middot; free tier</span>
-                  <a class="pd-link" href="https://inference.cerebras.ai">inference.cerebras.ai</a>
+                  <a class="link" href="https://inference.cerebras.ai">inference.cerebras.ai</a>
                 </span>
                 <span class="spec-note">one of the 197 shipped presets. It seeded kind, base_url and auth_style at creation and is not patchable afterwards.</span>
               </div>
@@ -8115,7 +8051,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
 
             <div class="row credential-row">
-              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
               <span class="mono">primary</span>
               <span class="mono">&hellip;a4f2</span>
               <span class="chip pd-cooling-chip"><span class="mark mark-cooling"></span>cooling 4m 12s</span>
@@ -8132,7 +8068,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="mono">primary &hellip;a4f2</span>
               </span>
               <span class="credential-replace-line">
-                <input class="pd-input" type="password" placeholder="paste the replacement key" autocomplete="off">
+                <input class="field-input" type="password" placeholder="paste the replacement key" autocomplete="off">
                 <button class="control control-primary" type="button">Add, then remove &hellip;a4f2</button>
                 <button class="control control-ghost" type="button">Cancel</button>
               </span>
@@ -8140,7 +8076,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
 
             <div class="row credential-row">
-              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
               <span class="mono">burst</span>
               <span class="mono">&hellip;7c19</span>
               <span></span>
@@ -8152,7 +8088,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
 
             <div class="row credential-row">
-              <span class="pd-switch" data-on="false" role="switch" aria-checked="false"><span class="pd-switch-knob"></span></span>
+              <span class="switch" data-on="false" role="switch" aria-checked="false"><span class="switch-track"><span class="switch-knob"></span></span></span>
               <span class="mono">ci</span>
               <span class="mono">&hellip;0d63</span>
               <span></span>
@@ -8178,35 +8114,35 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="chip">auth_style oauth</span>
               <span class="micro">preset anthropic-oauth &middot; Anthropic (Claude subscription)</span>
             </div>
-            <div class="pd-kvs">
+            <div class="kv-grid">
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">account</span>
-                <span class="mono pd-kv-value">ops@darkraise.dev</span>
+              <span class="kv">
+                <span class="micro kv-key">account</span>
+                <span class="mono kv-value">ops@darkraise.dev</span>
                 <span class="spec-note">returned once by oauth/complete and discarded today</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">expires_at</span>
+              <span class="kv">
+                <span class="micro kv-key">expires_at</span>
                 <span class="readout">14:41:20</span>
                 <span class="spec-note"><b class="data-emph">23m 25s</b> remaining &middot; the token, not the connection</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">last_refresh</span>
-                <span class="mono pd-kv-value">14:11:20</span>
+              <span class="kv">
+                <span class="micro kv-key">last_refresh</span>
+                <span class="mono kv-value">14:11:20</span>
                 <span class="spec-note">6m 35s ago, by the worker &mdash; no request paid for it</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">next_refresh</span>
-                <span class="mono pd-kv-value">14:21:07</span>
+              <span class="kv">
+                <span class="micro kv-key">next_refresh</span>
+                <span class="mono kv-value">14:21:07</span>
                 <span class="spec-note">worker interval 5m, jittered 0.5&ndash;1.5&times;, renewing anything inside 15m of expiry</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">state</span>
-                <span class="mono pd-kv-value">connected</span>
+              <span class="kv">
+                <span class="micro kv-key">state</span>
+                <span class="mono kv-value">connected</span>
                 <span class="spec-note">the only value an operator can see today is its opposite</span>
               </span>
 
@@ -8304,9 +8240,9 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <div class="well pd-result">
               <span class="chip status-badge" data-status="success">ok</span>
               <span class="pd-result-fields">
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">model_count</span><span class="data-emph">41</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">284</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">model_count</span><span class="data-emph">41</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">latency_ms</span><span class="data-emph">284</span></span>
               </span>
             </div>
             <p class="prose pd-probe-note">A successful probe resets the ladder for the credential it ran against &mdash; every triple and the credential-level entry &mdash; and triggers one discovery pass. That is the side effect region 4's Reset breaker button and region 6's Run discovery button exist to separate from it.</p>
@@ -8318,9 +8254,9 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <div class="well pd-result">
               <span class="chip status-badge" data-status="error">ok:false</span>
               <span class="pd-result-fields">
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">1,204</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">error</span><span class="mono pd-error-text">the provider rejected this credential: 401 Unauthorized</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">latency_ms</span><span class="data-emph">1,204</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">error</span><span class="mono pd-error-text">the provider rejected this credential: 401 Unauthorized</span></span>
               </span>
             </div>
             <p class="prose pd-probe-note">A rejected key is a 200 carrying ok:false, not a 5xx: the request to darkrouter succeeded and the answer is bad news. model_count is absent rather than 0 &mdash; nothing was listed, so there is no count to report. A failed probe clears nothing; the cooldown above stands.</p>
@@ -8331,30 +8267,35 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p class="section-title">Discovery</p>
           <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Discovery &mdash; POST /api/providers/{id}/discover. New. Discoverer.Trigger fires today only as a side effect of a successful test.</span></p>
           <div class="panel pd-panel">
-            <div class="pd-kvs">
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">last_attempt_at</span>
-                <span class="mono pd-kv-value">14:15:12</span>
+            <div class="pd-head">
+              <span class="discovery-status" data-discovery="stale"></span>
+              <span class="mono pd-head-id">cerebras</span>
+              <span class="chip">stale</span>
+            </div>
+            <div class="kv-grid">
+              <span class="kv">
+                <span class="micro kv-key">last_attempt_at</span>
+                <span class="mono kv-value">14:15:12</span>
                 <span class="spec-note">2m 43s ago &mdash; the pass is running, it is just failing</span>
               </span>
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">last_success_at</span>
-                <span class="mono pd-kv-value pd-bad">08:11:40</span>
+              <span class="kv">
+                <span class="micro kv-key">last_success_at</span>
+                <span class="mono kv-value pd-bad">08:11:40</span>
                 <span class="spec-note">6h 06m ago. The catalog for cerebras is that old.</span>
               </span>
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">consecutive_failures</span>
+              <span class="kv">
+                <span class="micro kv-key">consecutive_failures</span>
                 <span class="data-emph pd-bad">14</span>
                 <span class="spec-note">since the key was rotated upstream</span>
               </span>
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">models_in_catalog</span>
+              <span class="kv">
+                <span class="micro kv-key">models_in_catalog</span>
                 <span class="data-emph">41</span>
                 <span class="spec-note">stale, not gone &mdash; the router still routes on them</span>
               </span>
             </div>
             <div class="well pd-error-well">
-              <span class="micro pd-kv-key">last_error</span>
+              <span class="micro kv-key">last_error</span>
               <span class="mono pd-error-text">listing rejected the credential: 401 Unauthorized</span>
             </div>
             <div class="pd-foot">
@@ -8429,7 +8370,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <div class="chrome-main">
       <header class="topbar">
         <span class="topbar-title">configure/providers</span>
-        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
       </header>
       <main class="content">
 
@@ -8438,7 +8379,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <div class="preset-under">
             <p class="section-title">Providers</p>
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-              <button class="control preset-primary">Add provider</button>
+              <button class="control control-primary">Add provider</button>
               <button class="control control-ghost">Add without a preset</button>
             </div>
             <div class="table">
@@ -8461,7 +8402,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="mono" style="flex:0 0 180px">cerebras</span>
                 <span class="mono" style="flex:0 0 140px">openaicompat</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">90</span>
-                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
+                <span class="micro" style="flex:1 1 auto">3 credential(s)</span>
               </div>
               <div class="row">
                 <span class="state-pip" data-state="healthy"></span>
@@ -8475,21 +8416,21 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="mono" style="flex:0 0 180px">openrouter</span>
                 <span class="mono" style="flex:0 0 140px">openaicompat</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">70</span>
-                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+                <span class="micro" style="flex:1 1 auto">3 credential(s)</span>
               </div>
               <div class="row">
                 <span class="state-pip" data-state="healthy"></span>
                 <span class="mono" style="flex:0 0 180px">together</span>
                 <span class="mono" style="flex:0 0 140px">openaicompat</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">60</span>
-                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
               </div>
               <div class="row">
                 <span class="state-pip" data-state="healthy"></span>
                 <span class="mono" style="flex:0 0 180px">deepinfra</span>
                 <span class="mono" style="flex:0 0 140px">openaicompat</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">50</span>
-                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
               </div>
               <div class="row">
                 <span class="state-pip" data-state="failed"></span>
@@ -8518,9 +8459,9 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
             <div class="preset-modal-body">
               <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Overlay &mdash; the one place in the product with a shadow: 0 8px 24px -8px. Spec &sect;3.3.</span></p>
-              <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
+              <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><b class="pin" data-pin="3">3</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
 
-              <div class="panel preset-browse">
+              <div class="preset-browse">
 
                 <div class="preset-search-block">
                   <p class="legend-caps">Search 197 presets</p>
@@ -8550,7 +8491,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   </div>
                 </div>
 
-                <p><b class="pin" data-pin="2">2</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
                 <div class="preset-cols">
 
                   <div class="preset-facets">
@@ -8583,8 +8523,8 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                       <p class="legend-caps">Free tier</p>
                       <div class="well">
                         <span class="preset-toggle-row">
-                          <span class="preset-toggle" data-on="false"><span class="preset-toggle-knob"></span></span>
-                          <span>free tier only</span>
+                          <span class="switch" data-on="false"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                          <span class="switch-label">free tier only</span>
                           <span class="preset-facet-count">121</span>
                         </span>
                       </div>
@@ -8592,7 +8532,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   </div>
 
                   <div class="preset-results">
-                    <p><b class="pin" data-pin="3">3</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
                     <div class="preset-results-head">
                       <span class="micro">12 of 197 presets &middot; unfiltered, sorted by preset id</span>
                       <span class="micro">&crarr; narrows the grid to the 3 matches</span>
@@ -8609,7 +8548,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url">https://api.cerebras.ai/v1</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://inference.cerebras.ai">inference.cerebras.ai &#8599;</a>
+                    <a class="preset-link link" href="https://inference.cerebras.ai">inference.cerebras.ai &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8625,17 +8564,17 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                     <span class="preset-surface-chip">llm</span>
                     <span class="preset-surface-chip">stt</span>
                     <span class="preset-surface-chip">tts</span>
-                    <a class="preset-link" href="https://groq.com">groq.com &#8599;</a>
+                    <a class="preset-link link" href="https://groq.com">groq.com &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-form">
                   <div>
                     <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/providers {id,preset}. The preset supplies kind, base_url, auth_style, declared surfaces, quirks, model traits and the models.dev join key.</span></p>
                     <label class="legend-caps preset-field-label" for="preset-new-id">provider id</label>
-                    <input class="preset-input" id="preset-new-id--s-08-preset-browser" value="cerebras">
+                    <input class="field-input" id="preset-new-id--s-08-preset-browser" value="cerebras">
                     <p class="preset-field-note">Prefilled from the preset id and editable. This is the only field you type &mdash; it becomes the provider's key in routing and the left half of every <span class="mono">provider/model</span> pair it serves.</p>
                     <div class="preset-actions">
-                      <button class="control preset-primary">Add provider</button>
+                      <button class="control control-primary">Add provider</button>
                       <button class="control control-ghost">Cancel</button>
                     </div>
                     <p class="micro" style="margin:10px 0 0">POST /api/providers {"id":"cerebras","preset":"cerebras"}</p>
@@ -8673,7 +8612,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
                     <span class="preset-surface-chip">embedding</span>
-                    <a class="preset-link" href="https://deepinfra.com">deepinfra.com &#8599;</a>
+                    <a class="preset-link link" href="https://deepinfra.com">deepinfra.com &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8688,7 +8627,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                     <span class="preset-surface-chip">llm</span>
                     <span class="preset-surface-chip">embedding</span>
                     <span class="preset-surface-chip">image</span>
-                    <a class="preset-link" href="https://www.together.ai">www.together.ai &#8599;</a>
+                    <a class="preset-link link" href="https://www.together.ai">www.together.ai &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8702,7 +8641,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url">https://openrouter.ai/api/v1</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://openrouter.ai">openrouter.ai &#8599;</a>
+                    <a class="preset-link link" href="https://openrouter.ai">openrouter.ai &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8715,7 +8654,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url">https://api.anthropic.com/v1</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://platform.claude.com">platform.claude.com &#8599;</a>
+                    <a class="preset-link link" href="https://platform.claude.com">platform.claude.com &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8728,7 +8667,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url">https://api.anthropic.com/v1</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://claude.com">claude.com &#8599;</a>
+                    <a class="preset-link link" href="https://claude.com">claude.com &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8741,7 +8680,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url preset-url-derived" title="base_url is empty in the preset; the endpoint is assembled at create time as https://bedrock-runtime.{region}.amazonaws.com">https://bedrock-runtime.{region}.amazonaws.com</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://aws.amazon.com/bedrock">aws.amazon.com/bedrock &#8599;</a>
+                    <a class="preset-link link" href="https://aws.amazon.com/bedrock">aws.amazon.com/bedrock &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8756,7 +8695,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
                     <span class="preset-surface-chip">embedding</span>
-                    <a class="preset-link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
+                    <a class="preset-link link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8769,7 +8708,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url preset-url-derived" title="base_url is empty in the preset; the endpoint is assembled at create time as https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}">https://{location}-aiplatform.…/locations/{location}</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
+                    <a class="preset-link link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8783,7 +8722,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url">https://agentrouter.org/v1</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://agentrouter.org">agentrouter.org &#8599;</a>
+                    <a class="preset-link link" href="https://agentrouter.org">agentrouter.org &#8599;</a>
                   </span>
                 </div>
                 <div class="well preset-card">
@@ -8797,7 +8736,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="preset-url">https://apihub.agnes-ai.com/v1</span>
                   <span class="preset-card-foot">
                     <span class="preset-surface-chip">llm</span>
-                    <a class="preset-link" href="https://agnes-ai.com">agnes-ai.com &#8599;</a>
+                    <a class="preset-link link" href="https://agnes-ai.com">agnes-ai.com &#8599;</a>
                   </span>
                 </div>
                     </div>
@@ -8867,7 +8806,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; GET /api/models?q=&amp;surface=&amp;min_context=&amp;tools=true. min_context and tools are accepted today and unreachable from the current screen.</span></p>
           <div class="filter-bar">
 
-            <input class="q-input" value="gpt-oss" aria-label="q" readonly>
+            <input class="field-input q-input" value="gpt-oss" aria-label="q" readonly>
 
             <div class="segmented" aria-label="surface">
               <span class="segmented-option" data-active="true">llm</span>
@@ -9257,7 +9196,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <div class="region">
           <p class="section-title">Model detail sheet &mdash; open</p>
           <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
-          <div class="panel sheet">
+          <div class="sheet">
 
             <div class="sheet-head">
               <span class="sheet-title">openai/gpt-oss-120b</span>
@@ -9502,7 +9441,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <div class="row">
                     <span class="mono vcol-field">pricing</span>
                     <span class="data-emph vcol-effective text-muted">per offering</span>
-                    <span class="vcol-from"><span class="source-tag" data-source="discovered">provider</span></span>
+                    <span class="vcol-from micro">provider</span>
                     <span class="micro vcol-contributors">not merged &mdash; each (provider, credential) offering carries its own rate, listed above</span>
                   </div>
                 </div>
@@ -9601,11 +9540,11 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="legend-caps acol-requests col-right">requests 24h</span>
               </div>
               <div class="row">
-                <span class="mono acol-alias">fast-json</span>
+                <span class="mono acol-alias">fast-coder</span>
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">openai/gpt-oss-120b</span>
                 <span class="mono acol-surface">llm</span>
-                <span class="mono acol-candidates col-right">12</span>
+                <span class="mono acol-candidates col-right">8</span>
                 <span class="mono acol-requests col-right">2,481</span>
               </div>
               <div class="row">
@@ -9629,15 +9568,15 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">gemini-2.5-pro</span>
                 <span class="mono acol-surface">llm</span>
-                <span class="mono acol-candidates col-right">4</span>
+                <span class="mono acol-candidates col-right">5</span>
                 <span class="mono acol-requests col-right">312</span>
               </div>
               <div class="row">
-                <span class="mono acol-alias">embed</span>
+                <span class="mono acol-alias">cheap-embed</span>
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">text-embedding-3-large</span>
                 <span class="mono acol-surface">embedding</span>
-                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-candidates col-right">2</span>
                 <span class="mono acol-requests col-right">188</span>
               </div>
               <div class="row">
@@ -10172,7 +10111,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
         <div class="region">
           <p class="section-title">Alias validation &mdash; cheap-embed</p>
-          <p><b class="pin" data-pin="3-4">3-4</b><span class="pin-note">3-4 &middot; Aliases &mdash; GET/PUT /api/aliases. New. Chains are yaml-only today and rendered as a JSON dump.</span></p>
 
           <div class="rt-warn">
             <p class="rt-warn-head">
@@ -10374,7 +10312,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <div class="chrome-main">
       <header class="topbar">
         <span class="topbar-title">use/playground</span>
-        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
       </header>
       <main class="content">
 
@@ -10837,7 +10775,7 @@ def ulid_ms(ulid: str) -&gt; int:
         </div>
 
         <p class="section-title">Shared prompt</p>
-        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-2 &middot; Two independent POST /api/playground calls with a shared prompt. Each pane carries its own model, params and stream.</span></p>
+        <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; Two independent POST /api/playground calls with a shared prompt. Each pane carries its own model, params and stream.</span></p>
 
         <div class="panel pgc-prompt">
 
@@ -10892,7 +10830,6 @@ def ulid_ms(ulid: str) -&gt; int:
         </div>
 
         <p class="section-title" style="margin-top:var(--gutter)">Two panes</p>
-        <p><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; Two independent POST /api/playground calls with a shared prompt. Each pane carries its own model, params and stream.</span></p>
         <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Comparison &mdash; ttft_ms, total_ms, tokens_in/out, cost_micros per pane. Winner marks use --trace: a reading, not a health state.</span></p>
         <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Each pane's X-Darkrouter-Request links to its own trace.</span></p>
 
@@ -11118,7 +11055,7 @@ def ulid_ms(ulid: str) -&gt; int:
     <div class="chrome-main">
       <header class="topbar">
         <span class="topbar-title">use/connect</span>
-        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
       </header>
       <main class="content">
 

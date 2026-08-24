@@ -5,17 +5,17 @@
  * names the task's own Interfaces contract reserves for it, .credential-row
  * and .breaker-panel. Everything else is prefixed pd- so that Tasks 9, 11
  * and 12, which are written in the same wave and concatenated into the same
- * stylesheet, cannot collide with it — .pd-switch and .switch are the same
- * control, and the prefixed name is the one that can only mean this screen.
+ * stylesheet, cannot collide with it.
  *
  * Reused unchanged and therefore absent below: .panel, .well, .table, .row,
  * .chip, .control, .control-ghost, .mono, .micro, .prose, .readout, .unit,
  * .data-emph, .legend-caps, .section-title, .spec-note, .region, .state-pip,
  * .ladder, .ladder-row, .target, .reason, .reason-code, .reason-prose,
- * .mark, .mark-cooling (darkrouter-ui.css), plus .control-primary and
- * .status-badge from css/04-request-trace.css — the probe's two outcomes are
- * the same success/error badge a request trace already prints, and inventing
- * a second pill for the same idea is how a vocabulary splits.
+ * .mark, .mark-cooling, .control-primary, .status-badge, .switch (+ parts),
+ * .field (+ -span-2), .field-input, .field-static, .kv-grid, .kv (+ -key/
+ * -value), .discovery-status (darkrouter-ui.css) — the probe's two outcomes
+ * are the same success/error badge a request trace already prints, and
+ * inventing a second pill for the same idea is how a vocabulary splits.
  */
 
 /* --- Shared panel scaffolding ----------------------------------------- */
@@ -62,100 +62,24 @@
 
 .pd-link { color: var(--accent-ink); }
 
-/* --- Region 1: identity form ------------------------------------------ */
+/* --- Region 1: identity form ------------------------------------------
+   .field (+ -span-2) and .field-input are the shared vocabulary; only the
+   4-column count is this screen's own. */
 
 .pd-form {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--gutter) var(--section-pad);
 }
-.pd-span-2 { grid-column: span 2; }
 
-.pd-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.pd-field .legend-caps { margin: 0; }
-.pd-field .spec-note { margin-top: 2px; }
-
-/* An editable field is a well cut into the panel; a read-only one is not.
-   That is the whole polarity rule doing semantic work: what you can change
-   is recessed and holds the value, what you cannot sits flush with the
-   panel it is printed on, in both modes and without a lock glyph. */
-.pd-input {
-  height: var(--control-h);
-  padding: 0 8px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
-}
-.pd-input[readonly] {
-  background: var(--panel);
-  border-color: var(--hairline-subtle);
-  color: var(--ink-muted);
-}
-
-/* The value of a read-only field that is a link rather than a string, e.g.
-   the preset this provider was created from. Same box as .pd-input so the
-   grid keeps one baseline. */
-.pd-static {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--control-h);
-  padding: 0 8px;
-  border: 1px solid var(--hairline-subtle);
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink-muted);
-}
-
-/* Enabled is neither provider health nor a routing verdict — it is a
-   selection the operator made, so it takes --accent-ink, the same token the
-   rail's active item and Requests' active saved view already use for "this
-   one is on". No transition: the product has exactly three animations and a
-   sliding knob is not one of them. */
-.pd-switch {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 26px;
-  height: 16px;
-  padding: 2px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--well);
-}
-.pd-switch[data-on="true"] {
-  justify-content: flex-end;
-  border-color: var(--accent-ink);
-}
-
-.pd-switch-knob {
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius);
-  background: var(--bezel);
-}
-.pd-switch[data-on="true"] .pd-switch-knob { background: var(--accent-ink); }
-
-/* The switch always carries its own word, so the state survives greyscale
-   and colour stays the second channel. */
+/* The switch always carries its own word beside it, so the state survives
+   greyscale and colour stays the second channel. */
 .pd-switch-row {
   display: flex;
   align-items: center;
   gap: 8px;
   height: var(--control-h);
 }
-.pd-switch-label { color: var(--ink-muted); }
 
 /* --- Region 2: credentials -------------------------------------------- */
 
@@ -218,31 +142,9 @@
   align-items: center;
   gap: 8px;
 }
-.credential-replace-line .pd-input { flex: 1 1 auto; max-width: 320px; }
+.credential-replace-line .field-input { flex: 1 1 auto; max-width: 320px; }
 
 /* --- Region 3: OAuth account ------------------------------------------- */
-
-/* A run of wire fields printed side by side rather than stacked in a form,
-   because none of them is editable — expiry, last refresh and the next
-   worker run are reports, not inputs. A grid rather than a wrapping flex
-   row: content-sized cells put every field at a different x, which reads as
-   five accidents instead of one instrument. auto-fit collapses the tracks a
-   shorter run does not fill, so the five OAuth fields and the four discovery
-   fields both come out evenly divided. */
-.pd-kvs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--gutter);
-}
-
-.pd-kv {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.pd-kv-key { color: var(--legend); }
-.pd-kv-value { color: var(--ink); }
 
 /* --- Region 4: breaker -------------------------------------------------- */
 
@@ -318,7 +220,7 @@
 }
 
 /* An inline field:value pair on one line, for a response body read left to
-   right. The stacked .pd-kv is for a column of them. */
+   right. The stacked .kv is for a column of them. */
 .pd-inline-kv {
   display: inline-flex;
   align-items: baseline;
