@@ -57,20 +57,18 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
-		UsageMetadata  *wireUsage `json:"usageMetadata"`
-		PromptFeedback *struct {
-			BlockReason string `json:"blockReason"`
-		} `json:"promptFeedback"`
+		UsageMetadata *wireUsage `json:"usageMetadata"`
 	}
 	if json.Unmarshal([]byte(ev.Data), &w) != nil {
 		return adapter.RawEvent{}
 	}
-	// Gemini's SSE defines no error event type, so a refusal arrives as a
-	// chunk carrying promptFeedback.blockReason. Before commit that is the
-	// provider's answer rather than content.
-	if w.PromptFeedback != nil && w.PromptFeedback.BlockReason != "" {
-		return adapter.RawEvent{ErrPayload: ev.Data}
-	}
+	// A blocked prompt is deliberately not reported as an in-stream error.
+	// Master design §8.1 classifies a content filter as Fatal so the chain does
+	// not re-ask a question every model in it will refuse, and the IR path
+	// withholds the health signal for the same reason. Reporting it here would
+	// fail over and cool a provider that did nothing wrong; instead the stream
+	// ends with no content-bearing event and the bytes are forwarded verbatim,
+	// which is what a direct call returns.
 	out := adapter.RawEvent{}
 	for _, c := range w.Candidates {
 		for _, p := range c.Content.Parts {

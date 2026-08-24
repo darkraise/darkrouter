@@ -97,13 +97,17 @@ func TestRecognizeEventReportsUsageMetadata(t *testing.T) {
 	}
 }
 
-func TestRecognizeEventReportsAPromptFeedbackBlock(t *testing.T) {
-	// Gemini's SSE has no error event type; a refusal arrives as a chunk
-	// carrying promptFeedback.blockReason, and before commit that is a
-	// provider answer rather than content.
+func TestABlockedPromptIsNotAnInStreamError(t *testing.T) {
+	// A content filter must not fail over — master design §8.1 — and must not
+	// cool a healthy provider. So a blocked prompt is neither content nor an
+	// error here: the stream simply ends with nothing content-bearing and the
+	// bytes are forwarded as Google wrote them.
 	got := New().RecognizeEvent(sse.Event{
 		Data: `{"promptFeedback":{"blockReason":"SAFETY"}}`})
-	if got.ErrPayload == "" {
-		t.Fatal("a blocked prompt was not recognized")
+	if got.ErrPayload != "" {
+		t.Errorf("a blocked prompt was reported as an in-stream error: %q", got.ErrPayload)
+	}
+	if got.Content {
+		t.Error("a blocked prompt must not commit the response")
 	}
 }
