@@ -54,6 +54,14 @@ func forwardable(dialect string, pt *edge.Passthrough, c router.Candidate,
 		// bedrock and vertex land here, by not implementing the interface.
 		return nil, false
 	}
+	if pt.Stream && c.Kind == "gemini" && pt.Query.Get("alt") != "sse" {
+		// Gemini's other streaming form is a chunked JSON array with no event
+		// boundaries for the recognizer to find: the whole response
+		// accumulates in the splitter's carry instead of committing per
+		// chunk. The IR path's array writer flushes per chunk and stays
+		// eligible; only the SSE form does here.
+		return nil, false
+	}
 	if pt.Stream && c.Kind == "openaicompat" && presetRejectsStreamOptions(p.Preset) {
 		// The stream_options injection that spec §5.2 requires would be
 		// rejected by this upstream, so its streaming requests take the IR path.
