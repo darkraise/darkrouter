@@ -1,0 +1,39 @@
+<!--
+  Canonical console chrome. Copied verbatim into every screen fragment that
+  depicts the operator console; only the topbar-title text and the
+  data-active rail item change per screen. Kept outside fragments/ because it
+  is a template, not a screen of its own — build.py only assembles
+  fragments/*.html.
+-->
+<div class="chrome">
+  <nav class="rail">
+    <div class="rail-brand mono">darkrouter</div>
+    <div class="rail-group">
+      <p class="legend-caps">Operate</p>
+      <a class="rail-item" href="#" data-active="true">Overview</a>
+      <a class="rail-item" href="#">Requests</a>
+      <a class="rail-item" href="#">Usage</a>
+    </div>
+    <div class="rail-group">
+      <p class="legend-caps">Configure</p>
+      <a class="rail-item" href="#">Providers</a>
+      <a class="rail-item" href="#">Models</a>
+      <a class="rail-item" href="#">Routing</a>
+    </div>
+    <div class="rail-group">
+      <p class="legend-caps">Use</p>
+      <a class="rail-item" href="#">Playground</a>
+      <a class="rail-item" href="#">Connect</a>
+    </div>
+    <a class="rail-item rail-settings" href="#">Settings</a>
+  </nav>
+  <div class="chrome-main">
+    <header class="topbar">
+      <span class="topbar-title">operate/overview</span>
+      <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+    </header>
+    <main class="content">
+      <!-- screen-specific content replaces this comment -->
+    </main>
+  </div>
+</div>

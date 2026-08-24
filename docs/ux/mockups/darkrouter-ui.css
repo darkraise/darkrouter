@@ -1,0 +1,534 @@
+/*
+ * Darkrouter operator console — mockup design tokens ("Graticule Bench").
+ *
+ * Five surfaces, darkest to lightest in dark mode: ground (canvas), rail
+ * (nav), panel (cards, mid-range), overlay (popovers, the one elevated
+ * surface), well (recessed data regions, the extreme end of the range).
+ * Fonts are self-hosted via @font-face blocks that build.py injects ahead
+ * of this file; nothing here references a font file directly.
+ */
+
+:root {
+  --ground: #101214;
+  --rail: #14171A;
+  --overlay: #22262A;
+  --ink: #EBEDF0;
+  --ink-muted: #98A1A9;
+  --legend: #808A93;
+  --hairline-subtle: #272B2F;
+  --hairline: #383D43;
+  --bezel: #6A737C;
+  --trace: #3ABFF8;
+  --trace-fill: #0777AB;
+  --accent-ink: #3ABFF8;
+  --focus: #7ED4FC;
+  --state-healthy: #36D399;
+  --state-cooling: #FBBD23;
+  --state-failed: #F87272;
+
+  /* The well sits at the extreme end of the value range while the panel sits
+     mid-range. Dark: the well is darker than the panel. Light: brighter. This
+     inversion is why light and dark are structurally different screens rather
+     than a palette swap, and it is what keeps the readout at the highest
+     contrast in the frame in both modes. */
+  --panel: #191C1F;
+  --well: #090A0C;
+
+  --radius: 2px;
+  --shadow-card: none;
+  --shadow-overlay: 0 8px 24px -8px rgba(0, 0, 0, 0.7);
+
+  --row-h: 30px;
+  --control-h: 30px;
+  --topbar-h: 44px;
+  --rail-w: 200px;
+  --section-pad: 12px;
+  --gutter: 20px;
+
+  --dur-hover: 120ms;
+  --dur-disclosure: 160ms;
+  --dur-swap: 90ms;
+}
+
+body.theme-light {
+  --ground: #E5E8EB;
+  --rail: #EEF0F2;
+  --overlay: #FFFFFF;
+  --ink: #1A2128;
+  --ink-muted: #5A636D;
+  --legend: #68737D;
+  --hairline-subtle: #DDE0E4;
+  --hairline: #C3C9D0;
+  --bezel: #818C98;
+  --trace: #0284C5;
+  --trace-fill: #0DA2E7;
+  --accent-ink: #0369A0;
+  --focus: #0284C5;
+  --state-healthy: #059467;
+  --state-cooling: #DB7706;
+  --state-failed: #DC2828;
+
+  --panel: #F9FAFB;
+  --well: #FFFFFF;
+
+  --shadow-overlay: 0 8px 24px -8px rgba(15, 23, 41, 0.18);
+}
+
+/* --- Reset & base -------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+/* Pins are inert until A is pressed, so a screenshot of the design reads as
+   the design and a screenshot with pins reads as the specification. */
+.pin { display: none; }
+body.pins-on .pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: var(--radius);
+  background: var(--trace-fill);
+  color: var(--ground);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* --- Type roles ------------------------------------------------------ */
+
+.mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose {
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+/* The per-screen caption qa.py requires exactly one of. It reads as a
+   sentence, so it takes the prose face at legend weight, not small caps. */
+.legend {
+  margin: 0 0 var(--section-pad);
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--legend);
+}
+
+/* The small-caps "Legend" type role from the spec: section and nav-group
+   labels, distinct from the .legend caption above. */
+.legend-caps {
+  margin: 0 0 6px;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--legend);
+}
+
+.readout {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* No space before the unit in markup: <span class="readout">142</span
+   ><span class="unit">ms</span> */
+.unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--legend);
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--overlay);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+/* --- Surfaces ---------------------------------------------------------
+   Separation is a value step plus a 1px hairline, never a shadow. --shadow-
+   overlay is the one exception in the whole product, and it belongs on
+   elements whose background is --overlay, not on .panel or .well. */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.well {
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--overlay);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* --- Table / rows ------------------------------------------------------ */
+
+.table {
+  display: flex;
+  flex-direction: column;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: var(--row-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.row:last-child { border-bottom: none; }
+
+/* Row highlight animates opacity on a full-bleed overlay layer, not the
+   background-color itself — background-color never transitions in this
+   product; opacity is the only animated property on hover. */
+.row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) ease;
+}
+.row:hover::after { opacity: 1; }
+
+/* --- State pip -----------------------------------------------------
+   A provider identity pip: what a provider IS. Colour comes from a
+   data-state attribute, not a modifier class, since Task 2 owns no screen
+   that needs named variants yet. */
+
+.state-pip {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+.state-pip[data-state="healthy"] { background: var(--state-healthy); }
+.state-pip[data-state="cooling"] { background: var(--state-cooling); }
+.state-pip[data-state="failed"] { background: var(--state-failed); }
+
+/* --- Ladder ----------------------------------------------------------
+   The routing fallback ladder: one row per provider attempt, a spine
+   running through the gutter, and a mark per row for what happened. A
+   ladder mark reports what the ROUTER decided (trace/sky), not what a
+   provider is (state colours) — except cooling, which the spec carves out
+   as one of the two places amber is allowed, and failed, which reports an
+   attempt's outcome rather than a routing choice. */
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.ladder-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.ladder-row:last-child { border-bottom: none; }
+
+.rank {
+  min-width: 18px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-align: right;
+}
+
+.spine {
+  align-self: stretch;
+  width: 2px;
+  background: var(--hairline);
+}
+
+.mark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+/* Passed over without an attempt: neither a routing decision nor a health
+   report, so it carries no colour at all. */
+.mark-skipped { background: var(--ink-muted); opacity: 0.45; }
+/* The one other place amber is allowed, per the colour-discipline rule. */
+.mark-cooling {
+  background: transparent;
+  border: 2px solid var(--state-cooling);
+  width: 6px;
+  height: 6px;
+}
+/* This attempt errored — an outcome for that provider, not a routing
+   choice, so it takes the failed state colour. */
+.mark-failed { background: var(--state-failed); }
+/* Where the request landed: the router's decision, so trace, never a
+   state colour. */
+.mark-served { background: var(--trace-fill); border: 1px solid var(--trace); }
+
+.stub {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 1px;
+  background: var(--hairline);
+}
+.stub-dashed {
+  background: none;
+  border-top: 1px dashed var(--hairline);
+  height: 0;
+}
+
+.reason {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-muted);
+}
+.reason-code {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+.reason-prose {
+  min-width: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* --- Console chrome --------------------------------------------------- */
+
+.chrome {
+  display: flex;
+  align-items: stretch;
+  min-height: 720px;
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.rail {
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  background: var(--rail);
+  border-right: 1px solid var(--hairline);
+  padding: var(--section-pad) 0;
+}
+
+.rail-brand {
+  padding: 0 var(--section-pad) var(--section-pad);
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: var(--section-pad);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--section-pad);
+}
+/* Gutters exist only between the three nav groups; everything else in the
+   rail tiles on a 1px seam. */
+.rail-group + .rail-group { margin-top: var(--gutter); }
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  height: var(--control-h);
+  margin: 0 calc(var(--section-pad) * -1);
+  padding: 0 var(--section-pad);
+  border-top: 1px solid var(--hairline-subtle);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.75;
+  transition: opacity var(--dur-hover) ease;
+}
+.rail-group .rail-item:first-child { border-top: none; }
+.rail-item:hover,
+.rail-item[data-active="true"] { opacity: 1; color: var(--ink); }
+.rail-item[data-active="true"] { color: var(--accent-ink); }
+
+.rail-settings {
+  margin-top: auto;
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--hairline);
+}
+
+.chrome-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+}
+
+.topbar {
+  flex: 0 0 var(--topbar-h);
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--section-pad);
+  background: var(--panel);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.topbar-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.topbar-cmdk {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-muted);
+}
+
+.content {
+  flex: 1 1 auto;
+  padding: var(--section-pad);
+  background: var(--ground);
+}
+
+/* --- Document shell (outside the .chrome, describing the doc itself) -- */
+
+.screen {
+  display: block;
+  max-width: 1440px;
+  margin: 0 auto 48px;
+}
+
+.doc-head {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 32px var(--section-pad) 24px;
+}
+.doc-title {
+  margin: 0 0 4px;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+}
+.doc-keys {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+.toc {
+  max-width: 1440px;
+  margin: 0 auto 32px;
+  padding: var(--section-pad);
+  background: var(--panel);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+}
+.toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.toc li { border-top: 1px solid var(--hairline-subtle); }
+.toc li:first-child { border-top: none; }
+.toc a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  color: var(--ink-muted);
+  text-decoration: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.toc a:hover { opacity: 1; color: var(--ink); }
+.toc-n {
+  color: var(--legend);
+  font-size: 11px;
+}
