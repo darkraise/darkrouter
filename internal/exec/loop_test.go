@@ -350,7 +350,11 @@ func TestLoopMalformed400StaysFatal(t *testing.T) {
 	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
 	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 
-	if got := sc.order(); len(got) != 1 {
-		t.Errorf("order = %v, want exactly 1", got)
+	// This request is passthrough-eligible, so spec §9's same-candidate IR
+	// retry fires once on the pre-commit 400 before Fatal stands — g1 is
+	// called twice. What "stays fatal" means is no failover to a different
+	// candidate: g2 and c1 must never be called.
+	if got := sc.order(); len(got) != 2 || got[0] != "g1" || got[1] != "g1" {
+		t.Errorf("order = %v, want [g1 g1]", got)
 	}
 }

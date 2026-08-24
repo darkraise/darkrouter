@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -153,7 +154,10 @@ func requestFor(t *testing.T, dialect string, m meta, body []byte) *http.Request
 		r.Header.Set(k, v)
 	}
 	if dialect == "gemini" {
-		r.SetPathValue("model", m.Path)
+		// m.Path may carry a "?alt=sse" suffix for a streaming fixture that
+		// needs to select the SSE wire form; the path value routing extracts
+		// the model from is the segment alone, never the query.
+		r.SetPathValue("model", strings.SplitN(m.Path, "?", 2)[0])
 	}
 	return r
 }

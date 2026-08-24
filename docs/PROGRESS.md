@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 ## Phase status
 
@@ -14,7 +14,7 @@ Last updated: 2026-08-23
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
-| 9 — Passthrough fast path | ✅ | ✅ | **Planned.** 17 tasks in `docs/superpowers/plans/2026-08-24-phase9-passthrough.md`; not started. |
+| 9 — Passthrough fast path | ✅ | ✅ | **Complete.** 17 tasks; race-clean, verified against fakes only — no `GROQ_KEY` in this environment for the live check. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -67,6 +67,118 @@ Two items phase 3 carried forward are done:
 
 Four smaller items are listed at the end of
 `docs/superpowers/plans/2026-08-22-phase3-routing-failover.md`.
+
+## Closed by phase 9
+
+- **A request forwards instead of re-rendering when the client's dialect
+  already matches the chosen provider's wire format.** `edge.Passthrough`
+  (`internal/edge/edge.go:15`) carries the raw body alongside the parsed IR;
+  `forwardKinds` (`internal/exec/passthrough.go:25`) maps each of the three
+  inbound dialects onto the one adapter kind whose wire format matches it, and
+  eligibility is re-decided on every attempt, so a request that forwards to its
+  first provider still translates correctly on failover to a different kind.
+- **Bedrock and Vertex never take the fast path.** Bedrock signs a hash of the
+  materialized body, which a forwarded body would invalidate the moment a
+  header changed it; Vertex encodes the model in its URL alongside the
+  publisher, which a forwarded body cannot carry. Both are excluded by
+  `adapter.Forwarder` (`internal/adapter/adapter.go:240`) simply not being
+  implemented for either kind.
+- **Streaming forwards event-by-event, not buffered whole.** The forwarded SSE
+  stream is split at event boundaries, scanned inline for the commit and usage
+  signals every path needs for accounting, and flushed through without being
+  held for a full re-encode.
+- **The unary fast path is measurably cheaper, against a local upstream.**
+  `internal/exec/bench_test.go`, three runs of `-count=3 -benchmem`: unary
+  passthrough averaged ~66µs and 227 allocations per request against the IR
+  path's ~72µs and 284; streaming time-to-first-token averaged ~86.8µs against
+  ~90.7µs, with 448 total allocations against 825. The benchmark's upstream is
+  a local `httptest` server, so none of these numbers include real network
+  latency.
+- **`DisableCompression` is set on the executor's shared transport (spec §8),
+  which costs the IR path bandwidth.** Go's `http.Transport` otherwise
+  negotiates gzip and decompresses it transparently; turning that off so a
+  forwarded body always arrives byte-identical to what the provider sent means
+  every request on the shared transport, IR path included, now pays for
+  uncompressed bytes over the wire.
+- **A differential suite compares both paths over the phase 4 golden corpus.**
+  `internal/golden/differential_test.go` drives 10 request fixtures, 7 response
+  fixtures and 11 usage fixtures through the fast and IR paths against the same
+  fake upstream, asserting the forwarded body is byte-identical to what the
+  client sent and that extracted usage agrees exactly.
+- **Which path an attempt took is recorded end to end.**
+  `request_attempts.path` (migration 0005) is written by the executor, read
+  back by the trace endpoint, and shown as a `Path` column in the dashboard's
+  trace drawer — the only way to confirm from outside the process that a 200
+  came from the fast path rather than the IR path producing the same bytes by
+  coincidence.
+- **An end-to-end suite exercises the fast path through an assembled
+  `server.Server`**, not just through `internal/exec` in isolation:
+  `internal/e2e/phase9_test.go` seeds a fake upstream, runs the real HTTP
+  handlers and worker goroutines, and reads the request row back through
+  `GET /api/requests/{id}` to confirm the recorded path, forwarded bytes and
+  extracted usage all agree with what actually crossed the wire.
+
+## Carried forward from phase 9
+
+- **Two IR-path fidelity gaps phase 4 recorded in prose are now load-bearing
+  in the differential suite, not just noted here.** The IR path emits a usage
+  chunk the client never asked for — master design §4.2 requires that chunk
+  stripped, but scopes the requirement to the passthrough path only, so the IR
+  path still forwards it unconditionally — and that chunk carries a
+  synthesized choice (`chunk()` in `internal/edge/openai/stream.go:14` always
+  builds one `choices` entry) where OpenAI itself emits `choices: []`.
+  `internal/golden/differential_test.go` now encodes both explicitly: its
+  request-body comparison allows the IR path's top-level keys to exceed the
+  passthrough body's by exactly `stream_options`, and its source comments
+  cross-reference this document. A widening of either gap beyond what is
+  described here fails a test instead of only being true in prose.
+- **Gemini's blocked-prompt behaviour diverges between the two paths, and the
+  divergence is deliberate.** Google returns a blocked prompt as HTTP 200 with
+  `promptFeedback.blockReason`; the IR path (`internal/adapter/gemini/parse.go:119`)
+  still synthesizes a 400 and withholds the health signal, matching master
+  design §8.1's rule that a content filter is fatal rather than retryable. The
+  fast path forwards Google's 200 verbatim, which is strictly closer to what a
+  direct call to Google returns, and matches this document's own earlier note
+  (above, under "Carried forward into phase 5 and beyond") that the IR
+  behaviour makes Gemini CLI and Claude Code show a failure where the model
+  merely declined. A real defect was found and fixed along the
+  way: the streaming recognizer used to classify a blocked prompt as a
+  retryable provider error, which failed the request over to another provider
+  and recorded a health failure against a provider that had answered correctly.
+- **Live verification against Groq did not happen.** Unlike phase 8, this
+  phase is fully verifiable live — Groq is an OpenAI-compatible provider and
+  the OpenAI dialect is one of the three inbound ones — but there is no
+  `GROQ_KEY` in this environment and no local `darkrouter.yaml` carrying a
+  credential, so no live call was made. The plan's verification steps
+  (`docs/superpowers/plans/2026-08-24-phase9-passthrough.md`, task 17) are
+  written to be followed by hand and remain available to whoever has a key.
+- **`Discoverer.SweepOnce` ends with a rebuild that is not serialized against
+  concurrent admin catalog writes.** An operator adding a model while a sweep
+  runs could have it vanish from routing until the next rebuild. The mechanism
+  is inferred from the code; the phase's own e2e work only proved the
+  manifestation — a 404 flake in the strict-400 case, traced to the sweep's
+  trailing rebuild publishing a stale snapshot over a test's seeding — and
+  worked around it by disabling discovery in that suite rather than fixing the
+  race. Out of phase 9's scope.
+- **Array-form Gemini streaming lost its only integration coverage.** Gemini
+  clients may ask for a chunked JSON array instead of SSE, and the whole-branch
+  review found that form was passthrough-eligible but unservable — the fast
+  path found no SSE event boundary, so a response over the pre-commit cap failed
+  the whole chain and cooled providers that had answered correctly. Eligibility
+  now requires `alt=sse`, which is the right fix, but it also means no test
+  drives an array-form streaming request end to end through the executor. The
+  predicate and the array writer are each unit-tested; the path between them is
+  not.
+- **A post-commit scanner error forwards the injected usage chunk.** When the
+  event splitter overflows after commit, the remainder is copied through raw so
+  the client keeps every byte the provider sent — which bypasses the strip that
+  normally removes a `stream_options` chunk Darkrouter asked for and the client
+  did not. Never corrupting bytes is the right trade on an already-degraded
+  path, but it is the one route by which a fourth body mutation reaches a
+  client, and master design §4.2 permits three.
+- **That same remainder copy is untested.** Its covering test delivers its whole
+  body in one read, so the carry is flushed but the `io.Copy` leg copies zero
+  bytes. A two-chunk body would close it.
 
 ## Closed by phase 8
 
@@ -370,22 +482,11 @@ to `openai/gpt-oss-120b` in `darkrouter.example.yaml` and `README.md`. The
 config fixtures in `internal/config/load_test.go` still use the old name, which
 is harmless: they never leave the process.
 
-### 3b. Two wire-format notes for phase 9
+### 3b. Two wire-format notes for phase 9 — moved
 
-Neither is a phase 1 defect — phase 1's spec requires only that the adapter
-inject `stream_options` — but phase 9's differential suite compares IR output
-against passthrough byte for byte, and both will surface there.
-
-- **The IR path emits a usage chunk the client never asked for.** Master design
-  §4.2 requires the injected chunk to be stripped so "the client's view is
-  identical to what it would have received directly", but scopes that to the
-  passthrough path. On the IR path the gateway currently forwards usage
-  unconditionally. OpenAI sends that chunk only when the client sets
-  `stream_options.include_usage`.
-- **The usage chunk carries a synthesized choice.** `chunk()` in
-  `internal/edge/openai/stream.go:14` always builds `choices: [{index, delta,
-  finish_reason}]`, so the usage chunk goes out with one empty-delta choice
-  where OpenAI emits `choices: []`.
+These were phase 1/4 observations held here for phase 9 to pick up. Phase 9
+did: they now live under "Carried forward from phase 9" as load-bearing
+assertions in `internal/golden/differential_test.go`, not just prose.
 
 ### 5. Phase 6 verification against Groq — done
 
@@ -660,6 +761,85 @@ test-harness fact rather than a product defect: every path that writes a
 credential through the API already reloads.
 
 No process was left running and no port was held.
+
+### 10. Phase 9 verification against fakes — done
+
+Task 17's brief calls for a live check against Groq. This environment has no
+`GROQ_KEY` and no local config carrying one — a missing secret, not a network
+problem — and spending the user's paid vendor quota to work around that was
+ruled out. **What follows ran against a locally built binary and a local fake
+upstream. No vendor was contacted, and this section proves the wiring, not
+that Groq accepts the payload.** That gap is unlike phase 8's: phase 9 is
+otherwise fully verifiable live, and remains unrun live for want of a
+credential rather than for want of a reachable protocol.
+
+Run on 2026-08-24. `CGO_ENABLED=0 go build ./cmd/darkrouter` produced a
+**35 MB** static binary, started for real — a background OS process bound to
+real TCP listeners, config loaded from a real YAML file, the admin API driven
+over real HTTP with a real login and session cookie — rather than through
+`internal/e2e`'s in-process `httptest` harness. The fake upstream was a small
+standalone `net/http` server (not `httptest`, which cannot run outside a test
+binary) on port 19090, answering `/v1/chat/completions` (unary and SSE) and
+`/v1/messages` (Anthropic-shaped), and exposing `/_seen` to return the last
+request's headers and body verbatim.
+
+Three providers were configured: `fake-oai` (`openaicompat`, serving
+`fake-model`, kept healthy throughout so the passthrough checks below are
+unaffected by the failover check), `broken` (`openaicompat`, base URL
+`127.0.0.1:1`, unreachable by construction) and `fake-fallback` (`anthropic`),
+the latter two both serving a separate `fallback-model` so the failover check
+cannot accidentally land back on `fake-oai` and take the fast path a second
+time.
+
+- **The fast path is confirmed by trace, not by status code.** An
+  OpenAI-shaped request to `fake-oai` returned 200 with
+  `X-Darkrouter-Attempts: 1`, and `GET /api/requests/{id}` read back
+  `attempts[0].path == "passthrough"`.
+- **An unmodelled parameter reached the provider intact.** `seed: 424242`,
+  which Darkrouter's IR does not model anywhere in `internal/ir` or
+  `internal/edge/openai`, appeared verbatim in the fake's recorded body
+  (`"seed":424242`) and in its reply (`x_fake_saw_seed: 424242`, a value the
+  fake can only have produced by reading the field back out of what it
+  received).
+- **The inbound proxy credential never reached the upstream on the two calls
+  its headers were inspected; the target's own key did.** `/_seen` after the
+  unmodelled-parameter call recorded `Authorization: Bearer
+  sk-fake-upstream-key` (the provider's configured credential), never the
+  client's `Bearer proxy-throwaway-token`; `/_seen` after the failover call
+  showed the anthropic-kind fallback sending `X-Api-Key:
+  sk-fake-fallback-key` and no `Authorization` header at all. Headers were
+  not inspected on the plain fast-path call or on either streaming call —
+  only their bodies and the request trace were.
+- **Streamed usage and the stripped-versus-kept pair both hold.** A stream
+  request with no `stream_options` recorded `tokens_in: 12, tokens_out: 5` on
+  the request row, and the client's own SSE body (`stream1.txt`) carried zero
+  chunks with a `usage` key — while the fake's `/_seen` confirmed Darkrouter
+  had injected `"stream_options":{"include_usage":true}` upstream regardless.
+  The same request repeated with `"stream_options":{"include_usage":true}` in
+  the client's own body produced an SSE stream (`stream2.txt`) carrying
+  exactly one `usage`-bearing chunk before `[DONE]`. That pair — absent by
+  default, present on request — is what distinguishes stripping from never
+  receiving; either result alone would have proved nothing.
+- **Failover still translates.** With `broken` at priority 99 in front of
+  `fake-fallback` at priority 1, the trace read `attempts[0]` as
+  `broken/passthrough/retryable_provider` (`dial tcp 127.0.0.1:1: connect:
+  connection refused`) and `attempts[1]` as `fake-fallback/ir/success/200`.
+  The client received a well-formed OpenAI-shaped completion
+  (`"hi from the fallback"`) even though the second attempt answered in
+  Anthropic's wire shape — the IR path translated it back correctly.
+
+**What did not run, and why.** Brief step 6 (timing ten unary requests through
+the gateway against ten direct calls) was not attempted: it exists to catch a
+network-latency confound against a real vendor, and a local fake on loopback
+has no TLS handshake or WAN latency to confound anything, so the measurement
+would say nothing this task's scope needs. Nothing else in the brief's
+substance was skipped, and nothing observed here failed — every check above
+passed on the first run, including the failover case, which is itself worth
+noting as absence of a finding rather than proof one could not exist.
+
+Both processes were tracked by PID from the moment they started. Both were
+killed at the end (`pkill -P` followed by `kill`), and `ss -ltnp` afterward
+showed no listener on 18080, 18081 or 19090.
 
 ## Review history
 

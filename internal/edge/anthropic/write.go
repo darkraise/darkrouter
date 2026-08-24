@@ -116,6 +116,8 @@ func errorShape(t ir.ErrorType) (string, int) {
 		// would break clients matching on the documented set. The status is
 		// what carries the distinction.
 		return "invalid_request_error", http.StatusRequestEntityTooLarge
+	case ir.ErrUnsupportedMedia:
+		return "invalid_request_error", http.StatusUnsupportedMediaType
 	case ir.ErrRateLimit:
 		return "rate_limit_error", http.StatusTooManyRequests
 	case ir.ErrOverloaded:

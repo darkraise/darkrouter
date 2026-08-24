@@ -1,12 +1,15 @@
 package exec
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,10 +21,13 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/edge"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -36,14 +42,45 @@ func newExecutor(t *testing.T, upstreamURL string) *Executor {
 }
 
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
-// total leaves the default of 10m in place.
+// total leaves the default of 10m in place. It is a thin wrapper over
+// newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
+// below is the other caller, for the shape phase 9's tests need.
 func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Duration) *Executor {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
-		"  - id: fake\n    kind: openaicompat\n    base_url: " + upstreamURL +
-		"\n    api_key: ${K}\n    models: [m]\n"
+	return newExecutorRaw(t, []providerSpec{{id: "fake", kind: "openaicompat",
+		upstreamURL: upstreamURL, models: []string{"m"}}}, "sk",
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, deps, total, nil)
+}
+
+// providerSpec is one provider row for newExecutorRaw. priority of 0 leaves
+// the config default in place, since that is indistinguishable from omitting
+// the field entirely.
+type providerSpec struct {
+	id, kind, upstreamURL string
+	models                []string
+	priority              int
+}
+
+// newExecutorRaw writes the fixture config and builds the store every
+// executor fixture in this package needs, varying only in how many providers
+// it lists, what each serves and at what priority, the credential resolved
+// for them, which adapters are wired, any aliases mapping a client-visible
+// name onto a provider/model pair, and — phase 2 only — a total timeout tight
+// enough to exercise the budget gate.
+func newExecutorRaw(t testing.TB, specs []providerSpec, apiKeySecret string,
+	adapters map[string]adapter.Adapter, deps Deps, total time.Duration,
+	aliases map[string][]string) *Executor {
+
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n"
+	for _, s := range specs {
+		body += "  - id: " + s.id + "\n    kind: " + s.kind + "\n    base_url: " + s.upstreamURL +
+			"\n    api_key: ${K}\n    models: [" + strings.Join(s.models, ", ") + "]\n"
+		if s.priority != 0 {
+			body += "    priority: " + strconv.Itoa(s.priority) + "\n"
+		}
+	}
 	if total > 0 {
 		// connect and first_byte must be set alongside total: the budget gate
 		// refuses an attempt unless the remaining total covers connect +
@@ -52,15 +89,20 @@ func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Dur
 		body += "policy:\n  timeout:\n    connect: 5ms\n    first_byte: " +
 			(total / 4).String() + "\n    total: " + total.String() + "\n"
 	}
+	if len(aliases) > 0 {
+		body += "aliases:\n"
+		for name, targets := range aliases {
+			body += "  " + name + ": [" + strings.Join(targets, ", ") + "]\n"
+		}
+	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return apiKeySecret, true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(cfgStore, provider.NewYAMLSource(cfgStore),
-		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, deps)
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
 }
 
 func post(t *testing.T, e *Executor, body string) *httptest.ResponseRecorder {
@@ -1391,4 +1433,404 @@ func TestAProviderWithNoPresetCarriesNoRerankPath(t *testing.T) {
 	if op.lastTarget.RerankPath != "" {
 		t.Errorf("RerankPath = %q, want empty", op.lastTarget.RerankPath)
 	}
+}
+
+func TestHandleRefusesACompressedBodyWith415(t *testing.T) {
+	e := newExecutor(t, "https://unused.example/v1")
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
+	r.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("status = %d, want 415", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "content-encoding") {
+		t.Errorf("the error does not name the cause: %s", w.Body)
+	}
+}
+
+func TestASameDialectCandidateTakesTheFastPath(t *testing.T) {
+	var seen struct {
+		body []byte
+		auth string
+		hdr  http.Header
+	}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.body, _ = io.ReadAll(r.Body)
+		seen.auth, seen.hdr = r.Header.Get("x-api-key"), r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	// An anthropic-inbound request to an anthropic provider, carrying a
+	// parameter the IR does not model.
+	body := `{"model":"target-model","max_tokens":16,
+	          "messages":[{"role":"user","content":"hi"}],
+	          "some_parameter_shipped_last_week":{"nested":true}}`
+	rec, w := runChat(t, up.URL, "anthropic", body) // see the helper note below
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if len(rec.Attempts) != 1 || rec.Attempts[0].Path != PathPassthrough {
+		t.Fatalf("attempts = %+v", rec.Attempts)
+	}
+	// The unmodelled parameter reached the provider. This is the phase.
+	if !bytes.Contains(seen.body, []byte("some_parameter_shipped_last_week")) {
+		t.Errorf("the unmodelled field was dropped: %s", seen.body)
+	}
+	if seen.auth != "sk-upstream" {
+		t.Errorf("x-api-key = %q, want the target's", seen.auth)
+	}
+	if got := seen.hdr.Get("Authorization"); got != "" {
+		t.Errorf("the inbound credential was forwarded: %q", got)
+	}
+	if rec.TokensIn != 4 || rec.TokensOut != 2 {
+		t.Errorf("usage = %d/%d, want 4/2", rec.TokensIn, rec.TokensOut)
+	}
+}
+
+func TestACrossDialectCandidateTakesTheIRPath(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c","object":"chat.completion","choices":[{"index":0,
+			"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":4,"completion_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	// Anthropic in, openaicompat out.
+	rec, w := runChatKind(t, up.URL, "anthropic", "openaicompat",
+		`{"model":"target-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Errorf("path = %q, want ir", rec.Attempts[0].Path)
+	}
+}
+
+func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
+	// spec §9: a strict provider rejecting a field the IR path would have
+	// dropped must not become a hard failure with no failover.
+	var calls int
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		raw, _ := io.ReadAll(r.Body)
+		if bytes.Contains(raw, []byte("some_parameter_shipped_last_week")) {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error",
+				"message":"unexpected field"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	rec, w := runChat(t, up.URL, "anthropic",
+		`{"model":"target-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}],
+		  "some_parameter_shipped_last_week":{"nested":true}}`)
+
+	if w.Code != 200 {
+		t.Fatalf("the client got %d, want the IR retry to have served it: %s", w.Code, w.Body)
+	}
+	if calls != 2 {
+		t.Errorf("upstream calls = %d, want 2", calls)
+	}
+	if len(rec.Attempts) != 2 {
+		t.Fatalf("attempts = %+v, want both recorded", rec.Attempts)
+	}
+	if rec.Attempts[0].Path != PathPassthrough || rec.Attempts[1].Path != PathIR {
+		t.Errorf("paths = %q, %q", rec.Attempts[0].Path, rec.Attempts[1].Path)
+	}
+}
+
+func TestAGeminiRequestRewritesTheURLAndNotTheBody(t *testing.T) {
+	var seen struct {
+		path, query string
+		body        []byte
+	}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.path, seen.query = r.URL.EscapedPath(), r.URL.RawQuery
+		seen.body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model",
+			"parts":[{"text":"hi"}]},"finishReason":"STOP"}],
+			"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}`))
+	}))
+	defer up.Close()
+
+	inbound := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	// The client asked for one model; the target serves another.
+	rec, w := runGemini(t, up.URL, "gemini-2.0-flash:generateContent", "gemini-2.5-pro", inbound)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if rec.Attempts[0].Path != PathPassthrough {
+		t.Fatalf("path = %q", rec.Attempts[0].Path)
+	}
+	if !strings.HasSuffix(seen.path, "/models/gemini-2.5-pro:generateContent") {
+		t.Errorf("path = %s", seen.path)
+	}
+	// The body is untouched even though the model changed: it was never in it.
+	if !bytes.Equal(seen.body, inbound) {
+		t.Errorf("body = %s, want it untouched", seen.body)
+	}
+	if strings.Contains(seen.query, "key=") {
+		t.Errorf("the inbound credential reached the upstream URL: %s", seen.query)
+	}
+}
+
+func TestASameNameModelForwardsByteIdenticalBytes(t *testing.T) {
+	var seen []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer up.Close()
+
+	// Whitespace and key order that no re-encoding would reproduce.
+	inbound := "{ \"messages\" : [ {\"role\":\"user\",\"content\":\"hi\"} ],\n" +
+		"  \"model\":\"target-model\" ,  \"max_tokens\" : 16 }"
+	if _, w := runChat(t, up.URL, "anthropic", inbound); w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if string(seen) != inbound {
+		t.Errorf("bytes were rewritten\n got: %q\nwant: %q", seen, inbound)
+	}
+}
+
+func TestAnInStreamOverloadedErrorFailsOverBeforeCommit(t *testing.T) {
+	// Anthropic delivers overloaded_error as an SSE event under a 200. The
+	// status line says nothing is wrong, so only the recognizer can tell.
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\"," +
+			"\"message\":{\"id\":\"m\",\"model\":\"x\",\"usage\":{\"input_tokens\":1}}}\n\n" +
+			"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"," +
+			"\"message\":\"Overloaded\"}}\n\n"))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\"," +
+			"\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"served\"}}\n\n"))
+	}))
+	defer second.Close()
+
+	rec, w := runChatTwoProviders(t, first.URL, second.URL, "anthropic",
+		`{"model":"target-model","max_tokens":16,"stream":true,
+		  "messages":[{"role":"user","content":"hi"}]}`)
+
+	if !strings.Contains(w.Body.String(), "served") {
+		t.Errorf("the second provider did not serve it: %s", w.Body)
+	}
+	if len(rec.Attempts) != 2 {
+		t.Errorf("attempts = %+v", rec.Attempts)
+	}
+	if w.Header().Get("X-Darkrouter-Attempts") != "2" {
+		t.Errorf("X-Darkrouter-Attempts = %q", w.Header().Get("X-Darkrouter-Attempts"))
+	}
+}
+
+func TestARewriteFailureDowngradesInPlace(t *testing.T) {
+	// The op is built by hand rather than driven through Handle. Every body
+	// rewriteForward can reject — malformed JSON, or no top-level model — is
+	// already rejected earlier, at the dialect parse or at routing, so no
+	// inbound request reaches this branch through a real dialect today. It is
+	// defensive code for a future dialect, and this is what reaches it: an
+	// ir.Request that routes, paired with a passthrough body that cannot be
+	// rewritten.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	cap := &capture{}
+	e := newExecutorFor(t, "anthropic", up.URL, Deps{Log: cap})
+
+	op := &chatOp{
+		d: anthropicedge.New(),
+		req: &ir.Request{
+			Model:    "target-model",
+			Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		},
+		pt: &edge.Passthrough{
+			// No top-level "model" key, so rewriteForward cannot rewrite it —
+			// but ModelField is set, so forwardable still calls in.
+			Body:       []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+			ModelField: "model", Surface: ir.SurfaceLLM,
+		},
+	}
+	r := httptest.NewRequest("POST", "/v1/messages", nil)
+	e.RunSurface(httptest.NewRecorder(), r, op, e.store.Current())
+
+	rec := cap.rec
+	if len(rec.Attempts) != 1 {
+		// A rewrite failure happens before any upstream connection, so it must
+		// not burn a second slot from the retry budget.
+		t.Fatalf("attempts = %+v, want exactly 1", rec.Attempts)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Errorf("path = %q, want ir — an unrewritable body must not be forwarded", rec.Attempts[0].Path)
+	}
+	found := false
+	for _, w := range rec.Warnings {
+		if strings.Contains(w, "could not be forwarded") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want one naming the failed forward", rec.Warnings)
+	}
+}
+
+// capture keeps the one record a run produces. A Logger must never block, and
+// this one cannot.
+type capture struct{ rec *store.RequestRecord }
+
+func (c *capture) Log(r *store.RequestRecord) { c.rec = r }
+
+// forwardableAdapters is every adapter kind the passthrough fast path can
+// address, wired once for every fixture below that needs Handle to reach it.
+func forwardableAdapters() map[string]adapter.Adapter {
+	return map[string]adapter.Adapter{
+		"openaicompat": openaicompat.New(),
+		"anthropic":    anthropicadapter.New(),
+		"gemini":       geminiadapter.New(),
+	}
+}
+
+// newExecutorFor is newExecutorWith over a chosen provider kind, with every
+// forwardable adapter wired. It takes testing.TB so benchmarks can use it too.
+func newExecutorFor(t testing.TB, kind, upstreamURL string, deps Deps) *Executor {
+	t.Helper()
+	return newExecutorForModels(t, kind, upstreamURL, []string{"target-model"}, nil, deps)
+}
+
+// newExecutorForModels is newExecutorFor parameterized on the model the lone
+// provider "up" serves and, when set, an alias mapping some other
+// client-visible name onto it — the shape a client asking for a model the
+// provider does not itself call by that name needs, so the rewrite has
+// something to actually change.
+func newExecutorForModels(t testing.TB, kind, upstreamURL string, models []string,
+	aliases map[string][]string, deps Deps) *Executor {
+
+	t.Helper()
+	return newExecutorRaw(t, []providerSpec{
+		{id: "up", kind: kind, upstreamURL: upstreamURL, models: models},
+	}, "sk-upstream", forwardableAdapters(), deps, 0, aliases)
+}
+
+// newExecutorForTwo is newExecutorFor over two same-kind providers serving the
+// same model, "up" ahead of "second" at the given priority so failover order
+// is deterministic rather than relying on config file order.
+func newExecutorForTwo(t testing.TB, kind, urlA, urlB string, priorityA int, deps Deps) *Executor {
+	t.Helper()
+	return newExecutorRaw(t, []providerSpec{
+		{id: "up", kind: kind, upstreamURL: urlA, models: []string{"target-model"}, priority: priorityA},
+		{id: "second", kind: kind, upstreamURL: urlB, models: []string{"target-model"}},
+	}, "sk-upstream", forwardableAdapters(), deps, 0, nil)
+}
+
+// dispatchChat drives one inbound chat body through Handle for the given
+// dialect and returns the record the logger captured alongside the recorder.
+func dispatchChat(t *testing.T, e *Executor, cap *capture, dialect, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	var d edge.Dialect
+	target := "/v1/chat/completions"
+	switch dialect {
+	case "anthropic":
+		d, target = anthropicedge.New(), "/v1/messages"
+	default:
+		d = openaiedge.New()
+	}
+	r := httptest.NewRequest("POST", target, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	e.Handle(w, r, d)
+	return cap.rec, w
+}
+
+// runChatKind drives one inbound body through Handle and returns the record the
+// logger captured alongside the recorder.
+func runChatKind(t *testing.T, upstreamURL, dialect, kind, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	cap := &capture{}
+	e := newExecutorFor(t, kind, upstreamURL, Deps{Log: cap})
+	return dispatchChat(t, e, cap, dialect, body)
+}
+
+// runChat is runChatKind with the kind the dialect passes through to.
+func runChat(t *testing.T, upstreamURL, dialect, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	return runChatKind(t, upstreamURL, dialect, forwardKinds[dialect], body)
+}
+
+// runChatModel is runChat for a provider that serves servedModel under a name
+// the client's body does not use, wired through an alias so routing actually
+// resolves the request onto it and the rewrite has a model to change.
+func runChatModel(t *testing.T, upstreamURL, dialect, servedModel, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	var probe struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(body), &probe); err != nil || probe.Model == "" {
+		t.Fatalf("body has no top-level model field: %s", body)
+	}
+	cap := &capture{}
+	e := newExecutorForModels(t, forwardKinds[dialect], upstreamURL, []string{servedModel},
+		map[string][]string{probe.Model: {"up/" + servedModel}}, Deps{Log: cap})
+	return dispatchChat(t, e, cap, dialect, body)
+}
+
+// runChatTwoProviders is runChat over two providers of the same kind, the
+// first at a high enough priority that it is always tried first — the shape a
+// pre-commit failover from one candidate to the next needs.
+func runChatTwoProviders(t *testing.T, urlA, urlB, dialect, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	cap := &capture{}
+	e := newExecutorForTwo(t, forwardKinds[dialect], urlA, urlB, 99, Deps{Log: cap})
+	return dispatchChat(t, e, cap, dialect, body)
+}
+
+// runGemini drives one inbound Gemini body through Handle. pathValue is the
+// "model:method" URL segment the client sent, mirroring how the mux would
+// have set it; servedModel is what the provider is configured to answer to,
+// aliased in when it differs so the passthrough's URL rewrite has something
+// to rewrite. It uses geminiedge.NewFor(r) rather than New() so a client's
+// ?alt=sse selection is read the way Handle's real caller reads it.
+func runGemini(t *testing.T, upstreamURL, pathValue, servedModel string, body []byte) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	clientModel, _ := geminiedge.ExtractModel(pathValue)
+	var aliases map[string][]string
+	if clientModel != servedModel {
+		aliases = map[string][]string{clientModel: {"up/" + servedModel}}
+	}
+	cap := &capture{}
+	e := newExecutorForModels(t, "gemini", upstreamURL, []string{servedModel}, aliases, Deps{Log: cap})
+
+	// A real client's key travels in the query string here, which is exactly
+	// what must not survive into the upstream URL.
+	r := httptest.NewRequest("POST", "/v1beta/models/"+pathValue+"?key=client-key", bytes.NewReader(body))
+	r.SetPathValue("model", pathValue)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	e.Handle(w, r, geminiedge.NewFor(r))
+	return cap.rec, w
 }

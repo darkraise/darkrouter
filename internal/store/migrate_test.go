@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 4 {
-			t.Errorf("run %d: version = %d, want 4", i, v)
+		if v != 5 {
+			t.Errorf("run %d: version = %d, want 5", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -221,7 +221,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	}
 }
 
-func TestMigrationsReachVersionFour(t *testing.T) {
+func TestMigrationsReachVersionFive(t *testing.T) {
 	// The loader asserts contiguity from 1, so a mis-numbered file fails here
 	// rather than at a customer's first start. One assertion rather than one
 	// per phase: the count is a fact about this build, not about a phase.
@@ -229,8 +229,8 @@ func TestMigrationsReachVersionFour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 4 {
-		t.Fatalf("loaded %d migrations, want 4", len(ms))
+	if len(ms) != 5 {
+		t.Fatalf("loaded %d migrations, want 5", len(ms))
 	}
 }
 

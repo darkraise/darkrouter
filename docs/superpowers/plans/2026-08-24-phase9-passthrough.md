@@ -1203,8 +1203,8 @@ Append to `internal/exec/passthrough.go`:
 
 ```go
 // ErrNoModelField means a body-carried dialect's body has no top-level model
-// key to rewrite. Task 9 turns it into a fall back to the IR path rather than a
-// client error: the IR parser produces a proper dialect-shaped message if the
+// key to rewrite. The executor falls back to the IR path rather than reporting
+// a client error: the IR parser produces a proper dialect-shaped message if the
 // body is genuinely invalid, and this function cannot tell the difference.
 var ErrNoModelField = errors.New("exec: passthrough body carries no model field")
 
@@ -1764,14 +1764,18 @@ func TestRecognizeEventReportsUsageMetadata(t *testing.T) {
 	}
 }
 
-func TestRecognizeEventReportsAPromptFeedbackBlock(t *testing.T) {
-	// Gemini's SSE has no error event type; a refusal arrives as a chunk
-	// carrying promptFeedback.blockReason, and before commit that is a
-	// provider answer rather than content.
+func TestABlockedPromptIsNotAnInStreamError(t *testing.T) {
+	// A content filter must not fail over — master design §8.1 — and must not
+	// cool a healthy provider. So a blocked prompt is neither content nor an
+	// error here: the stream simply ends with nothing content-bearing and the
+	// bytes are forwarded as Google wrote them.
 	got := New().RecognizeEvent(sse.Event{
 		Data: `{"promptFeedback":{"blockReason":"SAFETY"}}`})
-	if got.ErrPayload == "" {
-		t.Fatal("a blocked prompt was not recognized")
+	if got.ErrPayload != "" {
+		t.Errorf("a blocked prompt was reported as an in-stream error: %q", got.ErrPayload)
+	}
+	if got.Content {
+		t.Error("a blocked prompt must not commit the response")
 	}
 }
 ```
@@ -1994,12 +1998,13 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 	if json.Unmarshal([]byte(ev.Data), &w) != nil {
 		return adapter.RawEvent{}
 	}
-	// Gemini's SSE defines no error event type, so a refusal arrives as a
-	// chunk carrying promptFeedback.blockReason. Before commit that is the
-	// provider's answer rather than content.
-	if w.PromptFeedback != nil && w.PromptFeedback.BlockReason != "" {
-		return adapter.RawEvent{ErrPayload: ev.Data}
-	}
+	// A blocked prompt is deliberately not reported as an in-stream error.
+	// Master design §8.1 classifies a content filter as Fatal so the chain does
+	// not re-ask a question every model in it will refuse, and the IR path
+	// withholds the health signal for the same reason. Reporting it here would
+	// fail over and cool a provider that did nothing wrong; instead the stream
+	// ends with no content-bearing event and the bytes are forwarded verbatim,
+	// which is what a direct call returns.
 	out := adapter.RawEvent{}
 	for _, c := range w.Candidates {
 		for _, p := range c.Content.Parts {
@@ -2234,7 +2239,6 @@ package exec
 import (
 	"bytes"
 	"errors"
-	"io"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
@@ -2335,10 +2339,10 @@ func eventEnd(b []byte) int {
 func parseEvent(raw []byte, maxLine int) (sse.Event, bool) {
 	ev, err := sse.NewReader(bytes.NewReader(raw), maxLine).Next()
 	if err != nil {
-		// io.EOF means the block dispatched nothing — a comment or blank
-		// lines. Any other error is a malformed event, which spec §6 says to
-		// stop recognizing and simply forward.
-		_ = errors.Is(err, io.EOF)
+		// Both outcomes are the same answer here. io.EOF means the block
+		// dispatched nothing — a comment or blank lines — and any other error
+		// means a malformed event, which spec §6 says to stop recognizing and
+		// simply forward. Neither is a reason to end the stream.
 		return sse.Event{}, false
 	}
 	return ev, true
@@ -2674,9 +2678,9 @@ import (
 // behind or exits, the pipe write blocks and the client's stream freezes.
 // Inline scanning has no concurrency and cannot stall.
 //
-// strip is Task 4's injected flag: it removes the extra final usage chunk that
-// Darkrouter's own stream_options produced. When the client asked for usage
-// itself the chunk is theirs and removing it would be a fourth mutation.
+// strip removes the extra final usage chunk that Darkrouter's own injected
+// stream_options produced. When the client asked for usage itself the chunk is
+// theirs and removing it would be a fourth mutation.
 func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *AttemptCtx,
 	fw adapter.Forwarder, strip bool) (adapter.Outcome, *ir.Error) {
 
@@ -3384,19 +3388,49 @@ func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
 }
 
 func TestARewriteFailureDowngradesInPlace(t *testing.T) {
-	// No top-level model field. The IR parse would have refused this body, and
-	// its refusal is the right message — but it is not a second attempt.
+	// The op is built by hand rather than driven through Handle. Every body
+	// rewriteForward can reject — malformed JSON, or no top-level model — is
+	// already rejected earlier, at the dialect parse or at routing, so no
+	// inbound request reaches this branch through a real dialect today. It is
+	// defensive code for a future dialect, and this is what reaches it: an
+	// ir.Request that routes, paired with a passthrough body that cannot be
+	// rewritten.
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 	}))
 	defer up.Close()
 
-	rec, _ := runChatRaw(t, up.URL, "anthropic",
-		`{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
-	for _, a := range rec.Attempts {
-		if a.Path == PathPassthrough {
-			t.Errorf("an unrewritable body was forwarded anyway: %+v", rec.Attempts)
+	cap := &capture{}
+	e := newExecutorFor(t, "anthropic", up.URL, Deps{Log: cap})
+	op := &chatOp{
+		d:   anthropicedge.New(),
+		req: &ir.Request{Model: "target-model", MaxTokens: ptr(16)},
+		pt: &edge.Passthrough{
+			Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+			ModelField: "model", Surface: ir.SurfaceLLM,
+		},
+	}
+	r := httptest.NewRequest("POST", "/v1/messages", strings.NewReader("{}"))
+	e.RunSurface(httptest.NewRecorder(), r, op, e.store.Current())
+
+	rec := cap.rec
+	if len(rec.Attempts) != 1 {
+		t.Fatalf("attempts = %+v, want exactly one — a rewrite failure never reached a provider", rec.Attempts)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Errorf("path = %q, want ir", rec.Attempts[0].Path)
+	}
+	var found bool
+	for _, w := range rec.Warnings {
+		if strings.Contains(w, "could not be forwarded") {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("no warning explains the downgrade: %v", rec.Warnings)
 	}
 }
 ```
@@ -3414,8 +3448,7 @@ type capture struct{ rec *store.RequestRecord }
 func (c *capture) Log(r *store.RequestRecord) { c.rec = r }
 
 // newExecutorFor is newExecutorWith over a chosen provider kind, with every
-// forwardable adapter wired. It takes testing.TB so the benchmarks in Task 14
-// can use it too.
+// forwardable adapter wired. It takes testing.TB so benchmarks can use it too.
 func newExecutorFor(t testing.TB, kind, upstreamURL string, deps Deps) *Executor {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
@@ -4376,8 +4409,8 @@ func TestAScannerErrorMidStreamLeavesTheClientStreamIntact(t *testing.T) {
 }
 
 func TestAPromptWithHTMLCharactersSurvivesTheRewrite(t *testing.T) {
-	// The end-to-end version of the unit test in Task 4: the client sends <, >
-	// and &, the model name changes so the body must be re-encoded, and the
+	// The end-to-end version of the rewrite's escaping test: the client sends <,
+	// > and &, the model name changes so the body must be re-encoded, and the
 	// provider must still see the original characters.
 	var seen []byte
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4707,7 +4740,7 @@ func seedProvider(t *testing.T, g *gateway, id, kind, baseURL, model string, pri
 
 // attemptPaths reads the trace for a request id and returns the path of each
 // attempt in order. This is the only way the fast path is observable from
-// outside the process, which is why Task 10 added the column.
+// outside the process, which is why the attempt row carries a path column.
 func attemptPaths(t *testing.T, g *gateway, requestID string) []string {
 	t.Helper()
 	w := g.mustAdmin(t, "GET", "/api/requests/"+requestID, "", http.StatusOK)

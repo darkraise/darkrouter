@@ -79,6 +79,8 @@ func TestStatusForMapsEveryErrorType(t *testing.T) {
 		{ir.ErrContentFilter, 400},
 		{ir.ErrAPI, 502},
 		{ir.ErrDarkrouter, 502},
+		{ir.ErrPayloadTooLarge, 413},
+		{ir.ErrUnsupportedMedia, 415},
 	} {
 		if got := statusFor(tc.in); got != tc.want {
 			t.Errorf("statusFor(%s) = %d, want %d", tc.in, got, tc.want)

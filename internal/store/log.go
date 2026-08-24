@@ -20,6 +20,9 @@ type AttemptRecord struct {
 	StatusCode int
 	LatencyMs  int64
 	Error      string
+	// Path is "passthrough" or "ir". Empty means "ir": a caller that predates
+	// the fast path is describing the only rendering there was.
+	Path string
 }
 
 // RequestRecord is a complete request, built in memory by the handler and
@@ -214,8 +217,8 @@ func (w *LogWriter) writeBatch(ctx context.Context, batch []*RequestRecord) (int
 
 	attStmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO request_attempts
-		    (request_id, seq, provider_id, key_id, model, outcome, status_code, latency_ms, error)
-		 VALUES (?,?,?,?,?,?,?,?,?)`)
+		    (request_id, seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -271,9 +274,13 @@ func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord
 		return err
 	}
 	for _, a := range r.Attempts {
+		path := a.Path
+		if path == "" {
+			path = "ir"
+		}
 		if _, err := attStmt.ExecContext(ctx,
 			r.ID, a.Seq, a.ProviderID, a.KeyID, a.Model, a.Outcome,
-			a.StatusCode, a.LatencyMs, a.Error,
+			a.StatusCode, a.LatencyMs, a.Error, path,
 		); err != nil {
 			return err
 		}
