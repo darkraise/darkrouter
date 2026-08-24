@@ -1392,3 +1392,19 @@ func TestAProviderWithNoPresetCarriesNoRerankPath(t *testing.T) {
 		t.Errorf("RerankPath = %q, want empty", op.lastTarget.RerankPath)
 	}
 }
+
+func TestHandleRefusesACompressedBodyWith415(t *testing.T) {
+	e := newExecutor(t, "https://unused.example/v1")
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
+	r.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("status = %d, want 415", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "content-encoding") {
+		t.Errorf("the error does not name the cause: %s", w.Body)
+	}
+}

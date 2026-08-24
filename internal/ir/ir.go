@@ -100,6 +100,12 @@ const (
 	// things: one says the request is malformed and retrying is pointless, the
 	// other says send something smaller.
 	ErrPayloadTooLarge ErrorType = "payload_too_large"
+	// ErrUnsupportedMedia is an inbound body Darkrouter will not decode —
+	// today, one carrying a Content-Encoding other than identity. Distinct
+	// from ErrInvalidRequest because a compressed body reaching a JSON parser
+	// comes back as "invalid JSON", which sends the client looking for a
+	// syntax error that is not there.
+	ErrUnsupportedMedia ErrorType = "unsupported_media"
 )
 
 type Media struct {

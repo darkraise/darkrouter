@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -284,5 +286,70 @@ func TestRewriteReportsMalformedJSON(t *testing.T) {
 	pt := &edge.Passthrough{Body: []byte(`{"model":`), ModelField: "model", Surface: ir.SurfaceLLM}
 	if _, _, err := rewriteForward(pt, "a", "b", "openaicompat"); err == nil {
 		t.Fatal("want an error for a malformed body")
+	}
+}
+
+func TestForwardHeadersKeepsOnlyTheAllowlist(t *testing.T) {
+	r := httptest.NewRequest("POST", "/v1/messages", strings.NewReader("{}"))
+	for k, v := range map[string]string{
+		"Content-Type":      "application/json",
+		"Accept":            "text/event-stream",
+		"User-Agent":        "claude-cli/2.0.0",
+		"anthropic-version": "2023-06-01",
+		"anthropic-beta":    "context-1m-2025-08-07",
+		"openai-beta":       "assistants=v2",
+
+		// Dropped: the inbound credential in all three dialect spellings,
+		// hop-by-hop headers, and anything a client invented.
+		"Authorization":         "Bearer proxy-token",
+		"x-api-key":             "proxy-token",
+		"x-goog-api-key":        "proxy-token",
+		"Connection":            "keep-alive",
+		"Keep-Alive":            "timeout=5",
+		"Transfer-Encoding":     "chunked",
+		"Te":                    "trailers",
+		"Upgrade":               "h2c",
+		"Proxy-Authorization":   "Basic abc",
+		"Host":                  "evil.example",
+		"X-Forwarded-For":       "10.0.0.1",
+		"Accept-Encoding":       "gzip",
+		"Cookie":                "session=abc",
+		"X-Darkrouter-Provider": "spoofed",
+	} {
+		r.Header.Set(k, v)
+	}
+
+	h := forwardHeaders(r)
+	for _, want := range []string{
+		"Content-Type", "Accept", "User-Agent", "anthropic-version",
+		"anthropic-beta", "openai-beta",
+	} {
+		if h.Get(want) == "" {
+			t.Errorf("%s was dropped", want)
+		}
+	}
+	if len(h) != 6 {
+		t.Errorf("forwarded %d headers, want 6: %v", len(h), h)
+	}
+}
+
+func TestCompressedInboundBodiesAreRefused(t *testing.T) {
+	for _, tc := range []struct {
+		enc  string
+		want bool
+	}{
+		{"", false},
+		{"identity", false},
+		{"gzip", true},
+		{"br", true},
+		{"gzip, identity", true},
+	} {
+		r := httptest.NewRequest("POST", "/v1/messages", strings.NewReader("{}"))
+		if tc.enc != "" {
+			r.Header.Set("Content-Encoding", tc.enc)
+		}
+		if got := compressedBody(r); got != tc.want {
+			t.Errorf("Content-Encoding %q: compressedBody = %v, want %v", tc.enc, got, tc.want)
+		}
 	}
 }
