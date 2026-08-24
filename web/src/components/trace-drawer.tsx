@@ -26,6 +26,7 @@ type Attempt = {
   status_code: number
   latency_ms: number
   error?: string
+  path: string
 }
 
 export type Trace = {
@@ -93,6 +94,7 @@ export function TraceDrawer({ id, onClose }: { id: string | null; onClose: () =>
                     <TableHead>Outcome</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Latency</TableHead>
+                    <TableHead>Path</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -114,6 +116,7 @@ export function TraceDrawer({ id, onClose }: { id: string | null; onClose: () =>
                       </TableCell>
                       <TableCell>{a.status_code || "—"}</TableCell>
                       <TableCell>{a.latency_ms} ms</TableCell>
+                      <TableCell>{a.path}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

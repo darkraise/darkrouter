@@ -31,6 +31,7 @@ const failover = {
       status_code: 500,
       latency_ms: 120,
       error: "upstream 500",
+      path: "passthrough",
     },
     {
       seq: 1,
@@ -40,6 +41,7 @@ const failover = {
       outcome: "success",
       status_code: 200,
       latency_ms: 340,
+      path: "ir",
     },
   ],
   warnings: ["top_k -> openai: not expressible"],
@@ -103,5 +105,13 @@ describe("the trace drawer", () => {
   it("says bodies were not captured rather than showing an empty panel", async () => {
     renderDrawer()
     expect(await screen.findByText(/not captured/i)).toBeInTheDocument()
+  })
+
+  it("shows which path each attempt took", async () => {
+    renderDrawer()
+    // Spec §11's first done criterion is only checkable from the drawer if a
+    // retried attempt and its passthrough predecessor read as different rows.
+    expect(await screen.findByText("passthrough")).toBeInTheDocument()
+    expect(await screen.findByText("ir")).toBeInTheDocument()
   })
 })

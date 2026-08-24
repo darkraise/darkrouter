@@ -156,3 +156,32 @@ func TestAnUnknownTraceIs404(t *testing.T) {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
+
+func TestTraceEndpointNamesTheAttemptPath(t *testing.T) {
+	// Spec §11's first criterion is only checkable from outside the process if
+	// the trace says which path served the request.
+	s, db := testServerFull(t)
+	db.WriteBatchForTest(t, []*store.RequestRecord{{
+		ID: "01PATH", TS: time.UnixMilli(1700000000000),
+		Dialect: "openai", Surface: "llm", RequestedModel: "m",
+		FinalProviderID: "p", FinalModel: "m", Status: "success",
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "p", Model: "m", Outcome: "success", StatusCode: 200,
+				Path: "passthrough"},
+		},
+	}})
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests/01PATH", "")
+	var body struct {
+		Attempts []struct {
+			Path string `json:"path"`
+		} `json:"attempts"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Attempts) == 0 || body.Attempts[0].Path != "passthrough" {
+		t.Errorf("attempts = %+v", body.Attempts)
+	}
+}
