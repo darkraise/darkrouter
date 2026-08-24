@@ -1,4 +1,4 @@
-<section class="screen" id="s-07-provider-detail" data-screen-title="provider detail">
+<section class="screen" id="s-07-provider-detail" data-screen-title="configure/providers &mdash; provider detail">
   <p class="legend">
     One provider opened from the list &mdash; cerebras, deliberately, because
     it is the one with something wrong: a rotated key its cooldown ladder is
@@ -34,7 +34,7 @@
     <div class="chrome-main">
       <header class="topbar">
         <span class="topbar-title">configure/providers</span>
-        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
       </header>
       <main class="content">
 
@@ -51,57 +51,57 @@
             </div>
             <div class="pd-form">
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">id</span>
-                <input class="pd-input" value="cerebras" readonly>
+                <input class="field-input" value="cerebras" readonly>
                 <span class="spec-note">the routing key. Renaming means deleting and recreating.</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">name</span>
-                <input class="pd-input" value="Cerebras">
+                <input class="field-input" value="Cerebras">
                 <span class="spec-note">display only &mdash; nothing routes on it</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">kind</span>
-                <input class="pd-input" value="openaicompat" readonly>
+                <input class="field-input" value="openaicompat" readonly>
                 <span class="spec-note">create-only. PATCH does not accept kind: changing it would repoint every catalogued model at a different wire protocol.</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">auth_style</span>
-                <input class="pd-input" value="bearer" readonly>
+                <input class="field-input" value="bearer" readonly>
                 <span class="spec-note">from the preset. Not patchable either.</span>
               </label>
 
-              <label class="pd-field pd-span-2">
+              <label class="field field-span-2">
                 <span class="legend-caps">base_url</span>
-                <input class="pd-input" value="https://api.cerebras.ai/v1">
+                <input class="field-input" value="https://api.cerebras.ai/v1">
                 <span class="spec-note">patchable, and the one field an operator changes to point at a proxy or a regional endpoint</span>
               </label>
 
-              <label class="pd-field">
+              <label class="field">
                 <span class="legend-caps">priority</span>
-                <input class="pd-input" value="90">
+                <input class="field-input" value="90">
                 <span class="spec-note">higher runs earlier in the ladder</span>
               </label>
 
-              <div class="pd-field">
+              <div class="field">
                 <span class="legend-caps">enabled</span>
                 <span class="pd-switch-row">
-                  <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
-                  <span class="mono pd-switch-label">enabled</span>
+                  <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                  <span class="mono switch-label">enabled</span>
                 </span>
                 <span class="spec-note">disabling keeps the provider, its keys and its history; deleting does not</span>
               </div>
 
-              <div class="pd-field pd-span-2">
+              <div class="field field-span-2">
                 <span class="legend-caps">preset</span>
-                <span class="pd-static">
+                <span class="field-static">
                   <span>cerebras</span>
                   <span class="micro">Cerebras &middot; llm &middot; free tier</span>
-                  <a class="pd-link" href="https://inference.cerebras.ai">inference.cerebras.ai</a>
+                  <a class="link" href="https://inference.cerebras.ai">inference.cerebras.ai</a>
                 </span>
                 <span class="spec-note">one of the 197 shipped presets. It seeded kind, base_url and auth_style at creation and is not patchable afterwards.</span>
               </div>
@@ -125,7 +125,7 @@
             </div>
 
             <div class="row credential-row">
-              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
               <span class="mono">primary</span>
               <span class="mono">&hellip;a4f2</span>
               <span class="chip pd-cooling-chip"><span class="mark mark-cooling"></span>cooling 4m 12s</span>
@@ -142,7 +142,7 @@
                 <span class="mono">primary &hellip;a4f2</span>
               </span>
               <span class="credential-replace-line">
-                <input class="pd-input" type="password" placeholder="paste the replacement key" autocomplete="off">
+                <input class="field-input" type="password" placeholder="paste the replacement key" autocomplete="off">
                 <button class="control control-primary" type="button">Add, then remove &hellip;a4f2</button>
                 <button class="control control-ghost" type="button">Cancel</button>
               </span>
@@ -150,7 +150,7 @@
             </div>
 
             <div class="row credential-row">
-              <span class="pd-switch" data-on="true" role="switch" aria-checked="true"><span class="pd-switch-knob"></span></span>
+              <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
               <span class="mono">burst</span>
               <span class="mono">&hellip;7c19</span>
               <span></span>
@@ -162,7 +162,7 @@
             </div>
 
             <div class="row credential-row">
-              <span class="pd-switch" data-on="false" role="switch" aria-checked="false"><span class="pd-switch-knob"></span></span>
+              <span class="switch" data-on="false" role="switch" aria-checked="false"><span class="switch-track"><span class="switch-knob"></span></span></span>
               <span class="mono">ci</span>
               <span class="mono">&hellip;0d63</span>
               <span></span>
@@ -188,35 +188,35 @@
               <span class="chip">auth_style oauth</span>
               <span class="micro">preset anthropic-oauth &middot; Anthropic (Claude subscription)</span>
             </div>
-            <div class="pd-kvs">
+            <div class="kv-grid">
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">account</span>
-                <span class="mono pd-kv-value">ops@darkraise.dev</span>
+              <span class="kv">
+                <span class="micro kv-key">account</span>
+                <span class="mono kv-value">ops@darkraise.dev</span>
                 <span class="spec-note">returned once by oauth/complete and discarded today</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">expires_at</span>
+              <span class="kv">
+                <span class="micro kv-key">expires_at</span>
                 <span class="readout">14:41:20</span>
                 <span class="spec-note"><b class="data-emph">23m 25s</b> remaining &middot; the token, not the connection</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">last_refresh</span>
-                <span class="mono pd-kv-value">14:11:20</span>
+              <span class="kv">
+                <span class="micro kv-key">last_refresh</span>
+                <span class="mono kv-value">14:11:20</span>
                 <span class="spec-note">6m 35s ago, by the worker &mdash; no request paid for it</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">next_refresh</span>
-                <span class="mono pd-kv-value">14:21:07</span>
+              <span class="kv">
+                <span class="micro kv-key">next_refresh</span>
+                <span class="mono kv-value">14:21:07</span>
                 <span class="spec-note">worker interval 5m, jittered 0.5&ndash;1.5&times;, renewing anything inside 15m of expiry</span>
               </span>
 
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">state</span>
-                <span class="mono pd-kv-value">connected</span>
+              <span class="kv">
+                <span class="micro kv-key">state</span>
+                <span class="mono kv-value">connected</span>
                 <span class="spec-note">the only value an operator can see today is its opposite</span>
               </span>
 
@@ -314,9 +314,9 @@
             <div class="well pd-result">
               <span class="chip status-badge" data-status="success">ok</span>
               <span class="pd-result-fields">
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">model_count</span><span class="data-emph">41</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">284</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">model_count</span><span class="data-emph">41</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">latency_ms</span><span class="data-emph">284</span></span>
               </span>
             </div>
             <p class="prose pd-probe-note">A successful probe resets the ladder for the credential it ran against &mdash; every triple and the credential-level entry &mdash; and triggers one discovery pass. That is the side effect region 4's Reset breaker button and region 6's Run discovery button exist to separate from it.</p>
@@ -328,9 +328,9 @@
             <div class="well pd-result">
               <span class="chip status-badge" data-status="error">ok:false</span>
               <span class="pd-result-fields">
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">probe</span><span class="mono">listing</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">latency_ms</span><span class="data-emph">1,204</span></span>
-                <span class="pd-inline-kv"><span class="micro pd-kv-key">error</span><span class="mono pd-error-text">the provider rejected this credential: 401 Unauthorized</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">probe</span><span class="mono">listing</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">latency_ms</span><span class="data-emph">1,204</span></span>
+                <span class="pd-inline-kv"><span class="micro kv-key">error</span><span class="mono pd-error-text">the provider rejected this credential: 401 Unauthorized</span></span>
               </span>
             </div>
             <p class="prose pd-probe-note">A rejected key is a 200 carrying ok:false, not a 5xx: the request to darkrouter succeeded and the answer is bad news. model_count is absent rather than 0 &mdash; nothing was listed, so there is no count to report. A failed probe clears nothing; the cooldown above stands.</p>
@@ -341,30 +341,35 @@
           <p class="section-title">Discovery</p>
           <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Discovery &mdash; POST /api/providers/{id}/discover. New. Discoverer.Trigger fires today only as a side effect of a successful test.</span></p>
           <div class="panel pd-panel">
-            <div class="pd-kvs">
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">last_attempt_at</span>
-                <span class="mono pd-kv-value">14:15:12</span>
+            <div class="pd-head">
+              <span class="discovery-status" data-discovery="stale"></span>
+              <span class="mono pd-head-id">cerebras</span>
+              <span class="chip">stale</span>
+            </div>
+            <div class="kv-grid">
+              <span class="kv">
+                <span class="micro kv-key">last_attempt_at</span>
+                <span class="mono kv-value">14:15:12</span>
                 <span class="spec-note">2m 43s ago &mdash; the pass is running, it is just failing</span>
               </span>
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">last_success_at</span>
-                <span class="mono pd-kv-value pd-bad">08:11:40</span>
+              <span class="kv">
+                <span class="micro kv-key">last_success_at</span>
+                <span class="mono kv-value pd-bad">08:11:40</span>
                 <span class="spec-note">6h 06m ago. The catalog for cerebras is that old.</span>
               </span>
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">consecutive_failures</span>
+              <span class="kv">
+                <span class="micro kv-key">consecutive_failures</span>
                 <span class="data-emph pd-bad">14</span>
                 <span class="spec-note">since the key was rotated upstream</span>
               </span>
-              <span class="pd-kv">
-                <span class="micro pd-kv-key">models_in_catalog</span>
+              <span class="kv">
+                <span class="micro kv-key">models_in_catalog</span>
                 <span class="data-emph">41</span>
                 <span class="spec-note">stale, not gone &mdash; the router still routes on them</span>
               </span>
             </div>
             <div class="well pd-error-well">
-              <span class="micro pd-kv-key">last_error</span>
+              <span class="micro kv-key">last_error</span>
               <span class="mono pd-error-text">listing rejected the credential: 401 Unauthorized</span>
             </div>
             <div class="pd-foot">

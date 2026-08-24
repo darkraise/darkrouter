@@ -46,7 +46,7 @@
           <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; GET /api/models?q=&amp;surface=&amp;min_context=&amp;tools=true. min_context and tools are accepted today and unreachable from the current screen.</span></p>
           <div class="filter-bar">
 
-            <input class="q-input" value="gpt-oss" aria-label="q" readonly>
+            <input class="field-input q-input" value="gpt-oss" aria-label="q" readonly>
 
             <div class="segmented" aria-label="surface">
               <span class="segmented-option" data-active="true">llm</span>
@@ -436,7 +436,7 @@
         <div class="region">
           <p class="section-title">Model detail sheet &mdash; open</p>
           <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
-          <div class="panel sheet">
+          <div class="sheet">
 
             <div class="sheet-head">
               <span class="sheet-title">openai/gpt-oss-120b</span>
@@ -681,7 +681,7 @@
                   <div class="row">
                     <span class="mono vcol-field">pricing</span>
                     <span class="data-emph vcol-effective text-muted">per offering</span>
-                    <span class="vcol-from"><span class="source-tag" data-source="discovered">provider</span></span>
+                    <span class="vcol-from micro">provider</span>
                     <span class="micro vcol-contributors">not merged &mdash; each (provider, credential) offering carries its own rate, listed above</span>
                   </div>
                 </div>
@@ -780,11 +780,11 @@
                 <span class="legend-caps acol-requests col-right">requests 24h</span>
               </div>
               <div class="row">
-                <span class="mono acol-alias">fast-json</span>
+                <span class="mono acol-alias">fast-coder</span>
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">openai/gpt-oss-120b</span>
                 <span class="mono acol-surface">llm</span>
-                <span class="mono acol-candidates col-right">12</span>
+                <span class="mono acol-candidates col-right">8</span>
                 <span class="mono acol-requests col-right">2,481</span>
               </div>
               <div class="row">
@@ -808,15 +808,15 @@
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">gemini-2.5-pro</span>
                 <span class="mono acol-surface">llm</span>
-                <span class="mono acol-candidates col-right">4</span>
+                <span class="mono acol-candidates col-right">5</span>
                 <span class="mono acol-requests col-right">312</span>
               </div>
               <div class="row">
-                <span class="mono acol-alias">embed</span>
+                <span class="mono acol-alias">cheap-embed</span>
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">text-embedding-3-large</span>
                 <span class="mono acol-surface">embedding</span>
-                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-candidates col-right">2</span>
                 <span class="mono acol-requests col-right">188</span>
               </div>
               <div class="row">

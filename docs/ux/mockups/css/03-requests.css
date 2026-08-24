@@ -1,13 +1,15 @@
 /*
  * Task 6 — the Requests log ("operate/requests").
  *
- * New vocabulary this screen introduces for reuse by Tasks 9 and 12:
- * .filter-bar, .combo (+ trigger/menu/option/check), .time-range,
- * .view-chip, .newer-pill, .table-toolbar, .col-menu, and the .col-*
- * column-width helpers the request table's header and rows share.
- * .segmented, .chip-failover, .chip-path and .control-ghost were promoted
- * to darkrouter-ui.css once Overview and Usage needed the same controls.
- * Everything else (.table, .row, .chip, .control, .well, .panel,
+ * New vocabulary this screen introduces: .time-range, .view-chip,
+ * .newer-pill, .col-menu, and the .col-* column-width helpers the request
+ * table's header and rows share. .segmented, .chip-failover, .chip-path
+ * and .control-ghost were promoted to darkrouter-ui.css once Overview and
+ * Usage needed the same controls; .filter-bar, .combo (+ trigger/menu/
+ * option/check/count), .table-toolbar (+ -actions), .table-wrap,
+ * .col-right, .text-muted and .row-head were promoted there in the
+ * consolidation pass once Providers, Models and Playground needed them
+ * too. Everything else (.table, .row, .chip, .control, .well, .panel,
  * .legend-caps, .micro, .prose) is reused as-is from darkrouter-ui.css.
  */
 
@@ -45,91 +47,11 @@
   opacity: 1;
 }
 
-/* --- Filter bar ------------------------------------------------------
-   Six real controls in a row, top-aligned so an open combobox or the
-   time-range menu grows downward inside its own column without pushing
-   or overlapping a sibling control — closed siblings just end 30px up
-   from wherever the tallest, open one does. */
-
-.filter-bar {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: var(--gutter);
-}
-
-/* --- Combobox ----------------------------------------------------------- */
-
-.combo {
-  display: flex;
-  flex-direction: column;
-}
-
-.combo-trigger {
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  cursor: default;
-}
-
-.combo-chevron {
-  color: var(--legend);
-  font-size: 10px;
-}
-
-.combo-menu {
-  display: none;
-  flex-direction: column;
-  gap: 1px;
-  margin-top: 4px;
-  padding: 4px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
-}
-.combo[data-open="true"] .combo-menu { display: flex; }
-
-.combo-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 24px;
-  padding: 0 6px;
-  border-radius: var(--radius);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
-  color: var(--ink);
-  opacity: 0.85;
-  transition: opacity var(--dur-hover) ease;
-}
-.combo-option:hover { opacity: 1; }
-
-.combo-check {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--bezel);
-  border-radius: var(--radius);
-  font-size: 9px;
-  line-height: 1;
-  color: transparent;
-}
-.combo-option[data-checked="true"] .combo-check,
+/* A column-menu tick reuses .combo-check for the same reason a facet
+   checkbox does: one 12px tick box, not a second one per menu type. */
 .col-menu-item[data-checked="true"] .combo-check {
   border-color: var(--accent-ink);
   color: var(--accent-ink);
-}
-
-.combo-count {
-  margin-left: auto;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
-  color: var(--ink-muted);
 }
 
 /* --- Time-range picker ------------------------------------------------- */
@@ -196,20 +118,9 @@
   color: var(--ink);
 }
 
-/* --- Table toolbar + column-visibility menu --------------------------- */
-
-.table-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.table-toolbar-actions {
-  position: relative;
-  display: flex;
-  gap: 8px;
-}
+/* --- Column-visibility menu --------------------------------------------
+   .table-toolbar (+ -actions) is the shared toolbar shell; only the
+   column menu it opens is this screen's own. */
 
 /* The second overlay in this screen (after .combo-menu/.time-range-menu):
    floats over the table on the same --overlay + --shadow-overlay surface
@@ -262,15 +173,9 @@
 }
 
 /* --- Request table -----------------------------------------------------
-   .table/.row are shared (darkrouter-ui.css); everything below is the
-   column geometry this screen's header and rows share. */
-
-.table-wrap { position: relative; }
-
-.row-head {
-  border-bottom-color: var(--hairline);
-}
-.row-head .legend-caps { margin: 0; }
+   .table/.row/.table-wrap/.row-head are shared (darkrouter-ui.css);
+   everything below is the column geometry this screen's header and rows
+   share. */
 
 .col-time { flex: 0 0 84px; }
 .col-surface { flex: 0 0 84px; }
@@ -292,12 +197,9 @@
 .col-attempts { flex: 0 0 64px; }
 .col-tokens { flex: 0 0 118px; }
 .col-latency { flex: 0 0 72px; }
-.col-right { text-align: right; }
 
 .status-success { color: var(--state-healthy); }
 .status-error { color: var(--state-failed); }
-
-.text-muted { color: var(--ink-muted); }
 
 /* .chip-failover and .chip-path are shared with Overview's failover log,
    so both live in darkrouter-ui.css now. */

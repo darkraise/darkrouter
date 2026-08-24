@@ -15,13 +15,11 @@
  * Reused unchanged from darkrouter-ui.css: .panel/.well/.table/.row/
  * .ladder (+ every ladder part, predictive mode)/.chip/.control/
  * .control-ghost/.mono/.micro/.prose/.unit/.section-title/.legend-caps/
- * .region/.pin/.pin-note. Reused from finished screens' partials, the
- * same way Task 9 reused Task 5's tiles: .priority-handle,
- * .drop-indicator, .prov-row-dragging and the .prov-prio-was/-arrow/-now
- * renumbering pair from Providers' (a drag-to-reorder list must look
- * identical on both screens or the gesture reads as two features);
- * .row-head from Requests'; .control-primary from Request trace's;
- * .spec-note from the design-language board.
+ * .region/.pin/.pin-note/.priority-handle/.drop-indicator/.row-head/
+ * .control-primary. Reused from Providers' partial: .prov-row-dragging
+ * and the .prov-prio-was/-arrow/-now renumbering pair (a drag-to-reorder
+ * list must look identical on both screens or the gesture reads as two
+ * features). .spec-note is reused from the design-language board.
  */
 
 /* --- Region 1: route preview -----------------------------------------

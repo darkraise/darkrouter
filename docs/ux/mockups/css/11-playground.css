@@ -2,14 +2,13 @@
  * Task 14 — the Playground ("use/playground").
  *
  * Reused unchanged from darkrouter-ui.css: .panel, .well, .table, .row,
- * .chip, .chip-path, .chip-failover, .control, .control-ghost, .segmented,
- * .segmented-option, .state-pip, .readout, .unit, .micro, .prose,
- * .legend-caps, .section-title, .region, .measure.
- * Reused from earlier screens' partials: .combo / .combo-trigger /
- * .combo-chevron (Task 6), .json-tree and its key/string/punct/toggle/depth
- * family plus .control-primary, .readout-tile and .trace-id (Task 7),
- * .switch / .switch-track / .switch-knob / .switch-label, .range-track,
- * .range-fill, .range-input and .link-out (Task 12).
+ * .chip, .chip-path, .chip-failover, .control, .control-primary,
+ * .control-ghost, .segmented, .segmented-option, .state-pip, .readout,
+ * .unit, .micro, .prose, .legend-caps, .section-title, .region, .measure,
+ * .combo (+ -trigger/-chevron), .switch (+ -track/-knob/-label).
+ * Reused from earlier screens' partials: .json-tree and its key/string/
+ * punct/toggle/depth family plus .readout-tile and .trace-id (Task 7),
+ * .range-track, .range-fill, .range-input and .link-out (Task 12).
  *
  * Everything below is prefixed pg- because three other screens are being
  * drawn against this stylesheet at the same time and a bare .turn or
