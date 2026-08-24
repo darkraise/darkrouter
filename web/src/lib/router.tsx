@@ -8,6 +8,10 @@ import {
   useRouterState,
 } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
+import { RouterAdapterProvider } from "darkraise-ui/router"
+import type { RouterAdapter } from "darkraise-ui/router"
+import { SidebarLayout } from "darkraise-ui/layout"
+import type { NavGroup } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { OverviewScreen } from "../routes/overview"
 import { RequestsScreen } from "../routes/requests"
@@ -22,12 +26,13 @@ import { SettingsScreen } from "../routes/settings"
  * useNavigate, usePathname, useBack and useInvalidate and expects something to
  * satisfy them. This is TanStack Router doing that.
  */
-export const routerAdapter = {
+export const routerAdapter: RouterAdapter = {
   Link: ({
     to,
     children,
     className,
     activeClassName,
+    activeExact,
     style,
     onClick,
   }: {
@@ -35,6 +40,7 @@ export const routerAdapter = {
     children: ReactNode
     className?: string
     activeClassName?: string
+    activeExact?: boolean
     style?: CSSProperties
     onClick?: (e: MouseEvent<HTMLAnchorElement>) => void
   }) => (
@@ -42,6 +48,10 @@ export const routerAdapter = {
       to={to}
       className={className}
       activeProps={activeClassName ? { className: activeClassName } : undefined}
+      // Without this every item whose path prefixes the current one lights up,
+      // and "/" prefixes all of them — so Overview would read as active on
+      // every screen.
+      activeOptions={{ exact: activeExact ?? false }}
       style={style}
       onClick={onClick}
     >
@@ -62,7 +72,38 @@ export const routerAdapter = {
   },
 }
 
-const rootRoute = createRootRoute({ component: Outlet })
+const nav: NavGroup[] = [
+  {
+    items: [
+      { label: "Overview", href: "/" },
+      { label: "Requests", href: "/requests" },
+      { label: "Catalog", href: "/catalog" },
+      { label: "Playground", href: "/playground" },
+      { label: "Settings", href: "/settings" },
+    ],
+  },
+]
+
+/**
+ * RootShell is the chrome every screen renders inside.
+ *
+ * It lives here, as the root route's component, rather than wrapping
+ * RouterProvider from outside: SidebarLayout renders SidebarItem and
+ * SearchCommand, both of which call darkraise-ui's useRouterAdapter, and the
+ * adapter below is built on TanStack hooks. Mounted above RouterProvider it
+ * would be reaching for a router context that does not exist yet.
+ */
+function RootShell() {
+  return (
+    <RouterAdapterProvider value={routerAdapter}>
+      <SidebarLayout nav={nav} showThemeSwitcher>
+        <Outlet />
+      </SidebarLayout>
+    </RouterAdapterProvider>
+  )
+}
+
+const rootRoute = createRootRoute({ component: RootShell })
 
 // One route per screen. Declared here rather than in a generated tree because
 // there are five of them and a generator would be more machinery than routes.
