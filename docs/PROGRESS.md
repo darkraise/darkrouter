@@ -955,7 +955,8 @@ carried-forward catalog item concrete: an operator reprioritising a provider
 in the dashboard sees no effect until the next sweep, up to the 15-minute
 discovery interval away.
 
-**Both findings are fixed.** The §9 fallback now records a warning naming the
+**Both findings are fixed**, merged to master as `f74e43a` (`--no-ff`) together
+with the two coverage gaps below. The §9 fallback now records a warning naming the
 translation (it cannot name the field — `encoding/json` discarded the unknown
 key at the edge parser long before), and `reloadProviders` rebuilds the catalog
 after reloading the source. Each fix went in test-first, and the test for the
