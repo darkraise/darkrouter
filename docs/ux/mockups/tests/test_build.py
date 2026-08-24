@@ -9,6 +9,7 @@ import qa
 
 HERE = Path(__file__).resolve().parents[1]
 FRAGMENTS = HERE / "fragments"
+CSS_PARTIALS = HERE / "css"
 
 # Two fragments that deliberately define the SAME gradient id. Unsuffixed they
 # collide in the assembled document and the second paints with the first one's
@@ -103,6 +104,37 @@ class TestBuild(unittest.TestCase):
 
     def test_built_index_passes_qa(self):
         self.assertEqual(qa.check_index(self.index), [])
+
+
+class TestCssPartials(unittest.TestCase):
+    """Parallel screen waves each get their own css/*.css file rather than
+    appending to darkrouter-ui.css, where two screens built at once would
+    clobber each other's rules."""
+
+    def setUp(self):
+        CSS_PARTIALS.mkdir(exist_ok=True)
+        self.path = CSS_PARTIALS / "99-fixture.css"
+        self.assertFalse(self.path.exists(), f"{self.path.name} would clobber a real partial")
+        self.path.write_text(".fixture-sparkline { color: var(--ink); }\n", encoding="utf-8")
+        self.index, self.artifact = build.build()
+
+    def tearDown(self):
+        self.path.unlink(missing_ok=True)
+        # Leave the built files matching the real css set rather than
+        # carrying this test's scratch rule into a committed index.
+        if any(FRAGMENTS.glob("*.html")):
+            build.build()
+        else:
+            (HERE / "index.html").unlink(missing_ok=True)
+            (HERE / "artifact.html").unlink(missing_ok=True)
+
+    def test_partial_rules_reach_the_built_index(self):
+        text = self.index.read_text(encoding="utf-8")
+        self.assertIn(".fixture-sparkline", text)
+        self.assertIn("--ground", text, "main stylesheet should still be inlined")
+        # darkrouter-ui.css first so a partial can override it; the partial
+        # rule must appear later in the concatenated <style> block.
+        self.assertLess(text.index("--ground"), text.index(".fixture-sparkline"))
 
 
 if __name__ == "__main__":

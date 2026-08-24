@@ -69,8 +69,7 @@ def main() -> int:
     if args.light:
         body_classes.append("theme-light")
 
-    css = (HERE / "darkrouter-ui.css").read_text(encoding="utf-8")
-    style = f"<style>\n{build.font_face_block()}\n{css}\n</style>"
+    style = build.style_block()
     doc = (
         f'<!doctype html><html lang="en" '
         f'data-mode="{"light" if args.light else "dark"}"><head>'

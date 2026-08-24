@@ -45,6 +45,31 @@ def suffix_svg_ids(fragment: str, screen_id: str) -> str:
     return SVG_ID.sub(lambda m: f"{m.group(1)}{m.group(2)}--{screen_id}", fragment)
 
 
+def css_partials() -> str:
+    """Concatenate every css/*.css partial in filename order.
+
+    Parallel screen waves each get their own stylesheet file instead of all
+    appending to darkrouter-ui.css, so two screens built at once cannot
+    clobber each other's rules. Sorted filename order keeps the concatenated
+    result deterministic regardless of build order.
+    """
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((HERE / "css").glob("*.css"))
+    )
+
+
+def style_block() -> str:
+    """Build the single <style> block shared by index.html and check.py.
+
+    A per-fragment screenshot must see exactly what the assembled page sees,
+    so both call this instead of each reading darkrouter-ui.css on its own.
+    """
+    css = (HERE / "darkrouter-ui.css").read_text(encoding="utf-8")
+    partials = css_partials()
+    sheet = "\n".join(part for part in (css, partials) if part)
+    return f"<style>\n{font_face_block()}\n{sheet}\n</style>"
+
+
 def collect() -> list[tuple[str, str, str]]:
     """Return (screen_id, title, html) per fragment, in filename order."""
     out = []
@@ -70,11 +95,10 @@ def toc(screens: list[tuple[str, str, str]]) -> str:
 
 def build() -> tuple[Path, Path]:
     screens = collect()
-    css = (HERE / "darkrouter-ui.css").read_text(encoding="utf-8")
     shell = (HERE / "_shell.html").read_text(encoding="utf-8")
 
     content = toc(screens) + "\n" + "\n".join(html for _, _, html in screens)
-    style = f"<style>\n{font_face_block()}\n{css}\n</style>"
+    style = style_block()
 
     document = (
         shell.replace("<!--STYLE-->", style)

@@ -340,19 +340,59 @@ kbd {
 }
 .ladder-row:last-child { border-bottom: none; }
 
+/* Where the request landed: a value step plus a 1px --trace rule down the
+   left edge, so the served row reads as the one the eye should stop on
+   without needing to read a single character of it. */
+.ladder-row-served { border-left: 1px solid var(--trace); }
+.ladder-row-served::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+/* Two-digit zero-padding keeps the gutter's optical width constant past
+   rank nine, which matters once a ladder runs past 9 candidates. */
 .rank {
-  min-width: 18px;
+  position: relative;
+  min-width: 28px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
   text-align: right;
 }
+/* A tick drawn into the spine's approach, not onto the spine itself — sits
+   in the 8px gap .ladder-row's flex gap already reserves, so it needs no
+   layout space of its own. Opt-in per rank (.rank-tick) rather than a bare
+   .rank rule, since a ladder with no .spine has nothing for the tick to
+   run into. Every fifth rank gets the long variant. */
+.rank-tick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  width: 3px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--bezel);
+}
+.rank-tick-major::after { width: 5px; }
+/* Below the served row a candidate's text is still printed, just at the
+   45% opacity the termination rule puts on it — the spine and mark get
+   their own colour treatment instead, so this is text-only and shared
+   across whichever element in the row needs it (rank, target, reason). */
+.text-terminated { opacity: 0.45; }
 
 .spine {
   align-self: stretch;
-  width: 2px;
+  width: 1px;
   background: var(--hairline);
 }
+/* The termination rule: below the served row the run of ink itself gives
+   out, not just the marks sitting on it. */
+.spine-terminated { background: var(--hairline-subtle); }
 
 /* All four states share one 7px silhouette footprint so the gutter column
    never jitters between rows, and split into two families: filled means an
@@ -382,21 +422,41 @@ kbd {
 /* Where the request landed: the router's decision, so trace, never a
    state colour. */
 .mark-served { background: var(--trace-fill); border: 1px solid var(--trace); }
+/* Below the served row a candidate was never reached at all — a smaller,
+   dimmer silhouette than "skipped", which was still a live decision.
+   This one is just where the ink runs out. */
+.mark-terminated {
+  width: 5px;
+  height: 5px;
+  background: transparent;
+  border: 1px solid var(--hairline-subtle);
+}
+/* The compressed catalog reading: rank plus mark plus provider id only,
+   at a size step up from the ladder's own 7px so a dense column of them
+   still reads as individual marks rather than a smear. */
+.mark-catalog { width: 9px; height: 9px; }
 
+/* Solid means the row ended here; dashed means the router moved past it
+   after a failure. A background gradient gives an exact 3px-on-3px dash
+   at any zoom level, which border-style: dashed does not guarantee. */
 .stub {
   flex: 0 0 auto;
-  width: 16px;
+  width: 12px;
   height: 1px;
-  background: var(--hairline);
+  background: var(--trace);
 }
 .stub-dashed {
-  background: none;
-  border-top: 1px dashed var(--hairline);
-  height: 0;
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--state-failed) 0 3px,
+    transparent 3px 6px
+  );
 }
 
 .reason {
   display: flex;
+  flex: 1 1 auto;
   align-items: baseline;
   gap: 6px;
   min-width: 0;
@@ -415,6 +475,40 @@ kbd {
   line-height: 1.55;
   color: var(--ink-muted);
 }
+
+/* The candidate identity itself — provider/model, off the wire, so mono.
+   Fixed width keeps it a column across rows whose reason text varies
+   wildly in length. */
+.target {
+  flex: 0 0 auto;
+  min-width: 230px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+/* A candidate the router passed over keeps its identity legible but
+   unemphasised — nothing happened here, so nothing should draw the eye. */
+.target-muted { color: var(--ink-muted); }
+
+/* A 2px bar in the row's own right margin, width set per row from the
+   ladder's own maximum latency — the ladder becomes a waterfall with no
+   second axis to read. */
+.latency-bar {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 2px;
+  min-width: 2px;
+  max-width: 64px;
+  margin-left: auto;
+  border-radius: var(--radius);
+  background: var(--trace);
+}
+.latency-bar-failed { background: var(--state-failed); }
+
+/* The evidence panel: the same retrospective ladder with every hue
+   stripped, so the four mark states have to stand on silhouette alone. */
+.ladder-grayscale { filter: grayscale(1); }
 
 /* --- Console chrome --------------------------------------------------- */
 
