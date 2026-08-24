@@ -39,8 +39,12 @@ func TestPostCommitFailureBecomesAnInStreamError(t *testing.T) {
 	if !strings.Contains(body, "died") {
 		t.Errorf("a post-commit failure must surface as an in-stream error: %s", body)
 	}
-	if !strings.HasSuffix(body, "data: [DONE]\n\n") {
-		t.Errorf("the stream must still terminate: %q", body)
+	// This request is passthrough-eligible, so the post-commit bytes are
+	// forwarded verbatim (spec §9) rather than re-rendered through the
+	// dialect writer — there is no synthesized [DONE] to expect, only exactly
+	// what the upstream sent.
+	if !strings.HasSuffix(body, "data: {\"error\":{\"message\":\"died\",\"type\":\"api_error\"}}\n\n") {
+		t.Errorf("the error event must reach the client verbatim: %q", body)
 	}
 	// The request is recorded as served, not as a failure to route.
 	if r := logger.only(t); r.Status != "success" {

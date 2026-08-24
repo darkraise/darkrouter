@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -18,9 +19,11 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/edge"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -1407,4 +1410,187 @@ func TestHandleRefusesACompressedBodyWith415(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "content-encoding") {
 		t.Errorf("the error does not name the cause: %s", w.Body)
 	}
+}
+
+func TestASameDialectCandidateTakesTheFastPath(t *testing.T) {
+	var seen struct {
+		body []byte
+		auth string
+		hdr  http.Header
+	}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.body, _ = io.ReadAll(r.Body)
+		seen.auth, seen.hdr = r.Header.Get("x-api-key"), r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	// An anthropic-inbound request to an anthropic provider, carrying a
+	// parameter the IR does not model.
+	body := `{"model":"target-model","max_tokens":16,
+	          "messages":[{"role":"user","content":"hi"}],
+	          "some_parameter_shipped_last_week":{"nested":true}}`
+	rec, w := runChat(t, up.URL, "anthropic", body) // see the helper note below
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if len(rec.Attempts) != 1 || rec.Attempts[0].Path != PathPassthrough {
+		t.Fatalf("attempts = %+v", rec.Attempts)
+	}
+	// The unmodelled parameter reached the provider. This is the phase.
+	if !bytes.Contains(seen.body, []byte("some_parameter_shipped_last_week")) {
+		t.Errorf("the unmodelled field was dropped: %s", seen.body)
+	}
+	if seen.auth != "sk-upstream" {
+		t.Errorf("x-api-key = %q, want the target's", seen.auth)
+	}
+	if got := seen.hdr.Get("Authorization"); got != "" {
+		t.Errorf("the inbound credential was forwarded: %q", got)
+	}
+	if rec.TokensIn != 4 || rec.TokensOut != 2 {
+		t.Errorf("usage = %d/%d, want 4/2", rec.TokensIn, rec.TokensOut)
+	}
+}
+
+func TestACrossDialectCandidateTakesTheIRPath(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c","object":"chat.completion","choices":[{"index":0,
+			"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":4,"completion_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	// Anthropic in, openaicompat out.
+	rec, w := runChatKind(t, up.URL, "anthropic", "openaicompat",
+		`{"model":"target-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Errorf("path = %q, want ir", rec.Attempts[0].Path)
+	}
+}
+
+func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
+	// spec §9: a strict provider rejecting a field the IR path would have
+	// dropped must not become a hard failure with no failover.
+	var calls int
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		raw, _ := io.ReadAll(r.Body)
+		if bytes.Contains(raw, []byte("some_parameter_shipped_last_week")) {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error",
+				"message":"unexpected field"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+
+	rec, w := runChat(t, up.URL, "anthropic",
+		`{"model":"target-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}],
+		  "some_parameter_shipped_last_week":{"nested":true}}`)
+
+	if w.Code != 200 {
+		t.Fatalf("the client got %d, want the IR retry to have served it: %s", w.Code, w.Body)
+	}
+	if calls != 2 {
+		t.Errorf("upstream calls = %d, want 2", calls)
+	}
+	if len(rec.Attempts) != 2 {
+		t.Fatalf("attempts = %+v, want both recorded", rec.Attempts)
+	}
+	if rec.Attempts[0].Path != PathPassthrough || rec.Attempts[1].Path != PathIR {
+		t.Errorf("paths = %q, %q", rec.Attempts[0].Path, rec.Attempts[1].Path)
+	}
+}
+
+func TestARewriteFailureDowngradesInPlace(t *testing.T) {
+	// No top-level model field. The IR parse would have refused this body, and
+	// its refusal is the right message — but it is not a second attempt.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer up.Close()
+
+	rec, _ := runChatRaw(t, up.URL, "anthropic",
+		`{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	for _, a := range rec.Attempts {
+		if a.Path == PathPassthrough {
+			t.Errorf("an unrewritable body was forwarded anyway: %+v", rec.Attempts)
+		}
+	}
+}
+
+// capture keeps the one record a run produces. A Logger must never block, and
+// this one cannot.
+type capture struct{ rec *store.RequestRecord }
+
+func (c *capture) Log(r *store.RequestRecord) { c.rec = r }
+
+// newExecutorFor is newExecutorWith over a chosen provider kind, with every
+// forwardable adapter wired. It takes testing.TB so benchmarks can use it too.
+func newExecutorFor(t testing.TB, kind, upstreamURL string, deps Deps) *Executor {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
+		"  - id: up\n    kind: " + kind + "\n    base_url: " + upstreamURL +
+		"\n    api_key: ${K}\n    models: [target-model]\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk-upstream", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
+		"openaicompat": openaicompat.New(),
+		"anthropic":    anthropicadapter.New(),
+		"gemini":       geminiadapter.New(),
+	}, deps)
+}
+
+// runChatKind drives one inbound body through Handle and returns the record the
+// logger captured alongside the recorder.
+func runChatKind(t *testing.T, upstreamURL, dialect, kind, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	cap := &capture{}
+	e := newExecutorFor(t, kind, upstreamURL, Deps{Log: cap})
+
+	var d edge.Dialect
+	target := "/v1/chat/completions"
+	switch dialect {
+	case "anthropic":
+		d, target = anthropicedge.New(), "/v1/messages"
+	default:
+		d = openaiedge.New()
+	}
+	r := httptest.NewRequest("POST", target, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	e.Handle(w, r, d)
+	return cap.rec, w
+}
+
+// runChat is runChatKind with the kind the dialect passes through to.
+func runChat(t *testing.T, upstreamURL, dialect, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	return runChatKind(t, upstreamURL, dialect, forwardKinds[dialect], body)
+}
+
+// runChatRaw is runChat, kept as a separate name because the bodies it sends
+// are deliberately unparseable by the rewrite and a reader should see that at
+// the call site.
+func runChatRaw(t *testing.T, upstreamURL, dialect, body string) (*store.RequestRecord, *httptest.ResponseRecorder) {
+	t.Helper()
+	return runChat(t, upstreamURL, dialect, body)
 }
