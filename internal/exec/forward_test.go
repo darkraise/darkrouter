@@ -240,3 +240,80 @@ func streamResponse(body string) *http.Response {
 func recorderBody(cw *CommitWriter) string {
 	return cw.w.(*httptest.ResponseRecorder).Body.String()
 }
+
+// usageForwarder answers with a fixed usage for any body that mentions one.
+type usageForwarder struct{ fakeForwarder }
+
+func (usageForwarder) RecognizeUsage(body []byte) *ir.Usage {
+	if !strings.Contains(string(body), "usage") {
+		return nil
+	}
+	return &ir.Usage{InputTokens: 11, OutputTokens: 7}
+}
+
+func TestForwardUnaryWritesTheBodyVerbatim(t *testing.T) {
+	body := `{"id":"x","choices":[{"message":{"content":"a < b && c > d"}}],"usage":{}}`
+	cw, ac := forwardFixture(t)
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	out, ierr := ac.Exec.forwardUnary(cw, resp, ac, usageForwarder{})
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client saw\n%q\nwant\n%q", got, body)
+	}
+	if ac.Rec.TokensIn != 11 || ac.Rec.TokensOut != 7 {
+		t.Errorf("usage = %d/%d", ac.Rec.TokensIn, ac.Rec.TokensOut)
+	}
+	if ac.Rec.FinalProviderID != "p" {
+		t.Errorf("FinalProviderID = %q", ac.Rec.FinalProviderID)
+	}
+}
+
+func TestForwardUnaryRecordsUnknownUsageRatherThanEstimating(t *testing.T) {
+	// spec §7: an estimate silently mixed into real accounting makes the whole
+	// ledger untrustworthy.
+	cw, ac := forwardFixture(t)
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"x"}`)),
+	}
+	if _, ierr := ac.Exec.forwardUnary(cw, resp, ac, usageForwarder{}); ierr != nil {
+		t.Fatal(ierr)
+	}
+	if ac.Rec.TokensIn != 0 || ac.Rec.TokensOut != 0 {
+		t.Errorf("tokens invented: %d/%d", ac.Rec.TokensIn, ac.Rec.TokensOut)
+	}
+	if len(ac.Rec.Warnings) == 0 {
+		t.Error("nothing on the row says the count is unknown")
+	}
+}
+
+func TestForwardUnaryDropsEncodingHeaders(t *testing.T) {
+	cw, ac := forwardFixture(t)
+	resp := &http.Response{
+		StatusCode: 201,
+		Header: http.Header{
+			"Content-Type":     []string{"application/json"},
+			"Content-Length":   []string{"999"},
+			"Content-Encoding": []string{"gzip"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"usage":{}}`)),
+	}
+	if _, ierr := ac.Exec.forwardUnary(cw, resp, ac, usageForwarder{}); ierr != nil {
+		t.Fatal(ierr)
+	}
+	rr := cw.w.(*httptest.ResponseRecorder)
+	if rr.Code != 201 {
+		t.Errorf("status = %d, want the upstream's 201", rr.Code)
+	}
+	if h := cw.Header(); h.Get("Content-Length") != "" || h.Get("Content-Encoding") != "" {
+		t.Errorf("encoding headers forwarded: %v", h)
+	}
+}

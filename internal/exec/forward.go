@@ -183,3 +183,58 @@ func copyResponseHeaders(dst, src http.Header) {
 		}
 	}
 }
+
+// maxForwardedUnaryBytes bounds what one unary response buffers for usage
+// extraction. A body past it is still forwarded in full — breaching the cap
+// costs the token count, never the response.
+//
+// Buffering the whole body rather than spec §7's bounded tail is deliberate:
+// the IR path's ParseResponse already reads the entire unary body into memory,
+// so this changes no memory characteristic of the product, and there is no
+// truncation point to get wrong.
+const maxForwardedUnaryBytes = 32 << 20
+
+func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *AttemptCtx,
+	fw adapter.Forwarder) (adapter.Outcome, *ir.Error) {
+
+	defer resp.Body.Close()
+	rec, c := ac.Rec, ac.Cand
+
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxForwardedUnaryBytes+1))
+	oversize := int64(len(body)) > maxForwardedUnaryBytes
+	if rerr != nil && !oversize {
+		// Nothing has reached the client, so this is still a failover.
+		return adapter.OutcomeRetryableProvider, &ir.Error{Type: ir.ErrAPI, Message: rerr.Error()}
+	}
+
+	warns := ac.Warns
+	if oversize {
+		warns = append(warns, ir.Warning{
+			Field: "usage", Target: c.ProviderID + "/" + c.Model,
+			Reason: "the response exceeded the buffer for usage extraction; tokens are unknown",
+		})
+	} else if u := fw.RecognizeUsage(body); u != nil {
+		applyUsage(rec, u)
+	} else {
+		warns = append(warns, ir.Warning{
+			Field: "usage", Target: c.ProviderID + "/" + c.Model,
+			Reason: "the response carried no usage; tokens are recorded as unknown",
+		})
+	}
+
+	ttft := time.Since(rec.TS).Milliseconds()
+	rec.TTFTMs = &ttft
+	rec.FinalProviderID = c.ProviderID
+	rec.FinalModel = c.Model
+	rec.Warnings = warningStrings(warns)
+
+	copyResponseHeaders(cw.Header(), resp.Header)
+	e.writeDiagnostics(cw, rec.ID, c, ac.Seq)
+	cw.WriteHeader(resp.StatusCode)
+	_, _ = cw.Write(body)
+	if oversize {
+		// Committed already: a truncated body would be worse than a slow one.
+		_, _ = io.Copy(cw, resp.Body)
+	}
+	return adapter.OutcomeSuccess, nil
+}
