@@ -1203,8 +1203,8 @@ Append to `internal/exec/passthrough.go`:
 
 ```go
 // ErrNoModelField means a body-carried dialect's body has no top-level model
-// key to rewrite. Task 9 turns it into a fall back to the IR path rather than a
-// client error: the IR parser produces a proper dialect-shaped message if the
+// key to rewrite. The executor falls back to the IR path rather than reporting
+// a client error: the IR parser produces a proper dialect-shaped message if the
 // body is genuinely invalid, and this function cannot tell the difference.
 var ErrNoModelField = errors.New("exec: passthrough body carries no model field")
 
@@ -2674,9 +2674,9 @@ import (
 // behind or exits, the pipe write blocks and the client's stream freezes.
 // Inline scanning has no concurrency and cannot stall.
 //
-// strip is Task 4's injected flag: it removes the extra final usage chunk that
-// Darkrouter's own stream_options produced. When the client asked for usage
-// itself the chunk is theirs and removing it would be a fourth mutation.
+// strip removes the extra final usage chunk that Darkrouter's own injected
+// stream_options produced. When the client asked for usage itself the chunk is
+// theirs and removing it would be a fourth mutation.
 func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *AttemptCtx,
 	fw adapter.Forwarder, strip bool) (adapter.Outcome, *ir.Error) {
 
@@ -3414,8 +3414,7 @@ type capture struct{ rec *store.RequestRecord }
 func (c *capture) Log(r *store.RequestRecord) { c.rec = r }
 
 // newExecutorFor is newExecutorWith over a chosen provider kind, with every
-// forwardable adapter wired. It takes testing.TB so the benchmarks in Task 14
-// can use it too.
+// forwardable adapter wired. It takes testing.TB so benchmarks can use it too.
 func newExecutorFor(t testing.TB, kind, upstreamURL string, deps Deps) *Executor {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
@@ -4376,8 +4375,8 @@ func TestAScannerErrorMidStreamLeavesTheClientStreamIntact(t *testing.T) {
 }
 
 func TestAPromptWithHTMLCharactersSurvivesTheRewrite(t *testing.T) {
-	// The end-to-end version of the unit test in Task 4: the client sends <, >
-	// and &, the model name changes so the body must be re-encoded, and the
+	// The end-to-end version of the rewrite's escaping test: the client sends <,
+	// > and &, the model name changes so the body must be re-encoded, and the
 	// provider must still see the original characters.
 	var seen []byte
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4707,7 +4706,7 @@ func seedProvider(t *testing.T, g *gateway, id, kind, baseURL, model string, pri
 
 // attemptPaths reads the trace for a request id and returns the path of each
 // attempt in order. This is the only way the fast path is observable from
-// outside the process, which is why Task 10 added the column.
+// outside the process, which is why the attempt row carries a path column.
 func attemptPaths(t *testing.T, g *gateway, requestID string) []string {
 	t.Helper()
 	w := g.mustAdmin(t, "GET", "/api/requests/"+requestID, "", http.StatusOK)
