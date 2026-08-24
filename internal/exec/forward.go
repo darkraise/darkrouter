@@ -188,6 +188,11 @@ func copyResponseHeaders(dst, src http.Header) {
 // extraction. A body past it is still forwarded in full — breaching the cap
 // costs the token count, never the response.
 //
+// Buffering the whole body rather than spec §7's bounded tail is deliberate:
+// the IR path's ParseResponse already reads the entire unary body into memory,
+// so this changes no memory characteristic of the product, and there is no
+// truncation point to get wrong.
+//
 // A var rather than a const so a test can shrink it: the alternative is
 // allocating tens of megabytes on every run of the suite.
 var maxForwardedUnaryBytes int64 = 32 << 20
