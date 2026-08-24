@@ -1,10 +1,15 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/catalog"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func TestAProviderCanBeCreatedListedAndDeleted(t *testing.T) {
@@ -258,5 +263,46 @@ func TestPresetsAreListedForTheCreateForm(t *testing.T) {
 	}
 	if !groq {
 		t.Error("groq is not in the preset list")
+	}
+}
+
+// A provider's priority is the order routing attempts candidates in, and that
+// order is baked into the catalog snapshot by catalog.Store.Rebuild. Reloading
+// the provider source alone leaves the snapshot holding the old order, so the
+// operator's change does not reach routing until some unrelated worker rebuilds
+// — up to a full discovery interval later.
+func TestPriorityChangeReachesRoutingImmediately(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	ctx := context.Background()
+
+	cat := catalog.NewStore(db, s.deps.Src)
+	s.deps.Catalog = cat
+
+	seedProviderWithKey(t, s, cookie, token, "low", "http://low.invalid")
+	seedProviderWithKey(t, s, cookie, token, "high", "http://high.invalid")
+	for _, id := range []string{"low", "high"} {
+		if err := db.RecordDiscoverySuccess(ctx, id,
+			[]store.DiscoveredModel{{ModelID: "m", ContextWindow: 1000, MaxOutputTokens: 100}},
+			time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Equal priority ties break on id, so "high" leads before any change.
+	if got := cat.Snapshot().Offering("m"); len(got) != 2 || got[0] != "high" {
+		t.Fatalf("initial offering = %v, want high first", got)
+	}
+
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/low", `{"priority":50}`); w.Code != http.StatusOK {
+		t.Fatalf("patch priority: %d %s", w.Code, w.Body.String())
+	}
+
+	if got := cat.Snapshot().Offering("m"); len(got) != 2 || got[0] != "low" {
+		t.Errorf("offering after raising low's priority = %v, want low first: "+
+			"the write reloaded the provider source but never rebuilt the catalog", got)
 	}
 }
