@@ -14,7 +14,7 @@ Last updated: 2026-08-24
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
-| 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, verified against fakes only — no `GROQ_KEY` in this environment for the live check. |
+| 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, and now **verified live against Groq** (§11), which found two defects. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -145,13 +145,15 @@ Four smaller items are listed at the end of
   way: the streaming recognizer used to classify a blocked prompt as a
   retryable provider error, which failed the request over to another provider
   and recorded a health failure against a provider that had answered correctly.
-- **Live verification against Groq did not happen.** Unlike phase 8, this
-  phase is fully verifiable live — Groq is an OpenAI-compatible provider and
-  the OpenAI dialect is one of the three inbound ones — but there is no
-  `GROQ_KEY` in this environment and no local `darkrouter.yaml` carrying a
-  credential, so no live call was made. The plan's verification steps
-  (`docs/superpowers/plans/2026-08-24-phase9-passthrough.md`, task 17) are
-  written to be followed by hand and remain available to whoever has a key.
+- **Live verification against Groq has now run — see §11.** It found two
+  defects, both recorded there and both still open: the §9 pre-commit-400
+  fallback drops an unmodelled client field and reports success with no
+  warning, against three explicit spec statements; and an admin priority
+  change does not reach routing until something else rebuilds the catalog.
+  One part of the brief remains unrunnable here: the cross-kind failover case
+  (passthrough to the first candidate, IR to a second candidate of a different
+  kind) needs an Anthropic or Gemini credential this environment lacks, and
+  stays covered by fakes only.
 - **`Discoverer.SweepOnce` ends with a rebuild that is not serialized against
   concurrent admin catalog writes.** An operator adding a model while a sweep
   runs could have it vanish from routing until the next rebuild. The mechanism
@@ -840,6 +842,112 @@ noting as absence of a finding rather than proof one could not exist.
 Both processes were tracked by PID from the moment they started. Both were
 killed at the end (`pkill -P` followed by `kill`), and `ss -ltnp` afterward
 showed no listener on 18080, 18081 or 19090.
+
+### 11. Phase 9 verification against Groq — done, with two findings
+
+Run on 2026-08-24 against the real vendor, with API keys supplied by the
+operator for this purpose. This closes the gap §10 recorded: the substance of
+Task 17's brief has now run against `api.groq.com`, not a fake. The binary was
+the same `CGO_ENABLED=0` static build (35 MB), started as a real OS process on
+ports 18080/18081 with one `groq` provider carrying `preset: groq` and the
+model `openai/gpt-oss-120b`. Config, database and credentials lived outside the
+repository; no key was written into a tracked file.
+
+- **The fast path is confirmed by trace, not by status code.** An
+  OpenAI-shaped request returned 200 with `X-Darkrouter-Attempts: 1`, and
+  `GET /api/requests/{id}` read back `attempts[0].path == "passthrough"`,
+  `tokens_in 73`, `tokens_out 52`. The response body carried Groq's `reasoning`
+  field and its non-standard `usage.queue_time` and `usage.prompt_time`, none
+  of which the IR path models — visible evidence of a forwarded body rather
+  than a re-render, independent of the trace.
+- **An unmodelled parameter reached the provider intact, and the proof is a
+  rejection.** `service_tier` is modelled nowhere in `internal/edge/openai` or
+  `internal/ir`. Sent through the gateway as `service_tier: "bogus_tier"`, the
+  passthrough attempt drew exactly the 400 a direct call draws
+  (`'service_tier' : value is not one of the allowed values
+  ['auto','on_demand','flex','performance',null]`), which is only possible if
+  the field crossed the wire unmodified. **This is also where the first
+  finding surfaced — see below.**
+- **Streamed usage and the stripped-versus-kept pair both hold, against the
+  vendor whose behaviour makes the pair necessary.** A stream with no
+  `stream_options` produced 65 SSE events, `tokens_in 74` / `tokens_out 72` on
+  the request row, and no standard usage chunk in the client's stream. The only
+  usage present was Groq's own `x_groq.usage` on the final content chunk —
+  byte-shape-identical to what a direct call returns, which is the caveat the
+  brief flagged and the reason the pair matters. Repeating with
+  `"stream_options":{"include_usage":true}` in the client's own body produced
+  exactly one `"choices":[],"usage":{…}` chunk. Absent by default, present on
+  request: the injection was stripped, not never received.
+- **Failover works live, and the IR path still translates live.** Two checks,
+  because no second vendor credential exists. With a local always-503 upstream
+  at higher priority in front of the real provider, the trace read
+  `attempts[0]` as `groq-dead/passthrough/retryable_provider/503` and
+  `attempts[1]` as `groq/passthrough/success/200`, and the client got the
+  right answer. Separately, an **Anthropic-dialect** request to `/v1/messages`
+  routed to the `openaicompat` provider recorded `dialect: anthropic`,
+  `path: ir`, `tokens 75/36`, and came back correctly shaped for Anthropic
+  (`content` array, `stop_reason: "end_turn"`,
+  `usage.input_tokens/output_tokens`) — the IR path rendering a real Groq
+  response back into a different inbound dialect. **What could not run live is
+  the cross-kind case** — first candidate `openaicompat` (passthrough), second
+  candidate a different kind (IR) — because that needs an Anthropic or Gemini
+  credential this environment still lacks. It remains fake-only, from §10.
+- **Timing, with the confound corrected.** The naive comparison reproduced
+  phase 4's illusion exactly: gateway median 551.4 ms against 644.6 ms for ten
+  direct `curl` calls, an apparent 93 ms *speedup*. That is the confound, not a
+  result — `exec`'s shared transport keeps a warm connection while each direct
+  `curl` pays a fresh TLS handshake. Re-measured with a single warm connection
+  on both sides and all twenty calls returning 200: **gateway 481.7 ms median
+  against 484.0 ms direct, a difference of −2.3 ms** across a min-to-max spread
+  of roughly 250 ms. The honest reading is that the gateway's overhead,
+  passthrough included, is not measurable against Groq's own variance. The
+  microbenchmark's ~6 µs unary saving is real and simply far below the noise
+  floor of a network call. An intermediate attempt to measure this with a curl
+  config file was discarded: repeated `data =` entries concatenate, so all ten
+  "reused connection" calls were 400s, and their 137 ms median measured Groq's
+  error path rather than a completion.
+
+**Finding 1 — the §9 fallback drops the client's field silently, which two
+spec statements say it must not.** Spec §9 retries a pre-commit 400 once
+through the IR path so that a strict provider's rejection does not become a
+hard failure. That behaved as designed. But the retry strips the offending
+field and reports plain success: sending `service_tier: "flex"` — a *valid*
+value the org's plan does not include, so a direct call returns 400 with
+"upgrade to access the required service tier" — produced **HTTP 200, a normal
+completion, and `warnings: []` in the request trace**. The client is told the
+request succeeded, is not told the parameter was discarded, and believes it ran
+on a tier it did not. Spec §11's second done criterion requires warnings
+"recorded for the dropped field", §10 requires the differential corpus to
+assert "the IR path recorded a warning about dropping it", and §3 rests the
+whole fidelity argument on the IR path dropping such fields "with a warning,
+which is honest". None of that holds for a field the IR does not model, and
+the mechanism is why: `internal/edge/openai/parse.go:17` unmarshals into a
+fixed struct, so `encoding/json` discards unknown top-level keys with nothing
+left to warn about. The warning machinery in `internal/adapter/openaicompat`
+only ever covers fields the IR *does* model but a target cannot express. The
+fix is not to change the fallback — the fallback is right — but to record a
+warning when it fires, since the executor knows a forwarded body was rejected
+and re-rendered even though the parser cannot name the field. `X-Darkrouter-
+Attempts: 2` on the response is the only signal a client gets today, and it
+does not mean "a parameter was dropped".
+
+**Finding 2 — an admin priority change does not reach routing until something
+else rebuilds the catalog.** `PATCH /api/providers/{id}` with a new `priority`
+returned 200, but the next request kept the old candidate order; only forcing
+a rebuild (via `POST /api/providers/{id}/test`, which triggers a probe and its
+trailing rebuild) made the new order take effect. The cause is the same one
+already carried forward about `Discoverer.SweepOnce`: provider order is baked
+into the catalog snapshot by `Store.Rebuild`
+(`internal/catalog/snapshot.go:146`), and the admin write path calls only
+`Src.Reload` (`internal/admin/providers.go:256`), never `Rebuild`. This was
+observed as a plain reproducible sequence rather than a race, and it makes the
+carried-forward catalog item concrete: an operator reprioritising a provider
+in the dashboard sees no effect until the next sweep, up to the 15-minute
+discovery interval away.
+
+Nothing else in the brief's substance was skipped. Both processes were tracked
+by PID from the moment they started, killed at the end (`pkill -P` then
+`kill`), and `ss -ltnp` afterward showed no listener on 18080, 18081 or 18090.
 
 ## Review history
 
