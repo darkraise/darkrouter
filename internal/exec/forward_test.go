@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,6 +100,73 @@ func TestForwardStreamPassesAPostCommitErrorThrough(t *testing.T) {
 	}
 	if got := recorderBody(cw); got != body {
 		t.Errorf("client saw %q", got)
+	}
+}
+
+func TestForwardStreamCopiesRawAfterAPostCommitSplitterOverflow(t *testing.T) {
+	// spec §6: past commit the recognizer's opinion no longer matters. The
+	// bytes already sitting in the carry still owe the client, and nothing
+	// after may be lost either — corrupting a response is worse than losing
+	// a token count.
+	cw, ac := forwardFixture(t)
+	ac.Cfg.Server.SSE.MaxLineBytes = 16
+
+	// No terminator at all, so the whole tail stays in the carry unterminated
+	// and exceeds the cap within the same read that carries the commit event.
+	body := "data: c-first\n\ndata: " + strings.Repeat("x", 40)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if !cw.Committed() {
+		t.Fatal("the first event should have committed")
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client did not receive every byte\n got: %q\nwant: %q", got, body)
+	}
+	if len(ac.Rec.Warnings) == 0 {
+		t.Error("no warning recorded for the scanner error")
+	}
+}
+
+// flakyBody reads through to r, then reports err instead of io.EOF — a
+// connection that dies mid-stream rather than closing cleanly.
+type flakyBody struct {
+	r   io.Reader
+	err error
+}
+
+func (f *flakyBody) Read(p []byte) (int, error) {
+	n, err := f.r.Read(p)
+	if err == io.EOF {
+		return n, f.err
+	}
+	return n, err
+}
+
+func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
+	// spec §9: after commit a failure becomes an in-stream error in the
+	// general case, but this fix only asks the row to be honest — nothing
+	// more is synthesized for the client.
+	cw, ac := forwardFixture(t)
+	body := "data: c-first\n\n"
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(&flakyBody{r: strings.NewReader(body), err: errors.New("connection reset")}),
+	}
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, false)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if !cw.Committed() {
+		t.Fatal("the content event should have committed")
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client saw %q, want %q", got, body)
+	}
+	if len(ac.Rec.Warnings) == 0 {
+		t.Error("no warning recorded for the post-commit transport failure")
 	}
 }
 

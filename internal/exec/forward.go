@@ -46,6 +46,15 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		}
 	}
 
+	// recordWarning notes a post-commit fault on the row. Failover is
+	// impossible once bytes are on the wire, so this is the only place left
+	// for the fault to show up.
+	recordWarning := func(reason string) {
+		rec.Warnings = append(rec.Warnings, ir.Warning{
+			Field: "passthrough", Target: c.ProviderID + "/" + c.Model, Reason: reason,
+		}.String())
+	}
+
 	commit := func() {
 		committed = true
 		ttft := time.Since(rec.TS).Milliseconds()
@@ -127,14 +136,30 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					return adapter.OutcomeRetryableProvider,
 						e.reclassifyStream(c, resp, rec, serr.Error())
 				}
-				// The client already has bytes; the stream ends here.
+				// Spec §6: past commit the recognizer's opinion no longer
+				// matters. What is already in the carry still owes the client
+				// those bytes; everything after is copied raw rather than
+				// risked against the splitter a second time.
+				if tail := sp.flush(); len(tail) > 0 {
+					_, _ = cw.Write(tail)
+				}
+				recordWarning("scanner error after commit, forwarding raw: " + serr.Error())
+				_, _ = io.Copy(cw, resp.Body)
+				cw.Flush()
 				return adapter.OutcomeSuccess, nil
 			}
 		}
 		if rerr != nil {
-			if rerr != io.EOF && !committed {
-				return adapter.OutcomeRetryableProvider,
-					e.reclassifyStream(c, resp, rec, rerr.Error())
+			if rerr != io.EOF {
+				if !committed {
+					return adapter.OutcomeRetryableProvider,
+						e.reclassifyStream(c, resp, rec, rerr.Error())
+				}
+				// Spec §9: after commit a failure becomes an in-stream error
+				// in the general case, but synthesizing a dialect-shaped one
+				// here is a larger change than this fix makes — the row
+				// staying honest about what happened is what matters most.
+				recordWarning("upstream connection failed after commit: " + rerr.Error())
 			}
 			break
 		}
