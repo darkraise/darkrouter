@@ -1,0 +1,260 @@
+/*
+ * Task 18 — Login ("sign in"), the one screen in the set with no console
+ * chrome. There is no rail and no top bar because neither exists before a
+ * session does, so the card sits alone on --ground and the frame around it
+ * is the browser window rather than a panel on a page.
+ *
+ * Reused unchanged and therefore absent below: .panel, .well, .chip,
+ * .control, .control-primary, .status-badge, .field, .field-input,
+ * .field-input-inert, .legend, .legend-caps, .section-title, .spec-note,
+ * .prose, .mono, .micro, .region, .pin, .pin-note (darkrouter-ui.css).
+ * The sign-in field is a .field-input on --well cut into the card's
+ * --panel, which is the same recessed step every data region in the
+ * product gets and the one that inverts between themes; the unconfigured
+ * state's field is .field-input-inert, the dashed "there is nothing to
+ * read here" variant, because a password box on a gateway with no hash is
+ * not read-only, it is inoperative.
+ *
+ * Everything below is prefixed login- so the two screens written in the
+ * same wave and concatenated into the same stylesheet cannot collide with
+ * it.
+ */
+
+/* --- Page -------------------------------------------------------------- */
+
+/* The screen has no .content to inherit padding from, since it has no
+   chrome, so the board restates the same 12px the console's main region
+   uses rather than letting the stages touch the viewport edge. */
+.login-board { padding: 0 var(--section-pad); }
+
+.login-stages {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: var(--gutter);
+}
+
+/* display:contents so each state's head and viewport land in the grid's own
+   two rows rather than in a nested box: the three heads then share one row
+   height and the three viewports start on the same line even when one pin
+   note wraps to two and another does not. The row is pinned on each child
+   rather than left to auto-placement, which would otherwise fill row 1 with
+   head/viewport/head in source order. */
+.login-stage { display: contents; }
+.login-stage > .login-state-head { grid-row: 1; }
+.login-stage > .login-viewport { grid-row: 2; }
+
+.login-state-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 8px;
+}
+.login-state-head .legend-caps { margin: 0; }
+
+/* The whole viewport, not a card on a page. Its surface is --ground — the
+   same value the document behind it sits on — because that is literally
+   what an operator sees: one card centred on the chassis colour with
+   nothing else painted. Only the hairline says where the window ends. */
+.login-viewport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 420px;
+  padding: var(--gutter);
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+/* --- The card ---------------------------------------------------------- */
+
+/* Layout only — the surface comes from the shared .panel it is written
+   alongside. --gutter rather than --section-pad for the padding: this is
+   the one screen with a single object in the frame, and the card is the
+   object. */
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-pad);
+  width: 100%;
+  max-width: 400px;
+  padding: var(--gutter);
+}
+.login-card p { margin: 0; }
+.login-card .legend-caps { margin: 0; }
+
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+
+/* The product name set beside its mark. One step above table data and one
+   below the page title: it identifies the instrument, it is not a reading,
+   and it is mono because the name is an id — it is what the binary, the
+   image and the config file are all called. */
+.login-wordmark {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.login-mark { display: block; flex: 0 0 auto; }
+.login-mark-96 { width: 96px; height: 96px; }
+.login-mark-24 { width: 24px; height: 24px; }
+.login-mark-16 { width: 16px; height: 16px; }
+
+/* The one committing action on the screen fills the card's width — there
+   is nothing to sit beside it. Colour and border come from
+   .control-primary; only the geometry is here. */
+.login-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Inoperative, not low-emphasis: .control-ghost dims at rest and comes up
+   to full on hover, which is the wrong promise for a button that cannot
+   be pressed, so the hover state is pinned to the rest state. */
+.login-submit-off,
+.login-submit-off:hover { opacity: 0.45; }
+
+/* The rejected field carries the outcome on the control as well as in the
+   sentence, so the eye lands on what to retype without reading first. */
+.login-input-bad { border-color: var(--state-failed); }
+
+/* --- Messages ---------------------------------------------------------- */
+
+/* One message block, two tones. The rule carries the colour and the words
+   stay in --ink: --state-cooling measures 3.16:1 in light and fails AA as
+   text, so the unconfigured tone could not be said in amber words even if
+   it wanted to be, and using the same construction for both tones keeps
+   the two states comparable side by side. Red is the rejected tone because
+   a refused sign-in is an OUTCOME — how it went — which is the same
+   reading .status-badge[data-status="error"] already carries. Amber is the
+   unconfigured tone because nothing has been attempted yet: the gateway is
+   reporting its own configuration, not the result of a request. */
+.login-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: var(--section-pad);
+  border-left: 2px solid var(--hairline);
+}
+.login-alert[data-tone="rejected"] { border-left-color: var(--state-failed); }
+.login-alert[data-tone="unconfigured"] { border-left-color: var(--state-cooling); }
+
+.login-alert-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- The remedy -------------------------------------------------------- */
+
+.login-remedy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.login-step {
+  display: flex;
+  gap: 8px;
+}
+.login-step-n {
+  flex: 0 0 auto;
+  width: 14px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  color: var(--legend);
+}
+.login-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* A command or an environment value exactly as it is typed: wire text, so
+   mono, and a --well because it is data the operator copies rather than
+   chrome the console draws. nowrap plus an ellipsis rather than a wrap:
+   a hash broken across two lines invites a copy that is missing a
+   character, which is the same failure this whole state exists to
+   explain. */
+.login-cmd {
+  display: block;
+  padding: 4px 8px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The doubled dollar signs, marked so the difference between the two
+   spellings is visible without counting characters. --accent-ink, not
+   --trace: this is accent-coloured TEXT, and --trace only reaches 3.93:1
+   in light mode. */
+.login-esc {
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+
+.login-gotcha {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline-subtle);
+}
+
+/* --- Identity mark board ----------------------------------------------- */
+
+.login-mark-board {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+  padding: var(--section-pad);
+}
+
+.login-mark-row {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--section-pad);
+}
+
+/* Uniform cells at every size, so the three specimens differ by the mark and
+   by nothing else. Two rows rather than a centred stack: a stack centres the
+   mark AND its caption together, which puts the three captions at three
+   different heights and makes the row read as ragged rather than as one
+   scale. The 1fr row centres each mark in the same space; the auto row puts
+   all three captions on one line. */
+.login-mark-cell {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  align-items: center;
+  justify-items: center;
+  gap: 10px;
+  width: 136px;
+  height: 136px;
+}
+
+.login-mark-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.login-mark-text p { margin: 0; }

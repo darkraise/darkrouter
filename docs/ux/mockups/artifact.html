@@ -5368,6 +5368,1053 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 }
 .cn-hdr-what .chip { margin-left: 2px; }
 
+/*
+ * Task 17 — Settings ("settings"), six panels grouped by concern.
+ *
+ * Every class is prefixed set- because two other screens are written in the
+ * same wave and concatenated into the same stylesheet.
+ *
+ * Reused unchanged and therefore absent below: .panel, .well, .table, .row,
+ * .row-head, .chip, .status-badge, .control, .control-primary, .switch (+
+ * -track/-knob/-label), .segmented, .segmented-option, .discovery-status,
+ * .field (+ -span-2), .field-input, .field-static, .mono, .micro, .prose,
+ * .data-emph, .legend-caps, .section-title, .spec-note, .text-muted,
+ * .region, and the whole chrome (darkrouter-ui.css). Appearance's two axes
+ * are the shared .segmented verbatim; the sessions table is .table/.row/
+ * .row-head with a grid applied, exactly as Provider detail's credential
+ * list is.
+ */
+
+/* --- Panel scaffolding -------------------------------------------------- */
+
+.set-panel { padding: var(--section-pad); }
+
+/* A panel's header strip: which config block this is, how many values it
+   holds, when a change to it lands, then the quiet facts. Same job as
+   Provider detail's .pd-head, which is scoped to that screen and was not
+   promoted in the consolidation pass; a settings panel head also has to
+   carry a scope marker, which that one does not. */
+.set-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: var(--section-pad);
+  margin-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.set-head-id {
+  font-weight: 500;
+  color: var(--ink);
+}
+.set-head .micro { flex: 1 1 240px; }
+
+/* A nested block's head sits inside a panel that already has one, so it
+   drops the seam and the bottom margin the outer strip needs. */
+.set-head-sub {
+  padding-bottom: 0;
+  margin-bottom: 10px;
+  border-bottom: none;
+}
+
+/* A panel's action row: the button, and the sentence saying what it will and
+   will not do. The sentence wraps; the button never does. */
+.set-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  margin-top: var(--section-pad);
+}
+.set-foot .prose {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ink-muted);
+}
+.set-foot .control {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* A heading inside a panel that carries data beside it. .legend-caps alone
+   uppercases, which is wrong for a path or a count. */
+.set-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: var(--gutter) 0 8px;
+}
+.set-subhead .legend-caps { margin: 0; }
+
+/* A second config block living inside the same panel as the first —
+   capture under log, discovery under catalog. It is a nested concern, not a
+   peer panel, so it gets a seam and a gutter rather than its own border. */
+.set-subgroup {
+  margin-top: var(--gutter);
+  padding-top: var(--gutter);
+  border-top: 1px solid var(--hairline-subtle);
+}
+
+/* --- The scope marker ---------------------------------------------------
+   The one thing this screen adds to the product's vocabulary: when does a
+   change to this value actually take effect. It is not a health reading and
+   not a routing decision, so it takes NEITHER the state colours nor
+   --trace — a value's activation lifetime is a third kind of fact and
+   colouring it from either family would make "restart required" look like a
+   provider outcome. Both channels are therefore achromatic: the word itself,
+   which survives greyscale and a screenshot, and a 3px bar that is solid for
+   a value a running process re-reads, segmented for one it does not, and
+   absent for one nothing reads at all. The bar repeats the word rather than
+   replacing it, so the marker is legible before it is learned. */
+.set-scope {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  height: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--legend);
+  white-space: nowrap;
+}
+.set-scope::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 11px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+/* Segmented, not dashed: a dashed 3px bar renders as two dots at this size.
+   The gradient is the same technique .priority-handle uses to draw a rule
+   without a glyph or a fetched asset. */
+.set-scope[data-scope="restart"]::before {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--bezel) 0 3px,
+    transparent 3px 5px
+  );
+}
+.set-scope[data-scope="restart"] { color: var(--ink-muted); }
+/* Nothing reads it, so the bar is an outline around nothing. */
+.set-scope[data-scope="inert"]::before {
+  background: transparent;
+  border: 1px solid var(--hairline);
+}
+
+/* The key strip that teaches the marker once, above the first panel, so no
+   panel has to explain it in prose. */
+.set-key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px var(--gutter);
+  padding: 10px var(--section-pad);
+  margin-bottom: var(--gutter);
+  background: var(--panel);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+}
+.set-key .legend-caps { margin: 0; }
+.set-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.set-key-tail {
+  flex: 1 1 100%;
+  color: var(--legend);
+}
+
+/* --- Form grid ----------------------------------------------------------
+   .field and .field-input are the shared vocabulary; only the column count
+   is this screen's, and it follows the field count of the widest group. */
+.set-form {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gutter) var(--section-pad);
+}
+
+/* Label left, scope marker right, on one line above the input — the same
+   place on every field in all six panels, which is what makes the marker
+   scannable down a column instead of read one row at a time. */
+.set-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 14px;
+}
+
+/* A switch standing where a .field-input would, so the grid keeps one
+   baseline down the row. */
+.set-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+
+/* --- Region 2: log and capture ------------------------------------------ */
+
+/* A sentence the operator needs to read before touching the group under it:
+   ink-coloured words against an amber rule. Amber measures 3.16:1 in light
+   mode and can never be set as text, so the colour lives entirely in the
+   2px rule and the words stay legible in both themes. */
+.set-note-warn {
+  margin: 0 0 var(--section-pad);
+  padding-left: 10px;
+  border-left: 2px solid var(--state-cooling);
+  color: var(--ink-muted);
+}
+
+/* The retention field's companion reads a consequence rather than accepting
+   a value, so it takes .field-static's box and no input. */
+.set-retention-note .field-static { justify-content: flex-start; }
+
+/* A warning attached to the table above it rather than floated under it: the
+   table's own border supplies no gutter, so the rule would touch the seam. */
+.table + .set-note-warn { margin-top: var(--section-pad); }
+
+/* --- Region 3: discovery master switch ---------------------------------- */
+
+/* The one control on this screen whose scope is the whole product's
+   outbound behaviour. A well, because what it governs is a live reading of
+   the system and not chrome, and full width because the sentence beside it
+   is the point of the control. */
+.set-master {
+  padding: 10px var(--section-pad);
+  margin-bottom: var(--gutter);
+}
+.set-master .prose {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+}
+.set-master .spec-note { margin-top: 6px; }
+
+/* --- Region 4: account and sessions ------------------------------------- */
+
+/* Composes .row for its 30px height, padding and seam, then replaces the
+   flex flow with a grid so the three sessions and the header line up as
+   columns even though the fourth cell holds a chip on one row and a date on
+   the others. */
+.set-session-row {
+  display: grid;
+  grid-template-columns: 168px 168px 1fr 148px 72px;
+  align-items: center;
+}
+.set-session-row .legend-caps { margin: 0; }
+
+.set-session-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* A row-level text action. .control is a 30px button and would burst a 30px
+   row; .chip is a bordered pill and reads as chrome competing with the data.
+   Provider detail's .pd-row-action is the same shape and is scoped to that
+   screen — promoting one shared row action is a consolidation decision, not
+   a screen's. */
+.set-row-action {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.set-row-action:hover { opacity: 1; color: var(--accent-ink); }
+/* Destructive affordance: red because the click produces the failed-shaped
+   outcome — the session is gone. */
+.set-row-action-danger:hover { color: var(--state-failed); }
+
+/* "You are here", the same thing the rail's active item and a saved view
+   already say, so it takes --accent-ink rather than a state colour: which
+   session is yours is a selection, not an outcome. */
+.set-chip-current {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+/* A grid cell blockifies an inline-flex child, so the chip would otherwise
+   stretch across its whole 148px column and stop reading as a pill. */
+.set-session-row .chip { justify-self: end; }
+
+/* --- Region 5: appearance ----------------------------------------------- */
+
+/* Two axes get two columns, sized to their segmented bars rather than
+   stretched across the panel — a two-option control blown to half a page
+   reads as a more important choice than it is. */
+.set-appearance {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gutter);
+  max-width: 720px;
+}
+.set-appearance .segmented { align-self: flex-start; }
+
+/* --- Region 6: configuration file --------------------------------------- */
+
+.set-config {
+  padding: 8px 0;
+  overflow-x: auto;
+}
+
+/* 24px rather than the 30px row height: this is a sub-row of a printed
+   document, the density the spec gives sub-rows, and 29 lines at 30px would
+   make the file view taller than the five panels above it put together. */
+.set-config-line {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: 24px;
+  padding: 0 var(--section-pad);
+  white-space: nowrap;
+}
+
+/* The source marker in the gutter — which of the two authorities owns this
+   value. Fixed width so every line of YAML starts at one x position. */
+.set-config-src {
+  flex: 0 0 32px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: right;
+  color: var(--legend);
+}
+/* Imported once and governed by SQLite since. --accent-ink, not a state
+   colour: "which authority owns this" is a fact about the system, not an
+   outcome, and accent-ink is the token that stays readable as text in both
+   themes. */
+.set-config-src[data-src="db"] { color: var(--accent-ink); }
+
+/* The file text for a block the file no longer governs. It prints in the
+   legend register for the same reason .field-input-inert does: it is still
+   there, still readable, and read by nothing. */
+.set-config-inert { color: var(--legend); }
+.set-config-more { color: var(--legend); }
+
+/* The two-marker key under the file view, close enough to the gutter it
+   explains that it needs no heading. */
+.set-srckey {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px var(--section-pad);
+  margin-top: 8px;
+}
+.set-srckey .set-config-src { flex: 0 0 auto; }
+.set-srckey .micro { margin-right: var(--gutter); }
+
+/* A count that is not yet a failure. Amber measures 3.16:1 in light and can
+   never be set as words, so it lives in the chip's border while the count
+   itself stays --ink-muted, the same split .pd-cooling-chip already makes. */
+.set-chip-warn { border-color: var(--state-cooling); }
+
+.set-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Same amber-rule-plus-ink-words construction as .set-note-warn, with a
+   location column in front: a warning the operator can act on has to say
+   which line to open. */
+.set-warning {
+  display: flex;
+  align-items: baseline;
+  gap: var(--section-pad);
+  padding-left: 10px;
+  border-left: 2px solid var(--state-cooling);
+}
+.set-warning .prose {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ink-muted);
+}
+.set-warning-loc {
+  flex: 0 0 56px;
+  color: var(--legend);
+}
+
+/* The §8.1 ruling, printed where the two authorities are visible side by
+   side rather than in a document nobody reading this screen has open. */
+.set-ruling {
+  margin: var(--gutter) 0 0;
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--hairline-subtle);
+  color: var(--ink-muted);
+}
+.set-ruling .legend-caps {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/*
+ * Task 18 — Login ("sign in"), the one screen in the set with no console
+ * chrome. There is no rail and no top bar because neither exists before a
+ * session does, so the card sits alone on --ground and the frame around it
+ * is the browser window rather than a panel on a page.
+ *
+ * Reused unchanged and therefore absent below: .panel, .well, .chip,
+ * .control, .control-primary, .status-badge, .field, .field-input,
+ * .field-input-inert, .legend, .legend-caps, .section-title, .spec-note,
+ * .prose, .mono, .micro, .region, .pin, .pin-note (darkrouter-ui.css).
+ * The sign-in field is a .field-input on --well cut into the card's
+ * --panel, which is the same recessed step every data region in the
+ * product gets and the one that inverts between themes; the unconfigured
+ * state's field is .field-input-inert, the dashed "there is nothing to
+ * read here" variant, because a password box on a gateway with no hash is
+ * not read-only, it is inoperative.
+ *
+ * Everything below is prefixed login- so the two screens written in the
+ * same wave and concatenated into the same stylesheet cannot collide with
+ * it.
+ */
+
+/* --- Page -------------------------------------------------------------- */
+
+/* The screen has no .content to inherit padding from, since it has no
+   chrome, so the board restates the same 12px the console's main region
+   uses rather than letting the stages touch the viewport edge. */
+.login-board { padding: 0 var(--section-pad); }
+
+.login-stages {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: var(--gutter);
+}
+
+/* display:contents so each state's head and viewport land in the grid's own
+   two rows rather than in a nested box: the three heads then share one row
+   height and the three viewports start on the same line even when one pin
+   note wraps to two and another does not. The row is pinned on each child
+   rather than left to auto-placement, which would otherwise fill row 1 with
+   head/viewport/head in source order. */
+.login-stage { display: contents; }
+.login-stage > .login-state-head { grid-row: 1; }
+.login-stage > .login-viewport { grid-row: 2; }
+
+.login-state-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 8px;
+}
+.login-state-head .legend-caps { margin: 0; }
+
+/* The whole viewport, not a card on a page. Its surface is --ground — the
+   same value the document behind it sits on — because that is literally
+   what an operator sees: one card centred on the chassis colour with
+   nothing else painted. Only the hairline says where the window ends. */
+.login-viewport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 420px;
+  padding: var(--gutter);
+  background: var(--ground);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+/* --- The card ---------------------------------------------------------- */
+
+/* Layout only — the surface comes from the shared .panel it is written
+   alongside. --gutter rather than --section-pad for the padding: this is
+   the one screen with a single object in the frame, and the card is the
+   object. */
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-pad);
+  width: 100%;
+  max-width: 400px;
+  padding: var(--gutter);
+}
+.login-card p { margin: 0; }
+.login-card .legend-caps { margin: 0; }
+
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+
+/* The product name set beside its mark. One step above table data and one
+   below the page title: it identifies the instrument, it is not a reading,
+   and it is mono because the name is an id — it is what the binary, the
+   image and the config file are all called. */
+.login-wordmark {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.login-mark { display: block; flex: 0 0 auto; }
+.login-mark-96 { width: 96px; height: 96px; }
+.login-mark-24 { width: 24px; height: 24px; }
+.login-mark-16 { width: 16px; height: 16px; }
+
+/* The one committing action on the screen fills the card's width — there
+   is nothing to sit beside it. Colour and border come from
+   .control-primary; only the geometry is here. */
+.login-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Inoperative, not low-emphasis: .control-ghost dims at rest and comes up
+   to full on hover, which is the wrong promise for a button that cannot
+   be pressed, so the hover state is pinned to the rest state. */
+.login-submit-off,
+.login-submit-off:hover { opacity: 0.45; }
+
+/* The rejected field carries the outcome on the control as well as in the
+   sentence, so the eye lands on what to retype without reading first. */
+.login-input-bad { border-color: var(--state-failed); }
+
+/* --- Messages ---------------------------------------------------------- */
+
+/* One message block, two tones. The rule carries the colour and the words
+   stay in --ink: --state-cooling measures 3.16:1 in light and fails AA as
+   text, so the unconfigured tone could not be said in amber words even if
+   it wanted to be, and using the same construction for both tones keeps
+   the two states comparable side by side. Red is the rejected tone because
+   a refused sign-in is an OUTCOME — how it went — which is the same
+   reading .status-badge[data-status="error"] already carries. Amber is the
+   unconfigured tone because nothing has been attempted yet: the gateway is
+   reporting its own configuration, not the result of a request. */
+.login-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: var(--section-pad);
+  border-left: 2px solid var(--hairline);
+}
+.login-alert[data-tone="rejected"] { border-left-color: var(--state-failed); }
+.login-alert[data-tone="unconfigured"] { border-left-color: var(--state-cooling); }
+
+.login-alert-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- The remedy -------------------------------------------------------- */
+
+.login-remedy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.login-step {
+  display: flex;
+  gap: 8px;
+}
+.login-step-n {
+  flex: 0 0 auto;
+  width: 14px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  color: var(--legend);
+}
+.login-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* A command or an environment value exactly as it is typed: wire text, so
+   mono, and a --well because it is data the operator copies rather than
+   chrome the console draws. nowrap plus an ellipsis rather than a wrap:
+   a hash broken across two lines invites a copy that is missing a
+   character, which is the same failure this whole state exists to
+   explain. */
+.login-cmd {
+  display: block;
+  padding: 4px 8px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The doubled dollar signs, marked so the difference between the two
+   spellings is visible without counting characters. --accent-ink, not
+   --trace: this is accent-coloured TEXT, and --trace only reaches 3.93:1
+   in light mode. */
+.login-esc {
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+
+.login-gotcha {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline-subtle);
+}
+
+/* --- Identity mark board ----------------------------------------------- */
+
+.login-mark-board {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+  padding: var(--section-pad);
+}
+
+.login-mark-row {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--section-pad);
+}
+
+/* Uniform cells at every size, so the three specimens differ by the mark and
+   by nothing else. Two rows rather than a centred stack: a stack centres the
+   mark AND its caption together, which puts the three captions at three
+   different heights and makes the row read as ragged rather than as one
+   scale. The 1fr row centres each mark in the same space; the auto row puts
+   all three captions on one line. */
+.login-mark-cell {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  align-items: center;
+  justify-items: center;
+  gap: 10px;
+  width: 136px;
+  height: 136px;
+}
+
+.login-mark-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.login-mark-text p { margin: 0; }
+
+/*
+ * Task 18 — First run ("operate/overview", zero providers, zero requests).
+ *
+ * This screen is the Overview with nothing in it, so it borrows the
+ * Overview's own layout wholesale rather than inventing an empty variant of
+ * it: .live-strip/.live-tile/.live-tile-caption/.live-tile-metric,
+ * .health-grid's .health-tile/.health-tile-head and .ops-footer (+ -dropped)
+ * all come from css/02-overview.css unchanged, and .empty-well comes from
+ * css/03-requests.css. From darkrouter-ui.css: .panel/.well/.region/.chip,
+ * .control (+ -primary/-ghost), .readout/.unit/.mono/.micro/.prose/
+ * .spec-note/.legend/.legend-caps/.section-title/.pin/.pin-note, and the
+ * console chrome verbatim.
+ *
+ * Colour discipline. Nothing on this screen is a health reading and nothing
+ * is a routing verdict, so almost nothing here is allowed a hue: an idle
+ * router has no state to report. The single accent is --accent-ink on the
+ * one call to action and on the active step's index, both of them UI
+ * selection, the same register the rail's active item uses. Every "there is
+ * no value here" mark is drawn in --bezel, --legend or a dash — never in
+ * --state-cooling, which would say something is wrong when nothing is.
+ *
+ * The classes below all carry the fr- slug so the screens being built
+ * alongside this one cannot collide with them.
+ */
+
+/* --- Region 1: the one call to action ---------------------------------
+   The only committing control on the screen, so the panel it sits in gets
+   the full --hairline border rather than .panel's default --hairline-
+   subtle: a structural step up in weight, not a colour one, since a
+   coloured rule here would have to borrow --trace and claim a routing
+   decision that has not happened. */
+.fr-start {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gutter);
+  padding: var(--gutter);
+  border-color: var(--hairline);
+}
+
+.fr-start-copy {
+  min-width: 0;
+  max-width: 760px;
+}
+
+/* A panel headline. .section-title is uppercase small caps and .legend is
+   the one per-screen caption, so neither can carry a sentence at heading
+   weight; this is the sans equivalent of .doc-title inside the chrome. */
+.fr-start-title {
+  margin: 0 0 6px;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.fr-start-sub {
+  margin: 0 0 10px;
+  color: var(--ink-muted);
+}
+
+/* The reassurance line, and the reason this screen does not read as broken
+   equipment: five facts off the wire, in mono, every one of them a real
+   reading rather than a placeholder. */
+.fr-start-facts {
+  margin: 0;
+  color: var(--legend);
+}
+
+.fr-start-action {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.fr-start-action .spec-note { margin: 0; }
+
+/* --- Region 2: the three-step path ------------------------------------
+   Three panels on one row with the connector drawn in the gutter between
+   them, so the path is a sequence rather than three cards that happen to
+   be adjacent. Rendered as a control, not as prose: the operator is meant
+   to see how many steps are left, which a paragraph cannot show. */
+.fr-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gutter);
+  align-items: stretch;
+}
+
+.fr-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+  background: var(--panel);
+  border: 1px solid var(--hairline-subtle);
+  border-radius: var(--radius);
+}
+/* The connector, aligned to the vertical centre of the index badge:
+   var(--section-pad) of padding plus half of the badge's 20px. */
+.fr-step + .fr-step::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--section-pad) + 10px);
+  left: calc(var(--gutter) * -1);
+  width: var(--gutter);
+  height: 1px;
+  background: var(--hairline);
+}
+
+.fr-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fr-step-index {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--legend);
+}
+
+.fr-step-title {
+  color: var(--ink-muted);
+}
+
+.fr-step-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.fr-step-call {
+  margin: auto 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-subtle);
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* Where the operator is now. Selection, not a verdict, so --accent-ink,
+   filled against --well for the same contrast pairing .pin uses (clears
+   4.5:1 in both modes; --trace on --panel does not). */
+.fr-step[data-state="active"] {
+  border-color: var(--accent-ink);
+}
+.fr-step[data-state="active"] .fr-step-index {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--well);
+}
+.fr-step[data-state="active"] .fr-step-title { color: var(--ink); }
+.fr-step[data-state="todo"] { opacity: 0.8; }
+
+/* --- Region 3: the Overview, empty ------------------------------------
+   The axis a sparkline will be drawn on, standing in for it at the same
+   40px and the same margin-top:auto so the four tiles keep the Overview's
+   exact silhouette. Two dashed borders rather than an SVG: a dash pattern
+   survives the tile's arbitrary width, where a stretched <svg> with
+   preserveAspectRatio="none" would smear its dashes horizontally. */
+.fr-axes {
+  height: 40px;
+  margin-top: auto;
+  border-left: 1px dashed var(--hairline);
+  border-bottom: 1px dashed var(--hairline);
+}
+
+/* A value that does not exist yet, as distinct from a value that is zero.
+   Both are printed at readout size, because both are readings; only this
+   one drops to --legend and to regular weight — an em dash at the
+   readout's own 600 is a slab wide enough to read as a redaction bar
+   rather than as an absent value. */
+.fr-nil {
+  font-weight: 400;
+  color: var(--legend);
+}
+
+.fr-note {
+  max-width: 940px;
+  margin: var(--section-pad) 0 0;
+  color: var(--ink-muted);
+}
+.fr-note-lead {
+  font-weight: 600;
+  color: var(--ink);
+}
+.fr-note-sub {
+  max-width: 940px;
+  margin: 4px 0 0;
+  color: var(--legend);
+}
+.fr-note-sub .mono { font-size: 11px; }
+
+.fr-subhead { margin-top: var(--gutter); }
+
+/* One specimen tile in the first cell, the legend spanning the other
+   three: a four-column grid keeps the specimen exactly the width a real
+   health tile would be, which is the whole point of showing it. */
+.fr-health {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+  align-items: start;
+}
+.fr-health-note {
+  grid-column: span 3;
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+/* --- The inert specimen ------------------------------------------------
+   The one treatment that says "this is a drawing of the content, not the
+   content". Four independent channels, so no single failure of attention
+   can turn a specimen into a reading: the border goes dashed where every
+   live surface in the product is solid (the same "there is nothing to
+   read here" the shared .field-input-inert already means by it), a
+   diagonal hatch crosses the whole box, the contents drop to half opacity,
+   and — in the markup, not here — every value slot prints a field name or
+   a dash instead of a value. Colour is deliberately not one of the four:
+   it would have to be a state colour, and a specimen has no state. */
+.fr-specimen {
+  position: relative;
+  border-style: dashed;
+  border-color: var(--bezel);
+}
+.fr-specimen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--bezel) 0 1px,
+    transparent 1px 9px
+  );
+  opacity: 0.14;
+}
+.fr-specimen-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0.5;
+}
+/* The label stays at full strength while everything under it is dimmed —
+   it is the one part of the specimen that is not a drawing of anything. */
+.fr-specimen-tag {
+  position: relative;
+  margin: 0;
+  color: var(--bezel);
+}
+
+/* Hollow where .state-pip is filled, and never given a data-state: a
+   specimen reports no health, and the absence of any pip colour is the
+   fastest of the four inert channels to read at tile size. */
+.fr-ghost-pip {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+/* The identity slot prints the wire field's name, not a provider id, so
+   there is no id on screen that could be counted as configured. */
+.fr-ghost-name { color: var(--legend); }
+
+/* .empty-well leaves its children's own margins alone; scoped here rather
+   than added to .empty-well itself, which two finished screens already
+   render with the margins they have. */
+.fr-empty p { margin: 0; max-width: 940px; }
+.fr-muted { color: var(--ink-muted); }
+
+/* --- Region 4: the pattern, stated once -------------------------------
+   A live specimen of the pattern on the left, the three rules that make
+   it on the right, keyed to each other by number. */
+.fr-pattern {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.fr-pattern-demo {
+  padding: var(--section-pad);
+}
+.fr-pattern-demo .empty-well { width: 100%; }
+
+.fr-part {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.fr-part-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Keyed to the rule list, and deliberately hollow: a filled 16px numbered
+   square is .pin, which means "specification annotation" everywhere else
+   in this set and must not be echoed by page content. */
+.fr-part-n {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--bezel);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--legend);
+}
+
+/* The dimmed specimen inside the specimen: a header row of column names
+   and two rows of dashes. Sub-row height (24px), because these stand in
+   for content rather than being content. .fr-specimen supplies the dashed
+   border style and the hatch; only the width is set here so it does not
+   reset the style back to solid. */
+.fr-ghost-rows {
+  border-width: 1px;
+  border-radius: var(--radius);
+}
+.fr-ghost-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: 24px;
+  padding: 0 8px;
+  border-bottom: 1px dashed var(--hairline);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+  opacity: 0.7;
+}
+.fr-ghost-row:last-child { border-bottom: none; }
+.fr-ghost-row span {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fr-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-pad);
+}
+.fr-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.fr-rule:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.fr-rule-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fr-rule-title {
+  margin: 0;
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.fr-rule-note {
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+}
+
 </style>
 <header class="doc-head">
       <h1 class="doc-title">darkrouter / operator console</h1>
@@ -5375,7 +6422,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-14-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-15-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-16-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li></ol></nav>
 <section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -11403,6 +12450,998 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
           </div>
 
           <p class="micro cn-note">A fifth header, <span class="mono">X-Darkrouter-Estimated: true</span>, appears only on the responses whose token counts the router had to estimate rather than read back from the provider.</p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-14-settings--s-14-settings" data-screen-title="settings">
+  <p class="legend">
+    Every knob the operator has, grouped by the concern it belongs to rather
+    than by the shape of the YAML file it came from, and each one marked with
+    when a change to it actually takes effect. Three of the six groups have no
+    writer behind them today. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd>
+    for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#" data-active="true">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">settings</span>
+        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="set-key">
+          <span class="legend-caps">takes effect</span>
+          <span class="set-key-item">
+            <span class="set-scope" data-scope="live">live</span>
+            <span class="micro">on save &mdash; a running worker re-reads it</span>
+          </span>
+          <span class="set-key-item">
+            <span class="set-scope" data-scope="restart">restart</span>
+            <span class="micro">on the next process start, and not before</span>
+          </span>
+          <span class="set-key-item">
+            <span class="set-scope" data-scope="inert">inert</span>
+            <span class="micro">never &mdash; nothing in the product reads it yet</span>
+          </span>
+          <span class="micro set-key-tail">One marker per value, in the same place on every row. Today this distinction exists in the code and nowhere in the interface, so an operator changes a listen address, sees the field accept it, and finds out at the next deploy.</span>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Server</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/config returns the whole server, log, capture and catalog blocks today and the SPA's Config type declares none of them. Writes need GET/PUT endpoints per &sect;8.2.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">server</span>
+              <span class="chip">6 values</span>
+              <span class="set-scope" data-scope="restart">restart</span>
+              <span class="micro">every value in this group is read once at process start. Nothing here can be applied to a running gateway.</span>
+            </div>
+            <div class="set-form">
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">proxy_listen</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value=":8080">
+                <span class="spec-note">where all three inbound dialects are served. Moving it moves the endpoint every configured client points at.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">admin_listen</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value=":8081">
+                <span class="spec-note">the console and /api. A separate port on purpose: a leaked proxy token reaches no admin route.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">max_body_bytes</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="33554432">
+                <span class="spec-note">32 MiB. An inbound body above it is refused before any provider is chosen, so it never costs an upstream call.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">shutdown_grace</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="30s">
+                <span class="spec-note">how long an in-flight stream has to finish after SIGTERM before the process exits regardless.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">sse.max_line_bytes</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="1048576">
+                <span class="spec-note">1 MiB per SSE line. One oversized provider event terminates the stream; it is not a ceiling on the whole response.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">sse.max_precommit_bytes</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="1048576">
+                <span class="spec-note">how much of a stream is buffered before the router commits to the provider it picked. Past this point failover is no longer possible.</span>
+              </label>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Log and capture</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; capture.bodies is inert: nothing writes request_bodies, though the retention sweep dutifully prunes the table.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">log</span>
+              <span class="chip">1 value</span>
+              <span class="set-scope" data-scope="live">live</span>
+              <span class="micro">the retention worker re-reads this on its next sweep</span>
+            </div>
+            <div class="set-form">
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">log.retention</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <input class="field-input" value="720h">
+                <span class="spec-note">30 days of request rows. The sweep runs hourly and takes the value it finds, so a change here applies without a restart &mdash; the only setting on this screen that does.</span>
+              </label>
+              <div class="field field-span-2 set-retention-note">
+                <span class="legend-caps">effect</span>
+                <span class="field-static">
+                  <span class="mono">2,481</span>
+                  <span class="micro">rows retained &middot; oldest 2026-07-25 09:41 &middot; next sweep 15:00:00</span>
+                </span>
+                <span class="spec-note">the count the current value keeps. Shortening the window deletes rows on the next sweep and there is no undo.</span>
+              </div>
+            </div>
+
+            <div class="set-subgroup">
+              <div class="set-head set-head-sub">
+                <span class="mono set-head-id">capture</span>
+                <span class="chip">3 values</span>
+                <span class="set-scope" data-scope="inert">inert</span>
+              </div>
+              <p class="prose set-note-warn">Body capture has no writer anywhere in the product. Nothing inserts a row into <span class="mono">request_bodies</span>, so all three values below are recorded, validated and then read by nothing &mdash; while the retention sweep dutifully prunes an empty table on schedule. The group is shown because an operator who finds these keys in the file will reasonably assume bodies are being stored, and today the interface does nothing to correct that.</p>
+              <div class="set-form">
+
+                <div class="field">
+                  <span class="set-field-head">
+                    <span class="legend-caps">capture.bodies</span>
+                    <span class="set-scope" data-scope="inert">inert</span>
+                  </span>
+                  <span class="set-switch-row">
+                    <span class="switch" data-on="false" role="switch" aria-checked="false"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                    <span class="mono switch-label">off</span>
+                  </span>
+                  <span class="spec-note">turning it on changes nothing today. It is the flag the writer would read, if the writer existed.</span>
+                </div>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="legend-caps">capture.max_bytes</span>
+                    <span class="set-scope" data-scope="inert">inert</span>
+                  </span>
+                  <input class="field-input" value="256000">
+                  <span class="spec-note">the per-body truncation point a writer would apply.</span>
+                </label>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="legend-caps">capture.retention</span>
+                    <span class="set-scope" data-scope="inert">inert</span>
+                  </span>
+                  <input class="field-input" value="72h">
+                  <span class="spec-note">72 hours, deliberately far shorter than the log window above: bodies carry prompts, and prompts are the sensitive half.</span>
+                </label>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Catalog</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync now &rarr; POST /api/catalog/sync. Discovery enabled is a pointer in the schema so an explicit false is distinguishable from absent.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">catalog</span>
+              <span class="chip">models.dev</span>
+              <span class="set-scope" data-scope="restart">restart</span>
+              <span class="micro">last sync 2026-08-24 02:11:07 &middot; 8 configured providers matched &middot; 1,412 catalogue entries rebuilt</span>
+            </div>
+            <div class="set-form">
+
+              <label class="field field-span-2">
+                <span class="set-field-head">
+                  <span class="legend-caps">models_dev_url</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="https://models.dev/api.json">
+                <span class="spec-note">one JSON document carrying every published provider and its model list. The 197 shipped presets are built from it.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">sync_interval</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="12h">
+                <span class="spec-note">the timer is built at start-up from this value.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">sync_timeout</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="30s">
+                <span class="spec-note">a sync that overruns is abandoned; the previous snapshot keeps serving.</span>
+              </label>
+
+            </div>
+            <div class="set-foot">
+              <button class="control control-primary" type="button">Sync now</button>
+              <p class="prose">Fetches models.dev immediately and rebuilds the snapshot without waiting for the interval. It is the button an operator wants after adding a provider whose models the catalog has never seen, and it does not exist today.</p>
+            </div>
+
+            <div class="set-subgroup">
+              <div class="set-head set-head-sub">
+                <span class="mono set-head-id">discovery</span>
+                <span class="chip">4 values</span>
+                <span class="set-scope" data-scope="restart">restart</span>
+                <span class="discovery-status" data-discovery="fresh"></span>
+                <span class="micro">8 of 8 providers listed within their interval</span>
+              </div>
+
+              <div class="well set-master">
+                <span class="set-switch-row">
+                  <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                  <span class="mono switch-label">enabled</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <p class="prose">This switch governs the only outbound traffic the gateway starts on the operator's behalf: a listing call to every enabled provider, on every enabled credential, on a timer, whether or not a request is in flight. Turning it off today means editing <span class="mono">darkrouter.yaml</span> and restarting the process &mdash; there is no endpoint behind this control, and an operator on a metered or audited network has no way to stop those calls from the console.</p>
+                <p class="spec-note">The field is a pointer in the schema rather than a bool, so an explicit <span class="mono">false</span> in the file is distinguishable from a key that was never written &mdash; which is what lets the default stay on without silently overriding an operator who turned it off.</p>
+              </div>
+
+              <div class="set-form">
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="legend-caps">discovery.interval</span>
+                    <span class="set-scope" data-scope="restart">restart</span>
+                  </span>
+                  <input class="field-input" value="15m">
+                  <span class="spec-note">how often a full sweep starts. Jittered per provider so eight listings do not leave at the same instant.</span>
+                </label>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="legend-caps">discovery.timeout</span>
+                    <span class="set-scope" data-scope="restart">restart</span>
+                  </span>
+                  <input class="field-input" value="15s">
+                  <span class="spec-note">per provider, not per sweep. A slow provider delays its own listing and nobody else's.</span>
+                </label>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="legend-caps">discovery.concurrency</span>
+                    <span class="set-scope" data-scope="restart">restart</span>
+                  </span>
+                  <input class="field-input" value="8">
+                  <span class="spec-note">providers listed at once. Enough to finish a sweep inside its interval, low enough that a sweep does not read as a burst to a rate limiter.</span>
+                </label>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Account</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/auth/password, GET/DELETE /api/sessions. Both new. Sessions have a sliding 30-day TTL and there is no way to list or revoke one today.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">admin</span>
+              <span class="chip">1 account</span>
+              <span class="micro">single operator account &middot; signed in since 09:12:44</span>
+            </div>
+
+            <p class="set-subhead"><span class="legend-caps">change password</span></p>
+            <div class="set-form">
+              <label class="field">
+                <span class="set-field-head"><span class="legend-caps">current password</span></span>
+                <input class="field-input" type="password" placeholder="current password" autocomplete="off">
+              </label>
+              <label class="field">
+                <span class="set-field-head"><span class="legend-caps">new password</span></span>
+                <input class="field-input" type="password" placeholder="at least 12 characters" autocomplete="off">
+              </label>
+              <label class="field">
+                <span class="set-field-head"><span class="legend-caps">confirm</span></span>
+                <input class="field-input" type="password" placeholder="repeat it" autocomplete="off">
+              </label>
+            </div>
+            <div class="set-foot">
+              <button class="control control-primary" type="button">Change password</button>
+              <p class="prose">Changing the password does not end the sessions below. That is a deliberate split and it has to be visible, because the reason an operator changes a password is usually that they believe someone else has it &mdash; and the password alone does not evict them.</p>
+            </div>
+
+            <p class="set-subhead">
+              <span class="legend-caps">active sessions</span>
+              <span class="micro">3 &middot; sliding 30-day TTL</span>
+            </p>
+            <div class="table">
+
+              <div class="row row-head set-session-row">
+                <span class="legend-caps">created</span>
+                <span class="legend-caps">last seen</span>
+                <span class="legend-caps">user agent</span>
+                <span class="legend-caps">&nbsp;</span>
+                <span class="legend-caps">&nbsp;</span>
+              </div>
+
+              <div class="row set-session-row">
+                <span class="mono">2026-08-24 09:12:44</span>
+                <span class="mono">14:18:04</span>
+                <span class="micro">Firefox 141 &middot; Linux x86_64 &middot; 192.168.0.24</span>
+                <span class="chip set-chip-current">this session</span>
+                <span class="set-session-actions"><button class="set-row-action" type="button">Sign out</button></span>
+              </div>
+
+              <div class="row set-session-row">
+                <span class="mono">2026-08-21 22:47:10</span>
+                <span class="mono">2026-08-23 08:30:19</span>
+                <span class="micro">Chrome 139 &middot; macOS 15.6 &middot; 192.168.0.31</span>
+                <span class="micro text-muted col-right">expires 2026-09-22</span>
+                <span class="set-session-actions"><button class="set-row-action set-row-action-danger" type="button">Revoke</button></span>
+              </div>
+
+              <div class="row set-session-row">
+                <span class="mono">2026-08-11 07:05:33</span>
+                <span class="mono">2026-08-11 07:41:02</span>
+                <span class="micro">Safari 18.6 &middot; iPhone OS 18.6 &middot; 84.17.202.9</span>
+                <span class="micro text-muted col-right">expires 2026-09-10</span>
+                <span class="set-session-actions"><button class="set-row-action set-row-action-danger" type="button">Revoke</button></span>
+              </div>
+
+            </div>
+            <p class="prose set-note-warn">The TTL slides: every authenticated request pushes the expiry out another 30 days, so the tab left open on a laptop three weeks ago is still a live session and stays live for as long as that tab keeps polling. Nothing in the product lists them and nothing revokes one &mdash; the only way to invalidate a session today is to restart the process. The third row is a phone on a public address that has not been touched in a fortnight, which is exactly the row this region exists to make visible.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Appearance</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Two axes. The seventeen-axis switcher is removed: an ops console reading live health must not let a gradient picker change what amber means.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">appearance</span>
+              <span class="chip">2 axes</span>
+              <span class="set-scope" data-scope="live">live</span>
+              <span class="micro">stored in this browser, not on the server &mdash; two operators can hold two different answers</span>
+            </div>
+            <div class="set-appearance">
+
+              <div class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">mode</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <div class="segmented">
+                  <span class="segmented-option" data-active="true">system</span>
+                  <span class="segmented-option">light</span>
+                  <span class="segmented-option">dark</span>
+                </div>
+                <span class="spec-note">follows the operating system until an operator picks one. Light is not a palette swap of dark: the recessed well inverts from darker-than-panel to brighter-than-panel, so the reading stays the highest-contrast thing in the frame either way.</span>
+              </div>
+
+              <div class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">density</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <div class="segmented">
+                  <span class="segmented-option" data-active="true">compact</span>
+                  <span class="segmented-option">cozy</span>
+                </div>
+                <span class="spec-note">compact is the 30px row this console is drawn at. Cozy relaxes rows and controls to 36px and changes nothing else &mdash; no type scale, no colour, no spacing rhythm.</span>
+              </div>
+
+            </div>
+            <p class="prose">Two axes, and no third. A settings screen that offers an accent picker, a font choice and seven density steps is negotiable chrome; this console is an instrument reading live provider health, and an operator must not be able to change what amber means on the screen where amber is the warning. Mode and density are the only two choices that cannot break a reading.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Configuration file</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; GET /api/config, POST /api/config/reload. The source marker per value is the &sect;8.2 extension.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">/etc/darkrouter/darkrouter.yaml</span>
+              <span class="chip status-badge" data-status="success">valid</span>
+              <span class="chip set-chip-warn">3 warnings</span>
+              <span class="micro">parsed 14:02:11 &middot; 118 lines &middot; 0 errors</span>
+            </div>
+
+            <p class="set-subhead">
+              <span class="legend-caps">parsed configuration</span>
+              <span class="micro">read-only. Editing happens above, or in the file.</span>
+            </p>
+            <div class="well set-config">
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">server:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;proxy_listen: ":8080"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;admin_listen: ":8081"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;max_body_bytes: 33554432</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;shutdown_grace: "30s"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">log:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;retention: "720h"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">capture:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;bodies: false</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;max_bytes: 256000</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;retention: "72h"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">catalog:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;models_dev_url: "https://models.dev/api.json"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;sync_interval: "12h"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">discovery:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;enabled: true</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;interval: "15m"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;concurrency: 8</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">providers:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;- id: groq</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;&nbsp;&nbsp;preset: groq</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;- id: cerebras</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;&nbsp;&nbsp;preset: cerebras</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">aliases:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;fast-coder: [cerebras/gpt-oss-120b, groq/openai-gpt-oss-120b]</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;long-context: [anthropic/claude-opus-4-20250514]</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">policy:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;retry: { max_attempts: 3, cooldown_base: "800ms" }</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">&nbsp;</span><span class="micro set-config-more">6 more providers, 2 more aliases and 14 more lines not shown</span></div>
+            </div>
+            <div class="set-srckey">
+              <span class="set-config-src" data-src="file">file</span>
+              <span class="micro">the file governs this value and a reload re-reads it</span>
+              <span class="set-config-src" data-src="db">db</span>
+              <span class="micro">imported once, on first run. SQLite governs it now and this text is inert.</span>
+            </div>
+
+            <p class="set-subhead">
+              <span class="legend-caps">warnings</span>
+              <span class="micro">3 &middot; a warning does not stop a reload</span>
+            </p>
+            <div class="set-warnings">
+              <div class="set-warning">
+                <span class="micro set-warning-loc">line 41</span>
+                <p class="prose"><span class="mono">providers[3].api_key</span> is set in the file. That provider was imported on first run and its credential lives encrypted in SQLite; the file value is read by nothing and should be removed before the file is shared.</p>
+              </div>
+              <div class="set-warning">
+                <span class="micro set-warning-loc">line 88</span>
+                <p class="prose"><span class="mono">aliases.vision</span> targets <span class="mono">openrouter/qwen-2.5-vl-72b</span>, which no enabled provider serves. The alias resolves to nothing until openrouter is enabled &mdash; a dangling target is a warning, never a validation error.</p>
+              </div>
+              <div class="set-warning">
+                <span class="micro set-warning-loc">line 103</span>
+                <p class="prose"><span class="mono">policy.retry.cooldown_base</span> is 800ms, below the 1s floor the breaker enforces. The ladder uses 1s, and this value has had no effect since the policy block was imported anyway.</p>
+              </div>
+            </div>
+
+            <div class="set-foot">
+              <button class="control" type="button">Reload</button>
+              <p class="prose">Re-reads the file, re-validates it, and re-applies only the blocks the file still governs. A reload that fails to parse changes nothing &mdash; the previous configuration keeps serving, which is why this button is safe to press on a production gateway.</p>
+            </div>
+
+            <p class="prose set-ruling"><span class="legend-caps">what the file still governs</span>
+              <span class="mono">server</span>, <span class="mono">log</span>, <span class="mono">capture</span>, <span class="mono">catalog</span> and <span class="mono">discovery</span> are read from the file on every start and on every reload. <span class="mono">providers</span>, <span class="mono">aliases</span> and <span class="mono">policy</span> are not: each was imported once on first run and lives in SQLite from then on, so editing them in the file has no effect &mdash; exactly as editing <span class="mono">providers:</span> already has none today. Round-tripping YAML would destroy the operator's own comments, and an overlay where the file is the base and the database wins would give one value two sources of truth and no way to see which is in effect. The marker in the gutter above is how a value says which of the two it is, and <span class="mono">GET /api/config</span> cannot answer that question today.</p>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-15-login--s-15-login" data-screen-title="sign in">
+  <p class="legend">
+    The sign-in screen in the three states it actually has. It carries no
+    rail and no top bar, because neither exists before a session does, so
+    the card sits alone on the chassis colour. The third state is the one
+    the product gets wrong today: an unset
+    <span class="mono">DARKROUTER_ADMIN_PASSWORD_HASH</span> refuses every
+    password and explains nothing, and the only trace is a startup warning on
+    <span class="mono">/healthz</span> that an operator staring at a login box
+    will never read. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light
+    mode.
+  </p>
+
+  <div class="login-board">
+
+    <div class="region">
+      <p class="section-title">Sign in &mdash; the three states</p>
+
+      <div class="login-stages">
+
+        <!-- ── 1. Resting ────────────────────────────────────────────── -->
+        <div class="login-stage">
+          <p class="login-state-head">
+            <b class="pin" data-pin="1">1</b>
+            <span class="legend-caps">resting</span>
+            <span class="pin-note">1 &middot; Resting &mdash; GET /api/auth/status decides whether this screen renders at all. Sign in is POST /api/auth/login {"password"}, behind a same-origin check that answers 403 "cross-site request refused" before the password is read. Success rotates the session id, then sets darkrouter_session &mdash; HttpOnly, SameSite=Lax, Secure only under TLS, 30-day sliding expiry.</span>
+          </p>
+          <div class="login-viewport">
+            <div class="panel login-card">
+
+              <div class="login-brand">
+                <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+                </svg>
+                <p class="login-wordmark">darkrouter</p>
+                <p class="micro">192.168.0.10:8081</p>
+              </div>
+
+              <label class="field">
+                <span class="legend-caps">admin password</span>
+                <input class="field-input" type="password" autocomplete="current-password">
+              </label>
+
+              <button class="control control-primary login-submit" type="button">Sign in</button>
+
+              <p class="spec-note">One operator, one password. There is no account list, no reset link and no second factor &mdash; the only credential this console has is the hash in the environment.</p>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 2. Rejected ───────────────────────────────────────────── -->
+        <div class="login-stage">
+          <p class="login-state-head">
+            <b class="pin" data-pin="2">2</b>
+            <span class="legend-caps">rejected</span>
+            <span class="pin-note">2 &middot; Rejected &mdash; 401 {"error":"invalid password"}. One string for a wrong password AND for an unconfigured hash. VerifyPassword fails closed on an empty or malformed hash, so bcrypt (cost 12) is never even reached in the second case and the two answers are indistinguishable from outside.</span>
+          </p>
+          <div class="login-viewport">
+            <div class="panel login-card">
+
+              <div class="login-brand">
+                <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+                </svg>
+                <p class="login-wordmark">darkrouter</p>
+                <p class="micro">192.168.0.10:8081</p>
+              </div>
+
+              <div class="login-alert" data-tone="rejected">
+                <p class="login-alert-line">
+                  <span class="chip status-badge" data-status="error">401</span>
+                  <span class="prose">Sign-in failed. Check the password and try again.</span>
+                </p>
+                <p class="spec-note">The same sentence answers a wrong password and a gateway with no hash configured at all. Which of the two it was is deliberately absent: an operator who read that no password is set would have learned the port is open, and so would anyone else who reached this box.</p>
+              </div>
+
+              <label class="field">
+                <span class="legend-caps">admin password</span>
+                <input class="field-input login-input-bad" type="password" value="trombone-marmalade" autocomplete="current-password">
+              </label>
+
+              <button class="control control-primary login-submit" type="button">Sign in</button>
+
+              <p class="spec-note">No lockout and no attempt counter today. The cost of a guess is one bcrypt verification at cost 12, which is the only rate limit there is.</p>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 3. No password configured ─────────────────────────────── -->
+        <div class="login-stage">
+          <p class="login-state-head">
+            <b class="pin" data-pin="3">3</b>
+            <span class="legend-caps">no password configured</span>
+            <span class="pin-note">3 &middot; Unconfigured &mdash; NEW, and the one state the product fails at. Today the unset variable only appends a line to the startup warnings /healthz reports, admin.New is handed an empty PasswordHash, and the login box answers 401 forever with no way to tell why. This banner needs GET /api/auth/status to report configured:false, and the server serves it only to a request arriving on the loopback interface, so the 401 in state 2 stays the only answer a remote browser ever gets.</span>
+          </p>
+          <div class="login-viewport">
+            <div class="panel login-card">
+
+              <div class="login-brand">
+                <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+                </svg>
+                <p class="login-wordmark">darkrouter</p>
+                <p class="micro">192.168.0.10:8081</p>
+              </div>
+
+              <div class="login-alert" data-tone="unconfigured">
+                <p class="legend-caps">sign-in is closed</p>
+                <p class="prose">No admin password hash is configured on this gateway, so every password is refused &mdash; including the right one. The proxy keeps serving; only the dashboard is shut. Three steps on the machine running it:</p>
+
+                <div class="login-remedy">
+
+                  <div class="login-step">
+                    <span class="login-step-n">1</span>
+                    <div class="login-step-body">
+                      <p class="prose">Generate a hash with the binary you already have. bcrypt, cost 12. With no <span class="mono">-password</span> it reads from stdin, so the password stays out of shell history.</p>
+                      <code class="well login-cmd">darkrouter hash-password</code>
+                    </div>
+                  </div>
+
+                  <div class="login-step">
+                    <span class="login-step-n">2</span>
+                    <div class="login-step-body">
+                      <p class="prose">Put the printed value in the environment.</p>
+                      <div class="field">
+                        <span class="legend-caps">DARKROUTER_ADMIN_PASSWORD_HASH</span>
+                        <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="login-step">
+                    <span class="login-step-n">3</span>
+                    <div class="login-step-body">
+                      <p class="prose">Restart. The variable is read once at startup; a config reload does not pick it up.</p>
+                      <code class="well login-cmd">docker compose restart darkrouter</code>
+                    </div>
+                  </div>
+
+                </div>
+
+                <div class="login-gotcha">
+                  <p class="legend-caps">if the value goes through compose</p>
+                  <p class="prose">A bcrypt hash always contains <span class="mono login-esc">$</span>, and docker compose reads each one as the start of a variable while it loads <span class="mono">.env</span>. Double every one of them, or the value silently arrives truncated and the correct password still fails with the message in the middle column.</p>
+                  <div class="field">
+                    <span class="legend-caps">as hash-password prints it</span>
+                    <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
+                  </div>
+                  <div class="field">
+                    <span class="legend-caps">as compose must receive it</span>
+                    <code class="well login-cmd"><span class="login-esc">$$</span>2a<span class="login-esc">$$</span>12<span class="login-esc">$$</span>K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
+                  </div>
+                </div>
+
+              </div>
+
+              <div class="field">
+                <span class="legend-caps">admin password</span>
+                <input class="field-input field-input-inert" type="password" placeholder="nothing to sign in against" disabled>
+              </div>
+
+              <button class="control login-submit login-submit-off" type="button" disabled>Sign in</button>
+
+              <p class="spec-note">The form stays on screen rather than being replaced, so the fix and the thing it fixes are in one frame. Shown only to a request from the loopback interface; a browser reaching this gateway across the LAN gets state 2 unchanged.</p>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Identity mark</p>
+      <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Identity mark &mdash; inline SVG built from rects on a 24 grid, two tokens only: a --bezel hairline and one --trace pip. No curve, no gradient, no fetched file, so the favicon, the rail brand and the 96px sign-in mark are one figure at three scales rather than three assets to keep in step.</span></p>
+
+      <div class="panel login-mark-board">
+
+        <div class="login-mark-row">
+          <div class="well login-mark-cell">
+            <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+            </svg>
+            <span class="spec-note">96px &mdash; sign-in</span>
+          </div>
+
+          <div class="well login-mark-cell">
+            <svg class="login-mark login-mark-24" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+            </svg>
+            <span class="spec-note">24px &mdash; inline</span>
+          </div>
+
+          <div class="well login-mark-cell">
+            <svg class="login-mark login-mark-16" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+            </svg>
+            <span class="spec-note">16px &mdash; favicon</span>
+          </div>
+        </div>
+
+        <div class="login-mark-text">
+          <p class="prose">The routing ladder and the logo drawn as the same figure: a bezel around a spine, three candidates entering from the left, two of them stopping at a hollow skip mark on the spine, and the third crossing it and running out to a single bright pip that breaks the frame. That is one request walking a failover chain, and it is also the instrument itself &mdash; a screen with something on it.</p>
+          <p class="prose">At 16px the interior detail drops out and what survives is a bracket, a crosshair and one dot pushed right, which is enough to find the tab by. It is the only place in the product where <span class="mono">--trace</span> appears without a routing decision behind it, and it is doing the same job: marking the one candidate that came out.</p>
+          <p class="spec-note">24 grid, rects only, no curve and no gradient. Bezel square (2,2)&ndash;(22,22) &middot; spine 1px at x=12 &middot; stubs 1px at y=7, y=12 and y=17, the outer two stopping at x=12 and the middle one crossing to x=19 &middot; skip marks 3&times;3 hollow, centred on the spine at (12,7) and (12,17) &middot; pip 4&times;4 filled, centred at (20,12), the one element in var(--trace).</p>
+          <p class="spec-note">One deviation from the written geometry, and it is visible above: the spine breaks either side of each skip mark instead of running unbroken from y=2 to y=22. A 3&times;3 outline drawn with a 1px stroke has a 1px core, which a 1px rule through it fills exactly &mdash; the two marks would render solid at every size and read as served rather than skipped, inverting the figure's meaning.</p>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="screen" id="s-16-first-run--s-16-first-run" data-screen-title="operate/overview &mdash; first run">
+  <p class="legend">
+    The console minutes after a fresh install: the gateway is up, the
+    configuration is valid, and there is nothing behind it &mdash; zero
+    providers, zero credentials, zero requests. This is the state that would
+    otherwise render as flat rectangles and faint grids and read as broken
+    equipment, so every well here names what it will hold, every dimmed
+    specimen is drawn plainly inert, and the screen offers exactly one action.
+    Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#" data-active="true">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">operate/overview</span>
+        <span class="topbar-cmdk mono"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Call to action &mdash; opens the preset browser: GET /api/presets, 197 shipped. Exactly one action on this screen; everything else explains rather than offers.</span></p>
+          <div class="panel fr-start">
+            <div class="fr-start-copy">
+              <p class="legend-caps">First run</p>
+              <p class="fr-start-title">Darkrouter is running. It is not routing anything yet.</p>
+              <p class="prose fr-start-sub">The proxy is listening and the configuration parsed clean &mdash; there is simply nothing behind it. Add one provider and every well on this screen fills in on its own.</p>
+              <p class="mono fr-start-facts">serving 0.0.0.0:8080 &middot; config valid &middot; 0 providers &middot; 0 credentials &middot; 0 requests &middot; 197 presets available</p>
+            </div>
+            <div class="fr-start-action">
+              <button class="control control-primary" type="button">Add your first provider &rarr;</button>
+              <p class="spec-note">Opens the preset browser.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Getting to the first request</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Steps &mdash; connect, test, send. POST /api/providers, POST /api/providers/{id}/test, POST /api/playground.</span></p>
+          <div class="fr-steps">
+
+            <div class="fr-step" data-state="active">
+              <div class="fr-step-head">
+                <span class="fr-step-index">01</span>
+                <span class="mono fr-step-title">connect a provider</span>
+              </div>
+              <p class="prose fr-step-note">Pick a preset &mdash; groq and cerebras are the usual first ones &mdash; and paste a key. The preset carries the base URL, the auth style and the surfaces that provider declares.</p>
+              <p class="mono fr-step-call">POST /api/providers</p>
+            </div>
+
+            <div class="fr-step" data-state="todo">
+              <div class="fr-step-head">
+                <span class="fr-step-index">02</span>
+                <span class="mono fr-step-title">test its credential</span>
+              </div>
+              <p class="prose fr-step-note">One probe against the live endpoint, so a wrong key is caught here rather than as a failover at three in the morning.</p>
+              <p class="mono fr-step-call">POST /api/providers/{id}/test</p>
+            </div>
+
+            <div class="fr-step" data-state="todo">
+              <div class="fr-step-head">
+                <span class="fr-step-index">03</span>
+                <span class="mono fr-step-title">send a request</span>
+              </div>
+              <p class="prose fr-step-note">From the playground, or from your own client against the endpoint on Connect. The first request is what turns this screen on.</p>
+              <p class="mono fr-step-call">POST /api/playground</p>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; First run &mdash; GET /api/overview with providers[] empty. Every empty well says what it would show.</span></p>
+
+          <p class="section-title">Live</p>
+          <div class="live-strip">
+
+            <div class="well live-tile">
+              <p class="live-tile-caption"><span class="mono">requests_per_min</span> &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">0.0</span>
+              </div>
+              <div class="fr-axes" aria-hidden="true"></div>
+            </div>
+
+            <div class="well live-tile">
+              <p class="live-tile-caption"><span class="mono">error_rate</span> &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout fr-nil">&mdash;</span><span class="unit">%</span>
+              </div>
+              <div class="fr-axes" aria-hidden="true"></div>
+            </div>
+
+            <div class="well live-tile">
+              <p class="live-tile-caption">latency &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="live-tile-metric"><span class="micro">p50</span><span class="readout fr-nil">&mdash;</span><span class="unit">ms</span></span>
+                <span class="live-tile-metric"><span class="micro">p95</span><span class="readout fr-nil">&mdash;</span><span class="unit">ms</span></span>
+              </div>
+              <div class="fr-axes" aria-hidden="true"></div>
+            </div>
+
+            <div class="well live-tile">
+              <p class="live-tile-caption"><span class="mono">today_spend</span></p>
+              <div class="live-tile-value">
+                <span class="readout">$0.00</span>
+              </div>
+              <div class="fr-axes" aria-hidden="true"></div>
+            </div>
+
+          </div>
+          <p class="prose fr-note"><b class="fr-note-lead">No requests yet.</b> This strip plots throughput, error rate, p50 and p95 latency, and today's spend over a rolling five-minute window. The axis under each readout is drawn dashed until there is a series to draw on it.</p>
+          <p class="micro fr-note-sub"><span class="mono">0.0</span> and <span class="mono">$0.00</span> are real readings taken from an idle router. A dash is a value that does not exist yet &mdash; an error rate and a percentile each need at least one request before they mean anything.</p>
+
+          <p class="section-title fr-subhead">Provider health</p>
+          <div class="fr-health">
+            <div class="well health-tile fr-specimen">
+              <p class="legend-caps fr-specimen-tag">Example &mdash; not a provider</p>
+              <div class="fr-specimen-body">
+                <div class="health-tile-head">
+                  <span class="fr-ghost-pip"></span>
+                  <span class="mono fr-ghost-name">provider.id</span>
+                </div>
+                <p class="micro">provider.credentials &middot; provider.state</p>
+              </div>
+            </div>
+            <p class="prose fr-health-note">One tile per configured provider, four across. Each carries a state pip &mdash; healthy, cooling, disabled or unconfigured &mdash; the provider id, how many credentials it holds and how many of those are cooling, plus a callout on the one provider whose credential needs the operator to reconnect it. Once it has anything in it, this grid is the fastest read on the screen. The tile at left is a labelled specimen of that shape, drawn dashed and unfilled so it cannot be counted as a provider.</p>
+          </div>
+
+          <p class="section-title fr-subhead">Recent failovers</p>
+          <div class="well empty-well fr-empty">
+            <p class="prose">Nothing has failed over, because nothing has been routed.</p>
+            <p class="prose fr-muted">This well lists the last five requests the router had to retry: the time, the alias and the provider/model it eventually landed on, the attempt count, and the total latency. An empty list here is the good outcome &mdash; it only starts being reassuring once there is traffic to be reassured about.</p>
+          </div>
+
+          <p class="ops-footer">
+            <span class="mono">v0.9.3</span> &middot;
+            <span class="mono">up 4m 12s</span> &middot;
+            <span class="mono">0 log records written</span> &middot;
+            <span class="mono ops-footer-dropped" data-alert="false" title="A non-zero value means the usage figures on this screen are a lower bound.">0 dropped</span>
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">The empty-state pattern</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Empty-state pattern &mdash; a legend sentence in Sans, a dimmed specimen of the real content, and at most one action. Spec &sect;6.11. Every other screen's empty state is this same shape.</span></p>
+          <div class="fr-pattern">
+
+            <div class="panel fr-pattern-demo">
+              <p class="legend-caps">Specimen &mdash; operate/requests with no matches</p>
+              <div class="well empty-well fr-empty">
+                <div class="fr-part">
+                  <span class="fr-part-n">1</span>
+                  <p class="prose fr-part-body">No requests match these filters. This well would list, per matching request, the same eight columns as the table above.</p>
+                </div>
+                <div class="fr-part">
+                  <span class="fr-part-n">2</span>
+                  <div class="fr-part-body fr-specimen fr-ghost-rows">
+                    <div class="fr-ghost-row"><span>ts</span><span>surface</span><span>model</span><span>provider</span><span>status</span><span>ms</span></div>
+                    <div class="fr-ghost-row"><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span></div>
+                    <div class="fr-ghost-row"><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span><span>&mdash;</span></div>
+                  </div>
+                </div>
+                <div class="fr-part">
+                  <span class="fr-part-n">3</span>
+                  <div class="fr-part-body">
+                    <button class="control control-ghost" type="button">Reset filters</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <ol class="fr-rules">
+              <li class="fr-rule">
+                <span class="fr-part-n">1</span>
+                <div class="fr-rule-body">
+                  <p class="fr-rule-title">A legend sentence, in Sans</p>
+                  <p class="prose fr-rule-note">Sans, because a person is explaining rather than the wire reporting. It names what the well holds when it holds something, not merely that it is empty. Never an exclamation, never an illustration.</p>
+                </div>
+              </li>
+              <li class="fr-rule">
+                <span class="fr-part-n">2</span>
+                <div class="fr-rule-body">
+                  <p class="fr-rule-title">A dimmed specimen of the real content</p>
+                  <p class="prose fr-rule-note">The rows, tiles or axes the well will fill with, drawn unmistakably inert: a dashed border where a live one is solid, a diagonal hatch, no state colour anywhere on it, and field names in place of values so there is no value to misread. A reader must never be able to count a specimen as a real provider, request or row.</p>
+                </div>
+              </li>
+              <li class="fr-rule">
+                <span class="fr-part-n">3</span>
+                <div class="fr-rule-body">
+                  <p class="fr-rule-title">At most one action</p>
+                  <p class="prose fr-rule-note">One, and only where a single obvious next step exists &mdash; here, clearing the filters. Zero is the right number when nothing the operator can do from this well would change the outcome, which is why the trace's Bodies panel offers none.</p>
+                </div>
+              </li>
+            </ol>
+
+          </div>
         </div>
 
       </main>
