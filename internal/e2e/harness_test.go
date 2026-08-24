@@ -83,8 +83,13 @@ func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gatewa
 	}
 
 	cfgPath := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	if err := os.WriteFile(cfgPath,
-		[]byte("server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\n"), 0o600); err != nil {
+	// Discovery and the models.dev sync are switched off: neither is what
+	// these tests exercise, and a phase 9 test that runs the server's worker
+	// loop otherwise races its own seeding against a background rebuild, and
+	// makes a live internet call on every run.
+	cfg := "server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\n" +
+		"catalog:\n  discovery:\n    enabled: false\n  models_dev_url: \"http://127.0.0.1:1/\"\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfgStore, err := config.NewStore(cfgPath, func(string) (string, bool) { return "", false })
