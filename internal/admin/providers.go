@@ -261,6 +261,13 @@ func (s *Server) reloadProviders(ctx context.Context) {
 	// and the database is the source of truth. The next natural reload picks it
 	// up, and reporting a 500 for a write that landed would be worse.
 	_ = s.deps.Src.Reload(ctx)
+	// Reloading the source is not enough. Provider identity, order and
+	// enablement are baked into the catalog snapshot when it is built, so
+	// without this the operator's change reaches routing only when some
+	// unrelated worker next rebuilds — up to a discovery interval away.
+	if s.deps.Catalog != nil {
+		_ = s.deps.Catalog.Rebuild(ctx)
+	}
 }
 
 type addCredentialBody struct {
