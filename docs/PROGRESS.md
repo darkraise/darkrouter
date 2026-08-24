@@ -14,7 +14,7 @@ Last updated: 2026-08-23
 | 6 — Catalog | ✅ | ✅ | **Complete.** 26 tasks; race-clean, verified live against Groq. |
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
-| 9 — Passthrough fast path | ✅ | — | Not started |
+| 9 — Passthrough fast path | ✅ | ✅ | **Planned.** 17 tasks in `docs/superpowers/plans/2026-08-24-phase9-passthrough.md`; not started. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
