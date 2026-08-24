@@ -146,8 +146,8 @@ func (f *flakyBody) Read(p []byte) (int, error) {
 
 func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 	// spec §9: after commit a failure becomes an in-stream error in the
-	// general case, but this fix only asks the row to be honest — nothing
-	// more is synthesized for the client.
+	// general case, but here the boundary is row honesty alone — no error
+	// event synthesis reaches the client.
 	cw, ac := forwardFixture(t)
 	body := "data: c-first\n\n"
 	resp := &http.Response{
