@@ -168,15 +168,16 @@ Four smaller items are listed at the end of
   after reloading. `Snapshot()` is untouched and stays a lock-free atomic load,
   so the request path pays nothing. The e2e harness still disables discovery,
   which is now a speed choice rather than a workaround.
-- **Array-form Gemini streaming lost its only integration coverage.** Gemini
+- **Array-form Gemini streaming has its integration coverage back.** Gemini
   clients may ask for a chunked JSON array instead of SSE, and the whole-branch
   review found that form was passthrough-eligible but unservable — the fast
   path found no SSE event boundary, so a response over the pre-commit cap failed
   the whole chain and cooled providers that had answered correctly. Eligibility
-  now requires `alt=sse`, which is the right fix, but it also means no test
-  drives an array-form streaming request end to end through the executor. The
-  predicate and the array writer are each unit-tested; the path between them is
-  not.
+  requires `alt=sse`, and
+  `TestAGeminiArrayFormStreamIsServedThroughTheIRPath` now drives an array-form
+  request end to end through the executor: IR path taken, `alt=sse` still asked
+  of Google, a JSON array with no SSE framing returned to the client, and usage
+  recorded. Deleting the eligibility guard fails it.
 - **A post-commit scanner error forwards the injected usage chunk.** When the
   event splitter overflows after commit, the remainder is copied through raw so
   the client keeps every byte the provider sent — which bypasses the strip that
@@ -184,9 +185,12 @@ Four smaller items are listed at the end of
   did not. Never corrupting bytes is the right trade on an already-degraded
   path, but it is the one route by which a fourth body mutation reaches a
   client, and master design §4.2 permits three.
-- **That same remainder copy is untested.** Its covering test delivers its whole
-  body in one read, so the carry is flushed but the `io.Copy` leg copies zero
-  bytes. A two-chunk body would close it.
+- **That same remainder copy is now tested.**
+  `TestForwardStreamCopiesTheUnreadRemainderAfterAPostCommitOverflow` delivers
+  the body in two reads, putting the splitter overflow in the first and leaving
+  bytes the splitter never saw in the second. Removing the `io.Copy` leg fails
+  the new test and leaves the old single-read one green, which is exactly the
+  gap this entry described.
 
 ## Closed by phase 8
 
