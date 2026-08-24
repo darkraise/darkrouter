@@ -1,0 +1,453 @@
+<section class="screen" id="s-11-playground" data-screen-title="use/playground">
+  <p class="legend">
+    The playground the gateway actually deserves: three inbound dialects and
+    eight surfaces selectable, a multi-turn conversation with the reply still
+    arriving, real sampling parameters, a tool definition, previews of the six
+    auxiliary surfaces that cannot be exercised from the dashboard at all
+    today, and a run footer that says which provider answered. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <div class="rail-brand mono">darkrouter</div>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#">Overview</a>
+        <a class="rail-item" href="#">Requests</a>
+        <a class="rail-item" href="#">Usage</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#">Providers</a>
+        <a class="rail-item" href="#">Models</a>
+        <a class="rail-item" href="#">Routing</a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#" data-active="true">Playground</a>
+        <a class="rail-item" href="#">Connect</a>
+      </div>
+      <a class="rail-item rail-settings" href="#">Settings</a>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <span class="topbar-title">use/playground</span>
+        <span class="topbar-cmdk mono"><kbd>&#8984;</kbd><kbd>K</kbd></span>
+      </header>
+      <main class="content">
+
+        <div class="region">
+
+          <p><b class="pin" data-pin="1-2">1-2</b><span class="pin-note">1-2 &middot; POST /api/playground {model,prompt,system,stream}. The API already accepts system and stream:false; the current screen exposes neither.</span></p>
+
+          <div class="filter-bar">
+
+            <div class="pg-field">
+              <p class="legend-caps">Model or alias</p>
+              <div class="combo" style="min-width:264px">
+                <button class="control combo-trigger">
+                  <span>fast-coder</span>
+                  <span class="combo-chevron">&#9662;</span>
+                </button>
+              </div>
+              <p class="pg-resolved">&rarr; together/openai-gpt-oss-120b</p>
+            </div>
+
+            <div class="pg-field">
+              <p class="legend-caps">Inbound dialect</p>
+              <div class="segmented" aria-label="inbound dialect">
+                <span class="segmented-option" data-active="true">openai</span>
+                <span class="segmented-option">anthropic</span>
+                <span class="segmented-option">gemini</span>
+              </div>
+              <p class="pg-resolved">POST /v1/chat/completions</p>
+            </div>
+
+            <div class="pg-field">
+              <p class="legend-caps">Key</p>
+              <div class="combo" style="min-width:180px">
+                <button class="control combo-trigger">
+                  <span>playground (local)</span>
+                  <span class="combo-chevron">&#9662;</span>
+                </button>
+              </div>
+              <p class="pg-resolved">sk-dr-&hellip;7f21 &middot; no quota</p>
+            </div>
+
+          </div>
+
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Surfaces &mdash; the gateway serves llm, embedding, moderation, rerank, image, stt and tts. None of the six auxiliary surfaces can be exercised from the dashboard today.</span></p>
+
+          <div class="pg-field">
+            <p class="legend-caps">Surface</p>
+            <div class="segmented" aria-label="request surface">
+              <span class="segmented-option" data-active="true">chat</span>
+              <span class="segmented-option">embeddings</span>
+              <span class="segmented-option">rerank</span>
+              <span class="segmented-option">moderation</span>
+              <span class="segmented-option">images</span>
+              <span class="segmented-option">speech</span>
+              <span class="segmented-option">transcription</span>
+              <span class="segmented-option">count tokens</span>
+            </div>
+            <p class="pg-resolved">chat &rarr; kind llm &middot; the seven surfaces map onto llm, embedding, rerank, moderation, image, tts and stt</p>
+          </div>
+
+        </div>
+
+        <div class="region">
+
+          <p><b class="pin" data-pin="4-5">4-5</b><span class="pin-note">4-5 &middot; Multi-turn and parameters need the playground endpoint extended to accept a message array and sampling params.</span></p>
+
+          <div class="pg-split">
+
+            <div class="panel pg-panel">
+              <div class="pg-head">
+                <p class="section-title">Conversation</p>
+                <span class="micro">3 turns &middot; 48 tok sent &middot; 71 tok received &middot; streaming</span>
+              </div>
+
+              <div class="well pg-turns">
+
+                <div class="pg-turn">
+                  <div class="pg-turn-head">
+                    <span class="pg-role">system</span>
+                    <span class="chip chip-path">pinned</span>
+                    <span class="micro pg-turn-tok">22<span class="unit">tok</span></span>
+                  </div>
+                  <p class="pg-turn-body">You are a terse coding assistant. Standard library only, no prose around code blocks.</p>
+                </div>
+
+                <div class="pg-turn">
+                  <div class="pg-turn-head">
+                    <span class="pg-role">user</span>
+                    <span class="micro pg-turn-tok">26<span class="unit">tok</span></span>
+                  </div>
+                  <p class="pg-turn-body">Parse a ULID into its 48-bit millisecond timestamp. Crockford base32, no dependencies.</p>
+                </div>
+
+                <div class="pg-turn pg-turn-served">
+                  <div class="pg-turn-head">
+                    <span class="pg-role">assistant</span>
+                    <span class="pg-turn-target">together/openai-gpt-oss-120b</span>
+                    <span class="chip">streaming</span>
+                    <span class="micro pg-turn-tok">71<span class="unit">tok</span></span>
+                  </div>
+                  <p class="pg-turn-body">The first ten characters carry the timestamp:
+
+import datetime
+
+_B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+def ulid_ms(ulid: str) -&gt; int:
+    ms = 0
+    for ch in ulid[:10]:
+        ms = ms * 32 + _B32.index(ch<span class="pg-cursor"></span></p>
+                </div>
+
+              </div>
+
+              <div class="pg-compose">
+                <button class="control control-ghost">+ message</button>
+                <div class="segmented" aria-label="role for the next message">
+                  <span class="segmented-option">system</span>
+                  <span class="segmented-option" data-active="true">user</span>
+                  <span class="segmented-option">assistant</span>
+                </div>
+                <span class="pg-spacer"></span>
+                <span class="micro">first byte at 291<span class="unit">ms</span></span>
+                <button class="control control-primary">&#9632; Stop</button>
+              </div>
+            </div>
+
+            <div class="panel pg-panel">
+              <div class="pg-head">
+                <p class="section-title">Parameters</p>
+                <span class="micro">sampling</span>
+              </div>
+
+              <div class="pg-param">
+                <span class="pg-param-name">temperature</span>
+                <span class="range-track pg-param-track">
+                  <span class="range-fill" style="left:0;right:90%"></span>
+                  <span class="pg-param-knob" style="left:10%"></span>
+                </span>
+                <input class="range-input pg-param-value" value="0.20" aria-label="temperature" readonly>
+              </div>
+
+              <div class="pg-param">
+                <span class="pg-param-name">max_tokens</span>
+                <span class="range-track pg-param-track">
+                  <span class="range-fill" style="left:0;right:75%"></span>
+                  <span class="pg-param-knob" style="left:25%"></span>
+                </span>
+                <input class="range-input pg-param-value" value="2,048" aria-label="max tokens" readonly>
+              </div>
+
+              <div class="pg-param">
+                <span class="pg-param-name">top_p</span>
+                <span class="range-track pg-param-track">
+                  <span class="range-fill" style="left:0;right:5%"></span>
+                  <span class="pg-param-knob" style="left:95%"></span>
+                </span>
+                <input class="range-input pg-param-value" value="0.95" aria-label="top p" readonly>
+              </div>
+
+              <div class="pg-sep"></div>
+
+              <div class="pg-param">
+                <span class="switch" data-on="true">
+                  <span class="switch-track"><span class="switch-knob"></span></span>
+                  <span class="switch-label">stream</span>
+                </span>
+                <span class="micro pg-spacer">SSE &middot; text/event-stream</span>
+              </div>
+
+              <div class="pg-sep"></div>
+
+              <div class="pg-stack">
+                <div class="pg-head">
+                  <p class="legend-caps">Tools</p>
+                  <div class="segmented" aria-label="tool choice">
+                    <span class="segmented-option" data-active="true">auto</span>
+                    <span class="segmented-option">none</span>
+                    <span class="segmented-option">required</span>
+                  </div>
+                </div>
+                <div class="well json-tree pg-tool-json">
+                  <div class="json-row"><span class="json-punct">{</span></div>
+                  <div class="json-row json-depth-1"><span class="json-key">type</span><span class="json-punct">:</span> <span class="json-string">"function"</span><span class="json-punct">,</span></div>
+                  <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">function</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
+                  <div class="json-row json-depth-2"><span class="json-key">name</span><span class="json-punct">:</span> <span class="json-string">"search_repo"</span><span class="json-punct">,</span></div>
+                  <div class="json-row json-depth-2"><span class="json-key">description</span><span class="json-punct">:</span> <span class="json-string">"grep the index"</span><span class="json-punct">,</span></div>
+                  <div class="json-row json-depth-2"><span class="json-toggle json-toggle-collapsed">&#9656;</span><span class="json-key">parameters</span><span class="json-punct">:</span> <span class="json-punct">{</span><span class="json-collapsed-count">3 keys</span><span class="json-punct">}</span></div>
+                  <div class="json-row json-depth-1"><span class="json-punct">}</span></div>
+                  <div class="json-row"><span class="json-punct">}</span></div>
+                </div>
+                <p class="micro">1 tool &middot; 90 tok &middot; forwarded verbatim on the openai and anthropic dialects, translated on gemini</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Embeddings &mdash; POST /v1/embeddings {input,encoding_format,dimensions}. Transcription is multipart; speech returns binary or SSE and is never stored.</span></p>
+
+          <div class="pg-head">
+            <p class="section-title">Auxiliary surfaces</p>
+            <span class="micro">collapsed while chat is the active surface &mdash; opened here so the design is on the page</span>
+          </div>
+
+          <div class="pg-aux-grid">
+
+            <div class="panel pg-aux">
+              <div class="pg-aux-head">
+                <span class="pg-aux-caret">&#9662;</span>
+                <span class="pg-aux-name">embeddings</span>
+                <span class="chip chip-path">kind embedding</span>
+              </div>
+              <div class="pg-aux-body">
+                <div class="pg-aux-row">
+                  <p class="legend-caps">model</p>
+                  <div class="combo">
+                    <button class="control combo-trigger">
+                      <span>text-embedding-3-large</span>
+                      <span class="combo-chevron">&#9662;</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="pg-aux-row">
+                  <p class="legend-caps">encoding</p>
+                  <div class="segmented" aria-label="encoding format">
+                    <span class="segmented-option" data-active="true">float</span>
+                    <span class="segmented-option">base64</span>
+                  </div>
+                </div>
+                <div class="pg-aux-row">
+                  <p class="legend-caps">dimensions</p>
+                  <input class="range-input range-input-wide" value="3,072" aria-label="dimension override" readonly>
+                  <span class="micro">override &middot; 256&ndash;3,072</span>
+                </div>
+                <div class="well pg-vector">
+                  <div class="pg-bars">
+                    <span class="pg-bar" style="height:7px"></span><span class="pg-bar" style="height:18px"></span><span class="pg-bar" style="height:4px"></span><span class="pg-bar" style="height:22px"></span><span class="pg-bar" style="height:11px"></span><span class="pg-bar" style="height:3px"></span><span class="pg-bar" style="height:15px"></span><span class="pg-bar" style="height:9px"></span><span class="pg-bar" style="height:26px"></span><span class="pg-bar" style="height:6px"></span><span class="pg-bar" style="height:13px"></span><span class="pg-bar" style="height:20px"></span><span class="pg-bar" style="height:5px"></span><span class="pg-bar" style="height:17px"></span><span class="pg-bar" style="height:8px"></span><span class="pg-bar" style="height:24px"></span><span class="pg-bar" style="height:10px"></span><span class="pg-bar" style="height:2px"></span><span class="pg-bar" style="height:19px"></span><span class="pg-bar" style="height:12px"></span><span class="pg-bar" style="height:7px"></span><span class="pg-bar" style="height:21px"></span><span class="pg-bar" style="height:14px"></span><span class="pg-bar" style="height:4px"></span><span class="pg-bar" style="height:16px"></span><span class="pg-bar" style="height:25px"></span><span class="pg-bar" style="height:9px"></span><span class="pg-bar" style="height:6px"></span><span class="pg-bar" style="height:18px"></span><span class="pg-bar" style="height:11px"></span><span class="pg-bar" style="height:3px"></span><span class="pg-bar" style="height:23px"></span><span class="pg-bar" style="height:8px"></span><span class="pg-bar" style="height:15px"></span><span class="pg-bar" style="height:5px"></span><span class="pg-bar" style="height:20px"></span><span class="pg-bar" style="height:12px"></span><span class="pg-bar" style="height:7px"></span><span class="pg-bar" style="height:17px"></span><span class="pg-bar" style="height:10px"></span><span class="pg-bar" style="height:22px"></span><span class="pg-bar" style="height:4px"></span><span class="pg-bar" style="height:13px"></span><span class="pg-bar" style="height:19px"></span><span class="pg-bar" style="height:6px"></span><span class="pg-bar" style="height:16px"></span><span class="pg-bar" style="height:9px"></span><span class="pg-bar" style="height:14px"></span>
+                  </div>
+                  <p class="pg-components">[0.0182, -0.0447, 0.0913, -0.0126, 0.0338, &hellip;]</p>
+                  <span class="micro">3,072 dims &middot; 48 shown &middot; served by deepinfra in 44<span class="unit">ms</span></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel pg-aux">
+              <div class="pg-aux-head">
+                <span class="pg-aux-caret">&#9662;</span>
+                <span class="pg-aux-name">transcription</span>
+                <span class="chip chip-path">kind stt</span>
+              </div>
+              <div class="pg-aux-body">
+                <div class="pg-drop">
+                  <span class="pg-drop-glyph">&#8681;</span>
+                  <span class="micro">drop audio, or click to choose</span>
+                  <span class="micro">mp3 wav m4a webm flac &middot; multipart/form-data</span>
+                </div>
+                <div class="well pg-file">
+                  <span class="pg-file-name">standup-2026-08-24.m4a</span>
+                  <span class="pg-duration">14:32</span>
+                </div>
+                <div class="pg-aux-row">
+                  <p class="legend-caps">duration</p>
+                  <span class="micro">872<span class="unit">s</span> &middot; 23.4<span class="unit">MB</span> &middot; 16<span class="unit">kHz</span> mono</span>
+                </div>
+                <div class="pg-aux-row">
+                  <p class="legend-caps">response</p>
+                  <div class="segmented" aria-label="transcription response format">
+                    <span class="segmented-option" data-active="true">json</span>
+                    <span class="segmented-option">text</span>
+                    <span class="segmented-option">srt</span>
+                    <span class="segmented-option">vtt</span>
+                  </div>
+                </div>
+                <span class="micro">the file is streamed straight through to the candidate; the gateway keeps no copy</span>
+              </div>
+            </div>
+
+            <div class="panel pg-aux">
+              <div class="pg-aux-head">
+                <span class="pg-aux-caret">&#9662;</span>
+                <span class="pg-aux-name">speech</span>
+                <span class="chip chip-path">kind tts</span>
+              </div>
+              <div class="pg-aux-body">
+                <div class="pg-aux-row">
+                  <p class="legend-caps">voice</p>
+                  <div class="combo">
+                    <button class="control combo-trigger">
+                      <span>alloy</span>
+                      <span class="combo-chevron">&#9662;</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="pg-aux-row">
+                  <p class="legend-caps">format</p>
+                  <div class="segmented" aria-label="audio format">
+                    <span class="segmented-option" data-active="true">mp3</span>
+                    <span class="segmented-option">opus</span>
+                    <span class="segmented-option">wav</span>
+                    <span class="segmented-option">pcm</span>
+                  </div>
+                </div>
+                <div class="pg-aux-row">
+                  <p class="legend-caps">speed</p>
+                  <span class="range-track pg-param-track">
+                    <span class="range-fill" style="left:0;right:50%"></span>
+                    <span class="pg-param-knob" style="left:50%"></span>
+                  </span>
+                  <input class="range-input" value="1.00" aria-label="speech speed" readonly>
+                </div>
+                <div class="well pg-player">
+                  <span class="pg-player-btn">&#9654;</span>
+                  <span class="pg-player-track">
+                    <span class="pg-player-fill" style="right:66%"></span>
+                    <span class="pg-player-head" style="left:34%"></span>
+                  </span>
+                  <span class="micro">0:07 / 0:21</span>
+                </div>
+                <span class="micro">binary or SSE off the wire, played from the browser's buffer &mdash; never written to disk</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+
+          <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Counting &mdash; POST /v1/messages/count_tokens and /v1beta/models/{model}:countTokens. X-Darkrouter-Estimated marks a local estimate.</span></p>
+
+          <div class="pg-head">
+            <p class="section-title">Token counting</p>
+            <span class="micro">recounted 90<span class="unit">ms</span> after the last edit</span>
+          </div>
+
+          <div class="pg-count-grid">
+
+            <div class="well readout-tile pg-tile-active">
+              <p class="spec-note">this run &mdash; openai dialect, together candidate</p>
+              <div><span class="readout">&asymp;138</span><span class="unit">tok</span></div>
+              <div class="pg-tile-marks">
+                <span class="chip chip-path">X-Darkrouter-Estimated: true</span>
+                <span class="micro">messages 48 &middot; tools 90</span>
+              </div>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">native &mdash; anthropic dialect, anthropic candidate</p>
+              <div><span class="readout">134</span><span class="unit">tok</span></div>
+              <div class="pg-tile-marks">
+                <span class="chip chip-path">upstream count</span>
+                <span class="micro">POST /v1/messages/count_tokens</span>
+              </div>
+            </div>
+
+          </div>
+
+          <p class="prose pg-count-note">
+            The number is the provider's own whenever the served candidate's
+            kind matches the inbound dialect &mdash; an anthropic candidate
+            answering an anthropic request is counted by anthropic, and a
+            gemini pair by countTokens. Every other pairing, this one
+            included, is counted locally with a BPE tokenizer, so the
+            response carries X-Darkrouter-Estimated and the readout carries
+            the approximation sign. A local estimate is not an error and not
+            a warning: it stays in the neutral register, marked but not
+            coloured.
+          </p>
+
+        </div>
+
+        <div class="region">
+
+          <p><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; Trace link &mdash; X-Darkrouter-Request arrives with the response headers, before the body this is rendering.</span></p>
+
+          <div class="panel pg-result">
+
+            <div class="pg-result-field">
+              <p class="legend-caps">request</p>
+              <span class="pg-result-value trace-id">01JQ6Z8VYB3T4N7CKR2WFPD5H9</span>
+              <button class="chip" type="button" aria-label="copy request id">&#10697; copy</button>
+            </div>
+
+            <div class="pg-result-field">
+              <p class="legend-caps">served by</p>
+              <span class="pg-result-value">
+                <span class="state-pip" data-state="healthy"></span>together
+                <span class="micro">/openai-gpt-oss-120b</span>
+              </span>
+            </div>
+
+            <div class="pg-result-field">
+              <p class="legend-caps">attempts</p>
+              <span class="pg-result-value">2<span class="chip chip-failover">failover &times;2</span></span>
+            </div>
+
+            <div class="pg-result-field">
+              <p class="legend-caps">latency</p>
+              <span class="pg-result-value"><span>1,904<span class="unit">ms</span></span></span>
+            </div>
+
+            <span class="pg-spacer"></span>
+
+            <a class="control control-primary link-out" href="#">Open trace &rarr;</a>
+
+          </div>
+
+          <p><span class="micro">groq returned 429 and went cooling; together answered on the second attempt. The id above was readable from the response headers before the first token of the body arrived.</span></p>
+
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
