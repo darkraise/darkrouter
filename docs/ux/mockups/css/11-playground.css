@@ -1,0 +1,485 @@
+/*
+ * Task 14 — the Playground ("use/playground").
+ *
+ * Reused unchanged from darkrouter-ui.css: .panel, .well, .table, .row,
+ * .chip, .chip-path, .chip-failover, .control, .control-ghost, .segmented,
+ * .segmented-option, .state-pip, .readout, .unit, .micro, .prose,
+ * .legend-caps, .section-title, .region, .measure.
+ * Reused from earlier screens' partials: .combo / .combo-trigger /
+ * .combo-chevron (Task 6), .json-tree and its key/string/punct/toggle/depth
+ * family plus .control-primary, .readout-tile and .trace-id (Task 7),
+ * .switch / .switch-track / .switch-knob / .switch-label, .range-track,
+ * .range-fill, .range-input and .link-out (Task 12).
+ *
+ * Everything below is prefixed pg- because three other screens are being
+ * drawn against this stylesheet at the same time and a bare .turn or
+ * .player would collide.
+ */
+
+/* --- Regions 1-3: the control strip ------------------------------------
+   .filter-bar already is "a row of 30px controls that wraps", so the strip
+   itself is reused. What it has never carried is a labelled control with a
+   caption under it, which is the whole point of the model picker here. */
+
+/* flex-start, not the default stretch: a segmented control has to be as
+   wide as its options, and the surface bar sits in a full-width block. */
+.pg-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.pg-field .legend-caps { margin: 0; }
+
+/* The resolved candidate under a control. --legend is the value the brief
+   fixes, and the face has to be mono: provider/model is an identifier off
+   the wire, not a sentence, so .spec-note (sans, --legend) is the wrong
+   half of the type system and .micro is the wrong colour. */
+.pg-resolved {
+  margin: 0;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--legend);
+  white-space: nowrap;
+}
+
+/* A panel header: a title on the left, a reading about it on the right,
+   sitting on a shared baseline. .table-toolbar is the same silhouette but
+   centres its items and is documented as the toolbar above a data table. */
+.pg-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--section-pad);
+  margin-bottom: 8px;
+}
+.pg-head .section-title,
+.pg-head .legend-caps { margin: 0; }
+
+/* --- Regions 4-5: conversation and parameters --------------------------- */
+
+.pg-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.pg-panel {
+  padding: var(--section-pad);
+}
+
+/* The turns well. Padding is zero because each turn owns its own padding
+   and its own 1px seam, exactly as .table does for .row. */
+.pg-turns {
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+  border-left: 1px solid transparent;
+}
+.pg-turn:last-child { border-bottom: none; }
+
+/* Where the request landed, restated in the conversation: the same 1px
+   --trace left rule plus 0.08 wash .ladder-row-served uses, so "this is
+   the served candidate speaking" reads identically on both screens. A
+   reply is the router's choice made visible, not a health report, so it
+   never takes a state colour. */
+.pg-turn-served {
+  position: relative;
+  border-left-color: var(--trace);
+}
+.pg-turn-served::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+.pg-turn-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-role {
+  flex: 0 0 74px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.pg-turn-target {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.pg-turn-tok {
+  margin-left: auto;
+}
+
+/* Message content is request/response payload — it came off the wire, so
+   it takes the data face even where it reads as English. pre-wrap keeps
+   the model's own line breaks and indentation intact. */
+.pg-turn-body {
+  position: relative;
+  margin: 0;
+  padding-left: 82px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+/* The stream cursor. Deliberately static: the animation budget for the
+   whole product is three (hover, disclosure, value swap) and a blink is
+   not one of them, so the caret is a printed block instead. */
+.pg-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: var(--ink);
+}
+
+.pg-compose {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: var(--section-pad);
+}
+
+.pg-spacer { flex: 1 1 auto; }
+
+/* --- Parameters --------------------------------------------------------- */
+
+.pg-param {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--control-h);
+}
+
+.pg-param-name {
+  flex: 0 0 92px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* .range-track is 56px wide by contract (a facet filter in a fixed-width
+   column). Here it is one of three stacked sliders that should share the
+   panel's own width, so only the width is restated. */
+.pg-param-track {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+/* .range-track/.range-fill report a span, so they never needed a handle.
+   A sampling parameter is a single value and wants one. --accent-ink to
+   match .range-fill: a control's own state, not a routing verdict. */
+.pg-param-knob {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 9px;
+  transform: translateX(-50%);
+  border-radius: var(--radius);
+  background: var(--accent-ink);
+}
+
+/* Keeps .range-input's own 76px rather than letting the flex row stretch
+   it — the three values have to line up as a column. */
+.pg-param-value {
+  flex: 0 0 auto;
+}
+
+.pg-sep {
+  height: 1px;
+  margin: var(--section-pad) 0;
+  background: var(--hairline-subtle);
+}
+
+.pg-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A tool schema is wider than a 360px column at any useful string length,
+   so the tree scrolls inside its own well rather than forcing the column
+   wider or truncating the JSON into a lie. */
+.pg-tool-json {
+  overflow-x: auto;
+}
+
+/* --- Region 6: auxiliary surfaces --------------------------------------- */
+
+.pg-aux-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.pg-aux {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A disclosure header on the panel's own top edge: 30px like every other
+   control, seam below it, caret in the gutter. */
+.pg-aux-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.pg-aux-head:hover { opacity: 1; }
+
+.pg-aux-caret {
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 9px;
+  color: var(--legend);
+}
+
+.pg-aux-name {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.pg-aux-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+
+.pg-aux-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control-h);
+}
+.pg-aux-row .legend-caps {
+  flex: 0 0 78px;
+  margin: 0;
+}
+.pg-aux-row .combo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A segmented control is sized by its options; stretching it across the
+   column would leave the labels adrift in their own cells. */
+.pg-aux-row .segmented { flex: 0 0 auto; }
+
+/* --- Embeddings preview -------------------------------------------------- */
+
+.pg-vector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px var(--section-pad);
+}
+
+/* One bar per component, magnitude as height. Neutral --bezel: a vector is
+   neither an outcome nor a routing decision, so it gets no state colour
+   and no trace. Heights are set per bar inline — geometry, not colour. */
+.pg-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 26px;
+}
+
+.pg-bar {
+  flex: 0 0 3px;
+  border-radius: var(--radius);
+  background: var(--bezel);
+}
+
+.pg-components {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Transcription preview ----------------------------------------------- */
+
+/* The one dashed edge in the product. A drop target has to read as "not a
+   surface yet" and the flat 1px hairline vocabulary has no way to say that;
+   a solid box here would read as an empty well instead. */
+.pg-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 78px;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.pg-drop-glyph {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 16px;
+  color: var(--bezel);
+}
+
+.pg-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px var(--section-pad);
+}
+
+.pg-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.pg-duration {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* --- Speech preview ------------------------------------------------------ */
+
+.pg-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--section-pad);
+  height: 34px;
+}
+
+.pg-player-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-size: 9px;
+  color: var(--ink);
+}
+
+/* Playback position is the page's own state, the register --accent-ink
+   already covers for .range-fill and .newer-pill — not a routing verdict. */
+.pg-player-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: var(--radius);
+  background: var(--hairline-subtle);
+}
+
+.pg-player-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: var(--radius);
+  background: var(--accent-ink);
+}
+
+.pg-player-head {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 9px;
+  transform: translateX(-50%);
+  border-radius: var(--radius);
+  background: var(--accent-ink);
+}
+
+/* --- Region 7: token counting -------------------------------------------- */
+
+.pg-count-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gutter);
+  align-items: start;
+}
+
+/* The reading actually in effect, marked the way every other "selected"
+   thing in the console is marked. */
+.pg-tile-active {
+  border-color: var(--accent-ink);
+}
+
+.pg-tile-marks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pg-count-note {
+  max-width: 78ch;
+  margin: var(--section-pad) 0 0;
+  color: var(--ink-muted);
+}
+
+/* --- Region 8: result footer --------------------------------------------- */
+
+.pg-result {
+  display: flex;
+  align-items: center;
+  gap: var(--gutter);
+  flex-wrap: wrap;
+  padding: 0 var(--section-pad);
+  min-height: 44px;
+}
+
+.pg-result-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pg-result-field .legend-caps { margin: 0; }
+
+.pg-result-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
