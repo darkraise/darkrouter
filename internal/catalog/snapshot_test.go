@@ -1,10 +1,13 @@
 package catalog
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider"
 )
 
 func snapModels() []Model {
@@ -121,4 +124,67 @@ func TestStoreSwapIsRaceFree(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// gatedSource makes the window between Rebuild's reads and its publish
+// observable: every call sleeps, so two overlapping rebuilds are guaranteed to
+// be seen overlapping rather than merely being able to.
+type gatedSource struct {
+	mu     sync.Mutex
+	active int
+	peak   int
+	ps     []provider.Provider
+}
+
+func (g *gatedSource) Providers(context.Context) ([]provider.Provider, error) {
+	g.mu.Lock()
+	g.active++
+	if g.active > g.peak {
+		g.peak = g.active
+	}
+	g.mu.Unlock()
+
+	time.Sleep(20 * time.Millisecond)
+
+	g.mu.Lock()
+	g.active--
+	g.mu.Unlock()
+	return g.ps, nil
+}
+
+func (g *gatedSource) Revision() uint64 { return 1 }
+
+func (g *gatedSource) peakConcurrency() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peak
+}
+
+// Rebuild reads every source and then publishes. Two of them interleaving lets
+// the one that read older data publish last, and its stale snapshot then serves
+// routing until something rebuilds again — up to a full discovery interval. The
+// discovery worker and the models.dev sync worker are independent goroutines
+// that both write rows and then rebuild, so the overlap is reachable in
+// production, not only here.
+func TestRebuildDoesNotOverlapItself(t *testing.T) {
+	db := discoveryDB(t, "a")
+	src := &gatedSource{ps: []provider.Provider{{ID: "a", Kind: "openaicompat", BaseURL: "http://x"}}}
+	s := NewStore(db, src)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.Rebuild(context.Background()); err != nil {
+				t.Errorf("Rebuild: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := src.peakConcurrency(); got != 1 {
+		t.Errorf("peak concurrent Rebuild reads = %d, want 1: a rebuild that "+
+			"read stale data can publish over one that read fresh data", got)
+	}
 }
