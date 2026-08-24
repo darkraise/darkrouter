@@ -55,6 +55,20 @@ func TestForwardStreamBuffersUntilContentThenReplays(t *testing.T) {
 	}
 }
 
+func TestAScannerErrorMidStreamLeavesTheClientStreamIntact(t *testing.T) {
+	// spec §7: losing a token count is acceptable, corrupting a response is
+	// not. An event the recognizer cannot parse is simply forwarded.
+	cw, ac := forwardFixture(t)
+	body := "data: c-first\n\ndata: {not json at all\n\ndata: c-second\n\n"
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("the client stream was altered\n got: %q\nwant: %q", got, body)
+	}
+}
+
 func TestForwardStreamFailsOverOnAPreCommitError(t *testing.T) {
 	// Anthropic's overloaded_error under a 200. Nothing has reached the client,
 	// so the chain may still move on.
