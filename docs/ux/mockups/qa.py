@@ -18,14 +18,22 @@ FRAGMENTS = HERE / "fragments"
 # escaped the token system and will not follow the light-mode swap.
 HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 
-# Loaded resources only. An <a href> to a provider's website is content the
-# screen is depicting, not an asset the page fetches.
-EXTERNAL_RESOURCE = re.compile(
-    r"""(?:\bsrc\s*=\s*["']https?://)"""
-    r"""|(?:@import\s+["']?https?://)"""
-    r"""|(?:url\(\s*["']?https?://)"""
-    r"""|(?:<link\b[^>]*\bhref\s*=\s*["']https?://)""",
+# Attributes that fetch, wherever they appear. The optional scheme catches
+# protocol-relative URLs, which fetch just as happily as an absolute one.
+FETCHING_ATTR = re.compile(
+    r"""\b(?:src|srcset|xlink:href|poster)\s*=\s*["'](?:https?:)?//""",
     re.IGNORECASE,
+)
+
+# Stylesheet fetches.
+CSS_FETCH = re.compile(r"""(?:@import\s+|url\(\s*)["']?(?:https?:)?//""", re.IGNORECASE)
+
+# href only fetches on elements that LOAD what it points at. On an anchor it is
+# navigation, which is why <a href="https://groq.com"> stays legal.
+LOADING_HREF = re.compile(
+    r"""<\s*(?:link|use|image|iframe|embed|object|track|source)\b[^>]*?"""
+    r"""\bhref\s*=\s*["'](?:https?:)?//""",
+    re.IGNORECASE | re.DOTALL,
 )
 
 FONT_SIZE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px")
@@ -90,9 +98,10 @@ def check_fragment(path: Path) -> list[str]:
         line = text.count("\n", 0, m.start()) + 1
         problems.append(f"{path.name}:{line}: raw hex {m.group(0)} — use var(--token) or rgba()")
 
-    for m in EXTERNAL_RESOURCE.finditer(text):
-        line = text.count("\n", 0, m.start()) + 1
-        problems.append(f"{path.name}:{line}: external resource load — the page must be self-contained")
+    for pattern in (FETCHING_ATTR, CSS_FETCH, LOADING_HREF):
+        for m in pattern.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            problems.append(f"{path.name}:{line}: external resource load — the page must be self-contained")
 
     for m in FONT_SIZE.finditer(text):
         if float(m.group(1)) > MAX_FONT_PX:

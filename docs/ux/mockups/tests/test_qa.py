@@ -44,6 +44,58 @@ class TestFragmentChecks(unittest.TestCase):
         problems = qa.check_fragment(FIX / "bad_hex.html")
         self.assertTrue(any("font-size" in p for p in problems), problems)
 
+    def test_protocol_relative_src_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "proto_rel.html"
+            f.write_text(
+                '<section class="screen" id="s-1-pr" data-screen-title="pr">'
+                '<p class="legend">proto rel</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<img src="//cdn.example.com/x.png" alt=""></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("external resource" in p for p in problems), problems)
+
+    def test_svg_xlink_href_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "svg_xlink.html"
+            f.write_text(
+                '<section class="screen" id="s-1-sx" data-screen-title="sx">'
+                '<p class="legend">svg xlink</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<svg><use xlink:href="https://example.com/s.svg#i"/></svg></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("external resource" in p for p in problems), problems)
+
+    def test_svg_image_href_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "svg_image.html"
+            f.write_text(
+                '<section class="screen" id="s-1-si" data-screen-title="si">'
+                '<p class="legend">svg image</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<svg><image href="https://example.com/p.png"/></svg></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("external resource" in p for p in problems), problems)
+
+    def test_anchor_href_is_still_allowed(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "anchor_href.html"
+            f.write_text(
+                '<section class="screen" id="s-1-ah" data-screen-title="ah">'
+                '<p class="legend">anchor href</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<a href="https://groq.com" rel="noreferrer">groq.com</a></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertEqual(problems, [])
+
 
 class TestIndexChecks(unittest.TestCase):
     def test_duplicate_ids_are_rejected(self):
