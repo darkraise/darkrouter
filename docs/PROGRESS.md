@@ -782,11 +782,15 @@ time.
   (`"seed":424242`) and in its reply (`x_fake_saw_seed: 424242`, a value the
   fake can only have produced by reading the field back out of what it
   received).
-- **The inbound proxy credential never reached the upstream; the target's own
-  key did.** The fake recorded `Authorization: Bearer sk-fake-upstream-key`
-  (the provider's configured credential) on every call, never the client's
-  `Bearer proxy-throwaway-token`; on the anthropic-kind fallback it recorded
-  `X-Api-Key: sk-fake-fallback-key` and no `Authorization` header at all.
+- **The inbound proxy credential never reached the upstream on the two calls
+  its headers were inspected; the target's own key did.** `/_seen` after the
+  unmodelled-parameter call recorded `Authorization: Bearer
+  sk-fake-upstream-key` (the provider's configured credential), never the
+  client's `Bearer proxy-throwaway-token`; `/_seen` after the failover call
+  showed the anthropic-kind fallback sending `X-Api-Key:
+  sk-fake-fallback-key` and no `Authorization` header at all. Headers were
+  not inspected on the plain fast-path call or on either streaming call —
+  only their bodies and the request trace were.
 - **Streamed usage and the stripped-versus-kept pair both hold.** A stream
   request with no `stream_options` recorded `tokens_in: 12, tokens_out: 5` on
   the request row, and the client's own SSE body (`stream1.txt`) carried zero
