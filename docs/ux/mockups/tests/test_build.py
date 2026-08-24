@@ -1,3 +1,4 @@
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -19,8 +20,20 @@ class TestBuild(unittest.TestCase):
         head = self.index.read_text(encoding="utf-8").lstrip().lower()
         self.assertTrue(head.startswith("<!doctype html>"))
         body = self.artifact.read_text(encoding="utf-8").lower()
-        for wrapper in ("<!doctype", "<html", "<head", "<body"):
-            self.assertNotIn(wrapper, body, f"artifact.html must not contain {wrapper}")
+        # \b keeps <header> out of this: "head" followed by "e" is not a word
+        # boundary, so only a real <head> tag matches.
+        for wrapper in (r"<!doctype", r"<html\b", r"<head\b", r"<body\b"):
+            self.assertIsNone(
+                re.search(wrapper, body),
+                f"artifact.html must not contain a {wrapper} tag",
+            )
+
+    def test_header_element_is_not_mistaken_for_document_head(self):
+        # The shell's page banner is a <header>. A substring check for "<head"
+        # matches it and would fail the build for no reason.
+        body = self.artifact.read_text(encoding="utf-8").lower()
+        self.assertIn("<header", body, "shell should carry a <header> banner")
+        self.assertIsNone(re.search(r"<head\b", body))
 
     def test_css_is_inlined_not_linked(self):
         text = self.index.read_text(encoding="utf-8")
