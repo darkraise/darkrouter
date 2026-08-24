@@ -317,7 +317,11 @@ FRAGMENTS = HERE / "fragments"
 
 # Colour lives in darkrouter-ui.css. A hex in a fragment is a value that
 # escaped the token system and will not follow the light-mode swap.
-HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+# A raw colour hex only appears in a CSS value position — after whitespace, a
+# colon, a comma or a semicolon. Requiring that keeps SVG refs like
+# url(#fade) and anchors like href="#dead" out, since hex-letter ids are
+# ordinary and blocking them would be a gate that cries wolf.
+HEX = re.compile(r"(?<=[\s:,;(])(?<!url\()#[0-9a-fA-F]{3,8}\b")
 
 # Attributes that fetch, wherever they appear. The optional scheme catches
 # protocol-relative URLs, which fetch just as happily as an absolute one.
@@ -770,7 +774,7 @@ Expected: `build: 1 screen(s) -> index.html (…), artifact.html (…)` then `qa
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `cd docs/ux/mockups && python3 -m unittest discover -s tests -v`
-Expected: OK, 14 tests (8 qa + 6 build).
+Expected: OK, 22 tests (14 qa + 8 build).
 
 - [ ] **Step 9: Delete the smoke fragment, rebuild, commit**
 
@@ -1925,7 +1929,7 @@ cd docs/ux/mockups
 python3 build.py && python3 qa.py && python3 -m unittest discover -s tests -v
 ```
 
-Expected: 18 fragments, qa PASS, 14 tests OK. Record `index.html`'s size — it should land in the 200–350 KB range; materially larger means an asset was embedded that should not have been.
+Expected: 18 fragments, qa PASS, 22 tests OK. Record `index.html`'s size — it should land in the 200–350 KB range; materially larger means an asset was embedded that should not have been.
 
 - [ ] **Step 2: Screenshot every screen in both modes**
 
