@@ -22,9 +22,15 @@ COPY . .
 # go:embed reads the filesystem at compile time, so the bundle has to land
 # before the build below rather than being mounted at runtime.
 COPY --from=web /src/internal/admin/dist ./internal/admin/dist
+# Stamped into the binary so a running container can say which build it is:
+# GET /healthz on the admin port reports it, and without this every image
+# calls itself "dev".
+ARG VERSION=dev
 # CGO_ENABLED=0 keeps the binary static, which is what lets the final image be
 # minimal and what modernc.org/sqlite is chosen for in Phase 2.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/darkrouter ./cmd/darkrouter
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags="-s -w -X github.com/darkraise/darkrouter/internal/server.Version=${VERSION}" \
+      -o /out/darkrouter ./cmd/darkrouter
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 darkrouter

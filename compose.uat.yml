@@ -1,0 +1,12 @@
+# Override for running a locally built image instead of pulling from Docker Hub.
+# Use it to exercise a change end to end before it is tagged and pushed:
+#
+#   docker build -t darkraise/darkrouter:latest .
+#   docker compose -f compose.prod.yml -f compose.uat.yml up -d
+#
+# Everything else — ports, volumes, environment, healthcheck — comes from
+# compose.prod.yml, so what is tested here differs from production in exactly
+# one respect: where the image came from.
+services:
+  darkrouter:
+    pull_policy: never

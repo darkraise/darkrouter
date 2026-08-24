@@ -36,6 +36,57 @@ The response carries `X-Darkrouter-Provider`, `X-Darkrouter-Model`,
 `X-Darkrouter-Attempts`, and `X-Darkrouter-Request` so routing is visible from a
 terminal.
 
+## Deploy
+
+`.github/workflows/ci.yml` vets, tests with `-race`, and then builds and pushes
+`darkraise/darkrouter` — `latest` from master, semver tags from a `v*` tag, and
+an immutable `sha-` tag on every build, which is what a rollback pins to once
+`latest` has moved. Set two repository secrets: `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN`. Pull requests run the tests and push nothing.
+
+One image carries everything. The SPA is built in its own stage and embedded
+into the binary with `go:embed`, so there is no second container and no static
+file server to point anywhere.
+
+```bash
+mkdir -p data && sudo chown -R 10001:10001 data   # the image's unprivileged uid
+cp darkrouter.example.yaml data/darkrouter.yaml
+cp .env.example .env                              # then fill it in
+docker compose -f compose.prod.yml up -d
+```
+
+Two things bite here. A **bcrypt hash contains `$`**, which compose reads as the
+start of a variable while it loads `.env` — double every one of them
+(`$$2a$$12$$…`) or the value silently arrives truncated and a correct password
+still fails to log in. And `data/` holds the encrypted credential database, so
+it is as sensitive as `.env` itself.
+
+Produce the hash with the image, overriding the entrypoint so the subcommand is
+seen at all:
+
+```bash
+docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
+  hash-password -password 'yours'
+```
+
+`GET /healthz` on the admin port reports the stamped version, so a running
+container can be matched to the build it came from.
+
+### LAN and internet
+
+Both ports bind every interface, so the LAN reaches them directly. For the
+internet, `--profile edge` adds Caddy and the bundled `Caddyfile` terminates TLS
+for two names, one per surface.
+
+There is no CORS configuration anywhere because none is needed: the dashboard is
+served by the same server that answers its `/api` calls, so every request it
+makes is same-origin. What *would* break that is splitting them — serving the UI
+from one hostname and pointing it at an API on another, or mounting it under a
+subpath such as `/darkrouter/`, since the bundle references its assets from the
+site root. Give each surface a whole origin and the browser never has to be
+asked for permission. Cross-site mutating requests are refused with 403 by
+design; that is the CSRF check working, not a CORS problem to configure away.
+
 ## Endpoints
 
 | Route | Dialect |
