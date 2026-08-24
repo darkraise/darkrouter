@@ -5,13 +5,14 @@ A self-hosted LLM gateway. One endpoint, many providers, deterministic failover.
 ## Status
 
 All nine phases are complete. Three inbound dialects — OpenAI, Anthropic, and
-Gemini — route to any provider kind, including SigV4-signed Bedrock and
-OAuth-backed Vertex and Anthropic subscriptions, with deterministic failover,
-persistence, health tracking, an admin dashboard, and a catalog that merges
-shipped presets with live discovery. A request whose dialect already matches
-the chosen provider's wire format takes a fast path that forwards the body
-rather than re-rendering it — see "The fast path" below. See
-`docs/superpowers/specs/README.md` for the full design and the phase roadmap.
+Gemini — route to any provider kind, including SigV4-signed Bedrock,
+service-account-backed Vertex, and OAuth-backed Anthropic subscriptions, with
+deterministic failover, persistence, health tracking, an admin dashboard, and
+a catalog that merges shipped presets, models.dev metadata, and live
+discovery. A request whose dialect already matches the chosen provider's wire
+format takes a fast path that forwards the body rather than re-rendering it —
+see "The fast path" below. See `docs/superpowers/specs/README.md` for the
+full design and the phase roadmap.
 
 ## Run
 
