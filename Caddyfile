@@ -1,0 +1,25 @@
+# Two whole origins, one per surface. This is the part that keeps the browser
+# happy: the dashboard's HTML and the /api it calls arrive from the same scheme,
+# host and port, so nothing is a cross-origin request and no CORS headers are
+# needed anywhere.
+#
+# What would break it: serving the SPA from one name and pointing it at an API
+# on another, or mounting it under a subpath such as /darkrouter/ — the bundle
+# references its assets from the site root, so it must own the root of its name.
+
+{$ADMIN_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy darkrouter:8081
+}
+
+# The LLM gateway. Called by CLIs and SDKs rather than by a browser, so CORS
+# never enters into it; it is a separate name only so TLS and access rules can
+# differ from the dashboard's.
+{$PROXY_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy darkrouter:8080 {
+		# Streamed responses must not be buffered or a client sees the whole
+		# completion arrive at once instead of token by token.
+		flush_interval -1
+	}
+}
