@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { ThemeProvider } from "darkraise-ui/theme"
-import { SidebarLayout } from "darkraise-ui/layout"
 import { themeConfig } from "./theme.config"
 import { api, onUnauthorized, setCsrfToken } from "./lib/api"
 import { ApiError } from "./lib/api"
@@ -55,24 +54,9 @@ function Shell() {
   if (!authed) {
     return <LoginScreen onAuthenticated={() => void status.refetch()} />
   }
-  return (
-    <SidebarLayout
-      nav={[
-        {
-          items: [
-            { label: "Overview", href: "/" },
-            { label: "Requests", href: "/requests" },
-            { label: "Catalog", href: "/catalog" },
-            { label: "Playground", href: "/playground" },
-            { label: "Settings", href: "/settings" },
-          ],
-        },
-      ]}
-      showThemeSwitcher
-    >
-      <RouterProvider router={router} />
-    </SidebarLayout>
-  )
+  // The shell is the root route's component rather than a wrapper here, so
+  // that darkraise-ui's sidebar has the router context its adapter needs.
+  return <RouterProvider router={router} />
 }
 
 export function App() {
