@@ -2234,7 +2234,6 @@ package exec
 import (
 	"bytes"
 	"errors"
-	"io"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
@@ -2335,10 +2334,10 @@ func eventEnd(b []byte) int {
 func parseEvent(raw []byte, maxLine int) (sse.Event, bool) {
 	ev, err := sse.NewReader(bytes.NewReader(raw), maxLine).Next()
 	if err != nil {
-		// io.EOF means the block dispatched nothing — a comment or blank
-		// lines. Any other error is a malformed event, which spec §6 says to
-		// stop recognizing and simply forward.
-		_ = errors.Is(err, io.EOF)
+		// Both outcomes are the same answer here. io.EOF means the block
+		// dispatched nothing — a comment or blank lines — and any other error
+		// means a malformed event, which spec §6 says to stop recognizing and
+		// simply forward. Neither is a reason to end the stream.
 		return sse.Event{}, false
 	}
 	return ev, true
