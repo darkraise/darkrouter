@@ -157,8 +157,8 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				}
 				// Spec §9: after commit a failure becomes an in-stream error
 				// in the general case, but synthesizing a dialect-shaped one
-				// here is a larger change than this fix makes — the row
-				// staying honest about what happened is what matters most.
+				// here would require a dialect writer — we hold only a Forwarder.
+				// The row records the failure; that honest accounting is the boundary.
 				recordWarning("upstream connection failed after commit: " + rerr.Error())
 			}
 			break
