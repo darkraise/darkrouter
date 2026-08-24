@@ -86,9 +86,12 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				cw.Flush()
 				return adapter.OutcomeSuccess, nil
 			}
-			if strip && re.UsageOnly {
-				return adapter.OutcomeSuccess, nil
-			}
+			// strip only ever applies post-commit: the injected chunk is the
+			// stream's trailing summary, which by construction arrives after
+			// the content that triggers commit. A usage-only event seen before
+			// that is buffered like anything else, so it still counts against
+			// the cap below rather than giving a flooding provider a free way
+			// past it.
 			if cap := cfg.Server.SSE.MaxPrecommitBytes; cap > 0 && pendingBytes+len(raw) > cap {
 				return adapter.OutcomeRetryableProvider,
 					e.reclassifyStream(c, resp, rec, ErrPreCommitBufferFull.Error())

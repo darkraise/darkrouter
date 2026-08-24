@@ -114,6 +114,12 @@ func New(store *config.Store, src provider.Source, adapters map[string]adapter.A
 				ForceAttemptHTTP2:     true,
 				MaxIdleConns:          100,
 				IdleConnTimeout:       90 * time.Second,
+				// Spec §8: bytes must arrive as the provider sent them, so the
+				// forwarder can pass them through unchanged. Go otherwise adds
+				// Accept-Encoding: gzip and decompresses transparently, which
+				// would make fidelity depend on a precondition rather than on
+				// a setting. The IR path pays more bandwidth for it.
+				DisableCompression: true,
 			},
 		},
 	}
@@ -231,7 +237,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		return
 	}
 
-	req, _, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
+	req, pt, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
 	if err != nil {
 		// The row is opened and closed here rather than in RunSurface: a body
 		// that never parsed has no op to name the surface it was asking for,
@@ -245,7 +251,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
 		return
 	}
-	e.RunSurface(w, r, &chatOp{d: d, req: req}, cfg)
+	e.RunSurface(w, r, &chatOp{d: d, req: req, pt: pt}, cfg)
 }
 
 // runAttempts drives the chain. The ordered list is fixed at snapshot time and
@@ -310,18 +316,36 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 		}
 
 		attempts++
-		outcome, status, aerr := e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel)
-		if aerr != nil {
-			lastErr = aerr
+		res := e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, true)
+		if res.Err != nil {
+			lastErr = res.Err
 		}
 
-		next, action := nextIndex(cands, i, outcome, status)
+		// spec §9: strict openaicompat providers reject fields the IR path
+		// would have dropped with a warning. Classifying that as Fatal would
+		// convert a request the IR path could have served into a hard failure
+		// with no failover — a silent regression introduced by an
+		// optimization. The same candidate is retried once through the IR path
+		// before any Fatal classification stands, and both attempts are
+		// recorded.
+		if res.Path == PathPassthrough && !res.Committed &&
+			res.Outcome == adapter.OutcomeFatal && res.Status == http.StatusBadRequest &&
+			attempts < maxAttempts && bud.canStartAttempt(time.Now()) {
+
+			attempts++
+			res = e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, false)
+			if res.Err != nil {
+				lastErr = res.Err
+			}
+		}
+
+		next, action := nextIndex(cands, i, res.Outcome, res.Status)
 		switch action {
 		case actionFinish:
 			rec.Status = "success"
 			return
 		case actionReturn:
-			if outcome == adapter.OutcomeClientCancelled {
+			if res.Outcome == adapter.OutcomeClientCancelled {
 				rec.Status = "cancelled"
 			}
 			if lastErr != nil {
@@ -343,13 +367,32 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 	_ = op.WriteError(w, lastErr)
 }
 
-// attempt performs one upstream call and records it. It returns the outcome,
-// the upstream status code, and the dialect error to serve if this turns out to
-// be the last attempt.
+// The two renderings an attempt can use. They are the values of the request
+// row's path column, so the strings are part of the schema.
+const (
+	PathIR          = "ir"
+	PathPassthrough = "passthrough"
+)
+
+// attemptResult is what one upstream call produced. It replaced three returns
+// when passthrough arrived: the loop needs to know which rendering ran and
+// whether anything reached the client, and neither fits in an outcome.
+type attemptResult struct {
+	Outcome   adapter.Outcome
+	Status    int
+	Err       *ir.Error
+	Path      string
+	Committed bool
+}
+
+// attempt performs one upstream call and records it. allowForward gates the
+// fast path: the pre-commit 400 retry (spec §9) calls back in with it false so
+// the same candidate's second try cannot loop back onto the rendering that
+// just failed.
 func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	cfg *config.Config, c router.Candidate, p provider.Provider,
 	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
-	cat catalog.Reader, firstModel string) (adapter.Outcome, int, *ir.Error) {
+	cat catalog.Reader, firstModel string, allowForward bool) attemptResult {
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
@@ -363,7 +406,8 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 
 	apiKey, authorizer, credErr := e.credentialFor(ctx, p, c)
 	if credErr != nil {
-		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: credErr.Error()}
+		return attemptResult{Outcome: adapter.OutcomeFatal, Path: PathIR,
+			Err: &ir.Error{Type: ir.ErrDarkrouter, Message: credErr.Error()}}
 	}
 	tgt := &adapter.Target{
 		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
@@ -376,20 +420,62 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	if iw, ok := inferredWarningFor(c, op.Query()); ok {
 		warns = append(warns, iw)
 	}
-	hr, buildWarns, err := op.Build(ctx, tgt, ad)
-	warns = append(warns, buildWarns...)
-	if err != nil {
-		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+
+	path := PathIR
+	var (
+		hr        *http.Request
+		fw        adapter.Forwarder
+		strip     bool
+		streaming bool
+	)
+	if allowForward {
+		if pop, ok := op.(passthroughOp); ok {
+			pt := pop.Passthrough()
+			if f, eligible := forwardable(op.Dialect(), pt, c, p, ad); eligible {
+				body, injected, rerr := rewriteForward(pt, op.Query().Model, c.Model, c.Kind)
+				if rerr != nil {
+					// spec §9: the IR parser produces a proper dialect-shaped
+					// error if the body is genuinely invalid, and it can tell
+					// the difference where this cannot. Not a second attempt —
+					// nothing has reached a provider.
+					warns = append(warns, ir.Warning{
+						Field: "passthrough", Target: c.ProviderID + "/" + c.Model,
+						Reason: "the body could not be forwarded and was translated instead: " +
+							rerr.Error(),
+					})
+				} else {
+					built, berr := f.BuildForward(ctx, tgt, &adapter.Forward{
+						Body: body, Header: forwardHeaders(r), Stream: pt.Stream,
+						Method: pt.Method, Query: pt.Query,
+					})
+					if berr != nil {
+						return attemptResult{Outcome: adapter.OutcomeFatal, Path: PathIR,
+							Err: &ir.Error{Type: ir.ErrDarkrouter, Message: berr.Error()}}
+					}
+					hr, fw, strip, streaming, path = built, f, injected, pt.Stream, PathPassthrough
+				}
+			}
+		}
+	}
+	if hr == nil {
+		built, buildWarns, err := op.Build(ctx, tgt, ad)
+		warns = append(warns, buildWarns...)
+		if err != nil {
+			return attemptResult{Outcome: adapter.OutcomeFatal, Path: path,
+				Err: &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}}
+		}
+		hr = built
 	}
 	if err := makeReplayable(hr); err != nil {
-		return adapter.OutcomeFatal, 0, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}
+		return attemptResult{Outcome: adapter.OutcomeFatal, Path: path,
+			Err: &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}}
 	}
 	if err := applyAuthorizer(ctx, hr, authorizer); err != nil {
 		// A credential that cannot be produced is a credential failure, not a
 		// provider one: an expired OAuth grant must cool the account rather
 		// than the upstream, which is serving everyone else fine.
-		return adapter.OutcomeRetryableCredential, 0,
-			&ir.Error{Type: ir.ErrAuthentication, Message: err.Error()}
+		return attemptResult{Outcome: adapter.OutcomeRetryableCredential, Path: path,
+			Err: &ir.Error{Type: ir.ErrAuthentication, Message: err.Error()}}
 	}
 
 	attemptStart := time.Now()
@@ -413,30 +499,41 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	if resp != nil {
 		statusCode = resp.StatusCode
 	}
-	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(attemptStart))
+	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(attemptStart), path)
 	e.recordHealthFor(c, outcome, resp)
 
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		return outcome, statusCode, errorFor(outcome, doErr)
+		return attemptResult{Outcome: outcome, Status: statusCode, Err: errorFor(outcome, doErr), Path: path}
 	}
 
 	cw := NewCommitWriter(w)
-	outcome, aerr := op.Respond(cw, resp, &AttemptCtx{
+	ac := &AttemptCtx{
 		Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: seq, Timer: timer,
 		Warns: warns, Adapter: ad, FirstModel: firstModel,
-	})
+	}
+	var aerr *ir.Error
+	switch {
+	case path == PathPassthrough && streaming:
+		outcome, aerr = e.forwardStream(cw, resp, ac, fw, strip)
+	case path == PathPassthrough:
+		outcome, aerr = e.forwardUnary(cw, resp, ac, fw)
+	default:
+		outcome, aerr = op.Respond(cw, resp, ac)
+	}
 	// The loop asks the writer, not the op. An op that reports a retryable
 	// outcome after bytes have gone out is describing a post-commit failure,
 	// and phase 3's rule says the chain ends there regardless — a second
 	// attempt would concatenate two half-responses on one connection.
 	if cw.Committed() && outcome != adapter.OutcomeSuccess {
 		rec.ErrorCode = string(ir.ErrAPI)
-		return adapter.OutcomeSuccess, statusCode, nil
+		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
+			Path: path, Committed: true}
 	}
-	return outcome, statusCode, aerr
+	return attemptResult{Outcome: outcome, Status: statusCode, Err: aerr,
+		Path: path, Committed: cw.Committed()}
 }
 
 // attemptStream buffers the upstream's events until one of them commits the
@@ -608,11 +705,12 @@ func (e *Executor) recordHealth(k health.Key, s health.Signal) {
 }
 
 func (e *Executor) recordAttempt(rec *store.RequestRecord, c router.Candidate,
-	o adapter.Outcome, statusCode int, err error, latency time.Duration) {
+	o adapter.Outcome, statusCode int, err error, latency time.Duration, path string) {
 
 	a := store.AttemptRecord{
 		Seq: len(rec.Attempts), ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model,
 		Outcome: string(o), StatusCode: statusCode, LatencyMs: latency.Milliseconds(),
+		Path: path,
 	}
 	if err != nil {
 		a.Error = err.Error()
