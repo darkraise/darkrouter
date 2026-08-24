@@ -317,3 +317,92 @@ func TestForwardUnaryDropsEncodingHeaders(t *testing.T) {
 		t.Errorf("encoding headers forwarded: %v", h)
 	}
 }
+
+func TestForwardUnaryBreachesCapButSendsWholeBody(t *testing.T) {
+	// A body larger than maxForwardedUnaryBytes must be sent in full, even though
+	// its usage cannot be extracted from the buffered part. This is the core
+	// design decision: losing a token count is acceptable, corrupting a response
+	// is not.
+	old := maxForwardedUnaryBytes
+	defer func() { maxForwardedUnaryBytes = old }()
+
+	cap := int64(32)
+	maxForwardedUnaryBytes = cap
+
+	// Build a body larger than the cap. First 30 bytes are within the cap,
+	// the rest breaches it. All of it must reach the client.
+	buffered := `{"id":"x","usage":{`          // 18 bytes
+	overflow := strings.Repeat("a", 25) + `}}` // 27 bytes
+	fullBody := buffered + overflow            // 45 bytes total
+	if len(fullBody) <= int(cap) {
+		t.Fatalf("body size %d must exceed cap %d", len(fullBody), cap)
+	}
+
+	cw, ac := forwardFixture(t)
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(fullBody)),
+	}
+
+	out, ierr := ac.Exec.forwardUnary(cw, resp, ac, usageForwarder{})
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+
+	// The client must receive every byte.
+	if got := recorderBody(cw); got != fullBody {
+		t.Errorf("client body corrupted: got %q, want %q", got, fullBody)
+	}
+
+	// Usage extraction failed, so tokens are not recorded.
+	if ac.Rec.TokensIn != 0 || ac.Rec.TokensOut != 0 {
+		t.Errorf("tokens recorded when buffer was breached: %d/%d", ac.Rec.TokensIn, ac.Rec.TokensOut)
+	}
+
+	// The row explains why the count is missing.
+	if len(ac.Rec.Warnings) == 0 {
+		t.Error("no warning explaining why usage was not extracted")
+	}
+}
+
+func TestForwardUnaryBoundaryExactlyAtCap(t *testing.T) {
+	// A body of exactly maxForwardedUnaryBytes bytes must be treated as not
+	// oversized, so its usage is parsed normally.
+	old := maxForwardedUnaryBytes
+	defer func() { maxForwardedUnaryBytes = old }()
+
+	cap := int64(40)
+	maxForwardedUnaryBytes = cap
+
+	// Create a body of exactly cap bytes that includes "usage" so the
+	// forwarder can extract it. Base string is 34 bytes, so add 6 spaces.
+	body := `{"id":"x","choices":[],"usage":{}}` + strings.Repeat(" ", 6) // 40 bytes
+	if int64(len(body)) != cap {
+		t.Fatalf("body size %d must equal cap %d", len(body), cap)
+	}
+
+	cw, ac := forwardFixture(t)
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	out, ierr := ac.Exec.forwardUnary(cw, resp, ac, usageForwarder{})
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+
+	// At exactly the cap, usage is parsed normally.
+	if ac.Rec.TokensIn != 11 || ac.Rec.TokensOut != 7 {
+		t.Errorf("usage not parsed at cap: %d/%d", ac.Rec.TokensIn, ac.Rec.TokensOut)
+	}
+
+	// No warning about the buffer; the body fit.
+	for _, w := range ac.Rec.Warnings {
+		if strings.Contains(w, "exceeded the buffer") {
+			t.Errorf("false warning about buffer for body at cap: %s", w)
+		}
+	}
+}
