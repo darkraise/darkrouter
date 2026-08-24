@@ -406,3 +406,25 @@ func TestForwardUnaryBoundaryExactlyAtCap(t *testing.T) {
 		}
 	}
 }
+
+func TestForwardStreamStripsAnInjectedUsageChunkOnAnEmptyCompletion(t *testing.T) {
+	// No content ever arrives, so commit never happens through the content
+	// branch — the stream ends and the deferred commit() call at EOF fires
+	// instead. The injected summary chunk must not survive into that replay:
+	// the client never asked for it, and forwarding it would be a fourth body
+	// mutation.
+	body := "data: u-usage\n\ndata: [DONE]\n\n"
+	cw, ac := forwardFixture(t)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, true)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if got := recorderBody(cw); got != "data: [DONE]\n\n" {
+		t.Errorf("client saw %q, want the usage chunk stripped", got)
+	}
+	// Stripped from the client's view, kept in the ledger, same as the
+	// post-commit case.
+	if ac.Rec.TokensIn != 3 || ac.Rec.TokensOut != 4 {
+		t.Errorf("usage = %d/%d, want 3/4", ac.Rec.TokensIn, ac.Rec.TokensOut)
+	}
+}

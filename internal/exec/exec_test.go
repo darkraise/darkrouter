@@ -39,14 +39,28 @@ func newExecutor(t *testing.T, upstreamURL string) *Executor {
 }
 
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
-// total leaves the default of 10m in place.
+// total leaves the default of 10m in place. It is a thin wrapper over
+// newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
+// below is the other caller, for the shape phase 9's tests need.
 func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Duration) *Executor {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
+	return newExecutorRaw(t, "fake", "openaicompat", []string{"m"}, upstreamURL, "sk",
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, deps, total)
+}
+
+// newExecutorRaw writes the fixture config and builds the store both
+// newExecutorWith and newExecutorFor need, varying only in what each caller
+// cares about: provider identity, the models it serves, the credential
+// resolved for it, which adapters are wired, and — phase 2 only — a total
+// timeout tight enough to exercise the budget gate.
+func newExecutorRaw(t testing.TB, providerID, kind string, models []string, upstreamURL, apiKeySecret string,
+	adapters map[string]adapter.Adapter, deps Deps, total time.Duration) *Executor {
+
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
 	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
-		"  - id: fake\n    kind: openaicompat\n    base_url: " + upstreamURL +
-		"\n    api_key: ${K}\n    models: [m]\n"
+		"  - id: " + providerID + "\n    kind: " + kind + "\n    base_url: " + upstreamURL +
+		"\n    api_key: ${K}\n    models: [" + strings.Join(models, ", ") + "]\n"
 	if total > 0 {
 		// connect and first_byte must be set alongside total: the budget gate
 		// refuses an attempt unless the remaining total covers connect +
@@ -58,12 +72,11 @@ func newExecutorWith(t *testing.T, upstreamURL string, deps Deps, total time.Dur
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return apiKeySecret, true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(cfgStore, provider.NewYAMLSource(cfgStore),
-		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, deps)
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
 }
 
 func post(t *testing.T, e *Executor, body string) *httptest.ResponseRecorder {
@@ -1515,19 +1528,57 @@ func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
 }
 
 func TestARewriteFailureDowngradesInPlace(t *testing.T) {
-	// No top-level model field. The IR parse would have refused this body, and
-	// its refusal is the right message — but it is not a second attempt.
+	// The op is built by hand rather than driven through Handle. Every body
+	// rewriteForward can reject — malformed JSON, or no top-level model — is
+	// already rejected earlier, at the dialect parse or at routing, so no
+	// inbound request reaches this branch through a real dialect today. It is
+	// defensive code for a future dialect, and this is what reaches it: an
+	// ir.Request that routes, paired with a passthrough body that cannot be
+	// rewritten.
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
 	}))
 	defer up.Close()
 
-	rec, _ := runChatRaw(t, up.URL, "anthropic",
-		`{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
-	for _, a := range rec.Attempts {
-		if a.Path == PathPassthrough {
-			t.Errorf("an unrewritable body was forwarded anyway: %+v", rec.Attempts)
+	cap := &capture{}
+	e := newExecutorFor(t, "anthropic", up.URL, Deps{Log: cap})
+
+	op := &chatOp{
+		d: anthropicedge.New(),
+		req: &ir.Request{
+			Model:    "target-model",
+			Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "hi"}}}},
+		},
+		pt: &edge.Passthrough{
+			// No top-level "model" key, so rewriteForward cannot rewrite it —
+			// but ModelField is set, so forwardable still calls in.
+			Body:       []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+			ModelField: "model", Surface: ir.SurfaceLLM,
+		},
+	}
+	r := httptest.NewRequest("POST", "/v1/messages", nil)
+	e.RunSurface(httptest.NewRecorder(), r, op, e.store.Current())
+
+	rec := cap.rec
+	if len(rec.Attempts) != 1 {
+		// A rewrite failure happens before any upstream connection, so it must
+		// not burn a second slot from the retry budget.
+		t.Fatalf("attempts = %+v, want exactly 1", rec.Attempts)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Errorf("path = %q, want ir — an unrewritable body must not be forwarded", rec.Attempts[0].Path)
+	}
+	found := false
+	for _, w := range rec.Warnings {
+		if strings.Contains(w, "could not be forwarded") {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want one naming the failed forward", rec.Warnings)
 	}
 }
 
@@ -1541,22 +1592,12 @@ func (c *capture) Log(r *store.RequestRecord) { c.rec = r }
 // forwardable adapter wired. It takes testing.TB so benchmarks can use it too.
 func newExecutorFor(t testing.TB, kind, upstreamURL string, deps Deps) *Executor {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
-		"  - id: up\n    kind: " + kind + "\n    base_url: " + upstreamURL +
-		"\n    api_key: ${K}\n    models: [target-model]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk-upstream", true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
-		"openaicompat": openaicompat.New(),
-		"anthropic":    anthropicadapter.New(),
-		"gemini":       geminiadapter.New(),
-	}, deps)
+	return newExecutorRaw(t, "up", kind, []string{"target-model"}, upstreamURL, "sk-upstream",
+		map[string]adapter.Adapter{
+			"openaicompat": openaicompat.New(),
+			"anthropic":    anthropicadapter.New(),
+			"gemini":       geminiadapter.New(),
+		}, deps, 0)
 }
 
 // runChatKind drives one inbound body through Handle and returns the record the
