@@ -177,8 +177,15 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 	}
 
 	// ModelField is empty: the Gemini model lives in the URL, which is why
-	// Phase 9's passthrough rewrites the path rather than the body.
-	return req, &edge.Passthrough{Body: body, ModelField: "", Surface: ir.SurfaceLLM}, nil
+	// phase 9's passthrough rewrites the path rather than the body. The
+	// credential parameter is dropped here rather than overridden upstream —
+	// replaying it would send Darkrouter's own proxy token to Google.
+	q := r.URL.Query()
+	q.Del("key")
+	return req, &edge.Passthrough{
+		Body: body, ModelField: "", Surface: ir.SurfaceLLM,
+		Method: method, Query: q, Stream: req.Stream,
+	}, nil
 }
 
 // parseParts converts one content entry, returning its blocks and the ids of

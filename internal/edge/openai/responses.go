@@ -174,7 +174,7 @@ func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthro
 		MaxOutputTokens: w.MaxOutputTokens, Metadata: w.Metadata,
 	}
 	return req, &edge.Passthrough{
-		Body: body, ModelField: "model", Surface: ir.SurfaceLLM,
+		Body: body, ModelField: "model", Surface: ir.SurfaceLLM, Stream: req.Stream,
 	}, echo, nil
 }
 

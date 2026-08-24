@@ -157,7 +157,9 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		req.ToolChoice = parseToolChoice(w.FunctionCall)
 	}
 
-	return req, &edge.Passthrough{Body: body, ModelField: "model", Surface: ir.SurfaceLLM}, nil
+	return req, &edge.Passthrough{
+		Body: body, ModelField: "model", Surface: ir.SurfaceLLM, Stream: req.Stream,
+	}, nil
 }
 
 func mapRole(role string) ir.Role {
