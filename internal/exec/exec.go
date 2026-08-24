@@ -215,6 +215,20 @@ func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
 	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 
+	if compressedBody(r) {
+		start := time.Now()
+		rec, done := e.newRecord(start, d.Name(), string(ir.SurfaceLLM))
+		defer done()
+		w.Header().Set("X-Darkrouter-Request", rec.ID)
+		w.Header().Set("X-Darkrouter-Attempts", "0")
+		rec.ErrorCode = string(ir.ErrUnsupportedMedia)
+		_ = d.WriteError(w, &ir.Error{
+			Type:    ir.ErrUnsupportedMedia,
+			Message: "content-encoding is not supported: send an uncompressed request body",
+		})
+		return
+	}
+
 	req, _, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
 	if err != nil {
 		// The row is opened and closed here rather than in RunSurface: a body

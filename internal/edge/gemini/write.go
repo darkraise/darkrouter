@@ -109,6 +109,8 @@ func errorShape(t ir.ErrorType) (string, int) {
 		// Same reasoning as Anthropic: the google.rpc.Code vocabulary is fixed,
 		// so the status carries what the code cannot.
 		return "INVALID_ARGUMENT", http.StatusRequestEntityTooLarge
+	case ir.ErrUnsupportedMedia:
+		return "INVALID_ARGUMENT", http.StatusUnsupportedMediaType
 	case ir.ErrRateLimit:
 		return "RESOURCE_EXHAUSTED", http.StatusTooManyRequests
 	case ir.ErrOverloaded:

@@ -115,6 +115,8 @@ func statusFor(t ir.ErrorType) int {
 		return http.StatusNotFound
 	case ir.ErrPayloadTooLarge:
 		return http.StatusRequestEntityTooLarge
+	case ir.ErrUnsupportedMedia:
+		return http.StatusUnsupportedMediaType
 	case ir.ErrRateLimit:
 		return http.StatusTooManyRequests
 	case ir.ErrOverloaded:

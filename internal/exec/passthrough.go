@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -138,4 +140,50 @@ func rewriteForward(pt *edge.Passthrough, requested, target, kind string) ([]byt
 	}
 	// Encode appends a newline that no provider wants in a JSON body.
 	return bytes.TrimRight(buf.Bytes(), "\n"), injected, nil
+}
+
+// forwardHeaderAllowlist is spec §5.3. Everything else inbound is dropped, so a
+// client cannot inject a header into Darkrouter's upstream call — including the
+// inbound proxy credential in any of its three dialect spellings, every
+// hop-by-hop header RFC 9110 §7.6.1 names, and Darkrouter's own diagnostics.
+//
+// content-type and openai-beta are here because an earlier draft of the spec
+// omitted them: without the first every upstream call goes out untyped and many
+// providers reject it, and without the second this phase's fidelity argument
+// fails for half its clients.
+var forwardHeaderAllowlist = map[string]bool{
+	"content-type":      true,
+	"accept":            true,
+	"user-agent":        true,
+	"anthropic-version": true,
+	"anthropic-beta":    true,
+	"openai-beta":       true,
+}
+
+// forwardHeaders is the inbound header set reduced to what may be forwarded.
+// Content-Length is deliberately absent: the body may have been rewritten, and
+// the builder sets it from the bytes it actually sends.
+func forwardHeaders(r *http.Request) http.Header {
+	out := make(http.Header, len(forwardHeaderAllowlist))
+	for k, vs := range r.Header {
+		if !forwardHeaderAllowlist[strings.ToLower(k)] {
+			continue
+		}
+		for _, v := range vs {
+			out.Add(k, v)
+		}
+	}
+	return out
+}
+
+// compressedBody reports an inbound body Darkrouter will not decode.
+//
+// Spec §5.4 refuses rather than downgrades: decoding it to rewrite the model
+// and re-encoding it defeats the point of the fast path, and forwarding it
+// unmodified is impossible when the model must change. The IR path could not
+// serve it either — its parser reads the raw bytes — so the refusal costs
+// nothing and says something true.
+func compressedBody(r *http.Request) bool {
+	enc := strings.TrimSpace(r.Header.Get("Content-Encoding"))
+	return enc != "" && !strings.EqualFold(enc, "identity")
 }
