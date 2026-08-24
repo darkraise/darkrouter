@@ -21,9 +21,12 @@ import (
 // into the database from inside Run — so these are the first e2e tests to
 // start it.
 //
-// Run is called before any provider exists, so the discoverer's immediate
-// sweep (internal/catalog/discovery.go) finds nothing to probe and the fake
-// upstreams stay untouched by anything but the requests each test sends.
+// Discovery and the models.dev sync, also started by Run, are switched off in
+// the harness config: they are not what these tests exercise, and their
+// background rebuilds have no ordering guarantee against a test's own
+// seeding — a sweep's rebuild can read the catalog before a seed commits and
+// publish its stale, empty snapshot afterwards, erasing the seeded model from
+// routing.
 func startWorkers(t *testing.T, g *gateway) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -32,7 +35,10 @@ func startWorkers(t *testing.T, g *gateway) {
 	t.Cleanup(func() {
 		cancel()
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil {
+				t.Errorf("server.Run returned %v", err)
+			}
 		case <-time.After(5 * time.Second):
 			t.Error("server did not shut down after cancel")
 		}
@@ -48,8 +54,7 @@ type echoFake struct {
 	query  string
 	calls  int
 
-	// status and reply are what it answers with; replyOn400 is the body it
-	// serves once it has already refused one request.
+	// status and reply are what it answers with.
 	status      int
 	reply       string
 	contentType string
@@ -275,8 +280,19 @@ func TestUsageAgreesAcrossPathsOnAssembledRequests(t *testing.T) {
 		}
 	}
 
-	a := traceUsage(t, g, fast.Header().Get("X-Darkrouter-Request"))
-	b := traceUsage(t, g, irp.Header().Get("X-Darkrouter-Request"))
+	fastID, irpID := fast.Header().Get("X-Darkrouter-Request"), irp.Header().Get("X-Darkrouter-Request")
+
+	// The usage comparison below means nothing unless the two requests really
+	// took different paths — otherwise it is IR compared against IR.
+	if got := attemptPaths(t, g, fastID); len(got) != 1 || got[0] != "passthrough" {
+		t.Errorf("fast request attempt paths = %v, want [passthrough]", got)
+	}
+	if got := attemptPaths(t, g, irpID); len(got) != 1 || got[0] != "ir" {
+		t.Errorf("ir request attempt paths = %v, want [ir]", got)
+	}
+
+	a := traceUsage(t, g, fastID)
+	b := traceUsage(t, g, irpID)
 	if a != b {
 		t.Errorf("usage differs: passthrough %+v, ir %+v", a, b)
 	}
