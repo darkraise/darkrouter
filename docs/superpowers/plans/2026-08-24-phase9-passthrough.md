@@ -3383,19 +3383,49 @@ func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
 }
 
 func TestARewriteFailureDowngradesInPlace(t *testing.T) {
-	// No top-level model field. The IR parse would have refused this body, and
-	// its refusal is the right message — but it is not a second attempt.
+	// The op is built by hand rather than driven through Handle. Every body
+	// rewriteForward can reject — malformed JSON, or no top-level model — is
+	// already rejected earlier, at the dialect parse or at routing, so no
+	// inbound request reaches this branch through a real dialect today. It is
+	// defensive code for a future dialect, and this is what reaches it: an
+	// ir.Request that routes, paired with a passthrough body that cannot be
+	// rewritten.
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hi"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 	}))
 	defer up.Close()
 
-	rec, _ := runChatRaw(t, up.URL, "anthropic",
-		`{"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
-	for _, a := range rec.Attempts {
-		if a.Path == PathPassthrough {
-			t.Errorf("an unrewritable body was forwarded anyway: %+v", rec.Attempts)
+	cap := &capture{}
+	e := newExecutorFor(t, "anthropic", up.URL, Deps{Log: cap})
+	op := &chatOp{
+		d:   anthropicedge.New(),
+		req: &ir.Request{Model: "target-model", MaxTokens: ptr(16)},
+		pt: &edge.Passthrough{
+			Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+			ModelField: "model", Surface: ir.SurfaceLLM,
+		},
+	}
+	r := httptest.NewRequest("POST", "/v1/messages", strings.NewReader("{}"))
+	e.RunSurface(httptest.NewRecorder(), r, op, e.store.Current())
+
+	rec := cap.rec
+	if len(rec.Attempts) != 1 {
+		t.Fatalf("attempts = %+v, want exactly one — a rewrite failure never reached a provider", rec.Attempts)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Errorf("path = %q, want ir", rec.Attempts[0].Path)
+	}
+	var found bool
+	for _, w := range rec.Warnings {
+		if strings.Contains(w, "could not be forwarded") {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("no warning explains the downgrade: %v", rec.Warnings)
 	}
 }
 ```
