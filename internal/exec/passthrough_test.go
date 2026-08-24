@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -351,5 +353,49 @@ func TestCompressedInboundBodiesAreRefused(t *testing.T) {
 		if got := compressedBody(r); got != tc.want {
 			t.Errorf("Content-Encoding %q: compressedBody = %v, want %v", tc.enc, got, tc.want)
 		}
+	}
+}
+
+func TestNoAuxiliarySurfaceIsEverForwarded(t *testing.T) {
+	// Master design §4.1: multipart and binary surfaces take the IR path, and
+	// what enforces it is the op having no passthrough body to offer. A
+	// transcription request's model lives inside a multipart form; an
+	// embedding request has no messages at all.
+	//
+	// Zero values are enough: this asserts on the method set, not on behavior.
+	for name, op := range map[string]SurfaceOp{
+		"transcription": &transcriptionOp{},
+		"embedding":     &embedOp{},
+		"image":         &imageOp{},
+		"speech":        &speechOp{},
+		"rerank":        &rerankOp{},
+		"moderation":    &moderationOp{},
+	} {
+		if _, ok := op.(passthroughOp); ok {
+			t.Errorf("%s offered a passthrough body", name)
+		}
+	}
+}
+
+func TestAPromptWithHTMLCharactersSurvivesTheRewrite(t *testing.T) {
+	// The end-to-end version of the rewrite's escaping test: the client sends <,
+	// > and &, the model name changes so the body must be re-encoded, and the
+	// provider must still see the original characters.
+	var seen []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"ok"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer up.Close()
+
+	runChatModel(t, up.URL, "anthropic", "other-model",
+		`{"model":"client-model","max_tokens":16,
+		  "messages":[{"role":"user","content":"if x < y && y > z"}]}`)
+
+	if !bytes.Contains(seen, []byte("if x < y && y > z")) {
+		t.Errorf("the prompt was escaped: %s", seen)
 	}
 }
