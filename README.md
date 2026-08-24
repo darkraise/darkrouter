@@ -4,10 +4,14 @@ A self-hosted LLM gateway. One endpoint, many providers, deterministic failover.
 
 ## Status
 
-Phases 1–4: three inbound dialects — OpenAI, Anthropic, and Gemini — routed to
-any provider kind with deterministic failover, persistence, and health tracking.
-See `docs/superpowers/specs/README.md` for the full design and the phase
-roadmap.
+All nine phases are complete. Three inbound dialects — OpenAI, Anthropic, and
+Gemini — route to any provider kind, including SigV4-signed Bedrock and
+OAuth-backed Vertex and Anthropic subscriptions, with deterministic failover,
+persistence, health tracking, an admin dashboard, and a catalog that merges
+shipped presets with live discovery. A request whose dialect already matches
+the chosen provider's wire format takes a fast path that forwards the body
+rather than re-rendering it — see "The fast path" below. See
+`docs/superpowers/specs/README.md` for the full design and the phase roadmap.
 
 ## Run
 
@@ -122,6 +126,21 @@ request row. That is how a vanished `cache_control` marker or a dropped
 locally rather than forwarding to the provider's own counting endpoint. The
 estimate uses a bundled BPE for OpenAI-family models and
 characters-divided-by-four otherwise, and it does not count images.
+
+## The fast path
+
+When a client's dialect already matches the provider's wire format — Claude Code
+against Anthropic, an OpenAI client against Groq — Darkrouter forwards the
+request rather than translating it. The model name is rewritten, the credential
+is swapped, and everything else the client sent reaches the provider unchanged,
+including parameters Darkrouter has never heard of.
+
+Eligibility is decided per attempt, so a request that forwards to its first
+provider still translates correctly when it fails over to a different kind. The
+trace drawer's Path column says which happened.
+
+Bedrock and Vertex never take the fast path: Bedrock signs a hash of the request
+body, and Vertex encodes the model in its URL alongside the publisher.
 
 ## The dashboard
 
