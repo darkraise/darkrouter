@@ -92,8 +92,12 @@ class TestBuild(unittest.TestCase):
         )
 
     def test_every_fragment_reaches_the_built_index(self):
+        # Counted dynamically, not hardcoded to the 2 fixtures this test
+        # writes: real fragments now live alongside them, and a fixed count
+        # would break every time a later task adds one.
         text = self.index.read_text(encoding="utf-8")
-        self.assertEqual(2, text.count('class="screen"'))
+        expected = len(list(FRAGMENTS.glob("*.html")))
+        self.assertEqual(expected, text.count('class="screen"'))
         self.assertIn("alpha", text)
         self.assertIn("beta", text)
 
