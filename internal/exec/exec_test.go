@@ -1603,6 +1603,81 @@ func TestAPreCommit400RetryWarnsThatTheBodyWasTranslated(t *testing.T) {
 	}
 }
 
+func TestAGeminiArrayFormStreamIsServedThroughTheIRPath(t *testing.T) {
+	// A Gemini client that omits ?alt=sse asks for a chunked JSON array. That
+	// form carries no SSE event boundary, so the fast path cannot find the
+	// commit and usage signals it needs and eligibility excludes it. The
+	// predicate and the array writer are each unit-tested; this drives the path
+	// between them, which is what a response over the pre-commit cap used to
+	// fail the whole candidate chain on.
+	var seenAlt string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAlt = r.URL.Query().Get("alt")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl, _ := w.(http.Flusher)
+		for _, chunk := range []string{
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"ba"}]}}]}`,
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"nana"}]},` +
+				`"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,` +
+				`"candidatesTokenCount":2}}`,
+		} {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+	}))
+	defer up.Close()
+
+	inbound := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	rec, w := runGemini(t, up.URL, "gemini-2.0-flash:streamGenerateContent", "gemini-2.0-flash", inbound)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if rec.Attempts[0].Path != PathIR {
+		t.Fatalf("path = %q, want ir: array-form streaming is not forwardable", rec.Attempts[0].Path)
+	}
+	// The IR path always asks Google for SSE, whatever the client asked for.
+	if seenAlt != "sse" {
+		t.Errorf("upstream alt = %q, want sse", seenAlt)
+	}
+
+	body := w.Body.String()
+	if !strings.HasPrefix(strings.TrimSpace(body), "[") {
+		t.Fatalf("client body is not a JSON array: %q", body)
+	}
+	if strings.Contains(body, "data: ") {
+		t.Errorf("client asked for the array form but got SSE framing: %q", body)
+	}
+	var chunks []struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal([]byte(body), &chunks); err != nil {
+		t.Fatalf("client body is not valid JSON: %v\n%s", err, body)
+	}
+	var text string
+	for _, c := range chunks {
+		for _, cand := range c.Candidates {
+			for _, part := range cand.Content.Parts {
+				text += part.Text
+			}
+		}
+	}
+	if text != "banana" {
+		t.Errorf("reassembled text = %q, want %q", text, "banana")
+	}
+	if rec.TokensIn != 3 || rec.TokensOut != 2 {
+		t.Errorf("usage = %d/%d, want 3/2", rec.TokensIn, rec.TokensOut)
+	}
+}
+
 func TestAGeminiRequestRewritesTheURLAndNotTheBody(t *testing.T) {
 	var seen struct {
 		path, query string

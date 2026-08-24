@@ -129,6 +129,50 @@ func TestForwardStreamCopiesRawAfterAPostCommitSplitterOverflow(t *testing.T) {
 	}
 }
 
+// chunkedBody hands out one prepared chunk per Read, so a test can put the
+// splitter overflow in the first read and leave real bytes unread behind it.
+// A single-read body cannot: the carry flush alone satisfies the assertion
+// while the io.Copy leg moves nothing.
+type chunkedBody struct{ chunks []string }
+
+func (c *chunkedBody) Read(p []byte) (int, error) {
+	if len(c.chunks) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, c.chunks[0])
+	if n < len(c.chunks[0]) {
+		c.chunks[0] = c.chunks[0][n:]
+		return n, nil
+	}
+	c.chunks = c.chunks[1:]
+	return n, nil
+}
+
+func TestForwardStreamCopiesTheUnreadRemainderAfterAPostCommitOverflow(t *testing.T) {
+	// The overflow happens on the first read; everything in the second read
+	// has never been seen by the splitter and can only reach the client
+	// through the io.Copy leg. Losing it would truncate a committed stream
+	// silently, which is the failure the raw copy exists to prevent.
+	cw, ac := forwardFixture(t)
+	ac.Cfg.Server.SSE.MaxLineBytes = 16
+
+	first := "data: c-first\n\ndata: " + strings.Repeat("x", 40)
+	second := strings.Repeat("y", 30) + "\n\n"
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(&chunkedBody{chunks: []string{first, second}}),
+	}
+
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, false)
+	if out != adapter.OutcomeSuccess || ierr != nil {
+		t.Fatalf("outcome = %v err = %v", out, ierr)
+	}
+	if got, want := recorderBody(cw), first+second; got != want {
+		t.Errorf("client did not receive every byte\n got: %q\nwant: %q", got, want)
+	}
+}
+
 // flakyBody reads through to r, then reports err instead of io.EOF — a
 // connection that dies mid-stream rather than closing cleanly.
 type flakyBody struct {
