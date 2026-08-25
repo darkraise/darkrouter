@@ -527,3 +527,121 @@ Run: `go build ./... && go vet ./... && go test -race ./...`
 - [ ] **Step 6: Commit**
 
 Subject: `fix(config): require at least a day of retention`
+
+---
+
+### Task 7: Delete the guard; raise the floor to 48h
+
+**Files:**
+- Modify: `internal/config/load.go` — the retention floor
+- Modify: `internal/store/rollup.go` — remove the shrink guard and the `logRetention` parameter
+- Modify: `internal/store/rollup.go` — `RunRollup`, and `internal/server/server.go` if the signature change reaches it
+- Test: `internal/store/rollup_test.go`, `internal/config/load_test.go`
+
+The rollup's freeze guard has been rewritten six times. Every version was a plausible rule that failed on a case its author had not enumerated, and a review has now demonstrated three more losses in the current one: growth from a late-arriving request masks a pruning loss in the same run; `tokens_out` and `cost_micros` shrink invisibly because only `tokens_in` is watched; and request counts shrink while `tokens_in` stays flat.
+
+They are all the same gap — the guard compares a net sum of one column — and the seventh patch would have the same shape as the first six.
+
+The guard exists only because the rollup's two-day window can overlap what pruning is removing. That overlap is a function of the retention floor, and it is arithmetic:
+
+| retention | earliest still-prunable timestamp inside the window | window safe |
+|---|---|---|
+| 24h | 24h into yesterday | no — all of yesterday |
+| 36h | 12h into yesterday | no |
+| 47h | 1h into yesterday | no |
+| **48h** | **0h** | **yes** |
+| 720h (default) | — | yes |
+
+Verified against the real `Prune`: at 24h, all four of a test day's in-window rows are pruned; at 48h, none are.
+
+So at a 48h floor the window is untouchable, the guard is unnecessary, and every finding above disappears — by deleting code rather than adding another special case.
+
+- [ ] **Step 1: Raise the floor**
+
+In `internal/config/load.go`, change the 24h floor to 48h:
+
+```go
+	// The daily rollup recomputes yesterday and today, so anything it can
+	// still rewrite must still be in the log. Two days is the exact point
+	// where pruning can no longer reach a row the rollup would rebuild.
+	if c.Log.Retention < 48*time.Hour {
+		return fmt.Errorf("log.retention must be at least 48h, got %s", c.Log.Retention)
+	}
+```
+
+Update the config tests: the rejected value stays below the floor, and the accepted boundary becomes `48h`.
+
+- [ ] **Step 2: Replace the guard's tests before removing the guard**
+
+`TestADayIsFinalizedBeforeItIsFrozen` and `TestRollupSkipsADayPruningHasAlreadyTouched` both exist to exercise the guard, and `TestRollupNeverShrinksADaysTokens` (or whatever the shrink test is named) does too. Once the guard is gone they no longer describe anything real.
+
+Do NOT simply delete them. Replace them with one test that pins the invariant they were standing in for — that at the floor, nothing the rollup can rewrite is prunable:
+
+```go
+func TestTheRollupWindowIsNeverPrunable(t *testing.T) {
+	// The rollup rewrites yesterday and today wholesale, which is only safe
+	// while pruning cannot reach either. At the retention floor it cannot,
+	// and that is what lets the rollup recompute without a shrink guard.
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	// The last instant the window is still current.
+	now := time.Date(2026, 8, 25, 23, 59, 0, 0, time.UTC)
+	yStart := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 4; i++ {
+		ts := yStart.Add(time.Duration(i*6) * time.Hour)
+		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("y%d", i), TS: ts, ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", TokensIn: 100,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := db.Prune(ctx, now, 48*time.Hour, 72*time.Hour, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	var n int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*) FROM requests`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Fatalf("pruning reached inside the rollup window: %d of 4 rows left", n)
+	}
+}
+```
+
+Also keep a test that a full recompute of a day still produces the right totals, and keep `TestRollupIsIdempotent` and the stale-`alias=''` clearing test — those describe the rollup itself, not the guard.
+
+- [ ] **Step 3: Remove the guard**
+
+Delete from `Rollup`: the `newTokens`/`oldTokens` queries, the comparison, the `from = startOfToday` reassignment, and the "would drop" log. Delete the `logRetention` parameter and the `defaultLogRetention` constant if nothing else uses it.
+
+Leave a comment where the guard was, explaining why the window can be rewritten wholesale:
+
+```go
+	// Yesterday and today are recomputed wholesale. That is safe because
+	// log.retention is floored at two days, so pruning can never reach a row
+	// inside this window -- a recompute always sees everything the day had.
+```
+
+Keep the narrowed DELETE from earlier work. It is no longer load-bearing at the floor, but it costs nothing and keeps a day with no surviving requests from being erased if one ever appears.
+
+- [ ] **Step 4: Update the callers**
+
+`RunRollup` no longer needs the retention, and therefore may no longer need the config store. Simplify it and `internal/server/server.go` to match, and update every `Rollup(...)` call in tests — including the one in `internal/exec/rollup_seam_test.go`.
+
+- [ ] **Step 5: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+- [ ] **Step 6: Commit**
+
+Subject: `refactor(store): drop the rollup shrink guard`
