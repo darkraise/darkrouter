@@ -704,3 +704,60 @@ func TestUsageByClampsDays(t *testing.T) {
 		}
 	}
 }
+
+func TestLatencyPercentiles(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now()
+	// 1..100ms; p50 is the 50th value and p95 the 95th.
+	for i := 1; i <= 100; i++ {
+		total := int64(i)
+		rec := &RequestRecord{
+			ID: fmt.Sprintf("r%03d", i), TS: now,
+			RequestedModel: "m", FinalProviderID: "groq", FinalModel: "m",
+			TotalMs: &total,
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p50, p95, err := db.LatencyPercentiles(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p50 != 50 || p95 != 95 {
+		t.Fatalf("want p50=50 p95=95, got %d/%d", p50, p95)
+	}
+}
+
+func TestRecentFailoversReturnsOnlyMultiAttemptRequests(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now()
+	mk := func(id string, attempts int) {
+		rec := &RequestRecord{
+			ID: id, TS: now, RequestedModel: "m",
+			FinalProviderID: "groq", FinalModel: "m",
+		}
+		for i := 1; i <= attempts; i++ {
+			rec.Attempts = append(rec.Attempts, AttemptRecord{
+				Seq: i, ProviderID: "groq", Model: "m", Outcome: "success",
+			})
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("one", 1)
+	mk("three", 3)
+
+	got, err := db.RecentFailovers(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "three" || got[0].Attempts != 3 {
+		t.Fatalf("want only the 3-attempt request, got %+v", got)
+	}
+}

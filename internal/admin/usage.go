@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // overviewWindow is what "requests per minute" and the error rate are measured
@@ -81,6 +83,21 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		errRate = float64(stats.Errors) / float64(stats.Requests)
 	}
 
+	p50, p95, err := s.deps.DB.LatencyPercentiles(r.Context(), overviewWindow)
+	if err != nil {
+		// A percentile failure must not fail the overview: the tile renders
+		// the bare number it renders today.
+		p50, p95 = 0, 0
+	}
+	failovers, err := s.deps.DB.RecentFailovers(r.Context(), 5)
+	if err != nil {
+		failovers = []store.FailoverRow{}
+	}
+	series, err := s.deps.DB.UsageBy(r.Context(), 30, store.UsageByDayOnly)
+	if err != nil {
+		series = nil
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"providers":        tiles,
 		"requests_per_min": float64(stats.Requests) / (float64(stats.WindowSec) / 60),
@@ -93,6 +110,9 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			// confident zero would read as "today was free".
 			"priced": stats.PricedRows > 0,
 		},
+		"latency":   map[string]any{"p50_ms": p50, "p95_ms": p95},
+		"series":    series,
+		"failovers": failovers,
 	})
 }
 

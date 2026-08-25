@@ -185,3 +185,26 @@ func TestUsageRollsUpByDay(t *testing.T) {
 		t.Error("priced = true with no cost recorded")
 	}
 }
+
+func TestOverviewCarriesLatencySeriesAndFailovers(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"latency", "series", "failovers"} {
+		if _, ok := got[k]; !ok {
+			t.Fatalf("overview is missing %q: %v", k, got)
+		}
+	}
+	// An empty database still answers with the keys present and empty, so the
+	// console never has to distinguish "no data" from "old server".
+	if got["failovers"] == nil {
+		t.Fatal("failovers must be [] rather than null")
+	}
+}
