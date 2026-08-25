@@ -1321,3 +1321,83 @@ Run: `go build ./... && go vet ./... && go test -race ./...`
 - [ ] **Step 7: Commit**
 
 Subject: `fix(exec): clear every burn field on demote`
+
+---
+
+### Task 15: Key the cost copy on every burn field
+
+**Files:**
+- Modify: `internal/exec/exec.go` — `priceRecord`
+- Test: `internal/exec/exec_test.go`
+
+Task 14 added a guard so a serving attempt that burned nothing would not receive a confident cost of zero. The guard tests `a.TokensIn != 0 || a.TokensOut != 0` — two of the five burn fields — while the request's cost is computed from four of them. So a request can carry real cost while its serving attempt has no in/out tokens, and the cost is then copied nowhere.
+
+This is the same two-of-five mistake Task 14 itself fixed in `demoteLastAttempt`, repeated one function over in the same commit.
+
+Reproduced against the committed code — a fully cached prompt (`in=0`, because the adapters subtract cached tokens) served with an empty completion (`out=0`, which `attemptStream` explicitly treats as a legitimate success, not a fault):
+
+    request cost  = 300 micros   (the trace shows this)
+    attempt cost  = nil          (every aggregate reads this)
+
+The rollup and `SpendSince` read cost from attempt rows whenever any exist, so those 300 micros reach no total while the trace still displays them — the two surfaces disagreeing, which is the exact invariant the comment three lines above the guard exists to defend.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestACacheOnlySuccessStillReachesTheAggregates(t *testing.T) {
+	// A fully cached prompt has in=0 after the adapters subtract the cached
+	// subset, and an empty completion is a legitimate success. Neither token
+	// field moves, but real money was spent.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{CacheReadTokens: 3000})
+
+	e.priceRecord(rec)
+
+	if rec.CostMicros == nil {
+		t.Fatal("the request was not priced")
+	}
+	if rec.Attempts[0].CostMicros == nil {
+		t.Fatalf("%d micros of real spend reaches no aggregate", *rec.CostMicros)
+	}
+	if *rec.Attempts[0].CostMicros != *rec.CostMicros {
+		t.Fatalf("attempt cost %d, request cost %d: the surfaces disagree",
+			*rec.Attempts[0].CostMicros, *rec.CostMicros)
+	}
+}
+```
+
+- [ ] **Step 2: Run it, watch it fail**
+
+Run: `go test ./internal/exec/ -run TestACacheOnlySuccess -v`
+Expected: FAIL with `300 micros of real spend reaches no aggregate`.
+
+- [ ] **Step 3: Test what the cost was computed from**
+
+The guard's purpose is to avoid copying a cost onto an attempt that burned nothing. "Nothing" means all five fields, the same set `demoteLastAttempt` now checks:
+
+```go
+			burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
+				rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
+				rec.ReasoningTokens != 0
+			if rec.CostMicros != nil && burned {
+				c := *rec.CostMicros
+				a.CostMicros = &c
+			}
+```
+
+Test the RECORD's fields rather than the attempt's copied tokens: the attempt row has no cache columns, so a cache-only burn leaves its tokens at zero while real money was spent. The attempt will then carry a cost with zero tokens — correct, because cost is what the aggregates need and the attempt row cannot express where it came from.
+
+`TestAServingAttemptWithNoUsageStaysUnpriced` must still pass: a record with no burn at all still copies nothing.
+
+- [ ] **Step 4: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+- [ ] **Step 5: Commit**
+
+Subject: `fix(exec): copy cost when any burn was priced`
