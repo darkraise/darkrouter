@@ -17,6 +17,7 @@ Last updated: 2026-08-25
 | 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, and now **verified live against Groq** (§11), which found two defects. |
 | 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
 | 11a — Cost, attempts and the usage dimension | ✅ | ✅ | **Complete.** 10 tasks; race-clean. Cost computed at commit time from catalog pricing, failed attempts counted, `usage_daily` keyed on alias. |
+| 11c — Cache tokens and coherence | ✅ | 🔄 | **In progress.** Cache-write cost fixed in `modelsdev.go` and generator carries the field; embedded snapshot predates the field (see note below). |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -321,7 +322,10 @@ still required and now substitutes the catalog's value. The findings ledger's
   `internal/catalog/models_snapshot.json` was taken on 2026-08-22. It is only
   the cold-start fallback — the sync overwrites it within twelve hours of a
   networked start — but a long-lived offline install runs on those numbers
-  indefinitely. Regenerate it when the binary ships.
+  indefinitely. Regenerate it when the binary ships. **Cache-write rates are
+  absent from the embedded snapshot** (it predates the field); models priced
+  from the fallback will omit the cache-write cost component until the snapshot
+  is regenerated with live models.dev data.
 - **Vertex and Bedrock have no discovery.** `ProbeFor` returns
   `ErrKindNotDiscoverable` for both, so their models come from presets and
   models.dev alone. Bedrock's two control-plane calls arrive with its adapter in
