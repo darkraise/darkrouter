@@ -211,3 +211,68 @@ func TestOverviewCarriesLatencySeriesAndFailovers(t *testing.T) {
 		t.Fatal("series must be [] rather than null")
 	}
 }
+
+func TestUsageGroupByAlias(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+		 VALUES ('2026-08-25','groq','m','fast-coder',7)`); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := do(t, s, cookie, token, "GET", "/api/usage?group_by=alias", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		GroupBy string `json:"group_by"`
+		Days    []struct {
+			Key      string `json:"key"`
+			Requests int64  `json:"requests"`
+		} `json:"days"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.GroupBy != "alias" {
+		t.Fatalf("group_by echo: want alias, got %q", got.GroupBy)
+	}
+	if len(got.Days) != 1 || got.Days[0].Key != "fast-coder" || got.Days[0].Requests != 7 {
+		t.Fatalf("want one fast-coder row of 7, got %+v", got.Days)
+	}
+}
+
+func TestUsageRejectsAnUnknownGroupBy(t *testing.T) {
+	// A typo must not silently fall back to the day-only rollup: the caller
+	// would render a chart with one series and no way to tell it asked wrong.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	rr := do(t, s, cookie, token, "GET", "/api/usage?group_by=providr", "")
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for an unknown dimension, got %d", rr.Code)
+	}
+}
+
+func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+		 VALUES ('2026-08-25','groq','m','fast-coder',7),
+		        ('2026-08-25','groq','m','cheap',3)`); err != nil {
+		t.Fatal(err)
+	}
+	rr := do(t, s, cookie, token, "GET", "/api/usage", "")
+	var got struct {
+		Days []struct {
+			Requests int64 `json:"requests"`
+		} `json:"days"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Days) != 1 || got.Days[0].Requests != 10 {
+		t.Fatalf("ungrouped: want one row of 10, got %+v", got.Days)
+	}
+}
