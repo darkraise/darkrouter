@@ -53,7 +53,7 @@
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 
@@ -196,7 +196,7 @@
 
 .rt-rule-title {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 
@@ -256,7 +256,7 @@
 .rt-alias-name {
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 500;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 
@@ -353,7 +353,7 @@
   margin: 0 0 6px;
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 .rt-warn .prose { margin: 0; }
@@ -390,7 +390,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }

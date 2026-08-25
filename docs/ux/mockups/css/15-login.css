@@ -174,7 +174,7 @@
   width: 14px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.5;
   font-variant-numeric: tabular-nums;
   color: var(--legend);
 }
@@ -196,7 +196,7 @@
   padding: 4px 8px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
