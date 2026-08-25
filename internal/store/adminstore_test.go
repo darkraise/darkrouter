@@ -627,3 +627,80 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 		t.Fatalf("want one day totalling 10, got %+v", flat)
 	}
 }
+
+// TestUsageByLimitsDaysNotRows is the fixture that tells a day-bounded LIMIT
+// apart from a row-bounded one. Three days x two providers is six rows.
+// Asking UsageBy for 2 days must return every row from the two newest days:
+// four rows spanning exactly two distinct days. A row-bounded `LIMIT 2`
+// instead returns the first two rows the query happens to emit, which cover
+// only one day -- so this test fails against that bug and passes against a
+// correct day-scoped LIMIT.
+func TestUsageByLimitsDaysNotRows(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	for _, day := range []string{"2026-08-23", "2026-08-24", "2026-08-25"} {
+		for _, provider := range []string{"groq", "openai"} {
+			if _, err := db.Write.ExecContext(ctx,
+				`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+				 VALUES (?, ?, 'm', '', 1)`, day, provider); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	rows, err := db.UsageBy(ctx, 2, UsageByProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows (2 days x 2 providers), got %d: %+v", len(rows), rows)
+	}
+	days := map[string]bool{}
+	for _, r := range rows {
+		days[r.Day] = true
+	}
+	if len(days) != 2 {
+		t.Fatalf("want 2 distinct days, got %d: %v", len(days), days)
+	}
+	if days["2026-08-23"] {
+		t.Errorf("the oldest day should have been dropped by the 2-day limit: %v", days)
+	}
+	if !days["2026-08-24"] || !days["2026-08-25"] {
+		t.Errorf("want the two newest days, got %v", days)
+	}
+}
+
+// TestUsageByClampsDays pins the 1..365 clamp: days=0, a negative value and
+// an oversized value must all read as if days=30 had been asked for. Without
+// the clamp, days=0 would query LIMIT 0 (zero days back) and days=10000
+// would place no bound at all, so an unclamped implementation returns a
+// different row count than a clamped one on this fixture -- this test fails
+// if the clamp is removed.
+func TestUsageByClampsDays(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+		 VALUES ('2026-08-25','groq','m','',1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	base, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base) != 1 {
+		t.Fatalf("fixture setup: want 1 row at days=30, got %d", len(base))
+	}
+
+	for _, days := range []int{0, -5, 10000} {
+		got, err := db.UsageBy(ctx, days, UsageByDayOnly)
+		if err != nil {
+			t.Fatalf("days=%d: %v", days, err)
+		}
+		if len(got) != len(base) {
+			t.Errorf("days=%d: want %d rows (clamped to 30), got %d",
+				days, len(base), len(got))
+		}
+	}
+}
