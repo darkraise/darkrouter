@@ -60,8 +60,8 @@
             <div class="set-head">
               <span class="mono set-head-id">server</span>
               <span class="chip">6 values</span>
-              <span class="set-scope" data-scope="restart">restart</span>
-              <span class="micro">every value in this group is read once at process start. Nothing here can be applied to a running gateway.</span>
+              <span class="set-scope" data-scope="live">mixed</span>
+              <span class="micro">two of these are read once at process start; the rest reload. config.RestartOnly names the whole product's restart set and it has four entries, two of them here.</span>
             </div>
             <div class="set-form">
 
@@ -86,16 +86,16 @@
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">max_body_bytes</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="33554432">
-                <span class="spec-note">32 MiB. An inbound body above it is refused before any provider is chosen, so it never costs an upstream call.</span>
+                <span class="spec-note">32 MiB. An inbound body above it is refused before any provider is chosen, so it never costs an upstream call. Live because the executor reads it from a fresh per-request snapshot &mdash; config.go names it as the field most often assumed to need a restart.</span>
               </label>
 
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">shutdown_grace</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="30s">
                 <span class="spec-note">how long an in-flight stream has to finish after SIGTERM before the process exits regardless.</span>
@@ -104,7 +104,7 @@
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">sse.max_line_bytes</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="1048576">
                 <span class="spec-note">1 MiB per SSE line. One oversized provider event terminates the stream; it is not a ceiling on the whole response.</span>
@@ -113,7 +113,7 @@
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">sse.max_precommit_bytes</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="1048576">
                 <span class="spec-note">how much of a stream is buffered before the router commits to the provider it picked. Past this point failover is no longer possible.</span>
@@ -145,8 +145,8 @@
               <div class="field field-span-2 set-retention-note">
                 <span class="legend-caps">effect</span>
                 <span class="field-static">
-                  <span class="mono">2,481</span>
-                  <span class="micro">rows retained &middot; oldest 2026-07-25 09:41 &middot; next sweep 15:00:00</span>
+                  <span class="mono">17,561</span>
+                  <span class="micro">rows retained &middot; oldest 2026-07-26 09:41 &middot; next sweep 15:00:00</span>
                 </span>
                 <span class="spec-note">the count the current value keeps. Shortening the window deletes rows on the next sweep and there is no undo.</span>
               </div>
@@ -206,6 +206,7 @@
               <span class="set-scope" data-scope="restart">restart</span>
               <span class="micro">last sync 2026-08-24 02:11:07 &middot; 8 configured providers matched &middot; 1,412 catalogue entries rebuilt</span>
             </div>
+            <p class="set-note-warn">Restart by behaviour, not by declaration. Both workers capture their interval into an options struct when they are constructed, so a reload that changes one is accepted, warns about nothing, and takes effect at the next process start. config.RestartOnly does not list them, which is the gap: the marker below is what the code does, not what the reload path claims.</p>
             <div class="set-form">
 
               <label class="field field-span-2">
@@ -450,10 +451,10 @@
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;&nbsp;&nbsp;preset: cerebras</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">aliases:</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;fast-coder: [cerebras/gpt-oss-120b, groq/openai-gpt-oss-120b]</span></div>
-              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;long-context: [anthropic/claude-opus-4-20250514]</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;long-context: [vertex/gemini-2.5-pro]</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">policy:</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;retry: { max_attempts: 3, cooldown_base: "800ms" }</span></div>
-              <div class="set-config-line"><span class="set-config-src" data-src="file">&nbsp;</span><span class="micro set-config-more">6 more providers, 2 more aliases and 14 more lines not shown</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">&nbsp;</span><span class="micro set-config-more">6 more providers, 5 more aliases and 14 more lines not shown</span></div>
             </div>
             <div class="set-srckey">
               <span class="set-config-src" data-src="file">file</span>
@@ -473,7 +474,7 @@
               </div>
               <div class="set-warning">
                 <span class="micro set-warning-loc">line 88</span>
-                <p class="prose"><span class="mono">aliases.vision</span> targets <span class="mono">openrouter/qwen-2.5-vl-72b</span>, which no enabled provider serves. The alias resolves to nothing until openrouter is enabled &mdash; a dangling target is a warning, never a validation error.</p>
+                <p class="prose"><span class="mono">aliases.cheap-embed</span> holds a target on <span class="mono">deepinfra</span>, which is disabled, so that link in the chain resolves to nothing. The alias still routes through its remaining targets &mdash; a dangling target is a warning, never a validation error.</p>
               </div>
               <div class="set-warning">
                 <span class="micro set-warning-loc">line 103</span>

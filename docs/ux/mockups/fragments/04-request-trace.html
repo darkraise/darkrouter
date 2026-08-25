@@ -44,7 +44,7 @@
           <div class="panel trace-header">
             <div class="trace-header-row">
               <span class="chip status-badge" data-status="success">success</span>
-              <span class="mono trace-id">01JBXTG4R8ZQCN2VMD9F6K3H7P</span>
+              <span class="mono trace-id">01M0W4NWMRZQCN2VMD9F6K3H7P</span>
               <button class="chip trace-copy-btn" type="button" aria-label="copy request id">⧉ copy</button>
             </div>
             <p class="mono trace-route">
@@ -58,7 +58,7 @@
           <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder &mdash; candidates[] and skips[] ("target:reason") and attempts[]{seq,provider,key_label,model,outcome,status_code,latency_ms,error,path}. seq is 0-indexed at source and displayed 1-based.</span></p>
       <div class="ladder">
         <div class="ladder-row">
-          <span class="rank">01</span>
+          <span class="rank rank-tick">01</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -70,7 +70,7 @@
           <span class="latency-bar latency-bar-failed" style="width:2px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank">02</span>
+          <span class="rank rank-tick">02</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -82,19 +82,19 @@
           <span class="latency-bar latency-bar-failed" style="width:64px"></span>
         </div>
         <div class="ladder-row ladder-row-served">
-          <span class="rank">03</span>
+          <span class="rank rank-tick">03</span>
           <span class="spine"></span>
           <span class="mark mark-served"></span>
           <span class="stub"></span>
           <span class="target">together/openai-gpt-oss-120b</span>
           <span class="reason">
             <span class="reason-code">200</span>
-            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
           </span>
           <span class="latency-bar" style="width:4px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">04</span>
+          <span class="rank rank-tick text-terminated">04</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
@@ -106,19 +106,19 @@
           <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">06</span>
+          <span class="rank rank-tick text-terminated">06</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">07</span>
+          <span class="rank rank-tick text-terminated">07</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">08</span>
+          <span class="rank rank-tick text-terminated">08</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">vertex/gemini-2.5-pro</span>
@@ -212,12 +212,6 @@
             </div>
 
             <div class="well readout-tile">
-              <p class="spec-note">cost_micros &middot; gpt-image-1</p>
-              <span class="readout">&mdash;</span>
-              <p class="spec-note">pricing unavailable for this model</p>
-            </div>
-
-            <div class="well readout-tile">
               <p class="spec-note">ttft_ms</p>
               <span class="readout">284</span><span class="unit">ms</span>
             </div>
@@ -255,7 +249,7 @@
           <div class="well json-tree">
             <div class="json-row json-depth-0"><span class="json-punct">{</span></div>
             <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">headers</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
-            <div class="json-row json-depth-2"><span class="json-key">x-request-id</span><span class="json-punct">:</span> <span class="json-string">"01JBXTG4R8ZQCN2VMD9F6K3H7P"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">x-request-id</span><span class="json-punct">:</span> <span class="json-string">"01M0W4NWMRZQCN2VMD9F6K3H7P"</span><span class="json-punct">,</span></div>
             <div class="json-row json-depth-2"><span class="json-key">content-type</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span><span class="json-punct">,</span></div>
             <div class="json-row json-depth-2"><span class="json-key">accept</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span></div>
             <div class="json-row json-depth-1"><span class="json-punct">},</span></div>

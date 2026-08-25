@@ -115,7 +115,7 @@
 
     <div class="region">
       <p class="section-title">Health / decision split</p>
-      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Health/decision split &mdash; state colours are provider identity, --trace is router verdict. Spec &sect;3.1. Amber appears only as a health pip and a cooling skip mark.</span></p>
+      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Health/decision split &mdash; state colours are provider identity, --trace is router verdict. Spec &sect;3.1. Three carve-outs are named below; a state colour used for anything not on that list is a bug.</span></p>
       <div style="display:flex;gap:var(--gutter)">
         <div style="flex:1 1 0">
           <p class="spec-note">what the provider is</p>
@@ -126,7 +126,7 @@
               <span class="micro">healthy</span>
             </div>
             <div class="row">
-              <span class="state-pip" data-state="cooling"></span>
+              <span class="state-pip" data-state="degraded"></span>
               <span class="mono">cerebras</span>
               <span class="micro">cooling until 14:22</span>
             </div>
@@ -141,18 +141,20 @@
           <p class="spec-note">what the router decided</p>
           <div class="ladder">
             <div class="ladder-row">
-              <span class="rank">1</span>
+              <span class="rank rank-tick">01</span>
+              <span class="spine"></span>
               <span class="mark mark-skipped"></span>
+              <span class="target">groq</span>
               <span class="reason">
-                <span class="reason-code">groq</span>
                 <span class="reason-prose">skipped &mdash; healthy, router preferred cerebras' latency</span>
               </span>
             </div>
-            <div class="ladder-row">
-              <span class="rank">2</span>
+            <div class="ladder-row ladder-row-served">
+              <span class="rank rank-tick">02</span>
+              <span class="spine"></span>
               <span class="mark mark-served"></span>
+              <span class="target">cerebras</span>
               <span class="reason">
-                <span class="reason-code">cerebras</span>
                 <span class="reason-prose">served openai/gpt-oss-120b &mdash; cooling, still completed</span>
               </span>
             </div>
@@ -160,20 +162,66 @@
         </div>
       </div>
       <p class="prose">
-        Left: three provider identity pips &mdash; what each provider IS, from
-        --state-healthy / --state-cooling / --state-failed. Right: the
-        router's verdict on the same request &mdash; what it DECIDED, in
-        --trace and --bezel. A healthy provider (groq) can still be
-        skipped; a cooling one (cerebras) can still serve. State colour
-        never appears in the gutter; --trace never appears on a pip.
-        A third, narrower use of --state-failed exists alongside these
-        two: the DESTRUCTIVE AFFORDANCE on a control whose action removes
-        something (a delete button's border and hover text) rather than
-        reporting an outcome that already happened. It is defensible
-        precisely because a destructive click produces a failed-shaped
-        result &mdash; the row is gone &mdash; but it is a third, named
-        thing, not a variant reading of a request's status or a
-        provider's health, and it never appears on a pip or a ladder mark.
+        Left: three provider identity pips &mdash; what each provider IS.
+        Right: the router's verdict on the same request &mdash; what it
+        DECIDED, in --trace and --bezel. A healthy provider (groq) can
+        still be skipped; a degraded one (cerebras) can still serve. State
+        colour never appears in the gutter; --trace never appears on a pip.
+      </p>
+      <p class="prose">
+        A pip carries one of the four states GET /api/overview emits, and
+        the wording is the API's rather than the language's: healthy,
+        DEGRADED, disabled, unconfigured. Degraded and cooling are not
+        synonyms and the row above shows why &mdash; cerebras reads degraded
+        because one of its credentials is cooling until 14:22. The
+        credential is the thing that cools; the provider is the thing that
+        degrades. That is also why the ladder mark for a passed-over
+        candidate stays --state-cooling: down there the subject really is
+        one credential.
+      </p>
+      <p class="prose">
+        Disabled and unconfigured take no state colour at all, because
+        neither is a health reading &mdash; nobody has measured anything. They
+        split the way the ladder marks split: disabled is filled --bezel, a
+        thing that exists and is switched off; unconfigured is a hollow
+        --bezel ring, a thing with nothing in it yet.
+      </p>
+      <p class="prose">
+        Three carve-outs are named, and only three. Each is a use of a state
+        colour that is not a provider's health, and each is listed here
+        because a rule with unlisted exceptions is not a rule.
+      </p>
+      <p class="prose">
+        DESTRUCTIVE AFFORDANCE &mdash; --state-failed on a control whose
+        action removes something: a delete button's border and hover text.
+        Defensible precisely because a destructive click produces a
+        failed-shaped result &mdash; the row is gone &mdash; but it is a
+        named thing, not a variant reading of health, and it never appears
+        on a pip or a ladder mark.
+      </p>
+      <p class="prose">
+        REQUEST OUTCOME &mdash; --state-healthy and --state-failed on a
+        finished request's or probe's status, in the log and on a badge. A
+        provider's health is a rolling judgement about a thing that
+        persists; an outcome is a verdict on one event that is over. They
+        are different facts wearing the same two colours, which is legible
+        only because an outcome never appears on a pip and a health reading
+        never appears in a status column.
+      </p>
+      <p class="prose">
+        ATTENTION &mdash; --state-cooling on a condition that is neither a
+        failure nor a provider state: a stale discovery sweep, a warning
+        chip, an alias that resolves to nothing, a value the operator has
+        not set yet. Amber is the language's "look at this, nothing has
+        broken" colour, and cooling is the provider-shaped member of that
+        family rather than its whole meaning. It is the widest of the three
+        carve-outs and the one worth policing: amber on anything that has
+        actually failed is a bug, and so is amber used decoratively.
+      </p>
+      <p class="prose">
+        What none of the three permit: a state colour in the ladder gutter
+        reporting a routing decision, or --trace on a provider pip. That
+        boundary has no exceptions.
       </p>
     </div>
 
@@ -301,6 +349,26 @@
     </div>
 
     <div class="region">
+      <p class="prose">
+        RULING &mdash; the well is a value step and a hairline, and nothing
+        else. Spec &sect;3.3 also describes a 1px inset light at the top and
+        dark at the bottom, and a graticule behind every well. Neither is
+        implemented: the inset is a bevel, which is elevation, and this
+        language spends its whole elevation budget on one shadow; the
+        graticule is drawn only where it means something, which is behind a
+        chart, and behind a table it would be decoration competing with the
+        rows. A recessed surface here is a value step plus a border, in both
+        modes, and the light proof shows what that costs.
+      </p>
+      <p class="prose">
+        RULING &mdash; radius is 2px on everything except two marks that are
+        circles: the cooling mark's centre dot and the stale-discovery ring.
+        Both are round because roundness is doing work &mdash; each has to
+        read as a different shape from the square pip beside it at 6 and 7
+        pixels, where a 2px radius and a circle are the only two silhouettes
+        that survive. A circle used as a corner treatment is still a bug.
+      </p>
+
       <p class="section-title">Density</p>
       <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; compact: 30px rows, 30px controls, 44px topbar, 200px rail, 1px panel seams.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
@@ -337,7 +405,7 @@
           <span class="chip">MONO &mdash; off the wire</span>
         </div>
         <div class="row">
-          <span class="mono">01JG7XKD2QN8R4M6P0S9T3VWYZ</span>
+          <span class="mono">01M0W4Q0S0N8R4M6P0S9T3VWYZ</span>
           <span class="chip">MONO &mdash; off the wire</span>
         </div>
         <div class="row">

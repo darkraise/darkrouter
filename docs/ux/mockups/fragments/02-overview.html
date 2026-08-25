@@ -41,7 +41,7 @@
           <div class="config-banner" role="alert">
             <p class="legend-caps">Config invalid</p>
             <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Config banner &mdash; GET /api/config {valid,error,serving}. Shown only when valid=false. Error in mono, reassurance in sans.</span></p>
-            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "fast" targets provider "cerebras" model "openai/gpt-oss-120b" but no credential is configured for that provider</p>
+            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "smart" targets provider "bedrock" model "claude-opus-4-20250514" but no credential is configured for that provider</p>
             <p class="prose config-banner-note">The previous configuration is still serving.</p>
           </div>
         </div>
@@ -118,7 +118,7 @@
 
             <div class="well health-tile">
               <div class="health-tile-head">
-                <span class="state-pip" data-state="cooling"></span>
+                <span class="state-pip" data-state="degraded"></span>
                 <span class="mono health-tile-name">cerebras</span>
               </div>
               <p class="micro">3 credentials &middot; 1 cooling</p>
@@ -182,39 +182,39 @@
           <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
           <div class="table">
 
-            <a class="row" href="#01HZXK4M9QANE2FTX7RS3JV8CB">
+            <a class="row" href="#01M0T2CSMRANE2FTX7RS3JV8CB">
               <span class="mono" style="min-width:64px">14:22:07</span>
-              <span class="mono" style="flex:1 1 auto">default &rarr; together/openai-gpt-oss-120b</span>
+              <span class="mono" style="flex:1 1 auto">fast-coder &rarr; together/openai-gpt-oss-120b</span>
               <span class="chip chip-failover">failover &times;3</span>
-              <span class="data-emph" style="margin-left:auto">1,847ms</span>
+              <span class="data-emph" style="margin-left:auto">3,284ms</span>
             </a>
 
-            <a class="row" href="#01HZXK5PWENA3D9RTX2FC6MJQ8">
+            <a class="row" href="#01M0T28NT0NA3D9RTX2FC6MJQ8">
               <span class="mono" style="min-width:64px">14:19:52</span>
-              <span class="mono" style="flex:1 1 auto">fast &rarr; cerebras/openai-gpt-oss-120b</span>
+              <span class="mono" style="flex:1 1 auto">cheap &rarr; groq/openai-gpt-oss-20b</span>
               <span class="chip chip-failover">failover &times;2</span>
-              <span class="data-emph" style="margin-left:auto">612ms</span>
+              <span class="data-emph" style="margin-left:auto">1,932ms</span>
             </a>
 
-            <a class="row" href="#01HZXK6R2TCEMA9NF3XJ7VQ5WB">
+            <a class="row" href="#01M0T1SBJGCEMA9NF3XJ7VQ5WB">
               <span class="mono" style="min-width:64px">14:11:30</span>
-              <span class="mono" style="flex:1 1 auto">vision &rarr; openrouter/qwen/qwen3-vl-235b</span>
+              <span class="mono" style="flex:1 1 auto">vision &rarr; vertex/gemini-2.5-pro</span>
               <span class="chip chip-failover">failover &times;2</span>
-              <span class="data-emph" style="margin-left:auto">2,104ms</span>
+              <span class="data-emph" style="margin-left:auto">3,516ms</span>
             </a>
 
-            <a class="row" href="#01HZXK7T4WBNF2CQ9RXM3E6JAP">
+            <a class="row" href="#01M0T11ZH0BNF2CQ9RXM3E6JAP">
               <span class="mono" style="min-width:64px">13:58:44</span>
               <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
               <span class="chip chip-failover">failover &times;4</span>
-              <span class="data-emph" style="margin-left:auto">4,392ms</span>
+              <span class="data-emph" style="margin-left:auto">8,940ms</span>
             </a>
 
-            <a class="row" href="#01HZXK8V6RCAM9FQ2TXJ5WNE3B">
+            <a class="row" href="#01M0T0D2JRCAM9FQ2TXJ5WNE3B">
               <span class="mono" style="min-width:64px">13:47:19</span>
-              <span class="mono" style="flex:1 1 auto">default &rarr; deepinfra/openai-gpt-oss-120b</span>
+              <span class="mono" style="flex:1 1 auto">fast-coder &rarr; openrouter/openai-gpt-oss-120b</span>
               <span class="chip chip-failover">failover &times;2</span>
-              <span class="data-emph" style="margin-left:auto">890ms</span>
+              <span class="data-emph" style="margin-left:auto">2,110ms</span>
             </a>
 
           </div>

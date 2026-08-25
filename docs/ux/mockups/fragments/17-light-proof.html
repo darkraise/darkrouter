@@ -73,10 +73,10 @@
         <p>
           <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder in light &mdash; the termination rule is the at-risk mark: --hairline-subtle on a near-white well.</span>
         </p>
-        <p class="micro">request 01JBXTG4R8ZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
+        <p class="micro">request 01M0W4NWMRZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
       <div class="ladder">
         <div class="ladder-row">
-          <span class="rank">01</span>
+          <span class="rank rank-tick">01</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -88,7 +88,7 @@
           <span class="latency-bar latency-bar-failed" style="width:2px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank">02</span>
+          <span class="rank rank-tick">02</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -100,19 +100,19 @@
           <span class="latency-bar latency-bar-failed" style="width:64px"></span>
         </div>
         <div class="ladder-row ladder-row-served">
-          <span class="rank">03</span>
+          <span class="rank rank-tick">03</span>
           <span class="spine"></span>
           <span class="mark mark-served"></span>
           <span class="stub"></span>
           <span class="target">together/openai-gpt-oss-120b</span>
           <span class="reason">
             <span class="reason-code">200</span>
-            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
           </span>
           <span class="latency-bar" style="width:4px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">04</span>
+          <span class="rank rank-tick text-terminated">04</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
@@ -124,19 +124,19 @@
           <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">06</span>
+          <span class="rank rank-tick text-terminated">06</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">07</span>
+          <span class="rank rank-tick text-terminated">07</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">08</span>
+          <span class="rank rank-tick text-terminated">08</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">vertex/gemini-2.5-pro</span>
@@ -157,9 +157,12 @@
           hairline is a pale grey, but dark's well is nearly black and its
           hairline nearly as dark, so neither mode was ever relying on much. The
           skipped mark's --bezel stroke gives up more: 4.11:1 dark against
-          3.42:1 light. Both marks clear the 3:1 non-text floor in both modes
-          only because the terminated mark is not asked to; it is the absence of
-          a decision, and the spine beneath it carries the same reading.
+          3.42:1 light, and it clears the 3:1 non-text floor in both. The
+          terminated mark clears nothing, and is not asked to: it reports the
+          absence of a decision rather than a decision, the spine beneath it
+          says the same thing at the same weight, and the row's text carries
+          the rest. A mark that has to be found is held to the floor; a mark
+          whose whole job is to stop asking for attention is not.
         </p>
       </div>
 

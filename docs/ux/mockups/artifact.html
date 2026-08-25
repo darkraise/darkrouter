@@ -421,8 +421,23 @@ a.row { text-decoration: none; }
   border-radius: var(--radius);
   background: var(--bezel);
 }
+/* The four states GET /api/overview actually emits for a provider tile.
+   "degraded" rather than "cooling" is the API's word and the accurate one:
+   a CREDENTIAL cools, and a provider is degraded while any of its
+   credentials is cooling. The ladder keeps .mark-cooling because there the
+   subject really is one candidate's credential.
+   Disabled and unconfigured both mean "no health reading exists", so
+   neither takes a state colour; they split filled from hollow the way the
+   ladder marks do — disabled is a thing that is switched off, unconfigured
+   is a thing with nothing in it. */
 .state-pip[data-state="healthy"] { background: var(--state-healthy); }
-.state-pip[data-state="cooling"] { background: var(--state-cooling); }
+.state-pip[data-state="degraded"] { background: var(--state-cooling); }
+.state-pip[data-state="disabled"] { background: var(--bezel); }
+.state-pip[data-state="unconfigured"] {
+  background: transparent;
+  border: 1px solid var(--bezel);
+}
+/* Outcome, not health — a finished request or probe. Never on a provider. */
 .state-pip[data-state="failed"] { background: var(--state-failed); }
 
 /* --- Ladder ----------------------------------------------------------
@@ -2759,7 +2774,8 @@ body.pins-on .pin-note { display: inline; }
   inset: -9999px;
   background: rgba(3, 5, 7, 0.66);
 }
-body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
+body.theme-light .preset-scrim,
+.force-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 /* --- The dialog -------------------------------------------------------
    --overlay plus --shadow-overlay: the single permitted shadow in the
@@ -4552,7 +4568,9 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 .pg-drop-glyph {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 16px;
+  /* The page-title step. A glyph is still type, and 16px is on no role
+     in the §3.2 scale. */
+  font-size: 15px;
   color: var(--bezel);
 }
 
@@ -5787,6 +5805,22 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   margin-bottom: 4px;
 }
 
+/* A note that qualifies the group marker above it rather than a field below
+   it: the catalog workers are restart-only in behaviour while config's own
+   RestartOnly list says otherwise, and the screen's subject is exactly that
+   distinction. Attention, not failure — nothing is broken, but the reload
+   path will not tell you. */
+.set-note-warn {
+  margin: 0;
+  padding: 8px var(--section-pad);
+  border-left: 2px solid var(--state-cooling);
+  background: var(--panel);
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+
 /*
  * Task 18 — Login ("sign in"), the one screen in the set with no console
  * chrome. There is no rail and no top bar because neither exists before a
@@ -5922,8 +5956,8 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 /* --- Messages ---------------------------------------------------------- */
 
 /* One message block, two tones. The rule carries the colour and the words
-   stay in --ink: --state-cooling measures 3.16:1 in light and fails AA as
-   text, so the unconfigured tone could not be said in amber words even if
+   stay in --ink: --state-cooling measures 3.02:1 against --panel in light and
+   fails AA as text, so the unconfigured tone could not be said in amber words even if
    it wanted to be, and using the same construction for both tones keeps
    the two states comparable side by side. Red is the rejected tone because
    a refused sign-in is an OUTCOME — how it went — which is the same
@@ -6759,7 +6793,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
     <div class="region">
       <p class="section-title">Health / decision split</p>
-      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Health/decision split &mdash; state colours are provider identity, --trace is router verdict. Spec &sect;3.1. Amber appears only as a health pip and a cooling skip mark.</span></p>
+      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Health/decision split &mdash; state colours are provider identity, --trace is router verdict. Spec &sect;3.1. Three carve-outs are named below; a state colour used for anything not on that list is a bug.</span></p>
       <div style="display:flex;gap:var(--gutter)">
         <div style="flex:1 1 0">
           <p class="spec-note">what the provider is</p>
@@ -6770,7 +6804,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="micro">healthy</span>
             </div>
             <div class="row">
-              <span class="state-pip" data-state="cooling"></span>
+              <span class="state-pip" data-state="degraded"></span>
               <span class="mono">cerebras</span>
               <span class="micro">cooling until 14:22</span>
             </div>
@@ -6785,18 +6819,20 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p class="spec-note">what the router decided</p>
           <div class="ladder">
             <div class="ladder-row">
-              <span class="rank">1</span>
+              <span class="rank rank-tick">01</span>
+              <span class="spine"></span>
               <span class="mark mark-skipped"></span>
+              <span class="target">groq</span>
               <span class="reason">
-                <span class="reason-code">groq</span>
                 <span class="reason-prose">skipped &mdash; healthy, router preferred cerebras' latency</span>
               </span>
             </div>
-            <div class="ladder-row">
-              <span class="rank">2</span>
+            <div class="ladder-row ladder-row-served">
+              <span class="rank rank-tick">02</span>
+              <span class="spine"></span>
               <span class="mark mark-served"></span>
+              <span class="target">cerebras</span>
               <span class="reason">
-                <span class="reason-code">cerebras</span>
                 <span class="reason-prose">served openai/gpt-oss-120b &mdash; cooling, still completed</span>
               </span>
             </div>
@@ -6804,20 +6840,66 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         </div>
       </div>
       <p class="prose">
-        Left: three provider identity pips &mdash; what each provider IS, from
-        --state-healthy / --state-cooling / --state-failed. Right: the
-        router's verdict on the same request &mdash; what it DECIDED, in
-        --trace and --bezel. A healthy provider (groq) can still be
-        skipped; a cooling one (cerebras) can still serve. State colour
-        never appears in the gutter; --trace never appears on a pip.
-        A third, narrower use of --state-failed exists alongside these
-        two: the DESTRUCTIVE AFFORDANCE on a control whose action removes
-        something (a delete button's border and hover text) rather than
-        reporting an outcome that already happened. It is defensible
-        precisely because a destructive click produces a failed-shaped
-        result &mdash; the row is gone &mdash; but it is a third, named
-        thing, not a variant reading of a request's status or a
-        provider's health, and it never appears on a pip or a ladder mark.
+        Left: three provider identity pips &mdash; what each provider IS.
+        Right: the router's verdict on the same request &mdash; what it
+        DECIDED, in --trace and --bezel. A healthy provider (groq) can
+        still be skipped; a degraded one (cerebras) can still serve. State
+        colour never appears in the gutter; --trace never appears on a pip.
+      </p>
+      <p class="prose">
+        A pip carries one of the four states GET /api/overview emits, and
+        the wording is the API's rather than the language's: healthy,
+        DEGRADED, disabled, unconfigured. Degraded and cooling are not
+        synonyms and the row above shows why &mdash; cerebras reads degraded
+        because one of its credentials is cooling until 14:22. The
+        credential is the thing that cools; the provider is the thing that
+        degrades. That is also why the ladder mark for a passed-over
+        candidate stays --state-cooling: down there the subject really is
+        one credential.
+      </p>
+      <p class="prose">
+        Disabled and unconfigured take no state colour at all, because
+        neither is a health reading &mdash; nobody has measured anything. They
+        split the way the ladder marks split: disabled is filled --bezel, a
+        thing that exists and is switched off; unconfigured is a hollow
+        --bezel ring, a thing with nothing in it yet.
+      </p>
+      <p class="prose">
+        Three carve-outs are named, and only three. Each is a use of a state
+        colour that is not a provider's health, and each is listed here
+        because a rule with unlisted exceptions is not a rule.
+      </p>
+      <p class="prose">
+        DESTRUCTIVE AFFORDANCE &mdash; --state-failed on a control whose
+        action removes something: a delete button's border and hover text.
+        Defensible precisely because a destructive click produces a
+        failed-shaped result &mdash; the row is gone &mdash; but it is a
+        named thing, not a variant reading of health, and it never appears
+        on a pip or a ladder mark.
+      </p>
+      <p class="prose">
+        REQUEST OUTCOME &mdash; --state-healthy and --state-failed on a
+        finished request's or probe's status, in the log and on a badge. A
+        provider's health is a rolling judgement about a thing that
+        persists; an outcome is a verdict on one event that is over. They
+        are different facts wearing the same two colours, which is legible
+        only because an outcome never appears on a pip and a health reading
+        never appears in a status column.
+      </p>
+      <p class="prose">
+        ATTENTION &mdash; --state-cooling on a condition that is neither a
+        failure nor a provider state: a stale discovery sweep, a warning
+        chip, an alias that resolves to nothing, a value the operator has
+        not set yet. Amber is the language's "look at this, nothing has
+        broken" colour, and cooling is the provider-shaped member of that
+        family rather than its whole meaning. It is the widest of the three
+        carve-outs and the one worth policing: amber on anything that has
+        actually failed is a bug, and so is amber used decoratively.
+      </p>
+      <p class="prose">
+        What none of the three permit: a state colour in the ladder gutter
+        reporting a routing decision, or --trace on a provider pip. That
+        boundary has no exceptions.
       </p>
     </div>
 
@@ -6945,6 +7027,26 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     </div>
 
     <div class="region">
+      <p class="prose">
+        RULING &mdash; the well is a value step and a hairline, and nothing
+        else. Spec &sect;3.3 also describes a 1px inset light at the top and
+        dark at the bottom, and a graticule behind every well. Neither is
+        implemented: the inset is a bevel, which is elevation, and this
+        language spends its whole elevation budget on one shadow; the
+        graticule is drawn only where it means something, which is behind a
+        chart, and behind a table it would be decoration competing with the
+        rows. A recessed surface here is a value step plus a border, in both
+        modes, and the light proof shows what that costs.
+      </p>
+      <p class="prose">
+        RULING &mdash; radius is 2px on everything except two marks that are
+        circles: the cooling mark's centre dot and the stale-discovery ring.
+        Both are round because roundness is doing work &mdash; each has to
+        read as a different shape from the square pip beside it at 6 and 7
+        pixels, where a 2px radius and a circle are the only two silhouettes
+        that survive. A circle used as a corner treatment is still a bug.
+      </p>
+
       <p class="section-title">Density</p>
       <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; compact: 30px rows, 30px controls, 44px topbar, 200px rail, 1px panel seams.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
@@ -6981,7 +7083,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="chip">MONO &mdash; off the wire</span>
         </div>
         <div class="row">
-          <span class="mono">01JG7XKD2QN8R4M6P0S9T3VWYZ</span>
+          <span class="mono">01M0W4Q0S0N8R4M6P0S9T3VWYZ</span>
           <span class="chip">MONO &mdash; off the wire</span>
         </div>
         <div class="row">
@@ -7051,10 +7153,10 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
       <p>
         <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Ladder geometry &mdash; 28px rank gutter, 1px spine, 12px stub lane, then target/reason/latency. Identical in all three modes.</span>
       </p>
-      <p class="micro">request 01JBXTG4R8ZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
+      <p class="micro">request 01M0W4NWMRZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
       <div class="ladder">
         <div class="ladder-row">
-          <span class="rank">01</span>
+          <span class="rank rank-tick">01</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -7066,7 +7168,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="latency-bar latency-bar-failed" style="width:2px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank">02</span>
+          <span class="rank rank-tick">02</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -7078,19 +7180,19 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="latency-bar latency-bar-failed" style="width:64px"></span>
         </div>
         <div class="ladder-row ladder-row-served">
-          <span class="rank">03</span>
+          <span class="rank rank-tick">03</span>
           <span class="spine"></span>
           <span class="mark mark-served"></span>
           <span class="stub"></span>
           <span class="target">together/openai-gpt-oss-120b</span>
           <span class="reason">
             <span class="reason-code">200</span>
-            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
           </span>
           <span class="latency-bar" style="width:4px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">04</span>
+          <span class="rank rank-tick text-terminated">04</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
@@ -7102,19 +7204,19 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">06</span>
+          <span class="rank rank-tick text-terminated">06</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">07</span>
+          <span class="rank rank-tick text-terminated">07</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">08</span>
+          <span class="rank rank-tick text-terminated">08</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">vertex/gemini-2.5-pro</span>
@@ -7139,10 +7241,10 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
       <p>
         <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Fill vs outline &mdash; filled means it happened (trace), outlined means it would happen (dry-run). No legend needed.</span>
       </p>
-      <p class="micro">predicted against snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
+      <p class="micro">predicted against snapshot 01M0W31NR0CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
       <div class="ladder">
         <div class="ladder-row">
-          <span class="rank">01</span>
+          <span class="rank rank-tick">01</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">groq/openai-gpt-oss-120b</span>
@@ -7151,7 +7253,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">02</span>
+          <span class="rank rank-tick">02</span>
           <span class="spine"></span>
           <span class="mark mark-cooling"></span>
           <span class="target">cerebras/gpt-oss-120b</span>
@@ -7161,7 +7263,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">03</span>
+          <span class="rank rank-tick">03</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">together/openai-gpt-oss-120b</span>
@@ -7170,7 +7272,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">04</span>
+          <span class="rank rank-tick">04</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">deepinfra/gpt-oss-120b</span>
@@ -7179,7 +7281,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">05</span>
+          <span class="rank rank-tick rank-tick-major">05</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">openrouter/openai/gpt-oss-120b</span>
@@ -7188,7 +7290,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">06</span>
+          <span class="rank rank-tick">06</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">anthropic/claude-opus-4-20250514</span>
@@ -7198,7 +7300,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">07</span>
+          <span class="rank rank-tick">07</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">bedrock/us.anthropic.claude-opus-4</span>
@@ -7207,7 +7309,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           </span>
         </div>
         <div class="ladder-row">
-          <span class="rank">08</span>
+          <span class="rank rank-tick">08</span>
           <span class="spine"></span>
           <span class="mark mark-skipped"></span>
           <span class="target">vertex/gemini-2.5-pro</span>
@@ -7230,77 +7332,67 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
       <p class="section-title">Mode 3 &mdash; compressed (models catalog)</p>
       <p class="prose">
         The same vocabulary at catalog density: rank, a 9px mark, provider
-        id, nothing else. Twelve rows read as a barcode of sigils &mdash; the
+        id, nothing else. Eight rows read as a barcode of sigils &mdash; the
         shape of the fleet at a glance, without a single word. The router
         expands one candidate per (provider, credential, model), so a
         provider with a second configured key earns a second row &mdash;
-        ranks 09&ndash;12 repeat groq, together, deepinfra and openrouter
-        for exactly that reason, each marked <span class="mono">key 2</span>
-        in --legend beside the id.
+        ranks 05&ndash;08 repeat the same four providers for exactly that
+        reason, each marked <span class="mono">key 2</span> in --legend
+        beside the id.
+      </p>
+      <p class="prose">
+        Every mark is hollow, and that is the mode's whole claim. This is a
+        catalog reading of what the router WOULD do, not a record of what it
+        did: nothing here has been sent, so nothing here is filled. Cerebras
+        carries the cooling mark in both its rows because cooling is a fact
+        about the provider that is true right now, which a prediction is
+        entitled to show; a filled mark would assert an attempt that never
+        happened. Fill is the one thing that separates this from the trace,
+        and the trace is the only mode allowed to use it.
       </p>
       <div class="ladder" style="width:220px">
         <div class="ladder-row" style="gap:8px">
-          <span class="rank">01</span>
-          <span class="mark mark-failed mark-catalog"></span>
+          <span class="rank rank-tick">01</span>
+          <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono">groq</span>
         </div>
         <div class="ladder-row" style="gap:8px">
-          <span class="rank">02</span>
-          <span class="mark mark-failed mark-catalog"></span>
+          <span class="rank rank-tick">02</span>
+          <span class="mark mark-cooling mark-catalog"></span>
           <span class="mono">cerebras</span>
         </div>
-        <div class="ladder-row ladder-row-served" style="gap:8px">
-          <span class="rank">03</span>
-          <span class="mark mark-served mark-catalog"></span>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank rank-tick">03</span>
+          <span class="mark mark-skipped mark-catalog"></span>
+          <span class="mono">openrouter</span>
+        </div>
+        <div class="ladder-row" style="gap:8px">
+          <span class="rank rank-tick">04</span>
+          <span class="mark mark-skipped mark-catalog"></span>
           <span class="mono">together</span>
         </div>
         <div class="ladder-row" style="gap:8px">
-          <span class="rank">04</span>
+          <span class="rank rank-tick rank-tick-major">05</span>
           <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">deepinfra</span>
+          <span class="mono">groq</span>
+          <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
-          <span class="rank">05</span>
-          <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">openrouter</span>
-        </div>
-        <div class="ladder-row" style="gap:8px">
-          <span class="rank">06</span>
-          <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">anthropic</span>
-        </div>
-        <div class="ladder-row" style="gap:8px">
-          <span class="rank">07</span>
-          <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">bedrock</span>
-        </div>
-        <div class="ladder-row" style="gap:8px">
-          <span class="rank">08</span>
-          <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">vertex</span>
-        </div>
-        <div class="ladder-row" style="gap:8px">
-          <span class="rank">09</span>
+          <span class="rank rank-tick">06</span>
           <span class="mark mark-cooling mark-catalog"></span>
-          <span class="mono target-muted">groq</span>
+          <span class="mono">cerebras</span>
           <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
-          <span class="rank">10</span>
+          <span class="rank rank-tick">07</span>
           <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">together</span>
+          <span class="mono">openrouter</span>
           <span class="credential-tag">key 2</span>
         </div>
         <div class="ladder-row" style="gap:8px">
-          <span class="rank">11</span>
+          <span class="rank rank-tick">08</span>
           <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">deepinfra</span>
-          <span class="credential-tag">key 2</span>
-        </div>
-        <div class="ladder-row" style="gap:8px">
-          <span class="rank">12</span>
-          <span class="mark mark-skipped mark-catalog"></span>
-          <span class="mono target-muted">openrouter</span>
+          <span class="mono">together</span>
           <span class="credential-tag">key 2</span>
         </div>
       </div>
@@ -7320,7 +7412,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p class="spec-note" style="width:190px">skipped &mdash; hollow 7px, 1px --bezel, no fill, spine runs through undisturbed</p>
           <div class="ladder" style="width:190px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
-              <span class="rank">01</span>
+              <span class="rank rank-tick">01</span>
               <span class="spine"></span>
               <span class="mark mark-skipped"></span>
               <span class="mono target-muted">deepinfra</span>
@@ -7336,7 +7428,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p class="spec-note" style="width:300px">skipped, cooling &mdash; hollow 7px stroked --state-cooling, no fill</p>
           <div class="ladder" style="width:300px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
-              <span class="rank">02</span>
+              <span class="rank rank-tick">02</span>
               <span class="spine"></span>
               <span class="mark mark-cooling"></span>
               <span class="mono">cerebras</span>
@@ -7357,7 +7449,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p class="spec-note" style="width:200px">attempted, failed &mdash; filled 7px --state-failed; stub 12px dashed 3px-on-3px, --state-failed</p>
           <div class="ladder" style="width:200px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
-              <span class="rank">01</span>
+              <span class="rank rank-tick">01</span>
               <span class="spine"></span>
               <span class="mark mark-failed"></span>
               <span class="stub stub-dashed"></span>
@@ -7376,7 +7468,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p class="spec-note" style="width:200px">served &mdash; filled 7px --trace-fill, 1px --trace ring; stub 12px solid --trace</p>
           <div class="ladder" style="width:200px;margin-top:8px">
             <div class="ladder-row ladder-row-served" style="gap:8px">
-              <span class="rank">03</span>
+              <span class="rank rank-tick">03</span>
               <span class="spine"></span>
               <span class="mark mark-served"></span>
               <span class="stub"></span>
@@ -7393,7 +7485,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <div class="region">
       <p class="section-title">Rank gutter</p>
       <p>
-        <b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Rank gutter &mdash; zero-padded so the column stays optically stable past nine candidates; every fifth rank ticks 5px.</span>
+        <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Rank gutter &mdash; zero-padded so the column stays optically stable past nine candidates; every fifth rank ticks 5px.</span>
       </p>
       <div style="display:flex;align-items:flex-start;gap:var(--gutter)">
         <div class="ladder" style="width:120px">
@@ -7452,7 +7544,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <div class="region">
       <p class="section-title">Reason format</p>
       <p>
-        <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Reason format &mdash; machine_code &middot; plain sentence. The code is what you grep for, the sentence is what you read.</span>
+        <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Reason format &mdash; machine_code &middot; plain sentence. The code is what you grep for, the sentence is what you read.</span>
       </p>
       <div class="table">
         <div class="row">
@@ -7503,7 +7595,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <div class="region">
       <p class="section-title">Greyscale proof</p>
       <p>
-        <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Greyscale proof &mdash; four states distinguishable with colour removed. Colour is the second channel, never the only one.</span>
+        <b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Greyscale proof &mdash; four states distinguishable with colour removed. Colour is the second channel, never the only one.</span>
       </p>
       <p class="prose">
         A retrospective ladder repeated inside
@@ -7519,7 +7611,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
       <div class="ladder-grayscale">
         <div class="ladder">
           <div class="ladder-row">
-            <span class="rank">01</span>
+            <span class="rank rank-tick">01</span>
             <span class="spine"></span>
             <span class="mark mark-skipped"></span>
             <span class="target target-muted">groq/openai-gpt-oss-120b</span>
@@ -7529,7 +7621,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </span>
           </div>
           <div class="ladder-row">
-            <span class="rank">02</span>
+            <span class="rank rank-tick">02</span>
             <span class="spine"></span>
             <span class="mark mark-cooling"></span>
             <span class="target">cerebras/gpt-oss-120b</span>
@@ -7539,7 +7631,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </span>
           </div>
           <div class="ladder-row">
-            <span class="rank">03</span>
+            <span class="rank rank-tick">03</span>
             <span class="spine"></span>
             <span class="mark mark-failed"></span>
             <span class="stub stub-dashed"></span>
@@ -7551,7 +7643,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <span class="latency-bar latency-bar-failed" style="width:64px"></span>
           </div>
           <div class="ladder-row ladder-row-served">
-            <span class="rank">04</span>
+            <span class="rank rank-tick">04</span>
             <span class="spine"></span>
             <span class="mark mark-served"></span>
             <span class="stub"></span>
@@ -7563,13 +7655,13 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <span class="latency-bar" style="width:2px"></span>
           </div>
           <div class="ladder-row">
-            <span class="rank text-terminated">05</span>
+            <span class="rank rank-tick rank-tick-major text-terminated">05</span>
             <span class="spine spine-terminated"></span>
             <span class="mark mark-terminated"></span>
             <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
           </div>
           <div class="ladder-row">
-            <span class="rank rank-tick rank-tick-major text-terminated">06</span>
+            <span class="rank rank-tick text-terminated">06</span>
             <span class="spine spine-terminated"></span>
             <span class="mark mark-terminated"></span>
             <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
@@ -7624,7 +7716,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <div class="config-banner" role="alert">
             <p class="legend-caps">Config invalid</p>
             <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Config banner &mdash; GET /api/config {valid,error,serving}. Shown only when valid=false. Error in mono, reassurance in sans.</span></p>
-            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "fast" targets provider "cerebras" model "openai/gpt-oss-120b" but no credential is configured for that provider</p>
+            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "smart" targets provider "bedrock" model "claude-opus-4-20250514" but no credential is configured for that provider</p>
             <p class="prose config-banner-note">The previous configuration is still serving.</p>
           </div>
         </div>
@@ -7701,7 +7793,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
             <div class="well health-tile">
               <div class="health-tile-head">
-                <span class="state-pip" data-state="cooling"></span>
+                <span class="state-pip" data-state="degraded"></span>
                 <span class="mono health-tile-name">cerebras</span>
               </div>
               <p class="micro">3 credentials &middot; 1 cooling</p>
@@ -7765,39 +7857,39 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
           <div class="table">
 
-            <a class="row" href="#01HZXK4M9QANE2FTX7RS3JV8CB">
+            <a class="row" href="#01M0T2CSMRANE2FTX7RS3JV8CB">
               <span class="mono" style="min-width:64px">14:22:07</span>
-              <span class="mono" style="flex:1 1 auto">default &rarr; together/openai-gpt-oss-120b</span>
+              <span class="mono" style="flex:1 1 auto">fast-coder &rarr; together/openai-gpt-oss-120b</span>
               <span class="chip chip-failover">failover &times;3</span>
-              <span class="data-emph" style="margin-left:auto">1,847ms</span>
+              <span class="data-emph" style="margin-left:auto">3,284ms</span>
             </a>
 
-            <a class="row" href="#01HZXK5PWENA3D9RTX2FC6MJQ8">
+            <a class="row" href="#01M0T28NT0NA3D9RTX2FC6MJQ8">
               <span class="mono" style="min-width:64px">14:19:52</span>
-              <span class="mono" style="flex:1 1 auto">fast &rarr; cerebras/openai-gpt-oss-120b</span>
+              <span class="mono" style="flex:1 1 auto">cheap &rarr; groq/openai-gpt-oss-20b</span>
               <span class="chip chip-failover">failover &times;2</span>
-              <span class="data-emph" style="margin-left:auto">612ms</span>
+              <span class="data-emph" style="margin-left:auto">1,932ms</span>
             </a>
 
-            <a class="row" href="#01HZXK6R2TCEMA9NF3XJ7VQ5WB">
+            <a class="row" href="#01M0T1SBJGCEMA9NF3XJ7VQ5WB">
               <span class="mono" style="min-width:64px">14:11:30</span>
-              <span class="mono" style="flex:1 1 auto">vision &rarr; openrouter/qwen/qwen3-vl-235b</span>
+              <span class="mono" style="flex:1 1 auto">vision &rarr; vertex/gemini-2.5-pro</span>
               <span class="chip chip-failover">failover &times;2</span>
-              <span class="data-emph" style="margin-left:auto">2,104ms</span>
+              <span class="data-emph" style="margin-left:auto">3,516ms</span>
             </a>
 
-            <a class="row" href="#01HZXK7T4WBNF2CQ9RXM3E6JAP">
+            <a class="row" href="#01M0T11ZH0BNF2CQ9RXM3E6JAP">
               <span class="mono" style="min-width:64px">13:58:44</span>
               <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
               <span class="chip chip-failover">failover &times;4</span>
-              <span class="data-emph" style="margin-left:auto">4,392ms</span>
+              <span class="data-emph" style="margin-left:auto">8,940ms</span>
             </a>
 
-            <a class="row" href="#01HZXK8V6RCAM9FQ2TXJ5WNE3B">
+            <a class="row" href="#01M0T0D2JRCAM9FQ2TXJ5WNE3B">
               <span class="mono" style="min-width:64px">13:47:19</span>
-              <span class="mono" style="flex:1 1 auto">default &rarr; deepinfra/openai-gpt-oss-120b</span>
+              <span class="mono" style="flex:1 1 auto">fast-coder &rarr; openrouter/openai-gpt-oss-120b</span>
               <span class="chip chip-failover">failover &times;2</span>
-              <span class="data-emph" style="margin-left:auto">890ms</span>
+              <span class="data-emph" style="margin-left:auto">2,110ms</span>
             </a>
 
           </div>
@@ -7858,7 +7950,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
         <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
         <div class="saved-views">
-          <span class="view-chip" data-active="true">failovers only</span>
+          <span class="view-chip">failovers only</span>
           <span class="view-chip">errors today</span>
           <span class="view-chip">passthrough misses</span>
         </div>
@@ -7868,12 +7960,12 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
           <div class="combo" data-open="true" style="min-width:190px">
             <button class="control combo-trigger">
-              <span>provider: groq +1</span>
+              <span>provider: any</span>
               <span class="combo-chevron">▾</span>
             </button>
             <div class="combo-menu">
-              <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>groq</span><span class="combo-count">2,481</span></span>
-              <span class="combo-option" data-checked="true"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">1,096</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>groq</span><span class="combo-count">2,481</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">1,096</span></span>
               <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>anthropic</span><span class="combo-count">640</span></span>
               <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>openrouter</span><span class="combo-count">312</span></span>
               <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>together</span><span class="combo-count">188</span></span>
@@ -7968,10 +8060,10 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="legend-caps col-status">status</span>
               <span class="legend-caps col-attempts col-right">attempts</span>
               <span class="legend-caps col-tokens col-right">tokens in/out</span>
-              <span class="legend-caps col-latency col-right">latency</span>
+              <span class="legend-caps col-latency col-right">total</span>
             </div>
 
-            <div class="row" data-id="01JG7XQ2M4K8VBNR3TDYW5EZ9C">
+            <div class="row" data-id="01M0W4Q0S0K8VBNR3TDYW5EZ9C">
               <span class="mono col-time">09:41:08</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
@@ -7982,7 +8074,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">184<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JNH9DN65R6PPG2X7R5JQC42E">
+            <div class="row" data-id="01M0W4PH50R6PPG2X7R5JQC42E">
               <span class="mono col-time">09:40:52</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
@@ -7993,18 +8085,18 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">96<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01J71HFE865V215DE1CTEWH0AV">
+            <div class="row" data-id="01M0W4NWMRZQCN2VMD9F6K3H7P">
               <span class="mono col-time">09:40:31</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span><span class="chip chip-failover">failover &times;3</span></span>
               <span class="mono col-provider">together</span>
               <span class="mono col-status status-success">success</span>
               <span class="mono col-attempts col-right">3</span>
-              <span class="mono col-tokens col-right">640/210</span>
-              <span class="mono col-latency col-right">1,847<span class="unit">ms</span></span>
+              <span class="mono col-tokens col-right">8,412/1,904</span>
+              <span class="mono col-latency col-right">32,259<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JAGVDCKSQWW7FE4N1EE043E4">
+            <div class="row" data-id="01M0W4N290QWW7FE4N1EE043E4">
               <span class="mono col-time">09:40:04</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span><span class="chip chip-failover">failover &times;3</span></span>
@@ -8015,7 +8107,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">2,240<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JSN6FCCW8VBHXF4W6305FATZ" title="429 rate limited">
+            <div class="row" data-id="01M0W4MWDG8VBHXF4W6305FATZ" title="429 rate limited">
               <span class="mono col-time">09:39:58</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
@@ -8026,7 +8118,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">412<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JJ5E6RHXQAQPDH4AFAXRHEM3">
+            <div class="row" data-id="01M0W4MAV0QAQPDH4AFAXRHEM3">
               <span class="mono col-time">09:39:40</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
@@ -8037,7 +8129,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">612<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01J7492Q9V82KQ2PDF6PT9FABT">
+            <div class="row" data-id="01M0W4KS8G82KQ2PDF6PT9FABT">
               <span class="mono col-time">09:39:22</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">gemini-2.5-pro</span></span>
@@ -8048,7 +8140,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">340<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JE2MSH4DMDZSX9G8FGVSQE8Z">
+            <div class="row" data-id="01M0W4K8N8MDZSX9G8FGVSQE8Z">
               <span class="mono col-time">09:39:05</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span><span class="chip chip-path">passthrough</span></span>
@@ -8059,7 +8151,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">128<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01J69HJDNDGZG35VH20N8GAWV0">
+            <div class="row" data-id="01M0W4JQ2RGZG35VH20N8GAWV0">
               <span class="mono col-time">09:38:47</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text"><span class="text-muted">fast-coder &rarr;</span> openai/gpt-oss-120b</span><span class="chip chip-path">translated</span></span>
@@ -8070,7 +8162,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">102<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01J2N4FHZD8YFYTC66VPVTX363" title="timeout &mdash; 30000ms elapsed before first byte">
+            <div class="row" data-id="01M0W4HWQ08YFYTC66VPVTX363" title="timeout &mdash; 30000ms elapsed before first byte">
               <span class="mono col-time">09:38:20</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
@@ -8081,7 +8173,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">30,000<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01J5379AV4RRXG07HN7JVAX0GB">
+            <div class="row" data-id="01M0W4HB4GRRXG07HN7JVAX0GB">
               <span class="mono col-time">09:38:02</span>
               <span class="mono col-surface">embedding</span>
               <span class="col-model"><span class="mono col-model-text">text-embedding-3-large</span></span>
@@ -8092,7 +8184,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">44<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JM40X64DG8P4FQJAWK0K68G7">
+            <div class="row" data-id="01M0W4GSJ0G8P4FQJAWK0K68G7">
               <span class="mono col-time">09:37:44</span>
               <span class="mono col-surface">rerank</span>
               <span class="col-model"><span class="mono col-model-text">bge-reranker-v2-m3</span></span>
@@ -8103,7 +8195,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">58<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01J6KC9QA0MZ17QKF3F55Z488Y">
+            <div class="row" data-id="01M0W4G240MZ17QKF3F55Z488Y">
               <span class="mono col-time">09:37:20</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">gemini-2.5-pro</span></span>
@@ -8114,7 +8206,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono col-latency col-right">288<span class="unit">ms</span></span>
             </div>
 
-            <div class="row" data-id="01JA35B44FS7F25TMGDMFGS8KX">
+            <div class="row" data-id="01M0W4FCMGS7F25TMGDMFGS8KX">
               <span class="mono col-time">09:36:58</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
@@ -8131,7 +8223,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Paging &mdash; keyset on (ts,id) desc, cursor rejected when filters change. Phase 7 &sect;4.2, unchanged.</span></p>
         <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
           <button class="control">Load 25 more &darr;</button>
-          <span class="micro">cursor 01JA35B44FS7F25TMGDMFGS8KX &middot; pages accumulate, they do not replace</span>
+          <span class="micro">cursor 01M0W4FCMGS7F25TMGDMFGS8KX &middot; pages accumulate, they do not replace</span>
         </div>
 
         <p class="section-title" style="margin-top:var(--gutter)">Empty state &mdash; no matches</p>
@@ -8196,7 +8288,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <div class="panel trace-header">
             <div class="trace-header-row">
               <span class="chip status-badge" data-status="success">success</span>
-              <span class="mono trace-id">01JBXTG4R8ZQCN2VMD9F6K3H7P</span>
+              <span class="mono trace-id">01M0W4NWMRZQCN2VMD9F6K3H7P</span>
               <button class="chip trace-copy-btn" type="button" aria-label="copy request id">⧉ copy</button>
             </div>
             <p class="mono trace-route">
@@ -8210,7 +8302,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder &mdash; candidates[] and skips[] ("target:reason") and attempts[]{seq,provider,key_label,model,outcome,status_code,latency_ms,error,path}. seq is 0-indexed at source and displayed 1-based.</span></p>
       <div class="ladder">
         <div class="ladder-row">
-          <span class="rank">01</span>
+          <span class="rank rank-tick">01</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -8222,7 +8314,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="latency-bar latency-bar-failed" style="width:2px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank">02</span>
+          <span class="rank rank-tick">02</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -8234,19 +8326,19 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="latency-bar latency-bar-failed" style="width:64px"></span>
         </div>
         <div class="ladder-row ladder-row-served">
-          <span class="rank">03</span>
+          <span class="rank rank-tick">03</span>
           <span class="spine"></span>
           <span class="mark mark-served"></span>
           <span class="stub"></span>
           <span class="target">together/openai-gpt-oss-120b</span>
           <span class="reason">
             <span class="reason-code">200</span>
-            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
           </span>
           <span class="latency-bar" style="width:4px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">04</span>
+          <span class="rank rank-tick text-terminated">04</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
@@ -8258,19 +8350,19 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">06</span>
+          <span class="rank rank-tick text-terminated">06</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">07</span>
+          <span class="rank rank-tick text-terminated">07</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">08</span>
+          <span class="rank rank-tick text-terminated">08</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">vertex/gemini-2.5-pro</span>
@@ -8364,12 +8456,6 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
 
             <div class="well readout-tile">
-              <p class="spec-note">cost_micros &middot; gpt-image-1</p>
-              <span class="readout">&mdash;</span>
-              <p class="spec-note">pricing unavailable for this model</p>
-            </div>
-
-            <div class="well readout-tile">
               <p class="spec-note">ttft_ms</p>
               <span class="readout">284</span><span class="unit">ms</span>
             </div>
@@ -8407,7 +8493,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <div class="well json-tree">
             <div class="json-row json-depth-0"><span class="json-punct">{</span></div>
             <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">headers</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
-            <div class="json-row json-depth-2"><span class="json-key">x-request-id</span><span class="json-punct">:</span> <span class="json-string">"01JBXTG4R8ZQCN2VMD9F6K3H7P"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">x-request-id</span><span class="json-punct">:</span> <span class="json-string">"01M0W4NWMRZQCN2VMD9F6K3H7P"</span><span class="json-punct">,</span></div>
             <div class="json-row json-depth-2"><span class="json-key">content-type</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span><span class="json-punct">,</span></div>
             <div class="json-row json-depth-2"><span class="json-key">accept</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span></div>
             <div class="json-row json-depth-1"><span class="json-punct">},</span></div>
@@ -8529,6 +8615,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-3"/></svg>together</span>
     <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-4"/></svg>openrouter</span>
     <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-5"/></svg>anthropic</span>
+    <span class="micro">five busiest; vertex is the only other provider with traffic in the window</span>
               </div>
             </div>
 
@@ -8668,7 +8755,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <span class="mono rank-col-id">anthropic</span>
         <span class="data-emph rank-col-num">1,331</span>
         <span class="rank-col-num"><span class="data-emph">1.68</span><span class="unit">M</span></span>
-        <span class="data-emph rank-col-num">$62.18</span>
+        <span class="data-emph rank-col-num">$64.07</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:20.6%"></span></span>
           <span class="micro share-pct">7.6%</span>
@@ -8770,7 +8857,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <span class="mono rank-col-id">claude-opus-4-20250514</span>
         <span class="data-emph rank-col-num">812</span>
         <span class="rank-col-num"><span class="data-emph">1.31</span><span class="unit">M</span></span>
-        <span class="data-emph rank-col-num">$44.45</span>
+        <span class="data-emph rank-col-num">$44.67</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:13.1%"></span></span>
           <span class="micro share-pct">4.6%</span>
@@ -8883,7 +8970,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             <div class="row prov-row" data-enabled="true">
               <span class="priority-handle" aria-hidden="true"></span>
               <span class="mono prov-col-prio">90</span>
-              <span class="prov-col-name"><span class="state-pip" data-state="cooling"></span><span class="mono">cerebras</span></span>
+              <span class="prov-col-name"><span class="state-pip" data-state="degraded"></span><span class="mono">cerebras</span></span>
               <span class="mono prov-col-kind">openaicompat</span>
               <span class="micro prov-col-url">https://api.cerebras.ai/v1</span>
               <span class="micro prov-col-creds">3 credentials &middot; 1 cooling</span>
@@ -8983,7 +9070,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <div class="row prov-row" data-enabled="true">
                 <span class="priority-handle" aria-hidden="true"></span>
                 <span class="mono prov-col-prio-edit">90</span>
-                <span class="prov-col-name"><span class="state-pip" data-state="cooling"></span><span class="mono">cerebras</span></span>
+                <span class="prov-col-name"><span class="state-pip" data-state="degraded"></span><span class="mono">cerebras</span></span>
                 <span class="micro">unchanged</span>
               </div>
 
@@ -9236,7 +9323,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
           <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Identity &mdash; PATCH /api/providers/{id}. kind, preset and auth_style are not patchable; location is create-only.</span></p>
           <div class="panel pd-panel">
             <div class="pd-head">
-              <span class="state-pip" data-state="cooling"></span>
+              <span class="state-pip" data-state="degraded"></span>
               <span class="mono pd-head-id">cerebras</span>
               <span class="chip">priority 90</span>
               <span class="chip">3 credentials</span>
@@ -9665,7 +9752,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
               </div>
               <div class="row">
-                <span class="state-pip" data-state="cooling"></span>
+                <span class="state-pip" data-state="degraded"></span>
                 <span class="mono" style="flex:0 0 180px">cerebras</span>
                 <span class="mono" style="flex:0 0 140px">openaicompat</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">90</span>
@@ -9693,14 +9780,14 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
               </div>
               <div class="row">
-                <span class="state-pip" data-state="healthy"></span>
+                <span class="state-pip" data-state="disabled"></span>
                 <span class="mono" style="flex:0 0 180px">deepinfra</span>
                 <span class="mono" style="flex:0 0 140px">openaicompat</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">50</span>
                 <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
               </div>
               <div class="row">
-                <span class="state-pip" data-state="failed"></span>
+                <span class="state-pip" data-state="unconfigured"></span>
                 <span class="mono" style="flex:0 0 180px">bedrock</span>
                 <span class="mono" style="flex:0 0 140px">bedrock</span>
                 <span class="micro" style="flex:0 0 90px;text-align:right">40</span>
@@ -10471,7 +10558,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="chip">llm</span>
               <span class="lifecycle" data-state="live"><span class="lifecycle-mark"></span>live</span>
               <span class="sheet-meta">
-                <span class="micro">5 offerings &middot; 12 candidates &middot; 3 aliases</span>
+                <span class="micro">5 offerings &middot; 8 candidates &middot; 1 alias</span>
                 <button class="chip" type="button" aria-label="close sheet">&times;</button>
               </span>
             </div>
@@ -10484,67 +10571,47 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <p class="section-title">Route order</p>
                   <div class="ladder" style="width:220px">
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">01</span>
-                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="rank rank-tick">01</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
                       <span class="mono">groq</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">02</span>
-                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="rank rank-tick">02</span>
+                      <span class="mark mark-cooling mark-catalog"></span>
                       <span class="mono">cerebras</span>
                     </div>
-                    <div class="ladder-row ladder-row-served" style="gap:8px">
-                      <span class="rank">03</span>
-                      <span class="mark mark-served mark-catalog"></span>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank rank-tick">03</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono">openrouter</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank rank-tick">04</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
                       <span class="mono">together</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">04</span>
+                      <span class="rank rank-tick rank-tick-major">05</span>
                       <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">deepinfra</span>
+                      <span class="mono">groq</span>
+                      <span class="credential-tag">key 2</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">05</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">openrouter</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">06</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">anthropic</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">07</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">bedrock</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">08</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">vertex</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">09</span>
+                      <span class="rank rank-tick">06</span>
                       <span class="mark mark-cooling mark-catalog"></span>
-                      <span class="mono target-muted">groq</span>
+                      <span class="mono">cerebras</span>
                       <span class="credential-tag">key 2</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">10</span>
+                      <span class="rank rank-tick">07</span>
                       <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">together</span>
+                      <span class="mono">openrouter</span>
                       <span class="credential-tag">key 2</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">11</span>
+                      <span class="rank rank-tick">08</span>
                       <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">deepinfra</span>
-                      <span class="credential-tag">key 2</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">12</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">openrouter</span>
+                      <span class="mono">together</span>
                       <span class="credential-tag">key 2</span>
                     </div>
                   </div>
@@ -10659,7 +10726,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                     </div>
                     <div class="row">
                       <span class="legend-caps icol-key">last discovery sweep</span>
-                      <span class="mono icol-value">2026-08-25 09:12 &middot; snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM</span>
+                      <span class="mono icol-value">2026-08-25 09:12 &middot; snapshot 01M0W31NR0CNRP4V8TG6W3F7ZM</span>
                     </div>
                   </div>
                 </div>
@@ -10847,6 +10914,14 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 <span class="mono acol-requests col-right">188</span>
               </div>
               <div class="row">
+                <span class="mono acol-alias">vision</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">gemini-2.5-pro</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-requests col-right">96</span>
+              </div>
+              <div class="row">
                 <span class="mono acol-alias">rerank-default</span>
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">bge-reranker-v2-m3</span>
@@ -10857,7 +10932,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
             <div class="alias-footer">
               <p class="alias-note">
-                Six aliases point into this catalog. Adding one, reordering
+                Seven aliases point into this catalog. Adding one, reordering
                 its candidates or repointing it is routing policy, so it
                 happens on one screen only &mdash; this panel exists so that
                 opening a model answers "who calls this?" without a second
@@ -10943,11 +11018,11 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <span class="mono rt-yield">8 targets</span>
               <span class="micro">8 candidates &middot; 2 would be skipped &middot; rank 01 would be attempted first</span>
             </div>
-            <p class="micro">predicted against snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
+            <p class="micro">predicted against snapshot 01M0W31NR0CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
 
             <div class="ladder">
               <div class="ladder-row">
-                <span class="rank">01</span>
+                <span class="rank rank-tick">01</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">groq/openai-gpt-oss-120b</span>
@@ -10956,7 +11031,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">02</span>
+                <span class="rank rank-tick">02</span>
                 <span class="spine"></span>
                 <span class="mark mark-cooling"></span>
                 <span class="target">cerebras/gpt-oss-120b</span>
@@ -10966,7 +11041,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">03</span>
+                <span class="rank rank-tick">03</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">together/openai-gpt-oss-120b</span>
@@ -10975,7 +11050,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">04</span>
+                <span class="rank rank-tick">04</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">deepinfra/gpt-oss-120b</span>
@@ -10984,7 +11059,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">05</span>
+                <span class="rank rank-tick rank-tick-major">05</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">openrouter/openai/gpt-oss-120b</span>
@@ -10993,7 +11068,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">06</span>
+                <span class="rank rank-tick">06</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">anthropic/claude-opus-4-20250514</span>
@@ -11003,7 +11078,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">07</span>
+                <span class="rank rank-tick">07</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">bedrock/us.anthropic.claude-opus-4</span>
@@ -11012,7 +11087,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">08</span>
+                <span class="rank rank-tick">08</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">vertex/gemini-2.5-pro</span>
@@ -11124,11 +11199,11 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
               <div class="rt-rule-eg">
                 <span class="mono">gemini-2.5-pro</span>
                 <span class="rt-arrow">&rarr;</span>
-                <span class="mono">vertex 100</span>
-                <span class="rt-arrow">&rsaquo;</span>
                 <span class="mono">openrouter 70</span>
                 <span class="rt-arrow">&rsaquo;</span>
                 <span class="mono">openrouter 70, key 2</span>
+                <span class="rt-arrow">&rsaquo;</span>
+                <span class="mono">vertex 30</span>
               </div>
               <p class="spec-note">nothing offers it &rarr; the request is rejected before any provider is called</p>
             </div>
@@ -11313,7 +11388,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
                   <span class="micro rt-tcol-ord">01</span>
                   <span class="mono rt-tcol-target">vertex/gemini-2.5-pro</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">vertex, priority 30 &middot; the only vision model in the catalog</span>
+                  <span class="micro rt-tcol-note">vertex, priority 30 &middot; the only candidate offering this model that also passes the vision demand</span>
                 </div>
 
                 <div class="row">
@@ -11961,7 +12036,7 @@ def ulid_ms(ulid: str) -&gt; int:
 
             <div class="pg-result-field">
               <p class="legend-caps">request</p>
-              <span class="pg-result-value trace-id">01JQ6Z8VYB3T4N7CKR2WFPD5H9</span>
+              <span class="pg-result-value trace-id">01M0W50V7G3T4N7CKR2WFPD5H9</span>
               <button class="chip" type="button" aria-label="copy request id">&#10697; copy</button>
             </div>
 
@@ -12166,7 +12241,7 @@ def ulid_ms(ulid: str) -&gt; int:
 
             <div class="pgc-tracelink">
               <span class="micro">X-Darkrouter-Request</span>
-              <span class="mono pgc-tracelink-id">01JGZ8VMKX4E7RP2N9SD3HQBFA</span>
+              <span class="mono pgc-tracelink-id">01M0W4YFDW4E7RP2N9SD3HQBFA</span>
               <a class="control link-out" href="#">Open trace &rarr;</a>
             </div>
 
@@ -12232,7 +12307,7 @@ def ulid_ms(ulid: str) -&gt; int:
 
             <div class="pgc-tracelink">
               <span class="micro">X-Darkrouter-Request</span>
-              <span class="mono pgc-tracelink-id">01JGZ8VMKY6T2W5CBN8HDQR3XF</span>
+              <span class="mono pgc-tracelink-id">01M0W4YFDX6T2W5CBN8HDQR3XF</span>
               <a class="control link-out" href="#">Open trace &rarr;</a>
             </div>
 
@@ -12404,7 +12479,7 @@ def ulid_ms(ulid: str) -&gt; int:
                 <span class="micro cn-surface-flag">live</span>
               </div>
               <p class="micro cn-surface-path">POST /v1/chat/completions</p>
-              <p class="micro cn-surface-by">all 8 configured providers</p>
+              <p class="micro cn-surface-by">6 enabled providers</p>
             </div>
 
             <div class="well cn-surface">
@@ -12414,7 +12489,7 @@ def ulid_ms(ulid: str) -&gt; int:
                 <span class="micro cn-surface-flag">live</span>
               </div>
               <p class="micro cn-surface-path">POST /v1/embeddings</p>
-              <p class="micro cn-surface-by">together, deepinfra, vertex</p>
+              <p class="micro cn-surface-by">together, vertex</p>
             </div>
 
             <div class="well cn-surface">
@@ -12424,7 +12499,7 @@ def ulid_ms(ulid: str) -&gt; int:
                 <span class="micro cn-surface-flag">live</span>
               </div>
               <p class="micro cn-surface-path">POST /v1/images/generations</p>
-              <p class="micro cn-surface-by">bedrock, vertex</p>
+              <p class="micro cn-surface-by">together</p>
             </div>
 
             <div class="well cn-surface">
@@ -12434,7 +12509,7 @@ def ulid_ms(ulid: str) -&gt; int:
                 <span class="micro cn-surface-flag">live</span>
               </div>
               <p class="micro cn-surface-path">POST /v1/audio/transcriptions</p>
-              <p class="micro cn-surface-by">groq, deepinfra</p>
+              <p class="micro cn-surface-by">groq</p>
             </div>
 
             <div class="well cn-surface">
@@ -12444,17 +12519,17 @@ def ulid_ms(ulid: str) -&gt; int:
                 <span class="micro cn-surface-flag">live</span>
               </div>
               <p class="micro cn-surface-path">POST /v1/rerank</p>
-              <p class="micro cn-surface-by">together, deepinfra</p>
+              <p class="micro cn-surface-by">together</p>
             </div>
 
-            <div class="well cn-surface cn-surface-off">
+            <div class="well cn-surface">
               <div class="cn-surface-head">
                 <span class="cn-surface-mark"></span>
                 <span class="mono">tts</span>
-                <span class="micro cn-surface-flag">not available</span>
+                <span class="micro cn-surface-flag">live</span>
               </div>
               <p class="micro cn-surface-path">POST /v1/audio/speech</p>
-              <p class="micro cn-surface-by">no enabled provider declares a model</p>
+              <p class="micro cn-surface-by">groq</p>
             </div>
 
             <div class="well cn-surface cn-surface-off">
@@ -12640,7 +12715,7 @@ Content-Type: application/json
 X-Darkrouter-Provider: cerebras
 X-Darkrouter-Model: openai/gpt-oss-120b
 X-Darkrouter-Attempts: 3
-X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
+X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
             </div>
 
             <div class="cn-pane">
@@ -12739,8 +12814,8 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
             <div class="set-head">
               <span class="mono set-head-id">server</span>
               <span class="chip">6 values</span>
-              <span class="set-scope" data-scope="restart">restart</span>
-              <span class="micro">every value in this group is read once at process start. Nothing here can be applied to a running gateway.</span>
+              <span class="set-scope" data-scope="live">mixed</span>
+              <span class="micro">two of these are read once at process start; the rest reload. config.RestartOnly names the whole product's restart set and it has four entries, two of them here.</span>
             </div>
             <div class="set-form">
 
@@ -12765,16 +12840,16 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">max_body_bytes</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="33554432">
-                <span class="spec-note">32 MiB. An inbound body above it is refused before any provider is chosen, so it never costs an upstream call.</span>
+                <span class="spec-note">32 MiB. An inbound body above it is refused before any provider is chosen, so it never costs an upstream call. Live because the executor reads it from a fresh per-request snapshot &mdash; config.go names it as the field most often assumed to need a restart.</span>
               </label>
 
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">shutdown_grace</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="30s">
                 <span class="spec-note">how long an in-flight stream has to finish after SIGTERM before the process exits regardless.</span>
@@ -12783,7 +12858,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">sse.max_line_bytes</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="1048576">
                 <span class="spec-note">1 MiB per SSE line. One oversized provider event terminates the stream; it is not a ceiling on the whole response.</span>
@@ -12792,7 +12867,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               <label class="field">
                 <span class="set-field-head">
                   <span class="legend-caps">sse.max_precommit_bytes</span>
-                  <span class="set-scope" data-scope="restart">restart</span>
+                  <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="1048576">
                 <span class="spec-note">how much of a stream is buffered before the router commits to the provider it picked. Past this point failover is no longer possible.</span>
@@ -12824,8 +12899,8 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               <div class="field field-span-2 set-retention-note">
                 <span class="legend-caps">effect</span>
                 <span class="field-static">
-                  <span class="mono">2,481</span>
-                  <span class="micro">rows retained &middot; oldest 2026-07-25 09:41 &middot; next sweep 15:00:00</span>
+                  <span class="mono">17,561</span>
+                  <span class="micro">rows retained &middot; oldest 2026-07-26 09:41 &middot; next sweep 15:00:00</span>
                 </span>
                 <span class="spec-note">the count the current value keeps. Shortening the window deletes rows on the next sweep and there is no undo.</span>
               </div>
@@ -12885,6 +12960,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               <span class="set-scope" data-scope="restart">restart</span>
               <span class="micro">last sync 2026-08-24 02:11:07 &middot; 8 configured providers matched &middot; 1,412 catalogue entries rebuilt</span>
             </div>
+            <p class="set-note-warn">Restart by behaviour, not by declaration. Both workers capture their interval into an options struct when they are constructed, so a reload that changes one is accepted, warns about nothing, and takes effect at the next process start. config.RestartOnly does not list them, which is the gap: the marker below is what the code does, not what the reload path claims.</p>
             <div class="set-form">
 
               <label class="field field-span-2">
@@ -13129,10 +13205,10 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;&nbsp;&nbsp;preset: cerebras</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">aliases:</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;fast-coder: [cerebras/gpt-oss-120b, groq/openai-gpt-oss-120b]</span></div>
-              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;long-context: [anthropic/claude-opus-4-20250514]</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;long-context: [vertex/gemini-2.5-pro]</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">policy:</span></div>
               <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;retry: { max_attempts: 3, cooldown_base: "800ms" }</span></div>
-              <div class="set-config-line"><span class="set-config-src" data-src="file">&nbsp;</span><span class="micro set-config-more">6 more providers, 2 more aliases and 14 more lines not shown</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">&nbsp;</span><span class="micro set-config-more">6 more providers, 5 more aliases and 14 more lines not shown</span></div>
             </div>
             <div class="set-srckey">
               <span class="set-config-src" data-src="file">file</span>
@@ -13152,7 +13228,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
               </div>
               <div class="set-warning">
                 <span class="micro set-warning-loc">line 88</span>
-                <p class="prose"><span class="mono">aliases.vision</span> targets <span class="mono">openrouter/qwen-2.5-vl-72b</span>, which no enabled provider serves. The alias resolves to nothing until openrouter is enabled &mdash; a dangling target is a warning, never a validation error.</p>
+                <p class="prose"><span class="mono">aliases.cheap-embed</span> holds a target on <span class="mono">deepinfra</span>, which is disabled, so that link in the chain resolves to nothing. The alias still routes through its remaining targets &mdash; a dangling target is a warning, never a validation error.</p>
               </div>
               <div class="set-warning">
                 <span class="micro set-warning-loc">line 103</span>
@@ -13591,7 +13667,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
                 <p class="micro">provider.credentials &middot; provider.state</p>
               </div>
             </div>
-            <p class="prose fr-health-note">One tile per configured provider, four across. Each carries a state pip &mdash; healthy, cooling, disabled or unconfigured &mdash; the provider id, how many credentials it holds and how many of those are cooling, plus a callout on the one provider whose credential needs the operator to reconnect it. Once it has anything in it, this grid is the fastest read on the screen. The tile at left is a labelled specimen of that shape, drawn dashed and unfilled so it cannot be counted as a provider.</p>
+            <p class="prose fr-health-note">One tile per configured provider, four across. Each carries a state pip &mdash; healthy, degraded, disabled or unconfigured, the four states the endpoint emits &mdash; the provider id, how many credentials it holds and how many of those are cooling, plus a callout on the one provider whose credential needs the operator to reconnect it. Once it has anything in it, this grid is the fastest read on the screen. The tile at left is a labelled specimen of that shape, drawn dashed and unfilled so it cannot be counted as a provider.</p>
           </div>
 
           <p class="section-title fr-subhead">Recent failovers</p>
@@ -13744,10 +13820,10 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
         <p>
           <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder in light &mdash; the termination rule is the at-risk mark: --hairline-subtle on a near-white well.</span>
         </p>
-        <p class="micro">request 01JBXTG4R8ZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
+        <p class="micro">request 01M0W4NWMRZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
       <div class="ladder">
         <div class="ladder-row">
-          <span class="rank">01</span>
+          <span class="rank rank-tick">01</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -13759,7 +13835,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
           <span class="latency-bar latency-bar-failed" style="width:2px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank">02</span>
+          <span class="rank rank-tick">02</span>
           <span class="spine"></span>
           <span class="mark mark-failed"></span>
           <span class="stub stub-dashed"></span>
@@ -13771,19 +13847,19 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
           <span class="latency-bar latency-bar-failed" style="width:64px"></span>
         </div>
         <div class="ladder-row ladder-row-served">
-          <span class="rank">03</span>
+          <span class="rank rank-tick">03</span>
           <span class="spine"></span>
           <span class="mark mark-served"></span>
           <span class="stub"></span>
           <span class="target">together/openai-gpt-oss-120b</span>
           <span class="reason">
             <span class="reason-code">200</span>
-            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
           </span>
           <span class="latency-bar" style="width:4px"></span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">04</span>
+          <span class="rank rank-tick text-terminated">04</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
@@ -13795,19 +13871,19 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
           <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">06</span>
+          <span class="rank rank-tick text-terminated">06</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">07</span>
+          <span class="rank rank-tick text-terminated">07</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
         </div>
         <div class="ladder-row">
-          <span class="rank text-terminated">08</span>
+          <span class="rank rank-tick text-terminated">08</span>
           <span class="spine spine-terminated"></span>
           <span class="mark mark-terminated"></span>
           <span class="target text-terminated">vertex/gemini-2.5-pro</span>
@@ -13828,9 +13904,12 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
           hairline is a pale grey, but dark's well is nearly black and its
           hairline nearly as dark, so neither mode was ever relying on much. The
           skipped mark's --bezel stroke gives up more: 4.11:1 dark against
-          3.42:1 light. Both marks clear the 3:1 non-text floor in both modes
-          only because the terminated mark is not asked to; it is the absence of
-          a decision, and the spine beneath it carries the same reading.
+          3.42:1 light, and it clears the 3:1 non-text floor in both. The
+          terminated mark clears nothing, and is not asked to: it reports the
+          absence of a decision rather than a decision, the spine beneath it
+          says the same thing at the same weight, and the row's text carries
+          the rest. A mark that has to be found is held to the floor; a mark
+          whose whole job is to stop asking for attention is not.
         </p>
       </div>
 
