@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## Phase status
 
@@ -15,6 +15,7 @@ Last updated: 2026-08-24
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
 | 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, and now **verified live against Groq** (§11), which found two defects. |
+| 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -970,6 +971,76 @@ Nothing else in the brief's substance was skipped. Both processes were tracked
 by PID from the moment they started, killed at the end (`pkill -P` then
 `kill`), and `ss -ltnp` afterward showed no listener on 18080, 18081 or 18090.
 
+## Phase 10 — the mockup set
+
+Eighteen annotated screens live in `docs/ux/mockups/`, assembled by `build.py`
+into a self-contained `index.html` (a document) and `artifact.html` (the same
+content with no document wrapper, because the Artifact tool supplies its own).
+
+**Published artifact:** https://claude.ai/code/artifact/604611dd-18a6-47fc-a980-f0aec6204879
+
+Republish by calling the Artifact tool with the **same file path**
+(`docs/ux/mockups/artifact.html`) from a conversation that published it, or by
+passing that URL as `url` from any other conversation. Publishing without the
+URL from a fresh conversation creates a second artifact instead of updating
+this one.
+
+Final gate: `qa: PASS — 18 fragment(s) clean`, 34 tests OK, 36 screenshots
+(every screen in both modes) with no failures and nothing clipped.
+`index.html` is 727 KB — 100 KB of that is four base64 IBM Plex woff2 faces,
+194 KB is the stylesheet and 428 KB is screen markup. The plan predicted
+200–350 KB, which was written before the set existed; nothing improper is
+embedded, and each font blob was verified byte-identical to its file on disk.
+
+### Four decisions a future reader will need
+
+**Light mode inverts well polarity; it is not a palette swap.** The well is the
+extreme end of the value range and the panel is mid-range, so in dark the well
+is *darker* than the panel and in light it is *brighter*. Measured from the
+rendered pixels: dark panel luma 27.6 → well 9.9; light panel 249.9 → well
+255.0. Light keeps the polarity at a third of the strength (1.045:1 against
+dark's 1.157:1), so every recessed region in light is carried by its 1px
+`--hairline` rather than by the value step inside it. Screen 17 is the proof and
+re-measures it.
+
+**The ladder is defined once and copied, never reimplemented.** Fragment 01 is
+the contract; screens 04, 09, 10 and 17 embed it byte-identically, indentation
+included. Three modes: retrospective (filled marks — the attempts happened),
+predictive and compressed (hollow — nothing has been sent). Fill versus outline
+is the only thing separating them, so a filled mark outside a trace is a bug.
+
+**State colour has exactly three carve-outs, and they are named on screen 00.**
+Destructive affordance, request outcome, and attention. Attention is the widest
+— it is why amber appears on stale discovery, warning chips, dangling aliases
+and unset values — and the one worth policing. What none of them permit: a
+state colour in the ladder gutter, or `--trace` on a provider pip.
+
+**A credential cools; a provider degrades.** Provider pips take the four states
+`GET /api/overview` actually emits — healthy, degraded, disabled, unconfigured
+— and `degraded` is not a synonym for `cooling`. The ladder keeps
+`.mark-cooling` because down there the subject really is one credential.
+
+### Two token divergences from the plan's verbatim-copy table
+
+Both are deliberate, ruled in `darkrouter-ui.css` and rendered as doctrine on
+screens 00 and 17. Light `--overlay` is `#F9FAFB` (panel-valued, not white):
+light panel-to-well is only 1.045:1 total, so a well recessed into a white
+overlay would be indistinguishable from the overlay. Light `--state-healthy`
+is `#047857`, not the plan's `#059467`, so it clears AA as body text rather
+than only the 3:1 non-text floor. If spec §3.1's table is ever treated as
+authoritative again, it is the table that is stale.
+
+### One code defect the mockups found
+
+`config.RestartOnly` under-reports. The catalog sync worker and the discovery
+sweeper each capture their interval into an options struct at construction
+(`internal/catalog/sync.go:96`, `internal/catalog/discovery.go:151`), so they
+are restart-only in behaviour — but neither is listed in `RestartOnly`
+(`internal/config/config.go:99`), so a reload that changes one is accepted,
+warns about nothing, and takes effect at the next process start. This is the
+exact failure `RestartOnly` exists to prevent. Screen 14 records it; the code
+is unchanged.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |
@@ -977,3 +1048,4 @@ by PID from the moment they started, killed at the end (`pkill -P` then
 | All 10 specs | 5 × Fable, read-only | ~150 findings → `docs/superpowers/specs/2026-08-22-spec-review-findings.md`, all specs revised |
 | Task 13 (`internal/exec`) | 1 × Fable, read-only | Concurrency core sound; 6 defects fixed in 8b0b81d |
 | Task 14 (`internal/server`) | 1 × Fable, read-only | 8 defects fixed in 8b0b81d, including a drain deadline that did nothing |
+| Phase 10 — all 18 mockup screens | 1 × Fable, read-only | 4 Important + 27 Minor, all verified against source and all fixed in 641c63d |
