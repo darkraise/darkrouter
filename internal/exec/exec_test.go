@@ -41,6 +41,58 @@ func newExecutor(t *testing.T, upstreamURL string) *Executor {
 	return newExecutorWith(t, upstreamURL, Deps{}, 0)
 }
 
+// newPricedExecutor returns an Executor whose catalog knows the pricing for
+// ("groq", "m"), for tests that call priceRecord directly rather than
+// driving a request through Handle.
+func newPricedExecutor(t *testing.T) *Executor {
+	t.Helper()
+	return &Executor{deps: Deps{Catalog: catalogOf(catalog.Model{
+		ProviderID: "groq", ModelID: "m",
+		Pricing: catalog.Pricing{
+			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000, Known: true,
+		},
+	})}}
+}
+
+func TestServedAttemptCarriesTheRequestUsage(t *testing.T) {
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 1000, TokensOut: 500,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "openai", Model: "x", Outcome: "error"},
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[1].TokensIn != 1000 || rec.Attempts[1].TokensOut != 500 {
+		t.Fatalf("served attempt must carry the request's usage, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[0].TokensIn != 0 {
+		t.Fatalf("a failed attempt must not inherit the served attempt's usage")
+	}
+}
+
+func TestAnAttemptWithNoTokensIsUnpricedNotFree(t *testing.T) {
+	// A confident zero is indistinguishable from a real zero downstream, and
+	// the rollup treats a non-NULL cost as authoritative.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "error"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].CostMicros != nil {
+		t.Fatalf("an attempt that recorded no tokens must stay unpriced, got %d",
+			*rec.Attempts[0].CostMicros)
+	}
+}
+
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
 // total leaves the default of 10m in place. It is a thin wrapper over
 // newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
