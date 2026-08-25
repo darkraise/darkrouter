@@ -555,9 +555,27 @@ func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, commit
 	if committed || outcome == adapter.OutcomeSuccess {
 		return
 	}
-	if n := len(rec.Attempts); n > 0 {
-		rec.Attempts[n-1].Outcome = string(outcome)
+	n := len(rec.Attempts)
+	if n == 0 {
+		return
 	}
+	a := &rec.Attempts[n-1]
+	if a.Outcome == string(outcome) {
+		// A pre-commit path (reclassifyStream) already demoted this attempt
+		// and moved its usage. The loop's own demote call on the same outcome
+		// is the same fault surfacing a second time, and re-running the
+		// transfer here would overwrite the moved usage with the zeroes it
+		// left behind.
+		return
+	}
+	a.Outcome = string(outcome)
+	// applyUsage accumulates onto the shared record as events arrive, so at
+	// this point it holds what this attempt burned before it failed. Moving it
+	// onto the attempt's own row is what lets the burn be priced at the
+	// provider that incurred it, and what stops the next attempt inheriting it.
+	a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+	rec.TokensIn, rec.TokensOut = 0, 0
+	rec.CacheReadTokens, rec.CacheWriteTokens, rec.ReasoningTokens = 0, 0, 0
 }
 
 // attemptStream buffers the upstream's events until one of them commits the
@@ -683,8 +701,8 @@ func (e *Executor) reclassifyStream(c router.Candidate, resp *http.Response,
 	rec *store.RequestRecord, msg string) *ir.Error {
 
 	e.recordHealthFor(c, adapter.OutcomeRetryableProvider, resp)
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
 	if n := len(rec.Attempts); n > 0 {
-		rec.Attempts[n-1].Outcome = string(adapter.OutcomeRetryableProvider)
 		rec.Attempts[n-1].Error = msg
 	}
 	return &ir.Error{Type: ir.ErrAPI, Message: msg}

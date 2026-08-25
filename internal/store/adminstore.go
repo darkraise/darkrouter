@@ -587,10 +587,6 @@ type RecentStats struct {
 	Requests  int64
 	Errors    int64
 	WindowSec int64
-	// PricedRows counts rows carrying a cost. Zero means nothing computes
-	// pricing, which the overview reports rather than showing a confident zero.
-	PricedRows int64
-	CostMicros int64
 }
 
 func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats, error) {
@@ -604,32 +600,6 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0)
 		   FROM requests WHERE ts >= ?`, since).
 		Scan(&s.Requests, &s.Errors)
-	if err != nil {
-		return s, fmt.Errorf("recent stats: %w", err)
-	}
-
-	// Cost is sourced the same way the daily rollup sources it: from each
-	// attempt's own cost, so a failover's discarded spend counts here just as
-	// it counts in usage_daily, rather than only the try that served. A
-	// request with no attempt rows falls back to its own cost_micros, the
-	// same fallback the rollup uses for requests written before attempt-level
-	// cost existed.
-	err = d.Read.QueryRowContext(ctx,
-		`SELECT coalesce(sum(CASE WHEN c IS NOT NULL THEN 1 ELSE 0 END), 0), coalesce(sum(c), 0)
-		   FROM (
-		     SELECT a.cost_micros AS c
-		       FROM requests r
-		       JOIN request_attempts a ON a.request_id = r.id
-		      WHERE r.ts >= ?
-		     UNION ALL
-		     SELECT r.cost_micros
-		       FROM requests r
-		      WHERE r.ts >= ?
-		        AND r.final_provider_id <> ''
-		        AND NOT EXISTS (
-		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
-		   )`, since, since).
-		Scan(&s.PricedRows, &s.CostMicros)
 	if err != nil {
 		return s, fmt.Errorf("recent stats: %w", err)
 	}
