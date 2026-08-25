@@ -731,12 +731,29 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		}
 	}
 
+	// recordAttempt runs while the attempt is still in flight, before its
+	// usage is known. By log time applyUsage has put the served attempt's
+	// usage on the request, so this is the first point it can be attributed.
+	for i := range rec.Attempts {
+		a := &rec.Attempts[i]
+		if rec.FinalProviderID != "" && a.ProviderID == rec.FinalProviderID &&
+			a.Model == rec.FinalModel && a.TokensIn == 0 && a.TokensOut == 0 {
+			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+			break
+		}
+	}
+
 	// Each attempt is priced against the model IT tried, not the one that
 	// served: a failover's discarded tokens were burned at the failed
 	// provider's rate.
 	for i := range rec.Attempts {
 		a := &rec.Attempts[i]
 		if a.CostMicros != nil || a.ProviderID == "" || a.Model == "" {
+			continue
+		}
+		// No tokens recorded is not the same as nothing spent: a NULL cost
+		// keeps the rollup from reporting a priced day of zero.
+		if a.TokensIn == 0 && a.TokensOut == 0 {
 			continue
 		}
 		am, ok := snap.Lookup(a.ProviderID, a.Model)
