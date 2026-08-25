@@ -704,7 +704,34 @@ func (e *Executor) log(rec *store.RequestRecord) {
 	if e.deps.Log == nil {
 		return
 	}
+	e.priceRecord(rec)
 	e.deps.Log.Log(rec)
+}
+
+// priceRecord fills in CostMicros from the catalog price of the model that
+// actually served.
+//
+// Here rather than in applyUsage because applyUsage has eleven call sites and
+// this has one: cost is a property of the finished request, not of each usage
+// event that arrived on the way. A record with nothing served, no catalog, or
+// an unpriced model keeps a nil cost -- the em-dash the trace already renders.
+func (e *Executor) priceRecord(rec *store.RequestRecord) {
+	if rec == nil || rec.CostMicros != nil {
+		return
+	}
+	if rec.FinalProviderID == "" || rec.FinalModel == "" || e.deps.Catalog == nil {
+		return
+	}
+	snap := e.deps.Catalog.Snapshot()
+	if snap == nil {
+		return
+	}
+	m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel)
+	if !ok {
+		return
+	}
+	rec.CostMicros = m.Pricing.CostMicros(
+		rec.TokensIn, rec.TokensOut, rec.CacheReadTokens)
 }
 
 func (e *Executor) recordHealth(k health.Key, s health.Signal) {
@@ -938,7 +965,9 @@ func applyUsage(rec *store.RequestRecord, u *ir.Usage) {
 	rec.CacheReadTokens = int64(u.CacheReadTokens)
 	rec.CacheWriteTokens = int64(u.CacheWriteTokens)
 	rec.ReasoningTokens = int64(u.ReasoningTokens)
-	// CostMicros stays nil. Phase 6 supplies pricing; zero would read as free.
+	// CostMicros stays nil here: it is priced once in priceRecord, at log
+	// time, from the model that actually served -- not from each usage event
+	// that arrived on the way.
 }
 
 // tapStream observes events on their way to the edge writer without buffering
