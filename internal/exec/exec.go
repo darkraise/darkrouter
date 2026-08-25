@@ -745,25 +745,36 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		}
 	}
 
+	// A pre-commit stream failure can report usage before it dies, and
+	// nothing resets the shared record between attempts. If another attempt
+	// already carries that usage, it is not the served attempt's to claim --
+	// handing it over would bill one provider for tokens another one burned.
+	var claimed int64
+	for i := range rec.Attempts {
+		claimed += rec.Attempts[i].TokensIn + rec.Attempts[i].TokensOut
+	}
+
 	// recordAttempt runs while the attempt is still in flight, before its
 	// usage is known. By log time applyUsage has put the served attempt's
 	// usage on the request, so this is the first point it can be attributed.
-	for i := range rec.Attempts {
-		a := &rec.Attempts[i]
-		// Identified by outcome, not by matching the request's final provider:
-		// the pre-commit 400 retry re-attempts the same provider and model, so
-		// a provider match would find the rejected attempt first.
-		if a.Outcome == string(adapter.OutcomeSuccess) &&
-			a.TokensIn == 0 && a.TokensOut == 0 {
-			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
-			// The same model at the same rates on the same tokens. Re-pricing
-			// it separately drops the cache-read component the attempt row has
-			// no column for, and the two cost surfaces stop agreeing.
-			if rec.CostMicros != nil {
-				c := *rec.CostMicros
-				a.CostMicros = &c
+	if claimed == 0 {
+		for i := range rec.Attempts {
+			a := &rec.Attempts[i]
+			// Identified by outcome, not by matching the request's final provider:
+			// the pre-commit 400 retry re-attempts the same provider and model, so
+			// a provider match would find the rejected attempt first.
+			if a.Outcome == string(adapter.OutcomeSuccess) &&
+				a.TokensIn == 0 && a.TokensOut == 0 {
+				a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+				// The same model at the same rates on the same tokens. Re-pricing
+				// it separately drops the cache-read component the attempt row has
+				// no column for, and the two cost surfaces stop agreeing.
+				if rec.CostMicros != nil {
+					c := *rec.CostMicros
+					a.CostMicros = &c
+				}
+				break
 			}
-			break
 		}
 	}
 
