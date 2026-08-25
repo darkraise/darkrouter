@@ -516,6 +516,11 @@ a.row { text-decoration: none; }
 
 .state-pip {
   display: inline-block;
+  /* A pip is 7px and carries the row's whole state reading, so it must never
+     be a shrink candidate: inside a crowded flex row the default
+     flex-shrink:1 collapses it to zero width and the state silently
+     disappears rather than overflowing visibly. */
+  flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -684,6 +689,7 @@ a.row { text-decoration: none; }
    footnotes the second (and later) row rather than letting it read as an
    accidental duplicate — legend weight, off to the side of the id. */
 .credential-tag {
+  flex: 0 0 auto;
   margin-left: 4px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;

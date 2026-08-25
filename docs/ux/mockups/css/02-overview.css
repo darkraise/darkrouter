@@ -4,7 +4,7 @@
  * New component classes this screen introduces: .config-banner (alarm
  * strip), .live-strip/.live-tile/.live-tile-caption (readout-over-sparkline
  * tiles), .sparkline (svg trend line, reused by Task 9), .load-bar (per-tile
- * refresh indicator), .health-grid/.health-tile (provider tiles, .health-tile
+ * refresh indicator), .health-tile (provider tiles, .health-tile
  * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
  * this screen composes .well/.table/.row/a.row/.chip/.chip-failover/.mono/
  * .readout/.unit/.micro/.data-emph/.section-title/.legend-caps/.region from
@@ -132,12 +132,11 @@
   opacity: 0.08;
 }
 
-/* --- Region 3: provider health grid ------------------------------------ */
-.health-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--gutter);
-}
+/* --- Provider tiles ----------------------------------------------------
+   The four-up .health-grid this screen used is gone — the routing flow shows
+   provider state now, with the routing that a grid of tiles could not. The
+   TILE survives because Providers and First run both build their own layouts
+   out of it, so it is shared vocabulary that happens to live here. */
 .health-tile {
   display: flex;
   flex-direction: column;
@@ -200,3 +199,128 @@
 .ops-footer-dropped[data-alert="true"] {
   color: var(--state-cooling);
 }
+
+/* --- Routing flow graph -------------------------------------------------
+   A left-to-right flow rather than the radial hub OmniRoute draws. A ring
+   cannot encode order, and order is the whole point here: the router walks
+   candidates by priority, so priority is the vertical axis and a reader can
+   see what was tried before what. Edge thickness carries volume, and a
+   provider that is not a candidate simply has no edge — absence is the
+   clearest way to say "this one is not in the path".
+
+   Nodes are HTML positioned over an SVG edge layer, so text is real text at
+   real weights instead of <text> that ignores the type scale. Coordinates
+   are fixed px and the SVG viewBox matches them 1:1, which is why the whole
+   graph scrolls rather than scales: a scaled graph distorts stroke widths,
+   and stroke width is data here. */
+
+.rf-wrap { overflow-x: auto; }
+
+.rf-graph { position: relative; }
+
+.rf-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rf-edge { fill: none; stroke-linecap: round; }
+/* Inbound is plumbing, not a decision: the thinnest structural stroke. */
+.rf-edge-in { stroke: var(--border); stroke-width: 1; }
+/* Outbound is the router's verdict, so it takes --trace and its width is
+   share of the window. */
+.rf-edge-out { stroke: var(--trace); opacity: 0.55; }
+/* Traffic that landed here because somewhere else refused it. Dashed for the
+   same reason the ladder dashes an attempted-and-failed stub. */
+.rf-edge-fail {
+  stroke: var(--trace);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+.rf-fo-label {
+  fill: var(--legend);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.rf-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  /* A node is a fixed box: nothing inside it may escape to the right, or a
+     count lands on top of the failover arcs drawn beside the column. */
+  overflow: hidden;
+}
+
+.rf-alias { justify-content: space-between; }
+.rf-alias .rf-vol { color: var(--legend); }
+
+/* The one node that is the product rather than a participant, so it is the
+   one node allowed to carry the brand. */
+.rf-router {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-warm);
+}
+.rf-router-label { margin: 0; color: var(--accent-ink); }
+.rf-router-total { font-size: 20px; font-weight: 500; }
+.rf-router-unit,
+.rf-router-fo { color: var(--legend); }
+.rf-router-fo { margin-top: 4px; }
+
+.rf-prio {
+  min-width: 22px;
+  text-align: right;
+  color: var(--legend);
+  font-variant-numeric: tabular-nums;
+}
+.rf-name { flex: 0 0 auto; }
+.rf-note {
+  /* The note takes the slack and the bar is fixed, not the other way round:
+     "1 cooling" is the reason a row is degraded and must not be the thing
+     an ellipsis eats. */
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--legend);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* No share bar. Edge thickness already encodes share, and far more
+   legibly than a 56px bar repeating it — the space is better spent on the
+   credential note, which nothing else on the screen carries. */
+
+.rf-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+.rf-count { font-variant-numeric: tabular-nums; }
+.rf-pct, .rf-out { color: var(--legend); }
+.rf-fo { color: var(--trace); }
+
+/* Not a candidate. The node stays legible — it is still configured — but it
+   reads as out of the path, which is exactly what it is. */
+.rf-provider-idle {
+  background: var(--ground-alt);
+  border-style: dashed;
+  box-shadow: none;
+}
+.rf-provider-idle .rf-name { color: var(--ink-muted); }
+
+.rf-lede { margin-bottom: var(--gutter); }
