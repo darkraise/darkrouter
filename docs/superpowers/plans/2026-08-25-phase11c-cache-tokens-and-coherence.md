@@ -1081,3 +1081,35 @@ Every existing pricing test now needs a fourth argument. Passing `0` preserves w
 - [ ] **Step 5: Commit**
 
 Subject: `feat(catalog): price cache writes`
+
+---
+
+### Task 12: Stop the generator discarding the cache-write rate
+
+**Files:**
+- Modify: `tools/presetgen/main.go` — the cost mapping
+- Modify: `docs/PROGRESS.md` or the catalog's own doc comment — record that the shipped snapshot predates the field
+
+`tools/presetgen/main.go:430-434` carries its own copy of the models.dev cost struct, declaring only `input`, `output` and `cache_read` — the identical discard just fixed in `internal/catalog/modelsdev.go`. The embedded fallback it generates (`internal/catalog/models_snapshot.json`, 652 KB) therefore contains no cache-write rates at all.
+
+Consequence: a deployment running on the embedded fallback rather than live models.dev data prices cache writes at zero. That degrades safely — a missing rate contributes nothing rather than a wrong number — but it means the pricing fix is only live-data-deep until the snapshot is regenerated.
+
+Regenerating the snapshot needs a live models.dev fetch, which is not available here. Fixing the generator is still worth doing now so the next regeneration captures the field instead of silently dropping it again.
+
+- [ ] **Step 1: Declare the field**
+
+Add `CacheWrite *float64` with tag `json:"cache_write"` to the cost struct in `tools/presetgen/main.go`, and carry it into whatever the generator writes, matching how `cache_read` is already handled there. Follow the file's existing conventions rather than importing the catalog's version — the duplication is pre-existing and consolidating it is not this task.
+
+- [ ] **Step 2: Record the snapshot's age**
+
+The shipped `models_snapshot.json` predates the field. Note that where a reader will meet it — a comment at the embedded snapshot's declaration in `internal/catalog`, and a line in `docs/PROGRESS.md`'s phase entry — stating that cache-write rates are absent from the embedded fallback until it is regenerated, and that models priced from it will omit the cache-write component.
+
+Do not fabricate rates into the existing snapshot.
+
+- [ ] **Step 3: Verify the generator compiles and its tests pass**
+
+Run: `go build ./... && go vet ./... && go test -race ./tools/... ./internal/catalog/`
+
+- [ ] **Step 4: Commit**
+
+Subject: `fix(presetgen): keep the cache-write rate`
