@@ -736,8 +736,11 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	// usage on the request, so this is the first point it can be attributed.
 	for i := range rec.Attempts {
 		a := &rec.Attempts[i]
-		if rec.FinalProviderID != "" && a.ProviderID == rec.FinalProviderID &&
-			a.Model == rec.FinalModel && a.TokensIn == 0 && a.TokensOut == 0 {
+		// Identified by outcome, not by matching the request's final provider:
+		// the pre-commit 400 retry re-attempts the same provider and model, so
+		// a provider match would find the rejected attempt first.
+		if a.Outcome == string(adapter.OutcomeSuccess) &&
+			a.TokensIn == 0 && a.TokensOut == 0 {
 			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
 			break
 		}
