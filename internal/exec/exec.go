@@ -709,29 +709,42 @@ func (e *Executor) log(rec *store.RequestRecord) {
 }
 
 // priceRecord fills in CostMicros from the catalog price of the model that
-// actually served.
+// actually served, then does the same for every attempt against the model
+// IT tried.
 //
 // Here rather than in applyUsage because applyUsage has eleven call sites and
 // this has one: cost is a property of the finished request, not of each usage
 // event that arrived on the way. A record with nothing served, no catalog, or
 // an unpriced model keeps a nil cost -- the em-dash the trace already renders.
 func (e *Executor) priceRecord(rec *store.RequestRecord) {
-	if rec == nil || rec.CostMicros != nil {
-		return
-	}
-	if rec.FinalProviderID == "" || rec.FinalModel == "" || e.deps.Catalog == nil {
+	if rec == nil || e.deps.Catalog == nil {
 		return
 	}
 	snap := e.deps.Catalog.Snapshot()
 	if snap == nil {
 		return
 	}
-	m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel)
-	if !ok {
-		return
+	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
+		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
+			rec.CostMicros = m.Pricing.CostMicros(
+				rec.TokensIn, rec.TokensOut, rec.CacheReadTokens)
+		}
 	}
-	rec.CostMicros = m.Pricing.CostMicros(
-		rec.TokensIn, rec.TokensOut, rec.CacheReadTokens)
+
+	// Each attempt is priced against the model IT tried, not the one that
+	// served: a failover's discarded tokens were burned at the failed
+	// provider's rate.
+	for i := range rec.Attempts {
+		a := &rec.Attempts[i]
+		if a.CostMicros != nil || a.ProviderID == "" || a.Model == "" {
+			continue
+		}
+		am, ok := snap.Lookup(a.ProviderID, a.Model)
+		if !ok {
+			continue
+		}
+		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0)
+	}
 }
 
 func (e *Executor) recordHealth(k health.Key, s health.Signal) {
