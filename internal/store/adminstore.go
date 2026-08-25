@@ -621,3 +621,74 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	}
 	return s, nil
 }
+
+// LatencyPercentiles returns p50 and p95 of total_ms over the window.
+//
+// Computed in SQL with a window function rather than by loading the rows: a
+// busy window is tens of thousands of requests and the overview polls every
+// three seconds.
+func (d *DB) LatencyPercentiles(ctx context.Context, window time.Duration) (int64, int64, error) {
+	since := time.Now().Add(-window).UnixMilli()
+	row := d.Read.QueryRowContext(ctx,
+		`WITH ranked AS (
+		     SELECT total_ms,
+		            row_number() OVER (ORDER BY total_ms) AS rn,
+		            count(*)     OVER ()                  AS n
+		       FROM requests
+		      WHERE ts >= ? AND total_ms IS NOT NULL
+		 )
+		 -- Nearest-rank: the ceil(n*p)-th value. percent_rank() is
+		 -- (rank-1)/(n-1), so "pr >= 0.50" over 100 values returns the 51st,
+		 -- not the 50th -- one position high on every sample, on a tile an
+		 -- operator reads as p50. Integer division truncates, so
+		 -- (n*50 + 99)/100 is ceil(n*50/100).
+		 SELECT coalesce((SELECT total_ms FROM ranked WHERE rn = (n * 50 + 99) / 100), 0),
+		        coalesce((SELECT total_ms FROM ranked WHERE rn = (n * 95 + 99) / 100), 0)`,
+		since)
+	var p50, p95 int64
+	if err := row.Scan(&p50, &p95); err != nil {
+		return 0, 0, fmt.Errorf("latency percentiles: %w", err)
+	}
+	return p50, p95, nil
+}
+
+// FailoverRow is one request the router had to walk past a candidate for.
+type FailoverRow struct {
+	ID              string
+	TS              int64
+	Alias           string
+	FinalProviderID string
+	FinalModel      string
+	Attempts        int
+	TotalMs         int64
+}
+
+// RecentFailovers returns the newest requests that took more than one attempt.
+func (d *DB) RecentFailovers(ctx context.Context, limit int) ([]FailoverRow, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT r.id, r.ts, r.resolved_alias, r.final_provider_id, r.final_model,
+		        count(a.seq) AS attempts, coalesce(r.total_ms, 0)
+		   FROM requests r
+		   JOIN request_attempts a ON a.request_id = r.id
+		  GROUP BY r.id
+		 HAVING attempts > 1
+		  ORDER BY r.ts DESC
+		  LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent failovers: %w", err)
+	}
+	defer rows.Close()
+	out := []FailoverRow{}
+	for rows.Next() {
+		var f FailoverRow
+		if err := rows.Scan(&f.ID, &f.TS, &f.Alias, &f.FinalProviderID,
+			&f.FinalModel, &f.Attempts, &f.TotalMs); err != nil {
+			return nil, fmt.Errorf("recent failovers: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
