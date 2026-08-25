@@ -22,21 +22,37 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	// The whole window is recomputed and upserted, so running this repeatedly
 	// converges rather than accumulating.
 	_, err := d.Write.ExecContext(ctx,
-		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out, cost_micros)
-		 SELECT strftime('%Y-%m-%d', ts / 1000, 'unixepoch') AS day,
-		        final_provider_id,
-		        final_model,
+		`WITH attempt_usage AS (
+		     SELECT request_id,
+		            coalesce(sum(tokens_in), 0)  AS a_in,
+		            coalesce(sum(tokens_out), 0) AS a_out,
+		            CASE WHEN count(cost_micros) = 0 THEN NULL
+		                 ELSE sum(cost_micros) END AS a_cost
+		       FROM request_attempts
+		      GROUP BY request_id
+		 )
+		 INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in, tokens_out, cost_micros)
+		 SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch') AS day,
+		        r.final_provider_id,
+		        r.final_model,
+		        r.resolved_alias,
 		        count(*),
-		        coalesce(sum(tokens_in), 0),
-		        coalesce(sum(tokens_out), 0),
+		        -- Attempt usage REPLACES the request's own counts rather than
+		        -- adding to them: the served attempt already carries what the
+		        -- request reports, so adding both would double it. A request
+		        -- with no attempt rows falls back to its own.
+		        coalesce(sum(au.a_in),  sum(r.tokens_in),  0),
+		        coalesce(sum(au.a_out), sum(r.tokens_out), 0),
 		        -- NULL rather than 0 when nothing in the group is priced:
 		        -- zero would report the day's spend as genuinely nothing.
-		        CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
-		   FROM requests
-		  WHERE ts >= ? AND ts < ?
-		    AND final_provider_id <> ''
-		  GROUP BY day, final_provider_id, final_model
-		 ON CONFLICT(day, provider_id, model) DO UPDATE SET
+		        CASE WHEN count(coalesce(au.a_cost, r.cost_micros)) = 0 THEN NULL
+		             ELSE sum(coalesce(au.a_cost, r.cost_micros)) END
+		   FROM requests r
+		   LEFT JOIN attempt_usage au ON au.request_id = r.id
+		  WHERE r.ts >= ? AND r.ts < ?
+		    AND r.final_provider_id <> ''
+		  GROUP BY day, r.final_provider_id, r.final_model, r.resolved_alias
+		 ON CONFLICT(day, provider_id, model, alias) DO UPDATE SET
 		        requests    = excluded.requests,
 		        tokens_in   = excluded.tokens_in,
 		        tokens_out  = excluded.tokens_out,
