@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 5 {
-			t.Errorf("run %d: version = %d, want 5", i, v)
+		if v != 6 {
+			t.Errorf("run %d: version = %d, want 6", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -221,7 +221,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	}
 }
 
-func TestMigrationsReachVersionFive(t *testing.T) {
+func TestMigrationsReachVersionSix(t *testing.T) {
 	// The loader asserts contiguity from 1, so a mis-numbered file fails here
 	// rather than at a customer's first start. One assertion rather than one
 	// per phase: the count is a fact about this build, not about a phase.
@@ -229,8 +229,49 @@ func TestMigrationsReachVersionFive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 5 {
-		t.Fatalf("loaded %d migrations, want 5", len(ms))
+	if len(ms) != 6 {
+		t.Fatalf("loaded %d migrations, want 6", len(ms))
+	}
+}
+
+func TestMigration0006AddsAliasAndAttemptUsage(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	// usage_daily carries alias and keys on it
+	var pk string
+	err := db.Read.QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='usage_daily'`).Scan(&pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pk, "alias") {
+		t.Fatalf("usage_daily has no alias column:\n%s", pk)
+	}
+	if !strings.Contains(pk, "PRIMARY KEY (day, provider_id, model, alias)") {
+		t.Fatalf("usage_daily key was not widened:\n%s", pk)
+	}
+
+	// two rows differing only by alias must coexist
+	for _, alias := range []string{"", "fast-coder"} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+			 VALUES ('2026-08-25','groq','gpt-oss-120b',?,1)`, alias); err != nil {
+			t.Fatalf("insert alias=%q: %v", alias, err)
+		}
+	}
+
+	// request_attempts carries usage
+	for _, col := range []string{"tokens_in", "tokens_out", "cost_micros"} {
+		var n int
+		if err := db.Read.QueryRowContext(ctx,
+			`SELECT count(*) FROM pragma_table_info('request_attempts') WHERE name=?`,
+			col).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("request_attempts is missing %s", col)
+		}
 	}
 }
 
