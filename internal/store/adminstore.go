@@ -498,6 +498,7 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 type UsageDay struct {
 	Day        string
 	Requests   int64
+	Attempts   int64
 	TokensIn   int64
 	TokensOut  int64
 	CostMicros *int64
@@ -554,7 +555,7 @@ func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]Usage
 	// silently return thirty rows covering four days once eight providers
 	// are in play.
 	q := `SELECT day, ` + sel + `,
-	             sum(requests), sum(tokens_in), sum(tokens_out),
+	             sum(requests), sum(attempts), sum(tokens_in), sum(tokens_out),
 	             CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
 	        FROM usage_daily
 	       WHERE day IN (SELECT day FROM usage_daily
@@ -569,7 +570,7 @@ func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]Usage
 	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
-		if err := rows.Scan(&r.Day, &r.Key, &r.Requests,
+		if err := rows.Scan(&r.Day, &r.Key, &r.Requests, &r.Attempts,
 			&r.TokensIn, &r.TokensOut, &r.CostMicros); err != nil {
 			return nil, fmt.Errorf("usage by: %w", err)
 		}

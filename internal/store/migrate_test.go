@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 6 {
-			t.Errorf("run %d: version = %d, want 6", i, v)
+		if v != 7 {
+			t.Errorf("run %d: version = %d, want 7", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -221,7 +221,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	}
 }
 
-func TestMigrationsReachVersionSix(t *testing.T) {
+func TestMigrationsReachVersionSeven(t *testing.T) {
 	// The loader asserts contiguity from 1, so a mis-numbered file fails here
 	// rather than at a customer's first start. One assertion rather than one
 	// per phase: the count is a fact about this build, not about a phase.
@@ -229,8 +229,8 @@ func TestMigrationsReachVersionSix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 6 {
-		t.Fatalf("loaded %d migrations, want 6", len(ms))
+	if len(ms) != 7 {
+		t.Fatalf("loaded %d migrations, want 7", len(ms))
 	}
 }
 
@@ -328,6 +328,36 @@ func TestMigration0006PreservesExistingUsageRows(t *testing.T) {
 	}
 	if alias != "" {
 		t.Fatalf("a row that predates aliases must carry the empty alias, got %q", alias)
+	}
+}
+
+func TestMigration0007AddsAttemptsAndKeepsRows(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	var n int
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*) FROM pragma_table_info('usage_daily') WHERE name='attempts'`,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatal("usage_daily is missing the attempts column")
+	}
+
+	// A row written before the column existed must read as zero, not NULL.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+		 VALUES ('2026-08-25','groq','m','',3)`); err != nil {
+		t.Fatal(err)
+	}
+	var attempts int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT attempts FROM usage_daily`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 {
+		t.Fatalf("attempts must default to 0, got %d", attempts)
 	}
 }
 
