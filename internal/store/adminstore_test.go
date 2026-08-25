@@ -619,7 +619,7 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 	}
 
 	// The day-only rollup still aggregates across aliases.
-	flat, err := db.UsageByDay(ctx, 30)
+	flat, err := db.UsageBy(ctx, 30, UsageByDayOnly)
 	if err != nil {
 		t.Fatal(err)
 	}

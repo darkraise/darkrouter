@@ -22,22 +22,23 @@ func filtersFrom(r *http.Request) RequestFilters {
 }
 
 type requestView struct {
-	ID         string `json:"id"`
-	TSMs       int64  `json:"ts_ms"`
-	Dialect    string `json:"dialect"`
-	Surface    string `json:"surface"`
-	Model      string `json:"model"`
-	Alias      string `json:"alias,omitempty"`
-	Provider   string `json:"provider,omitempty"`
-	FinalModel string `json:"final_model,omitempty"`
-	Status     string `json:"status"`
-	TokensIn   int64  `json:"tokens_in"`
-	TokensOut  int64  `json:"tokens_out"`
-	CostMicros *int64 `json:"cost_micros"`
-	TTFTMs     *int64 `json:"ttft_ms"`
-	TotalMs    *int64 `json:"total_ms"`
-	ErrorCode  string `json:"error_code,omitempty"`
-	Attempts   int    `json:"attempts"`
+	ID              string `json:"id"`
+	TSMs            int64  `json:"ts_ms"`
+	Dialect         string `json:"dialect"`
+	Surface         string `json:"surface"`
+	Model           string `json:"model"`
+	Alias           string `json:"alias,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	FinalModel      string `json:"final_model,omitempty"`
+	Status          string `json:"status"`
+	TokensIn        int64  `json:"tokens_in"`
+	TokensOut       int64  `json:"tokens_out"`
+	CacheReadTokens int64  `json:"cache_read_tokens"`
+	CostMicros      *int64 `json:"cost_micros"`
+	TTFTMs          *int64 `json:"ttft_ms"`
+	TotalMs         *int64 `json:"total_ms"`
+	ErrorCode       string `json:"error_code,omitempty"`
+	Attempts        int    `json:"attempts"`
 }
 
 func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +75,8 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 			Model: row.RequestedModel, Alias: row.ResolvedAlias,
 			Provider: row.FinalProviderID, FinalModel: row.FinalModel,
 			Status: row.Status, TokensIn: row.TokensIn, TokensOut: row.TokensOut,
-			CostMicros: row.CostMicros, TTFTMs: row.TTFTMs, TotalMs: row.TotalMs,
+			CacheReadTokens: row.CacheReadTokens,
+			CostMicros:      row.CostMicros, TTFTMs: row.TTFTMs, TotalMs: row.TotalMs,
 			ErrorCode: row.ErrorCode, Attempts: row.Attempts,
 		})
 	}
@@ -109,6 +111,7 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 			"seq": a.Seq, "provider": a.ProviderID, "key_label": a.KeyID,
 			"model": a.Model, "outcome": a.Outcome, "status_code": a.StatusCode,
 			"latency_ms": a.LatencyMs, "error": a.Error, "path": a.Path,
+			"tokens_in": a.TokensIn, "tokens_out": a.TokensOut, "cost_micros": a.CostMicros,
 		})
 	}
 	bodies := make([]map[string]any, 0, len(tr.Bodies))
@@ -121,7 +124,7 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 		"model": tr.RequestedModel, "alias": tr.ResolvedAlias,
 		"provider": tr.FinalProviderID, "final_model": tr.FinalModel,
 		"status": tr.Status, "error_code": tr.ErrorCode,
-		"tokens_in": tr.TokensIn, "tokens_out": tr.TokensOut,
+		"tokens_in": tr.TokensIn, "tokens_out": tr.TokensOut, "cache_read_tokens": tr.CacheReadTokens,
 		"cost_micros": tr.CostMicros, "ttft_ms": tr.TTFTMs, "total_ms": tr.TotalMs,
 		// Three separate lists, deliberately. Attempts alone explains a
 		// failover; candidates and skips explain the routing decision.

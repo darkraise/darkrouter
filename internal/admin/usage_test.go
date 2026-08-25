@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -183,6 +184,55 @@ func TestUsageRollsUpByDay(t *testing.T) {
 	}
 	if body.Priced {
 		t.Error("priced = true with no cost recorded")
+	}
+}
+
+func TestTodaySpendAgreesWithTheUsageChartAcrossAFailover(t *testing.T) {
+	// A failed attempt's cost lands in usage_daily via the rollup but, before
+	// this, never reached today_spend -- the tile and the chart answered a
+	// different question about the same day.
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	now := time.Now()
+	failedCost := int64(500)
+	servedCost := int64(1200)
+	db.WriteBatchForTest(t, []*store.RequestRecord{{
+		ID: "01SPEND", TS: now, Dialect: "openai", Surface: "llm", RequestedModel: "m",
+		FinalProviderID: "b", FinalModel: "m", Status: "success",
+		CostMicros: &servedCost,
+		Attempts: []store.AttemptRecord{
+			{Seq: 1, ProviderID: "a", Model: "m", Outcome: "retryable_provider", CostMicros: &failedCost},
+			{Seq: 2, ProviderID: "b", Model: "m", Outcome: "success", CostMicros: &servedCost},
+		},
+	}})
+	if err := db.Rollup(context.Background(), now, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	body := getOverview(t, s, cookie, token)
+	want := failedCost + servedCost
+	if !body.Spend.Priced || body.Spend.Micros != want {
+		t.Fatalf("today_spend = %+v, want %d priced", body.Spend, want)
+	}
+
+	rr := do(t, s, cookie, token, "GET", "/api/usage", "")
+	var usage struct {
+		Days []struct {
+			CostMicros *int64 `json:"cost_micros"`
+		} `json:"days"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &usage); err != nil {
+		t.Fatal(err)
+	}
+	var chartTotal int64
+	for _, d := range usage.Days {
+		if d.CostMicros != nil {
+			chartTotal += *d.CostMicros
+		}
+	}
+	if chartTotal != body.Spend.Micros {
+		t.Fatalf("chart total = %d, today_spend = %d; the two surfaces disagree",
+			chartTotal, body.Spend.Micros)
 	}
 }
 
