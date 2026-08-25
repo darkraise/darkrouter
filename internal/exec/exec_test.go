@@ -49,7 +49,8 @@ func newPricedExecutor(t *testing.T) *Executor {
 	return &Executor{deps: Deps{Catalog: catalogOf(catalog.Model{
 		ProviderID: "groq", ModelID: "m",
 		Pricing: catalog.Pricing{
-			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000, Known: true,
+			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000,
+			CacheReadMicrosPerMTok: 100_000, Known: true,
 		},
 	})}}
 }
@@ -90,6 +91,32 @@ func TestAnAttemptWithNoTokensIsUnpricedNotFree(t *testing.T) {
 	if rec.Attempts[0].CostMicros != nil {
 		t.Fatalf("an attempt that recorded no tokens must stay unpriced, got %d",
 			*rec.Attempts[0].CostMicros)
+	}
+}
+
+func TestTheServedAttemptCostsWhatTheRequestCosts(t *testing.T) {
+	// usage_daily sums attempt cost while today_spend sums request cost.
+	// If they are computed differently the console contradicts itself.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 1000, TokensOut: 500, CacheReadTokens: 100000,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.CostMicros == nil {
+		t.Fatal("the request was not priced")
+	}
+	if rec.Attempts[0].CostMicros == nil {
+		t.Fatal("the served attempt was not priced")
+	}
+	if *rec.Attempts[0].CostMicros != *rec.CostMicros {
+		t.Fatalf("served attempt cost %d, request cost %d: the usage chart and "+
+			"the spend tile would disagree",
+			*rec.Attempts[0].CostMicros, *rec.CostMicros)
 	}
 }
 

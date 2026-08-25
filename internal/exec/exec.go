@@ -756,6 +756,13 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		if a.Outcome == string(adapter.OutcomeSuccess) &&
 			a.TokensIn == 0 && a.TokensOut == 0 {
 			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+			// The same model at the same rates on the same tokens. Re-pricing
+			// it separately drops the cache-read component the attempt row has
+			// no column for, and the two cost surfaces stop agreeing.
+			if rec.CostMicros != nil {
+				c := *rec.CostMicros
+				a.CostMicros = &c
+			}
 			break
 		}
 	}
