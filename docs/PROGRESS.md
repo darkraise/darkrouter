@@ -992,6 +992,33 @@ Final gate: `qa: PASS — 18 fragment(s) clean`, 34 tests OK, 36 screenshots
 200–350 KB, which was written before the set existed; nothing improper is
 embedded, and each font blob was verified byte-identical to its file on disk.
 
+### Superseded 2026-08-25 — the set moved to "Warm Console"
+
+The four decisions below describe **Graticule Bench**, the language the phase
+was executed in. The owner asked for 9router's identity instead
+(`github.com/decolua/9router`, checked out at
+`/root/repositories-community/9router`), and the set was moved to it in
+`2f31605` and `818954e`. Spec §3 is the contract; the plan's Global
+Constraints table is marked superseded.
+
+What changed: coral `#E56A4A` brand, warm neutral surfaces that **stack
+upward** from the ground, 4/8/10/14px radius, real elevation, Inter for the
+chrome, a 288px vibrancy sidebar, and a faint accent graticule. Nine token
+values are repaired against 9router's own — seven of its shipped values sit
+under the floor their role is held to, including a light success green at
+2.54:1 and an amber at 2.15:1, both under the 3:1 floor a *shape* must clear.
+
+Three rules are Darkrouter's rather than 9router's, all deliberate: coral is
+**brand only** (position and primary action, never state) so it never joins
+amber and red in the ladder gutter; **Inter carries the chrome, IBM Plex Mono
+still carries data**; and the identity mark stays the §3.5 routing ladder,
+presented in 9router's coral-gradient tile.
+
+**What did NOT survive:** well polarity. This language stacks surfaces upward
+in both modes, so light is a palette swap by design and there is no inversion
+to prove. Screen 17 is now a contrast proof of the nine repairs instead. Read
+the first decision below as history, not as current doctrine.
+
 ### Four decisions a future reader will need
 
 **Light mode inverts well polarity; it is not a palette swap.** The well is the
