@@ -82,10 +82,11 @@ type Traits struct {
 // Pricing is micro-dollars per million tokens. Known separates a free model
 // from an unpriced one; both are zero.
 type Pricing struct {
-	InputMicrosPerMTok     int64
-	OutputMicrosPerMTok    int64
-	CacheReadMicrosPerMTok int64
-	Known                  bool
+	InputMicrosPerMTok      int64
+	OutputMicrosPerMTok     int64
+	CacheReadMicrosPerMTok  int64
+	CacheWriteMicrosPerMTok int64
+	Known                   bool
 }
 
 // Model is one model as offered by one provider.

@@ -759,7 +759,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
 		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
 			rec.CostMicros = m.Pricing.CostMicros(
-				rec.TokensIn, rec.TokensOut, rec.CacheReadTokens)
+				rec.TokensIn, rec.TokensOut, rec.CacheReadTokens, rec.CacheWriteTokens)
 		}
 	}
 
@@ -785,8 +785,9 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 				a.TokensIn == 0 && a.TokensOut == 0 {
 				a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
 				// The same model at the same rates on the same tokens. Re-pricing
-				// it separately drops the cache-read component the attempt row has
-				// no column for, and the two cost surfaces stop agreeing.
+				// it separately drops the cache-read and cache-write components the
+				// attempt row has no columns for, and the two cost surfaces stop
+				// agreeing.
 				if rec.CostMicros != nil {
 					c := *rec.CostMicros
 					a.CostMicros = &c
@@ -813,7 +814,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		if !ok {
 			continue
 		}
-		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0)
+		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0, 0)
 	}
 }
 

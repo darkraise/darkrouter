@@ -11,13 +11,14 @@ package catalog
 // them. Returning nil for unpriced is what lets the trace and the spend tile
 // render an em-dash: reporting 0 would state that a request cost nothing,
 // which is a different and usually false claim.
-func (p Pricing) CostMicros(in, out, cacheRead int64) *int64 {
+func (p Pricing) CostMicros(in, out, cacheRead, cacheWrite int64) *int64 {
 	if !p.Known {
 		return nil
 	}
 	total := rateMicros(p.InputMicrosPerMTok, in) +
 		rateMicros(p.OutputMicrosPerMTok, out) +
-		rateMicros(p.CacheReadMicrosPerMTok, cacheRead)
+		rateMicros(p.CacheReadMicrosPerMTok, cacheRead) +
+		rateMicros(p.CacheWriteMicrosPerMTok, cacheWrite)
 	return &total
 }
 

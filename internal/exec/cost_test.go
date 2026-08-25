@@ -7,6 +7,20 @@ import (
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
+// newPricedExecutorWithCacheWrite extends newPricedExecutor's rates with a
+// cache-write price, for tests that need the premium billed.
+func newPricedExecutorWithCacheWrite(t *testing.T) *Executor {
+	t.Helper()
+	return &Executor{deps: Deps{Catalog: catalogOf(catalog.Model{
+		ProviderID: "groq", ModelID: "m",
+		Pricing: catalog.Pricing{
+			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000,
+			CacheReadMicrosPerMTok: 100_000, CacheWriteMicrosPerMTok: 1_250_000,
+			Known: true,
+		},
+	})}}
+}
+
 func catalogOf(models ...catalog.Model) *catalog.Store {
 	providers := make([]string, 0, len(models))
 	seen := map[string]bool{}
@@ -141,5 +155,21 @@ func TestLogPricesAttemptsWhenNothingServed(t *testing.T) {
 	}
 	if rec.Attempts[0].CostMicros == nil || *rec.Attempts[0].CostMicros != 1_000_000 {
 		t.Fatalf("attempt 1: want 1000000, got %v", rec.Attempts[0].CostMicros)
+	}
+}
+
+func TestTheRequestsCacheWritesArePriced(t *testing.T) {
+	e := newPricedExecutorWithCacheWrite(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 1000, TokensOut: 0, CacheWriteTokens: 4000,
+	}
+	e.priceRecord(rec)
+	if rec.CostMicros == nil {
+		t.Fatal("not priced")
+	}
+	// The cache-write component must be present, not silently dropped.
+	if *rec.CostMicros <= 1000 {
+		t.Fatalf("cost %d does not include the cache write", *rec.CostMicros)
 	}
 }

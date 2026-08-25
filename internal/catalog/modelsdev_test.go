@@ -1,6 +1,11 @@
 package catalog
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
+)
 
 const liveSample = `{
   "anthropic": {
@@ -94,6 +99,35 @@ func TestLimitsAndUnknownPrice(t *testing.T) {
 	}
 }
 
+func TestCacheWriteRateIsParsed(t *testing.T) {
+	// models.dev reports cache creation at a premium over input. Discarding
+	// it prices the first request of every cached session as if writing the
+	// context were free.
+	doc, err := ParseModelsDev([]byte(liveSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := Merge(MergeInput{
+		Providers: []provider.Provider{{ID: "anthropic", Kind: "anthropic", Preset: "anthropic"}},
+		Presets: Presets{"anthropic": {
+			Name: "Anthropic", Kind: "anthropic", ModelsDevID: "anthropic",
+		}},
+		Doc: doc,
+		Rows: []store.ModelRow{
+			{ProviderID: "anthropic", ModelID: "claude-opus-4-5", State: "live", CapabilitiesSource: "inferred"},
+		},
+	})
+	snap := NewSnapshot(models, []string{"anthropic"})
+	m, ok := snap.Lookup("anthropic", "claude-opus-4-5")
+	if !ok {
+		t.Fatal("claude-opus-4-5 missing from the snapshot")
+	}
+	if m.Pricing.CacheWriteMicrosPerMTok != 6_250_000 {
+		t.Fatalf("cache-write rate = %d, want 6250000 (6.25 per Mtok)",
+			m.Pricing.CacheWriteMicrosPerMTok)
+	}
+}
+
 func TestMissRatherThanZeroValue(t *testing.T) {
 	doc, _ := ParseModelsDev([]byte(liveSample))
 	if _, ok := doc.Metadata("anthropic", "not-a-model"); ok {
@@ -125,6 +159,10 @@ func TestEmbeddedFallbackAgreesWithTheLiveShape(t *testing.T) {
 	}
 	live, _ := ParseModelsDev([]byte(liveSample))
 	want, _ := live.Metadata("anthropic", "claude-opus-4-5")
+	// The embedded snapshot was generated before tools/presetgen carried
+	// cache-write rates, so it has none yet -- that gap closes on the next
+	// regeneration, not here.
+	want.CacheWriteMicrosPerMTok = 0
 	if got != want {
 		t.Errorf("fallback = %+v\nlive     = %+v", got, want)
 	}
