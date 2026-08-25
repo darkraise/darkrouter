@@ -275,6 +275,62 @@ func TestMigration0006AddsAliasAndAttemptUsage(t *testing.T) {
 	}
 }
 
+func TestMigration0006PreservesExistingUsageRows(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version > 5 {
+			continue
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("apply %04d: %v", m.version, err)
+		}
+	}
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out)
+		 VALUES ('2026-08-01','groq','a',5,100,200),
+		        ('2026-08-02','openai','b',7,300,400)`); err != nil {
+		t.Fatalf("pre-0006 insert: %v", err)
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to 0006: %v", err)
+	}
+
+	var rows, requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*), sum(requests), sum(tokens_in) FROM usage_daily`,
+	).Scan(&rows, &requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || requests != 12 || tokensIn != 400 {
+		t.Fatalf("rows lost across the rebuild: rows=%d requests=%d tokens_in=%d, want 2/12/400",
+			rows, requests, tokensIn)
+	}
+
+	var alias string
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT alias FROM usage_daily WHERE provider_id='groq'`).Scan(&alias); err != nil {
+		t.Fatal(err)
+	}
+	if alias != "" {
+		t.Fatalf("a row that predates aliases must carry the empty alias, got %q", alias)
+	}
+}
+
 func TestTheKeysetIndexExists(t *testing.T) {
 	// Spec §4.2: the keyset promise is theoretical without this. A query
 	// planner check is the only assertion that cannot pass by accident.
