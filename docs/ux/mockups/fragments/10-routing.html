@@ -68,11 +68,11 @@
               <span class="mono rt-yield">8 targets</span>
               <span class="micro">8 candidates &middot; 2 would be skipped &middot; rank 01 would be attempted first</span>
             </div>
-            <p class="micro">predicted against snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
+            <p class="micro">predicted against snapshot 01M0W31NR0CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
 
             <div class="ladder">
               <div class="ladder-row">
-                <span class="rank">01</span>
+                <span class="rank rank-tick">01</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">groq/openai-gpt-oss-120b</span>
@@ -81,7 +81,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">02</span>
+                <span class="rank rank-tick">02</span>
                 <span class="spine"></span>
                 <span class="mark mark-cooling"></span>
                 <span class="target">cerebras/gpt-oss-120b</span>
@@ -91,7 +91,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">03</span>
+                <span class="rank rank-tick">03</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">together/openai-gpt-oss-120b</span>
@@ -100,7 +100,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">04</span>
+                <span class="rank rank-tick">04</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">deepinfra/gpt-oss-120b</span>
@@ -109,7 +109,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">05</span>
+                <span class="rank rank-tick rank-tick-major">05</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">openrouter/openai/gpt-oss-120b</span>
@@ -118,7 +118,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">06</span>
+                <span class="rank rank-tick">06</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">anthropic/claude-opus-4-20250514</span>
@@ -128,7 +128,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">07</span>
+                <span class="rank rank-tick">07</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">bedrock/us.anthropic.claude-opus-4</span>
@@ -137,7 +137,7 @@
                 </span>
               </div>
               <div class="ladder-row">
-                <span class="rank">08</span>
+                <span class="rank rank-tick">08</span>
                 <span class="spine"></span>
                 <span class="mark mark-skipped"></span>
                 <span class="target">vertex/gemini-2.5-pro</span>
@@ -249,11 +249,11 @@
               <div class="rt-rule-eg">
                 <span class="mono">gemini-2.5-pro</span>
                 <span class="rt-arrow">&rarr;</span>
-                <span class="mono">vertex 100</span>
-                <span class="rt-arrow">&rsaquo;</span>
                 <span class="mono">openrouter 70</span>
                 <span class="rt-arrow">&rsaquo;</span>
                 <span class="mono">openrouter 70, key 2</span>
+                <span class="rt-arrow">&rsaquo;</span>
+                <span class="mono">vertex 30</span>
               </div>
               <p class="spec-note">nothing offers it &rarr; the request is rejected before any provider is called</p>
             </div>
@@ -438,7 +438,7 @@
                   <span class="micro rt-tcol-ord">01</span>
                   <span class="mono rt-tcol-target">vertex/gemini-2.5-pro</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">vertex, priority 30 &middot; the only vision model in the catalog</span>
+                  <span class="micro rt-tcol-note">vertex, priority 30 &middot; the only candidate offering this model that also passes the vision demand</span>
                 </div>
 
                 <div class="row">

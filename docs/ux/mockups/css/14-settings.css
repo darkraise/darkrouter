@@ -384,3 +384,19 @@
   display: block;
   margin-bottom: 4px;
 }
+
+/* A note that qualifies the group marker above it rather than a field below
+   it: the catalog workers are restart-only in behaviour while config's own
+   RestartOnly list says otherwise, and the screen's subject is exactly that
+   distinction. Attention, not failure — nothing is broken, but the reload
+   path will not tell you. */
+.set-note-warn {
+  margin: 0;
+  padding: 8px var(--section-pad);
+  border-left: 2px solid var(--state-cooling);
+  background: var(--panel);
+  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}

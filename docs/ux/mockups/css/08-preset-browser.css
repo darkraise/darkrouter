@@ -52,7 +52,8 @@
   inset: -9999px;
   background: rgba(3, 5, 7, 0.66);
 }
-body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
+body.theme-light .preset-scrim,
+.force-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 /* --- The dialog -------------------------------------------------------
    --overlay plus --shadow-overlay: the single permitted shadow in the

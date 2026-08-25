@@ -133,8 +133,8 @@
 /* --- Messages ---------------------------------------------------------- */
 
 /* One message block, two tones. The rule carries the colour and the words
-   stay in --ink: --state-cooling measures 3.16:1 in light and fails AA as
-   text, so the unconfigured tone could not be said in amber words even if
+   stay in --ink: --state-cooling measures 3.02:1 against --panel in light and
+   fails AA as text, so the unconfigured tone could not be said in amber words even if
    it wanted to be, and using the same construction for both tones keeps
    the two states comparable side by side. Red is the rejected tone because
    a refused sign-in is an OUTCOME — how it went — which is the same

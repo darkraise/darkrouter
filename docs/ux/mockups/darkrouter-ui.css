@@ -416,8 +416,23 @@ a.row { text-decoration: none; }
   border-radius: var(--radius);
   background: var(--bezel);
 }
+/* The four states GET /api/overview actually emits for a provider tile.
+   "degraded" rather than "cooling" is the API's word and the accurate one:
+   a CREDENTIAL cools, and a provider is degraded while any of its
+   credentials is cooling. The ladder keeps .mark-cooling because there the
+   subject really is one candidate's credential.
+   Disabled and unconfigured both mean "no health reading exists", so
+   neither takes a state colour; they split filled from hollow the way the
+   ladder marks do — disabled is a thing that is switched off, unconfigured
+   is a thing with nothing in it. */
 .state-pip[data-state="healthy"] { background: var(--state-healthy); }
-.state-pip[data-state="cooling"] { background: var(--state-cooling); }
+.state-pip[data-state="degraded"] { background: var(--state-cooling); }
+.state-pip[data-state="disabled"] { background: var(--bezel); }
+.state-pip[data-state="unconfigured"] {
+  background: transparent;
+  border: 1px solid var(--bezel);
+}
+/* Outcome, not health — a finished request or probe. Never on a provider. */
 .state-pip[data-state="failed"] { background: var(--state-failed); }
 
 /* --- Ladder ----------------------------------------------------------

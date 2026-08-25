@@ -344,7 +344,9 @@
 
 .pg-drop-glyph {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 16px;
+  /* The page-title step. A glyph is still type, and 16px is on no role
+     in the §3.2 scale. */
+  font-size: 15px;
   color: var(--bezel);
 }
 

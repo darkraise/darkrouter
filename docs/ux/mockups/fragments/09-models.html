@@ -444,7 +444,7 @@
               <span class="chip">llm</span>
               <span class="lifecycle" data-state="live"><span class="lifecycle-mark"></span>live</span>
               <span class="sheet-meta">
-                <span class="micro">5 offerings &middot; 12 candidates &middot; 3 aliases</span>
+                <span class="micro">5 offerings &middot; 8 candidates &middot; 1 alias</span>
                 <button class="chip" type="button" aria-label="close sheet">&times;</button>
               </span>
             </div>
@@ -457,67 +457,47 @@
                   <p class="section-title">Route order</p>
                   <div class="ladder" style="width:220px">
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">01</span>
-                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="rank rank-tick">01</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
                       <span class="mono">groq</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">02</span>
-                      <span class="mark mark-failed mark-catalog"></span>
+                      <span class="rank rank-tick">02</span>
+                      <span class="mark mark-cooling mark-catalog"></span>
                       <span class="mono">cerebras</span>
                     </div>
-                    <div class="ladder-row ladder-row-served" style="gap:8px">
-                      <span class="rank">03</span>
-                      <span class="mark mark-served mark-catalog"></span>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank rank-tick">03</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
+                      <span class="mono">openrouter</span>
+                    </div>
+                    <div class="ladder-row" style="gap:8px">
+                      <span class="rank rank-tick">04</span>
+                      <span class="mark mark-skipped mark-catalog"></span>
                       <span class="mono">together</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">04</span>
+                      <span class="rank rank-tick rank-tick-major">05</span>
                       <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">deepinfra</span>
+                      <span class="mono">groq</span>
+                      <span class="credential-tag">key 2</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">05</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">openrouter</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">06</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">anthropic</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">07</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">bedrock</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">08</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">vertex</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">09</span>
+                      <span class="rank rank-tick">06</span>
                       <span class="mark mark-cooling mark-catalog"></span>
-                      <span class="mono target-muted">groq</span>
+                      <span class="mono">cerebras</span>
                       <span class="credential-tag">key 2</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">10</span>
+                      <span class="rank rank-tick">07</span>
                       <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">together</span>
+                      <span class="mono">openrouter</span>
                       <span class="credential-tag">key 2</span>
                     </div>
                     <div class="ladder-row" style="gap:8px">
-                      <span class="rank">11</span>
+                      <span class="rank rank-tick">08</span>
                       <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">deepinfra</span>
-                      <span class="credential-tag">key 2</span>
-                    </div>
-                    <div class="ladder-row" style="gap:8px">
-                      <span class="rank">12</span>
-                      <span class="mark mark-skipped mark-catalog"></span>
-                      <span class="mono target-muted">openrouter</span>
+                      <span class="mono">together</span>
                       <span class="credential-tag">key 2</span>
                     </div>
                   </div>
@@ -632,7 +612,7 @@
                     </div>
                     <div class="row">
                       <span class="legend-caps icol-key">last discovery sweep</span>
-                      <span class="mono icol-value">2026-08-25 09:12 &middot; snapshot 01JEQKD9X2CNRP4V8TG6W3F7ZM</span>
+                      <span class="mono icol-value">2026-08-25 09:12 &middot; snapshot 01M0W31NR0CNRP4V8TG6W3F7ZM</span>
                     </div>
                   </div>
                 </div>
@@ -820,6 +800,14 @@
                 <span class="mono acol-requests col-right">188</span>
               </div>
               <div class="row">
+                <span class="mono acol-alias">vision</span>
+                <span class="mono acol-arrow">&rarr;</span>
+                <span class="mono acol-target">gemini-2.5-pro</span>
+                <span class="mono acol-surface">llm</span>
+                <span class="mono acol-candidates col-right">3</span>
+                <span class="mono acol-requests col-right">96</span>
+              </div>
+              <div class="row">
                 <span class="mono acol-alias">rerank-default</span>
                 <span class="mono acol-arrow">&rarr;</span>
                 <span class="mono acol-target">bge-reranker-v2-m3</span>
@@ -830,7 +818,7 @@
             </div>
             <div class="alias-footer">
               <p class="alias-note">
-                Six aliases point into this catalog. Adding one, reordering
+                Seven aliases point into this catalog. Adding one, reordering
                 its candidates or repointing it is routing policy, so it
                 happens on one screen only &mdash; this panel exists so that
                 opening a model answers "who calls this?" without a second
