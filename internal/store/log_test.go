@@ -387,3 +387,38 @@ func TestAttemptPathDefaultsToIR(t *testing.T) {
 		t.Errorf("Path = %q, want ir", tr.Attempts[0].Path)
 	}
 }
+
+func TestAttemptUsageIsPersisted(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	cost := int64(4321)
+
+	rec := &RequestRecord{
+		ID: "01M0W4NWMRZQCN2VMD9F6K3H7P", TS: time.Now(),
+		RequestedModel: "openai/gpt-oss-120b",
+		Attempts: []AttemptRecord{{
+			Seq: 1, ProviderID: "groq", Model: "openai/gpt-oss-120b",
+			Outcome: "retryable_provider", StatusCode: 429,
+			TokensIn: 812, TokensOut: 0, CostMicros: &cost,
+		}},
+	}
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+
+	var in, out int64
+	var got *int64
+	err := db.Read.QueryRowContext(ctx,
+		`SELECT tokens_in, tokens_out, cost_micros FROM request_attempts
+		  WHERE request_id = ? AND seq = 1`, rec.ID).Scan(&in, &out, &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in != 812 || out != 0 {
+		t.Fatalf("tokens: want 812/0, got %d/%d", in, out)
+	}
+	if got == nil || *got != 4321 {
+		t.Fatalf("cost: want 4321, got %v", got)
+	}
+}
