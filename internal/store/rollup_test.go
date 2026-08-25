@@ -587,6 +587,59 @@ func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
 	}
 }
 
+func TestTodayIsNeverPrunedAtTheRetentionFloor(t *testing.T) {
+	// Today's earliest possible request sits at today's midnight, and
+	// pruning removes anything older than now-retention. So today cannot be
+	// pruned while it is still being rolled up exactly when retention is at
+	// least 24h -- the floor config now enforces. Below the floor this same
+	// shape (requests spread across the morning, finalized once, then
+	// partly pruned by afternoon) is what silently shrinks a day's total.
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+
+	startOfToday := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
+	today := startOfToday.Format("2006-01-02")
+
+	var recs []*RequestRecord
+	for i, hour := range []int{2, 3, 4, 5, 6, 7} {
+		recs = append(recs, &RequestRecord{
+			ID: fmt.Sprintf("r%d", i), TS: startOfToday.Add(time.Duration(hour) * time.Hour),
+			ResolvedAlias: "fast", FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", TokensIn: 100,
+			}},
+		})
+	}
+	if _, err := w.writeBatch(ctx, recs); err != nil {
+		t.Fatal(err)
+	}
+
+	// The 08:00 rollup finalizes today at 600 tokens.
+	if err := db.Rollup(ctx, startOfToday.Add(8*time.Hour), 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	// 14:00: pruning at the floor retention, then another rollup.
+	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 24*time.Hour, 24*time.Hour, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Rollup(ctx, startOfToday.Add(14*time.Hour), 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(tokens_in),0) FROM usage_daily WHERE day=?`, today,
+	).Scan(&tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	if tokensIn != 600 {
+		t.Fatalf("today shrank at the retention floor: tokens_in=%d, want 600", tokensIn)
+	}
+}
+
 func TestRollupClearsItsWindowBeforeReinserting(t *testing.T) {
 	// 0006 copied every pre-existing row in with alias ''. Recomputing the
 	// same day grouped by a wider key inserts new rows without matching the

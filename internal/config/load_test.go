@@ -181,6 +181,27 @@ func TestParseRejectsNonPositiveRetention(t *testing.T) {
 	}
 }
 
+func TestRetentionShorterThanADayIsRejected(t *testing.T) {
+	// The daily rollup cannot finalize a day that pruning is eating while it
+	// is still being written. Rejecting the config is honest; accepting it
+	// and silently under-reporting the day is not.
+	body := minimal + "\nlog:\n  retention: 6h\n"
+	_, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err == nil {
+		t.Fatal("a retention below 24h must be rejected")
+	}
+	if !strings.Contains(err.Error(), "log.retention") {
+		t.Fatalf("the error must name the setting, got %q", err)
+	}
+}
+
+func TestRetentionOfExactlyADayIsAccepted(t *testing.T) {
+	body := minimal + "\nlog:\n  retention: 24h\n"
+	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err != nil {
+		t.Fatalf("24h is the floor and must be accepted: %v", err)
+	}
+}
+
 // The shipped example is documentation that has to stay loadable. It drifted
 // once already, naming a model the provider had decommissioned.
 func TestShippedExampleParses(t *testing.T) {
