@@ -23,10 +23,13 @@
 .force-dark {
   color-scheme: dark;
 
-  /* Surfaces stack upward from the ground: each step is lighter than the one
-     it sits on. This is an elevation model, not the recessed-well model the
-     previous language used, and it is why light mode here is a palette swap
-     rather than a polarity inversion. */
+  /* Surfaces stack upward from the ground: a card is lighter than the
+     ground it sits on, in both modes. The INSET inside a card is where
+     that stops in light — there is nothing above white, so it steps down
+     to --surface-2 instead and is read from its border. This is an
+     elevation model, not the recessed-well model the previous language
+     used, and it is why light here is a palette swap rather than a
+     polarity inversion. */
   --ground: #1A1A1A;
   --ground-alt: #1F1F1E;
   --surface: #262626;
@@ -152,12 +155,15 @@ body.theme-light,
 /* --- darkraise-ui mapping ----------------------------------------------
    What each token above becomes when this is built on darkraise-ui 6.4.0,
    so the implementation is a rename rather than a re-derivation. The axes
-   carry most of it: density="comfortable" already gives a 36px cell,
+   carry most of it: density="comfortable" sets --density-cell-base to
+   2.25rem, which is the control height the 36px row matches (kit table
+   cells are padding-sized and land near it rather than being set to it),
    radius="rounded" already gives 8px, elevation="low" already gives this
    shadow ramp's geometry, and --font-sans is already Inter.
 
      --ground          --surface-base / --background
-     --ground-alt      --surface-tint
+     --ground-alt      none — --surface-tint is a saturated glow hue, not
+                       a second canvas; the library has no counterpart
      --surface         --surface-raised / --card
      --surface-2       --surface-sunken
      --surface-3       --muted
@@ -175,26 +181,29 @@ body.theme-light,
      --state-cooling   --warning
      --state-failed    --destructive
      --focus           --focus-ring / --ring
-     --shadow-soft     --elevation-low / --shadow-card
-     --shadow-elevated --elevation-high / --shadow-dropdown
+     --shadow-soft     --elevation-low  (--shadow-soft is a preset recipe
+                       whose static default is none, not the axis token)
+     --shadow-elevated --elevation-high (likewise --shadow-dropdown)
      --shadow-warm     none — custom, and spent only on the brand mark
      --graticule       none — custom, one background-image on the screen
 
    FOUR THINGS COST SOMETHING. Everything else is an axis setting.
 
-   1. Coral is not a themeable accent. ACCENT_COLORS is eighteen named hues
-      and coral (hsl 12 75% 59%) sits between `red` (hue 0) and `orange`
-      (hue 25), matching neither. The engine emits only --primary,
-      --primary-fill and --primary-foreground from the accent scale, so the
-      override is three declarations — cheap, but it is an override, and
-      adding a `coral` ColorScale upstream would remove it entirely.
+   1. Coral is not a themeable accent. ACCENT_COLORS is SEVENTEEN named
+      hues and coral (hsl 12 75% 59%) sits between `red` (hue 0) and
+      `orange` (hue 25), matching neither. The accent scale drives more than
+      the three --primary* tokens: --ring, --focus-ring, --chart-1..5 and
+      the destructive branch derive from it too, so the override is five
+      declarations before the chart ramp. Adding a `coral` ColorScale
+      upstream removes all of it.
    2. The warm ground is unreachable. sepia (hue 36) is a near-exact match
       for it and stone is a workable second, but SURFACE_COLORS is
       ["slate", ...ACCENT_COLORS], so twelve neutral ramps ship and one is
       selectable. Spec §7's widening is what unblocks this.
-   3. --chart-1..5 must be overridden. The generated ramp reaches for
-      orange and lime at positions 4 and 5, which collide with the reserved
-      cooling and healthy colours. .chart-scope already does this.
+   3. --chart-1..5 must be overridden. The ramp rotates from the accent's
+      index, so WHICH positions collide with the reserved cooling and
+      healthy colours depends on the accent — at sky it is 4 and 5. The
+      collision is the point, not the index. .chart-scope already does it.
    4. --legend has no counterpart. The library emits --foreground and
       --muted-foreground and stops; this language reads a third, quieter
       tier for column heads and captions. One token.
@@ -280,7 +289,8 @@ body.pins-on .pin {
   height: 16px;
   padding: 0 3px;
   border-radius: var(--radius);
-  /* accent-ink/well clears 4.5:1 in both modes (dark ~9.4:1, light ~6:1);
+  /* accent-ink on --surface-2 clears 4.5:1 in both modes, dark 4.60:1 and
+     light 5.65:1 — the dark margin is thin, which is why the pin is 600 weight;
      trace-fill/ground only managed ~2.2:1 in light mode. */
   background: var(--accent-ink);
   color: var(--surface-2);
@@ -456,7 +466,7 @@ kbd {
    more than one candidate), the same split the ladder's --trace/state-
    colour rule already draws — so it stays in the trace family, not a
    neutral chip. Border/rule keeps --trace; the text is --accent-ink, the
-   readable pairing for accent-coloured text (--trace only clears 3.93:1
+   readable pairing for accent-coloured text (--trace only clears 5.17:1
    in light mode). Requests and Overview both report it, so both consume
    this chip rather than reinventing it. */
 .chip-failover {
@@ -483,8 +493,8 @@ kbd {
 /* --- Segmented control ---------------------------------------------------
    One "pick exactly one of N" bar, joined into a single bordered strip
    with hairline dividers between options. The active option sits on
-   --well — the recessed, "value in effect" surface already used for
-   tables, the ladder, and time-range presets — not --overlay, which the
+   --surface-2 — the recessed, "value in effect" surface already used for
+   tables, the ladder, and time-range presets — not --surface-2, which the
    surface hierarchy (see the header comment above) reserves for popovers;
    an inline selection state is not an elevated surface. */
 .segmented {
@@ -691,7 +701,7 @@ a.row { text-decoration: none; }
   border-radius: 2px;
   background: var(--legend);
 }
-/* Passed over without an attempt: hollow, 1px --bezel stroke, no fill —
+/* Passed over without an attempt: hollow, 1px --legend stroke, no fill —
    neither a routing decision nor a health report, so it carries no state
    colour, and its hollow silhouette matches "no attempt occurred" rather
    than the filled attempt outcomes below. */
@@ -796,6 +806,10 @@ a.row { text-decoration: none; }
    Fixed width keeps it a column across rows whose reason text varies
    wildly in length. */
 .target {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex: 0 0 auto;
   min-width: 230px;
   font-family: 'IBM Plex Mono', monospace;
@@ -1043,7 +1057,7 @@ a.row { text-decoration: none; }
 /* A boolean control's on-state is a UI SELECTION, not a router verdict, so
    it takes --accent-ink — the same token the rail's active item and
    Requests' active saved view already use for "this one is chosen". The
-   knob is drawn, not tweened: this product has exactly three animations
+   knob is drawn, not tweened: this product has exactly four movements
    (hover opacity, disclosure height, value swap) and a sliding knob is
    none of them. 26x14, well track — the one shape every screen adopts;
    Provider detail's 26x16 and the preset browser's 24x14 both round to
@@ -1148,7 +1162,7 @@ a.row { text-decoration: none; }
 .drop-indicator {
   position: relative;
   height: 0;
-  border-top: 2px solid var(--trace);
+  border-top: 2px solid var(--accent);
 }
 .drop-indicator::before {
   content: "";
@@ -1157,14 +1171,14 @@ a.row { text-decoration: none; }
   left: 0;
   width: 4px;
   height: 4px;
-  background: var(--trace);
+  background: var(--accent);
 }
 
 /* A provider's discovery-health dot. Deliberately a CIRCLE while
    .state-pip is a 2px-radius square: the two marks answer different
    questions ("is this provider serving" vs "is its model listing still
    being refreshed") and must not read as one repeated mark. Hollow
-   --bezel is the base — no current reading. Stale takes the 2px ring plus
+   --legend is the base — no current reading. Stale takes the 2px ring plus
    centre dot .mark-cooling already established for "something is still
    in there, waiting", so the shape carries it without spending amber on
    a fourth thing. */
@@ -1199,8 +1213,8 @@ a.row { text-decoration: none; }
 
 /* --- Combobox ------------------------------------------------------------
    A multi-select trigger plus its popover menu. The popover sits on
-   --overlay + --shadow-overlay: the surface hierarchy's one elevated
-   value, never --panel or --well. */
+   --surface-2 + --shadow-elevated: the surface hierarchy's one elevated
+   value, never --surface or --surface-2. */
 .combo {
   display: flex;
   flex-direction: column;
@@ -1322,9 +1336,9 @@ a.row { text-decoration: none; }
 .field .spec-note { margin-top: 2px; }
 .field-span-2 { grid-column: span 2; }
 
-/* An input is a value the operator can change, so it sits on --well: the
+/* An input is a value the operator can change, so it sits on --surface-2: the
    recessed surface this product already uses for anything that is data
-   rather than chrome, and the one that inverts polarity between themes. */
+   rather than chrome, and the one that stacks upward in both themes. */
 .field-input {
   height: var(--control-h);
   padding: 0 12px;
@@ -1396,7 +1410,7 @@ a.row { text-decoration: none; }
    styled navigation. RULING: always underlined. An underline is the
    accessible affordance that does not depend on colour alone, so it
    applies whether or not the link is being hovered. --accent-ink because
-   this is accent-coloured text (--trace only reaches 3.93:1 in light
+   this is accent-coloured text (--trace only reaches 5.17:1 in light
    mode and fails AA at body size). */
 .link {
   color: var(--accent-ink);
@@ -1457,7 +1471,7 @@ body.pins-on .pin-note { display: inline; }
   color: var(--ink);
 }
 
-/* Region 5 (surface): the one place --shadow-overlay is allowed to appear
+/* Region 5 (surface): the one place --shadow-elevated is allowed to appear
    outside real overlay chrome (menus, popovers). */
 .surface-overlay {
   padding: var(--section-pad);
@@ -1496,6 +1510,12 @@ body.pins-on .pin-note { display: inline; }
   transition: background var(--dur-hover) ease, border-color var(--dur-hover) ease;
 }
 .control:hover { background: var(--surface-3); }
+/* The fourth permitted motion: 9router presses a control rather than
+   flashing it. No transition — a press is instant and the release is
+   what the eye reads. */
+.control:active,
+.control-primary:active,
+.topbar-btn:active { transform: scale(0.97); }
 
 /* Region 6 (density): a caliper bracket for calling out an exact pixel
    measurement next to the thing it measures. */

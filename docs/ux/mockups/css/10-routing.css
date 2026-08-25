@@ -41,10 +41,10 @@
 }
 
 /* The one control the operator types into on this screen, so it carries
-   --focus on its border rather than --hairline: it is where the cursor
-   already is when the screen opens. --well, like every other input in
+   --focus on its border rather than --border: it is where the cursor
+   already is when the screen opens. --surface-2, like every other input in
    the console — an input holds a value, and values sit on the recessed
-   surface that inverts polarity between themes. */
+   surface that stacks upward in both themes. */
 .rt-input {
   width: 300px;
   height: var(--control-h);
@@ -85,7 +85,7 @@
 
 /* Which of the three rules matched — a router decision, so the trace
    family, and --accent-ink because it is text (--trace only reaches
-   3.93:1 in light mode). Never wraps: "rule 2 · provider/model" broken
+   5.17:1 in light mode). Never wraps: "rule 2 · provider/model" broken
    across two lines reads as two separate labels. */
 .rt-rule-tag {
   flex: 0 0 auto;
@@ -312,7 +312,7 @@
 
    Amber as a rule and a mark, never as text — the discipline provider
    detail's .pd-cooling-chip already set, because --state-cooling measures
-   3.16:1 against the well in light mode and would fail AA on a word. So
+   3.19:1 against --surface (a 2px rule on --surface-2 measures 2.90:1 and misses the floor, so it never sits there) in light mode and would fail AA on a word. So
    the row carries a 1px cooling rule down its left edge and the resolve
    column carries the triangle, while every word in the row stays at full
    ink. The triangle is also the second, shape-based channel, so the flag

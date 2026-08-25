@@ -16,7 +16,7 @@
  * router has no state to report. The single accent is --accent-ink on the
  * one call to action and on the active step's index, both of them UI
  * selection, the same register the rail's active item uses. Every "there is
- * no value here" mark is drawn in --bezel, --legend or a dash — never in
+ * no value here" mark is drawn in --legend, --legend or a dash — never in
  * --state-cooling, which would say something is wrong when nothing is.
  *
  * The classes below all carry the fr- slug so the screens being built
@@ -25,7 +25,7 @@
 
 /* --- Region 1: the one call to action ---------------------------------
    The only committing control on the screen, so the panel it sits in gets
-   the full --hairline border rather than .panel's default --hairline-
+   the full --border border rather than .panel's default --border-
    subtle: a structural step up in weight, not a colour one, since a
    coloured rule here would have to borrow --trace and claim a routing
    decision that has not happened. */
@@ -151,8 +151,8 @@
 }
 
 /* Where the operator is now. Selection, not a verdict, so --accent-ink,
-   filled against --well for the same contrast pairing .pin uses (clears
-   4.5:1 in both modes; --trace on --panel does not). */
+   filled against --surface-2 for the same contrast pairing .pin uses (clears
+   4.5:1 in both modes; --trace on --surface does not). */
 .fr-step[data-state="active"] {
   border-color: var(--accent-ink);
 }

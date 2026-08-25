@@ -263,17 +263,20 @@
 .rf-alias .rf-vol { color: var(--legend); }
 
 /* The one node that is the product rather than a participant, so it is the
-   one node allowed to carry the brand. */
+   one node allowed to carry the accent border. It does NOT take
+   --shadow-warm: that is spent on the brand mark in the sidebar and nowhere
+   else, and a second warm shadow would make the rule a preference. */
 .rf-router {
   flex-direction: column;
   justify-content: center;
   gap: 2px;
   border-color: var(--accent);
   background: var(--surface);
-  box-shadow: var(--shadow-warm);
+  box-shadow: var(--shadow-soft);
 }
 .rf-router-label { margin: 0; color: var(--accent-ink); }
-.rf-router-total { font-size: 20px; font-weight: 500; }
+/* The readout role, not a new size: a router total is a primary reading. */
+.rf-router-total { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; }
 .rf-router-unit,
 .rf-router-fo { color: var(--legend); }
 .rf-router-fo { margin-top: 4px; }

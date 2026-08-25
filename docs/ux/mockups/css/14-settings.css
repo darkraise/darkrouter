@@ -189,7 +189,7 @@
 /* --- Region 2: log and capture ------------------------------------------ */
 
 /* A sentence the operator needs to read before touching the group under it:
-   ink-coloured words against an amber rule. Amber measures 3.16:1 in light
+   ink-coloured words against an amber rule. Amber measures 3.19:1 against --surface in light
    mode and can never be set as text, so the colour lives entirely in the
    2px rule and the words stay legible in both themes. */
 .set-note-warn {
@@ -341,7 +341,7 @@
 .set-srckey .set-config-src { flex: 0 0 auto; }
 .set-srckey .micro { margin-right: var(--gutter); }
 
-/* A count that is not yet a failure. Amber measures 3.16:1 in light and can
+/* A count that is not yet a failure. Amber measures 3.19:1 against --surface in light and can
    never be set as words, so it lives in the chip's border while the count
    itself stays --ink-muted, the same split .pd-cooling-chip already makes. */
 .set-chip-warn { border-color: var(--state-cooling); }

@@ -144,10 +144,13 @@
   line-height: 1;
   color: var(--ink);
 }
+/* Absent, not disabled: it still has to be readable. At 0.3 on a white card
+   the glyph all but vanished in light while staying legible in dark, so the
+   colour carries the dimming and the opacity only softens it. */
 .cap-bit[data-on="false"] {
   border-color: var(--border);
-  color: var(--ink-muted);
-  opacity: 0.3;
+  color: var(--legend);
+  opacity: 0.55;
 }
 
 /* --- Region 2: provenance and lifecycle --------------------------------
@@ -214,7 +217,7 @@
 }
 
 /* The row-level reading of the same fact: an inferred row routes with a
-   warning, so its left edge breaks. --bezel, not amber — this is not a
+   warning, so its left edge breaks. --legend, not amber — this is not a
    health reading. */
 .row-inferred { border-left: 1px dashed var(--legend); }
 
@@ -260,11 +263,11 @@
 /* --- Regions 4 and 5: the model detail sheet ---------------------------
    Docked under the table rather than floating as a positioned overlay —
    a board has to show the sheet and the rows it came from at once — but
-   it now carries the --overlay surface and its one shadow rather than
-   --panel. --panel was only ever a workaround: in light mode --overlay
-   and --well used to share a value, which would have flattened every
+   it now carries the --surface-2 surface and its one shadow rather than
+   --surface. --surface was only ever a workaround: in light mode --surface-2
+   and --surface-2 used to share a value, which would have flattened every
    recessed region inside a floated sheet. Now that the overlay ruling
-   makes --overlay panel-valued in light, the well/overlay step is the
+   makes --surface-2 panel-valued in light, the well/overlay step is the
    same one every well already gets, so the sheet can read as what it
    is — the one elevated surface open on the page, same as a popover. */
 
@@ -540,7 +543,7 @@
    selected row is the same question asked of the operator's own pointer.
    A second pseudo-element rather than reusing .row::after, which owns the
    120ms hover wash and would otherwise dim on hover instead of brighten. */
-.row-selected { border-left: 1px solid var(--trace); }
+.row-selected { border-left: 1px solid var(--accent); }
 .row-selected::before {
   content: "";
   position: absolute;

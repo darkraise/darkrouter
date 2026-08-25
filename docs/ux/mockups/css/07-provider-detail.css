@@ -121,7 +121,7 @@
 /* Amber as a mark, never as text: the ring is the ladder's own cooling mark
    and the border is a rule, both permitted uses; the words stay --ink-muted,
    which is what keeps this legible in light mode where --state-cooling
-   measures 3.16:1 against the well behind it. */
+   measures 3.19:1 against --surface (a 2px rule on --surface-2 measures 2.90:1 and misses the floor, so it never sits there) behind it. */
 .pd-cooling-chip { border-color: var(--state-cooling); }
 
 /* The mid-replace disclosure. Not a .row: it is taller than 30px by

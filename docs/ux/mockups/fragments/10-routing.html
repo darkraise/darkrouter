@@ -139,7 +139,7 @@
                 <span class="target">anthropic/claude-opus-4-20250514</span>
                 <span class="reason">
                   <span class="reason-code">no_capability</span>
-                  <span class="reason-prose">vision demanded, model has none</span>
+                  <span class="reason-prose">vision demanded, model is text-only</span>
                 </span>
               </div>
               <div class="ladder-row">
@@ -350,7 +350,7 @@
                   <span class="micro rt-tcol-ord">04</span>
                   <span class="mono rt-tcol-target">deepinfra/gpt-oss-120b</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; healthy</span>
+                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; disabled &mdash; skipped, never a candidate</span>
                 </div>
 
                 <div class="row">
@@ -374,7 +374,7 @@
                   <span class="micro rt-tcol-ord">07</span>
                   <span class="mono rt-tcol-target">bedrock/us.anthropic.claude-opus-4</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; needs reconnection</span>
+                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; no credential &mdash; skipped, never a candidate</span>
                 </div>
 
                 <div class="row">
@@ -418,7 +418,7 @@
                   <span class="micro rt-tcol-ord">02</span>
                   <span class="mono rt-tcol-target">deepinfra/text-embedding-3-large</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; healthy</span>
+                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; disabled &mdash; skipped, never a candidate</span>
                 </div>
 
                 <div class="row rt-row-dangling">
@@ -507,7 +507,7 @@
                   <span class="micro rt-tcol-ord">04</span>
                   <span class="mono rt-tcol-target">bedrock/us.anthropic.claude-opus-4</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; needs reconnection</span>
+                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; no credential &mdash; skipped, never a candidate</span>
                 </div>
 
               </div>
@@ -546,7 +546,7 @@
 
         <div class="region">
           <p class="section-title">Policy</p>
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Policy &mdash; GET/PUT /api/policy. GET /api/config already returns the whole policy block and the SPA's Config type does not declare it.</span></p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Policy &mdash; GET/PUT /api/policy. NEW per &sect;8.2 &mdash; the PUT does not exist today. GET /api/config already returns the whole policy block and the SPA's Config type does not declare it.</span></p>
 
           <div class="panel rt-policy">
 

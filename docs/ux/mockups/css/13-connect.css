@@ -2,7 +2,7 @@
  * Task 16 — Connect ("use/connect").
  *
  * Everything structural is reused: .panel/.well (so the recessed-data
- * polarity inverts with the theme for free), .table/.row/.row-head,
+ * the ramp stacks upward with the theme for free), .table/.row/.row-head,
  * .chip/.chip-path/.chip-failover, .control, .segmented (+ -option),
  * .combo/.combo-trigger/.combo-chevron, .mono/.micro/.data-emph/.prose/
  * .legend-caps/.section-title/.region/.pin/.pin-note, and the console
@@ -15,7 +15,7 @@
  * surface being live is a configuration fact, so it is drawn with a
  * filled/hollow mark and an ink-level step rather than green/grey; the
  * "one shared secret" notice is an explanation, not a fault, so it takes
- * a --bezel rule rather than --state-failed. The only hues on the screen
+ * a --legend rule rather than --state-failed. The only hues on the screen
  * are --accent-ink on a hovered copy control and on the active tab (both
  * selection/interaction, matching the rail), --state-failed on a hovered
  * Revoke (destructive, the treatment .pd-row-action-danger already
@@ -159,8 +159,8 @@
   color: var(--legend);
 }
 
-/* --bezel, not --hairline: this is the ladder's own .mark-skipped ring,
-   and --hairline is a structural seam colour that measures under 1.6:1
+/* --legend, not --border: this is the ladder's own .mark-skipped ring,
+   and --border is a structural seam colour that measures under 1.6:1
    against a well in both modes — invisible at 7px. */
 .cn-surface-off .cn-surface-mark {
   flex: 0 0 auto;
@@ -173,7 +173,7 @@
 /* --- Region 3: proxy tokens -------------------------------------------- */
 
 /* States what the router does today, next to a table that shows what it
-   would do once per-client tokens exist. A --bezel rule rather than
+   would do once per-client tokens exist. A --legend rule rather than
    --state-failed: nothing has failed here, and red would read as an
    incident rather than as a design limit. */
 .cn-notice {

@@ -8,8 +8,8 @@
  * .control, .control-primary, .status-badge, .field, .field-input,
  * .field-input-inert, .legend, .legend-caps, .section-title, .spec-note,
  * .prose, .mono, .micro, .region, .pin, .pin-note (darkrouter-ui.css).
- * The sign-in field is a .field-input on --well cut into the card's
- * --panel, which is the same recessed step every data region in the
+ * The sign-in field is a .field-input on --surface-2 cut into the card's
+ * --surface, which is the same recessed step every data region in the
  * product gets and the one that inverts between themes; the unconfigured
  * state's field is .field-input-inert, the dashed "there is nothing to
  * read here" variant, because a password box on a gateway with no hash is
@@ -133,7 +133,7 @@
 /* --- Messages ---------------------------------------------------------- */
 
 /* One message block, two tones. The rule carries the colour and the words
-   stay in --ink: --state-cooling measures 3.02:1 against --panel in light and
+   stay in --ink: --state-cooling measures 3.19:1 against --surface in light and
    fails AA as text, so the unconfigured tone could not be said in amber words even if
    it wanted to be, and using the same construction for both tones keeps
    the two states comparable side by side. Red is the rejected tone because
@@ -186,7 +186,7 @@
 }
 
 /* A command or an environment value exactly as it is typed: wire text, so
-   mono, and a --well because it is data the operator copies rather than
+   mono, and a --surface-2 because it is data the operator copies rather than
    chrome the console draws. nowrap plus an ellipsis rather than a wrap:
    a hash broken across two lines invites a copy that is missing a
    character, which is the same failure this whole state exists to
@@ -205,7 +205,7 @@
 
 /* The doubled dollar signs, marked so the difference between the two
    spellings is visible without counting characters. --accent-ink, not
-   --trace: this is accent-coloured TEXT, and --trace only reaches 3.93:1
+   --trace: this is accent-coloured TEXT, and --trace only reaches 5.17:1
    in light mode. */
 .login-esc {
   color: var(--accent-ink);

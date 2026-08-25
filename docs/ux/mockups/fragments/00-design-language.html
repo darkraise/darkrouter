@@ -257,11 +257,11 @@
         </div>
         <div class="row">
           <span class="section-title" style="margin:0">ROUTING</span>
-          <span class="spec-note">12px / Sans 600 / +0.06em / uppercase &mdash; Section title</span>
+          <span class="spec-note">16px / Inter 600 / &minus;0.01em / sentence case &mdash; Section title</span>
         </div>
         <div class="row">
           <p class="doc-title" style="margin:0">operate/requests</p>
-          <span class="spec-note">15px / Sans 600 &mdash; Page title</span>
+          <span class="spec-note">20px / Inter 600 / &minus;0.015em &mdash; Page title</span>
         </div>
         <div class="row">
           <span class="readout">142</span><span class="unit">ms</span>
@@ -358,21 +358,24 @@
         6px on a chip, 8px on a card, 12px on the chrome. It matches
         darkraise-ui's --radius at data-radius="rounded" and Tailwind's
         derived md/sm exactly, so the implementation sets one axis and writes
-        no radius rule. Two marks are true circles because roundness is doing
-        work &mdash; the cooling mark's centre dot and the stale-discovery ring
-        each have to read as a different shape from the square pip beside them
-        at 7 and 8 pixels. A circle used as a corner treatment is still a bug,
-        and so is --radius on a mark small enough that 8px makes it one.
+        no radius rule. Round is reserved for a STATUS DOT and for nothing else: the state pip,
+        the cooling mark's centre dot and the stale-discovery ring. Everything
+        that carries a silhouette reading stays square-cornered &mdash; the four
+        ladder marks depend on filled-versus-hollow and square-versus-round to
+        say what happened, and a circular ladder mark would collide with the
+        pip vocabulary. A circle used as a corner treatment is still a bug, and
+        so is --radius on a mark small enough that 8px makes it one.
       </p>
 
               <p class="prose">
-          Surfaces STACK UPWARD. The ground is the darkest thing in dark mode
-          and the palest in light; a card sits on it, an inset region sits on
-          the card, and each step is lighter than the one beneath. The
-          previous language cut wells DOWN into the panel and inverted that
-          ordering between modes; this one does not, which is why light here
-          is a palette swap and not a polarity flip, and why the light proof
-          now measures contrast rather than direction.
+          Surfaces STACK UPWARD. A card is lighter than the ground it sits on,
+          in both modes. The INSET inside a card is where that stops in light:
+          nothing sits above white, so it steps down to --surface-2 instead and
+          is read from its border rather than its fill. The previous language
+          cut wells DOWN into the panel and inverted that ordering between
+          modes; this one does not, which is why light here is a palette swap
+          and not a polarity flip, and why the light proof measures contrast
+          rather than direction.
         </p>
         <p class="prose">
           Elevation is real and is spent in four places: --shadow-soft on a
@@ -380,12 +383,10 @@
           the one lifted panel that also carries an inset highlight, and
           --shadow-warm, the coral-tinted one, reserved for the brand mark.
           A fifth, --shadow-focus, is the 3px coral ring a focused control
-          takes. Radius runs 4 / 8 / 10 / 14px by element size, and a mark
-          under 10px keeps a 2px corner so its silhouette still reads.
-        </p>
+          takes. Radius runs 4 / 6 / 8 / 12px by element size</p>
 
 <p class="section-title">Density</p>
-      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; roomy: 36px rows, 36px controls, 64px header, 288px rail, 40px page padding, 1280px measure.</span></p>
+      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; roomy: 36px rows, 36px controls, 64px header, 256px rail, 40px page padding, 1280px measure.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
         <div>
           <div class="table" style="width:220px">
@@ -395,11 +396,11 @@
               <span class="micro">healthy</span>
             </div>
           </div>
-          <p class="spec-note">30px row &mdash; var(--row-h)</p>
+          <p class="spec-note">36px row &mdash; var(--row-h)</p>
         </div>
         <div>
           <span class="control">Apply changes</span>
-          <p class="spec-note">30px control &mdash; var(--control-h)</p>
+          <p class="spec-note">36px control &mdash; var(--control-h)</p>
         </div>
         <div>
           <div style="display:flex">
@@ -451,14 +452,14 @@
               <span class="micro">hover this row</span>
             </div>
           </div>
-          <p class="spec-note">120ms opacity on hover</p>
+          <p class="spec-note">150ms opacity on hover</p>
         </div>
         <div>
           <div class="disclosure" style="width:220px">
             <p class="mono" style="margin:0">groq &mdash; healthy</p>
             <p class="prose" style="margin:6px 0 0">Hover to reveal the rest &mdash; latency, model list, last checked.</p>
           </div>
-          <p class="spec-note">160ms height on disclosure</p>
+          <p class="spec-note">200ms height on disclosure</p>
         </div>
         <div>
           <span class="value-swap">
