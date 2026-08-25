@@ -73,7 +73,7 @@
 
 /* --- Region 2: reordering ----------------------------------------------
    The dragged row is genuinely lifted off the panel, which makes it the
-   one legitimate --shadow-overlay surface on this screen. Its left rule
+   one legitimate --shadow-elevated surface on this screen. Its left rule
    is --trace, the same "this is the row the eye should stop on" mark
    .ladder-row-served already uses for the candidate that was chosen. */
 .prov-reorder { max-width: 760px; }
@@ -83,14 +83,14 @@
   z-index: 1;
   transform: translateX(6px);
   background: var(--surface-2);
-  border-left: 1px solid var(--trace);
+  border-left: 1px solid var(--accent);
   box-shadow: var(--shadow-elevated);
 }
 
 /* The priority column while a drag is in flight: the value that is being
    written and the value it replaces, side by side. The outgoing number is
    struck through at --legend; the incoming one is --accent-ink, because
-   accent-coloured TEXT takes accent-ink (--trace only reaches 3.93:1 in
+   accent-coloured TEXT takes accent-ink (--trace only reaches 5.17:1 in
    light mode and fails AA at body size). */
 .prov-col-prio-edit {
   flex: 0 0 108px;

@@ -70,7 +70,7 @@
 
         <div class="region">
           <p class="section-title">Server</p>
-          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/config returns the whole server, log, capture and catalog blocks today and the SPA's Config type declares none of them. Writes need GET/PUT endpoints per &sect;8.2.</span></p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/config returns valid, warnings, aliases, policy and server today &mdash; NOT log, capture or catalog, which have no read endpoint shipped and none in &sect;8.2 either. Both the reads and the writes for those three blocks are new.</span></p>
           <div class="panel set-panel">
             <div class="set-head">
               <span class="mono set-head-id">server</span>
@@ -213,7 +213,7 @@
 
         <div class="region">
           <p class="section-title">Catalog</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync now &rarr; POST /api/catalog/sync. Discovery enabled is a pointer in the schema so an explicit false is distinguishable from absent.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync now &rarr; POST /api/catalog/sync (NEW, &sect;8.2 &mdash; Sync Now does not work today). Discovery enabled is a pointer in the schema so an explicit false is distinguishable from absent.</span></p>
           <div class="panel set-panel">
             <div class="set-head">
               <span class="mono set-head-id">catalog</span>

@@ -221,7 +221,7 @@
 .pgc-out p { margin: 0 0 10px; }
 .pgc-out p:last-child { margin-bottom: 0; }
 
-/* The stream cursor. Static: this product has exactly three animations and
+/* The stream cursor. Static: this product has exactly four movements and
    a blink would be a fourth. --accent-ink for the same reason .pgc-state
    takes it — the socket is open, which is a UI fact. */
 .pgc-caret {
@@ -258,7 +258,7 @@
    reading came out ahead, which is a measurement, not a health state — the
    green/amber/red family would claim the right pane is unhealthy for being
    dearer, which it is not. --accent-ink rather than --trace for the text
-   because --trace only reaches 3.93:1 on light-mode panel. */
+   because --trace only reaches 5.17:1 on light-mode panel. */
 .pgc-win{
   display: inline-flex;
   align-items: center;
@@ -331,7 +331,7 @@
 
 /* A parameter that no longer matches the other pane. Neither an outcome nor
    a routing choice — it is a configuration fact about this bench — so it
-   takes --bezel and --legend and stays out of both colour families. */
+   takes --legend and --legend and stays out of both colour families. */
 .pgc-param-diff { border-color: var(--legend); }
 .pgc-neq {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;

@@ -123,7 +123,7 @@
    column menu it opens is this screen's own. */
 
 /* The second overlay in this screen (after .combo-menu/.time-range-menu):
-   floats over the table on the same --overlay + --shadow-overlay surface
+   floats over the table on the same --surface-2 + --shadow-elevated surface
    rather than sitting in normal flow, which would push the table down and
    leave a dead band the width of the menu behind it. */
 .col-menu {

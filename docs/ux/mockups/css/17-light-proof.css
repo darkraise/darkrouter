@@ -108,8 +108,8 @@
   outline-offset: 1px;
 }
 .lp-input-shipped {
-  border-color: var(--shipped-primary);
-  outline: 1px solid var(--shipped-primary);
+  border-color: var(--shipped-light-accent-ink);
+  outline: 1px solid var(--shipped-light-accent-ink);
 }
 .lp-input-repaired {
   border-color: var(--accent);
@@ -121,7 +121,7 @@
   height: 15px;
   margin-left: -4px;
 }
-.lp-caret-shipped { background: var(--shipped-primary); }
+.lp-caret-shipped { background: var(--shipped-light-accent-ink); }
 .lp-caret-repaired { background: var(--accent); }
 
 /* --- Region 5: cooling headroom --------------------------------------- */
@@ -143,10 +143,10 @@
   flex-wrap: wrap;
 }
 
-/* The 0.02 the cooling mark clears the floor by, drawn to scale: a 300px
-   bar spanning 3.00:1 to 3.20:1 with the measurement sitting near its left
-   edge. Printing "3.02:1" states the margin; drawing it shows how little
-   of the bar it is. */
+/* The margin the cooling mark clears the floor by, drawn to scale: a 300px
+   bar spanning 3.00:1 to 4.00:1 with the measurement near its left edge.
+   Printing "3.19:1" states the margin; drawing it shows how little of the
+   bar it is. */
 .lp-gauge{
   position: relative;
   width: 300px;

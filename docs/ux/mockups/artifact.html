@@ -29,10 +29,13 @@
 .force-dark {
   color-scheme: dark;
 
-  /* Surfaces stack upward from the ground: each step is lighter than the one
-     it sits on. This is an elevation model, not the recessed-well model the
-     previous language used, and it is why light mode here is a palette swap
-     rather than a polarity inversion. */
+  /* Surfaces stack upward from the ground: a card is lighter than the
+     ground it sits on, in both modes. The INSET inside a card is where
+     that stops in light — there is nothing above white, so it steps down
+     to --surface-2 instead and is read from its border. This is an
+     elevation model, not the recessed-well model the previous language
+     used, and it is why light here is a palette swap rather than a
+     polarity inversion. */
   --ground: #1A1A1A;
   --ground-alt: #1F1F1E;
   --surface: #262626;
@@ -158,12 +161,15 @@ body.theme-light,
 /* --- darkraise-ui mapping ----------------------------------------------
    What each token above becomes when this is built on darkraise-ui 6.4.0,
    so the implementation is a rename rather than a re-derivation. The axes
-   carry most of it: density="comfortable" already gives a 36px cell,
+   carry most of it: density="comfortable" sets --density-cell-base to
+   2.25rem, which is the control height the 36px row matches (kit table
+   cells are padding-sized and land near it rather than being set to it),
    radius="rounded" already gives 8px, elevation="low" already gives this
    shadow ramp's geometry, and --font-sans is already Inter.
 
      --ground          --surface-base / --background
-     --ground-alt      --surface-tint
+     --ground-alt      none — --surface-tint is a saturated glow hue, not
+                       a second canvas; the library has no counterpart
      --surface         --surface-raised / --card
      --surface-2       --surface-sunken
      --surface-3       --muted
@@ -181,26 +187,29 @@ body.theme-light,
      --state-cooling   --warning
      --state-failed    --destructive
      --focus           --focus-ring / --ring
-     --shadow-soft     --elevation-low / --shadow-card
-     --shadow-elevated --elevation-high / --shadow-dropdown
+     --shadow-soft     --elevation-low  (--shadow-soft is a preset recipe
+                       whose static default is none, not the axis token)
+     --shadow-elevated --elevation-high (likewise --shadow-dropdown)
      --shadow-warm     none — custom, and spent only on the brand mark
      --graticule       none — custom, one background-image on the screen
 
    FOUR THINGS COST SOMETHING. Everything else is an axis setting.
 
-   1. Coral is not a themeable accent. ACCENT_COLORS is eighteen named hues
-      and coral (hsl 12 75% 59%) sits between `red` (hue 0) and `orange`
-      (hue 25), matching neither. The engine emits only --primary,
-      --primary-fill and --primary-foreground from the accent scale, so the
-      override is three declarations — cheap, but it is an override, and
-      adding a `coral` ColorScale upstream would remove it entirely.
+   1. Coral is not a themeable accent. ACCENT_COLORS is SEVENTEEN named
+      hues and coral (hsl 12 75% 59%) sits between `red` (hue 0) and
+      `orange` (hue 25), matching neither. The accent scale drives more than
+      the three --primary* tokens: --ring, --focus-ring, --chart-1..5 and
+      the destructive branch derive from it too, so the override is five
+      declarations before the chart ramp. Adding a `coral` ColorScale
+      upstream removes all of it.
    2. The warm ground is unreachable. sepia (hue 36) is a near-exact match
       for it and stone is a workable second, but SURFACE_COLORS is
       ["slate", ...ACCENT_COLORS], so twelve neutral ramps ship and one is
       selectable. Spec §7's widening is what unblocks this.
-   3. --chart-1..5 must be overridden. The generated ramp reaches for
-      orange and lime at positions 4 and 5, which collide with the reserved
-      cooling and healthy colours. .chart-scope already does this.
+   3. --chart-1..5 must be overridden. The ramp rotates from the accent's
+      index, so WHICH positions collide with the reserved cooling and
+      healthy colours depends on the accent — at sky it is 4 and 5. The
+      collision is the point, not the index. .chart-scope already does it.
    4. --legend has no counterpart. The library emits --foreground and
       --muted-foreground and stops; this language reads a third, quieter
       tier for column heads and captions. One token.
@@ -286,7 +295,8 @@ body.pins-on .pin {
   height: 16px;
   padding: 0 3px;
   border-radius: var(--radius);
-  /* accent-ink/well clears 4.5:1 in both modes (dark ~9.4:1, light ~6:1);
+  /* accent-ink on --surface-2 clears 4.5:1 in both modes, dark 4.60:1 and
+     light 5.65:1 — the dark margin is thin, which is why the pin is 600 weight;
      trace-fill/ground only managed ~2.2:1 in light mode. */
   background: var(--accent-ink);
   color: var(--surface-2);
@@ -462,7 +472,7 @@ kbd {
    more than one candidate), the same split the ladder's --trace/state-
    colour rule already draws — so it stays in the trace family, not a
    neutral chip. Border/rule keeps --trace; the text is --accent-ink, the
-   readable pairing for accent-coloured text (--trace only clears 3.93:1
+   readable pairing for accent-coloured text (--trace only clears 5.17:1
    in light mode). Requests and Overview both report it, so both consume
    this chip rather than reinventing it. */
 .chip-failover {
@@ -489,8 +499,8 @@ kbd {
 /* --- Segmented control ---------------------------------------------------
    One "pick exactly one of N" bar, joined into a single bordered strip
    with hairline dividers between options. The active option sits on
-   --well — the recessed, "value in effect" surface already used for
-   tables, the ladder, and time-range presets — not --overlay, which the
+   --surface-2 — the recessed, "value in effect" surface already used for
+   tables, the ladder, and time-range presets — not --surface-2, which the
    surface hierarchy (see the header comment above) reserves for popovers;
    an inline selection state is not an elevated surface. */
 .segmented {
@@ -697,7 +707,7 @@ a.row { text-decoration: none; }
   border-radius: 2px;
   background: var(--legend);
 }
-/* Passed over without an attempt: hollow, 1px --bezel stroke, no fill —
+/* Passed over without an attempt: hollow, 1px --legend stroke, no fill —
    neither a routing decision nor a health report, so it carries no state
    colour, and its hollow silhouette matches "no attempt occurred" rather
    than the filled attempt outcomes below. */
@@ -802,6 +812,10 @@ a.row { text-decoration: none; }
    Fixed width keeps it a column across rows whose reason text varies
    wildly in length. */
 .target {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex: 0 0 auto;
   min-width: 230px;
   font-family: 'IBM Plex Mono', monospace;
@@ -1049,7 +1063,7 @@ a.row { text-decoration: none; }
 /* A boolean control's on-state is a UI SELECTION, not a router verdict, so
    it takes --accent-ink — the same token the rail's active item and
    Requests' active saved view already use for "this one is chosen". The
-   knob is drawn, not tweened: this product has exactly three animations
+   knob is drawn, not tweened: this product has exactly four movements
    (hover opacity, disclosure height, value swap) and a sliding knob is
    none of them. 26x14, well track — the one shape every screen adopts;
    Provider detail's 26x16 and the preset browser's 24x14 both round to
@@ -1154,7 +1168,7 @@ a.row { text-decoration: none; }
 .drop-indicator {
   position: relative;
   height: 0;
-  border-top: 2px solid var(--trace);
+  border-top: 2px solid var(--accent);
 }
 .drop-indicator::before {
   content: "";
@@ -1163,14 +1177,14 @@ a.row { text-decoration: none; }
   left: 0;
   width: 4px;
   height: 4px;
-  background: var(--trace);
+  background: var(--accent);
 }
 
 /* A provider's discovery-health dot. Deliberately a CIRCLE while
    .state-pip is a 2px-radius square: the two marks answer different
    questions ("is this provider serving" vs "is its model listing still
    being refreshed") and must not read as one repeated mark. Hollow
-   --bezel is the base — no current reading. Stale takes the 2px ring plus
+   --legend is the base — no current reading. Stale takes the 2px ring plus
    centre dot .mark-cooling already established for "something is still
    in there, waiting", so the shape carries it without spending amber on
    a fourth thing. */
@@ -1205,8 +1219,8 @@ a.row { text-decoration: none; }
 
 /* --- Combobox ------------------------------------------------------------
    A multi-select trigger plus its popover menu. The popover sits on
-   --overlay + --shadow-overlay: the surface hierarchy's one elevated
-   value, never --panel or --well. */
+   --surface-2 + --shadow-elevated: the surface hierarchy's one elevated
+   value, never --surface or --surface-2. */
 .combo {
   display: flex;
   flex-direction: column;
@@ -1328,9 +1342,9 @@ a.row { text-decoration: none; }
 .field .spec-note { margin-top: 2px; }
 .field-span-2 { grid-column: span 2; }
 
-/* An input is a value the operator can change, so it sits on --well: the
+/* An input is a value the operator can change, so it sits on --surface-2: the
    recessed surface this product already uses for anything that is data
-   rather than chrome, and the one that inverts polarity between themes. */
+   rather than chrome, and the one that stacks upward in both themes. */
 .field-input {
   height: var(--control-h);
   padding: 0 12px;
@@ -1402,7 +1416,7 @@ a.row { text-decoration: none; }
    styled navigation. RULING: always underlined. An underline is the
    accessible affordance that does not depend on colour alone, so it
    applies whether or not the link is being hovered. --accent-ink because
-   this is accent-coloured text (--trace only reaches 3.93:1 in light
+   this is accent-coloured text (--trace only reaches 5.17:1 in light
    mode and fails AA at body size). */
 .link {
   color: var(--accent-ink);
@@ -1463,7 +1477,7 @@ body.pins-on .pin-note { display: inline; }
   color: var(--ink);
 }
 
-/* Region 5 (surface): the one place --shadow-overlay is allowed to appear
+/* Region 5 (surface): the one place --shadow-elevated is allowed to appear
    outside real overlay chrome (menus, popovers). */
 .surface-overlay {
   padding: var(--section-pad);
@@ -1502,6 +1516,12 @@ body.pins-on .pin-note { display: inline; }
   transition: background var(--dur-hover) ease, border-color var(--dur-hover) ease;
 }
 .control:hover { background: var(--surface-3); }
+/* The fourth permitted motion: 9router presses a control rather than
+   flashing it. No transition — a press is instant and the release is
+   what the eye reads. */
+.control:active,
+.control-primary:active,
+.topbar-btn:active { transform: scale(0.97); }
 
 /* Region 6 (density): a caliper bracket for calling out an exact pixel
    measurement next to the thing it measures. */
@@ -1833,17 +1853,20 @@ body.pins-on .pin-note { display: inline; }
 .rf-alias .rf-vol { color: var(--legend); }
 
 /* The one node that is the product rather than a participant, so it is the
-   one node allowed to carry the brand. */
+   one node allowed to carry the accent border. It does NOT take
+   --shadow-warm: that is spent on the brand mark in the sidebar and nowhere
+   else, and a second warm shadow would make the rule a preference. */
 .rf-router {
   flex-direction: column;
   justify-content: center;
   gap: 2px;
   border-color: var(--accent);
   background: var(--surface);
-  box-shadow: var(--shadow-warm);
+  box-shadow: var(--shadow-soft);
 }
 .rf-router-label { margin: 0; color: var(--accent-ink); }
-.rf-router-total { font-size: 20px; font-weight: 500; }
+/* The readout role, not a new size: a router total is a primary reading. */
+.rf-router-total { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; }
 .rf-router-unit,
 .rf-router-fo { color: var(--legend); }
 .rf-router-fo { margin-top: 4px; }
@@ -2020,7 +2043,7 @@ body.pins-on .pin-note { display: inline; }
    column menu it opens is this screen's own. */
 
 /* The second overlay in this screen (after .combo-menu/.time-range-menu):
-   floats over the table on the same --overlay + --shadow-overlay surface
+   floats over the table on the same --surface-2 + --shadow-elevated surface
    rather than sitting in normal flow, which would push the table down and
    leave a dead band the width of the menu behind it. */
 .col-menu {
@@ -2240,8 +2263,8 @@ body.pins-on .pin-note { display: inline; }
   );
 }
 
-/* Default fill is neutral --bezel: elapsed time before an outcome is
-   known, the same "nothing has been decided yet" register --bezel already
+/* Default fill is neutral --legend: elapsed time before an outcome is
+   known, the same "nothing has been decided yet" register --legend already
    carries on a skipped ladder mark. Only once an outcome exists does a
    segment take the router-verdict or provider-outcome colour below. */
 .waterfall-seg{
@@ -2292,6 +2315,15 @@ body.pins-on .pin-note { display: inline; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* The unit hugs its number. In a column flex the .unit span was blockified
+   into a second flex item and dropped to the tile's bottom-left, reading as
+   a stray label rather than a suffix — setting display:inline on a flex item
+   does not help, so the pair gets a wrapper of its own. */
+.readout-value {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
   padding: var(--section-pad);
 }
 
@@ -2358,6 +2390,8 @@ body.pins-on .pin-note { display: inline; }
 /* --- Region 8: open in playground ---------------------------------------- */
 
 .trace-footer {
+  gap: var(--gutter);
+  flex-wrap: wrap;
   display: flex;
   justify-content: flex-end;
 }
@@ -2651,7 +2685,7 @@ body.pins-on .pin-note { display: inline; }
 
 /* --- Region 2: reordering ----------------------------------------------
    The dragged row is genuinely lifted off the panel, which makes it the
-   one legitimate --shadow-overlay surface on this screen. Its left rule
+   one legitimate --shadow-elevated surface on this screen. Its left rule
    is --trace, the same "this is the row the eye should stop on" mark
    .ladder-row-served already uses for the candidate that was chosen. */
 .prov-reorder { max-width: 760px; }
@@ -2661,14 +2695,14 @@ body.pins-on .pin-note { display: inline; }
   z-index: 1;
   transform: translateX(6px);
   background: var(--surface-2);
-  border-left: 1px solid var(--trace);
+  border-left: 1px solid var(--accent);
   box-shadow: var(--shadow-elevated);
 }
 
 /* The priority column while a drag is in flight: the value that is being
    written and the value it replaces, side by side. The outgoing number is
    struck through at --legend; the incoming one is --accent-ink, because
-   accent-coloured TEXT takes accent-ink (--trace only reaches 3.93:1 in
+   accent-coloured TEXT takes accent-ink (--trace only reaches 5.17:1 in
    light mode and fails AA at body size). */
 .prov-col-prio-edit {
   flex: 0 0 108px;
@@ -2901,7 +2935,7 @@ body.pins-on .pin-note { display: inline; }
 /* Amber as a mark, never as text: the ring is the ladder's own cooling mark
    and the border is a rule, both permitted uses; the words stay --ink-muted,
    which is what keeps this legible in light mode where --state-cooling
-   measures 3.16:1 against the well behind it. */
+   measures 3.19:1 against --surface (a 2px rule on --surface-2 measures 2.90:1 and misses the floor, so it never sits there) behind it. */
 .pd-cooling-chip { border-color: var(--state-cooling); }
 
 /* The mid-replace disclosure. Not a .row: it is taller than 30px by
@@ -3133,7 +3167,7 @@ body.theme-light .preset-scrim,
 .force-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 /* --- The dialog -------------------------------------------------------
-   --overlay plus --shadow-overlay: the single permitted shadow in the
+   --surface-2 plus --shadow-elevated: the single permitted shadow in the
    product (0 8px 24px -8px). 96px of clearance at the top so the page
    behind is visibly a page and not just a border. */
 .preset-modal {
@@ -3199,11 +3233,11 @@ body.theme-light .preset-scrim,
 }
 
 /* --- Search -----------------------------------------------------------
-   The browse surface used to be a .panel laid inside the --overlay dialog
-   purely to work around light mode: --overlay and --well were the same
+   The browse surface used to be a .panel laid inside the --surface-2 dialog
+   purely to work around light mode: --surface-2 and --surface-2 were the same
    value there, so a well cut straight into the dialog would have no
-   recess. Now that the overlay ruling makes --overlay panel-valued in
-   light (with lift from --shadow-overlay and the hairline, not from a
+   recess. Now that the overlay ruling makes --surface-2 panel-valued in
+   light (with lift from --shadow-elevated and the hairline, not from a
    brighter fill), that intermediate panel is redundant — a well cut
    directly into .preset-modal gets the same well/panel step every other
    well gets. .preset-browse keeps its padding and drops the surface. */
@@ -3232,7 +3266,7 @@ body.theme-light .preset-scrim,
 }
 
 /* A text cursor parked after the query. Static — the product has exactly
-   three animations and none of them is a blink. */
+   four movements and none of them is a blink. */
 .preset-caret {
   width: 1px;
   height: 15px;
@@ -3369,14 +3403,14 @@ body.theme-light .preset-scrim,
 /* The chosen preset. Trace border and the shared 0.08 trace wash — a
    selection is what was CHOSEN, never a state colour. */
 .preset-card[data-selected="true"] {
-  border-color: var(--trace);
+  border-color: var(--accent);
   opacity: 1;
 }
 .preset-card[data-selected="true"]::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--trace);
+  background: var(--accent);
   opacity: 0.08;
   pointer-events: none;
 }
@@ -3446,7 +3480,7 @@ body.theme-light .preset-scrim,
 
 /* Free tier is an attribute of the vendor's plan, not a health reading and
    not a routing decision, so it takes neither a state colour nor trace. A
-   --bezel stroke is the loudest neutral available. */
+   --legend stroke is the loudest neutral available. */
 .preset-free{
   display: inline-flex;
   align-items: center;
@@ -3512,10 +3546,10 @@ body.theme-light .preset-scrim,
 /* The inventory of everything the operator is not typing. A two-column
    key/value run rather than prose, because the point is that these are
    fields, and a field list is what a form would have made them fill in.
-   It sits on --panel, not --well: the form around it is already a well cut
+   It sits on --surface, not --surface-2: the form around it is already a well cut
    into the results grid, and a well inside a well is the same value twice
-   with a hairline between — no recess in either theme. On --panel it is a
-   peer of the id input beside it, which is on --panel for the same reason. */
+   with a hairline between — no recess in either theme. On --surface it is a
+   peer of the id input beside it, which is on --surface for the same reason. */
 .preset-supplies {
   display: grid;
   grid-template-columns: 124px 1fr;
@@ -3698,10 +3732,13 @@ body.theme-light .preset-scrim,
   line-height: 1;
   color: var(--ink);
 }
+/* Absent, not disabled: it still has to be readable. At 0.3 on a white card
+   the glyph all but vanished in light while staying legible in dark, so the
+   colour carries the dimming and the opacity only softens it. */
 .cap-bit[data-on="false"] {
   border-color: var(--border);
-  color: var(--ink-muted);
-  opacity: 0.3;
+  color: var(--legend);
+  opacity: 0.55;
 }
 
 /* --- Region 2: provenance and lifecycle --------------------------------
@@ -3768,7 +3805,7 @@ body.theme-light .preset-scrim,
 }
 
 /* The row-level reading of the same fact: an inferred row routes with a
-   warning, so its left edge breaks. --bezel, not amber — this is not a
+   warning, so its left edge breaks. --legend, not amber — this is not a
    health reading. */
 .row-inferred { border-left: 1px dashed var(--legend); }
 
@@ -3814,11 +3851,11 @@ body.theme-light .preset-scrim,
 /* --- Regions 4 and 5: the model detail sheet ---------------------------
    Docked under the table rather than floating as a positioned overlay —
    a board has to show the sheet and the rows it came from at once — but
-   it now carries the --overlay surface and its one shadow rather than
-   --panel. --panel was only ever a workaround: in light mode --overlay
-   and --well used to share a value, which would have flattened every
+   it now carries the --surface-2 surface and its one shadow rather than
+   --surface. --surface was only ever a workaround: in light mode --surface-2
+   and --surface-2 used to share a value, which would have flattened every
    recessed region inside a floated sheet. Now that the overlay ruling
-   makes --overlay panel-valued in light, the well/overlay step is the
+   makes --surface-2 panel-valued in light, the well/overlay step is the
    same one every well already gets, so the sheet can read as what it
    is — the one elevated surface open on the page, same as a popover. */
 
@@ -4094,7 +4131,7 @@ body.theme-light .preset-scrim,
    selected row is the same question asked of the operator's own pointer.
    A second pseudo-element rather than reusing .row::after, which owns the
    120ms hover wash and would otherwise dim on hover instead of brighten. */
-.row-selected { border-left: 1px solid var(--trace); }
+.row-selected { border-left: 1px solid var(--accent); }
 .row-selected::before {
   content: "";
   position: absolute;
@@ -4147,10 +4184,10 @@ body.theme-light .preset-scrim,
 }
 
 /* The one control the operator types into on this screen, so it carries
-   --focus on its border rather than --hairline: it is where the cursor
-   already is when the screen opens. --well, like every other input in
+   --focus on its border rather than --border: it is where the cursor
+   already is when the screen opens. --surface-2, like every other input in
    the console — an input holds a value, and values sit on the recessed
-   surface that inverts polarity between themes. */
+   surface that stacks upward in both themes. */
 .rt-input {
   width: 300px;
   height: var(--control-h);
@@ -4191,7 +4228,7 @@ body.theme-light .preset-scrim,
 
 /* Which of the three rules matched — a router decision, so the trace
    family, and --accent-ink because it is text (--trace only reaches
-   3.93:1 in light mode). Never wraps: "rule 2 · provider/model" broken
+   5.17:1 in light mode). Never wraps: "rule 2 · provider/model" broken
    across two lines reads as two separate labels. */
 .rt-rule-tag {
   flex: 0 0 auto;
@@ -4418,7 +4455,7 @@ body.theme-light .preset-scrim,
 
    Amber as a rule and a mark, never as text — the discipline provider
    detail's .pd-cooling-chip already set, because --state-cooling measures
-   3.16:1 against the well in light mode and would fail AA on a word. So
+   3.19:1 against --surface (a 2px rule on --surface-2 measures 2.90:1 and misses the floor, so it never sits there) in light mode and would fail AA on a word. So
    the row carries a 1px cooling rule down its left edge and the resolve
    column carries the triangle, while every word in the row stays at full
    ink. The triangle is also the second, shape-based channel, so the flag
@@ -4880,7 +4917,7 @@ body.theme-light .preset-scrim,
   padding: 8px var(--section-pad);
 }
 
-/* One bar per component, magnitude as height. Neutral --bezel: a vector is
+/* One bar per component, magnitude as height. Neutral --legend: a vector is
    neither an outcome nor a routing decision, so it gets no state colour
    and no trace. Heights are set per bar inline — geometry, not colour. */
 .pg-bars {
@@ -5288,7 +5325,7 @@ body.theme-light .preset-scrim,
 .pgc-out p { margin: 0 0 10px; }
 .pgc-out p:last-child { margin-bottom: 0; }
 
-/* The stream cursor. Static: this product has exactly three animations and
+/* The stream cursor. Static: this product has exactly four movements and
    a blink would be a fourth. --accent-ink for the same reason .pgc-state
    takes it — the socket is open, which is a UI fact. */
 .pgc-caret {
@@ -5325,7 +5362,7 @@ body.theme-light .preset-scrim,
    reading came out ahead, which is a measurement, not a health state — the
    green/amber/red family would claim the right pane is unhealthy for being
    dearer, which it is not. --accent-ink rather than --trace for the text
-   because --trace only reaches 3.93:1 on light-mode panel. */
+   because --trace only reaches 5.17:1 on light-mode panel. */
 .pgc-win{
   display: inline-flex;
   align-items: center;
@@ -5398,7 +5435,7 @@ body.theme-light .preset-scrim,
 
 /* A parameter that no longer matches the other pane. Neither an outcome nor
    a routing choice — it is a configuration fact about this bench — so it
-   takes --bezel and --legend and stays out of both colour families. */
+   takes --legend and --legend and stays out of both colour families. */
 .pgc-param-diff { border-color: var(--legend); }
 .pgc-neq {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
@@ -5410,7 +5447,7 @@ body.theme-light .preset-scrim,
  * Task 16 — Connect ("use/connect").
  *
  * Everything structural is reused: .panel/.well (so the recessed-data
- * polarity inverts with the theme for free), .table/.row/.row-head,
+ * the ramp stacks upward with the theme for free), .table/.row/.row-head,
  * .chip/.chip-path/.chip-failover, .control, .segmented (+ -option),
  * .combo/.combo-trigger/.combo-chevron, .mono/.micro/.data-emph/.prose/
  * .legend-caps/.section-title/.region/.pin/.pin-note, and the console
@@ -5423,7 +5460,7 @@ body.theme-light .preset-scrim,
  * surface being live is a configuration fact, so it is drawn with a
  * filled/hollow mark and an ink-level step rather than green/grey; the
  * "one shared secret" notice is an explanation, not a fault, so it takes
- * a --bezel rule rather than --state-failed. The only hues on the screen
+ * a --legend rule rather than --state-failed. The only hues on the screen
  * are --accent-ink on a hovered copy control and on the active tab (both
  * selection/interaction, matching the rail), --state-failed on a hovered
  * Revoke (destructive, the treatment .pd-row-action-danger already
@@ -5567,8 +5604,8 @@ body.theme-light .preset-scrim,
   color: var(--legend);
 }
 
-/* --bezel, not --hairline: this is the ladder's own .mark-skipped ring,
-   and --hairline is a structural seam colour that measures under 1.6:1
+/* --legend, not --border: this is the ladder's own .mark-skipped ring,
+   and --border is a structural seam colour that measures under 1.6:1
    against a well in both modes — invisible at 7px. */
 .cn-surface-off .cn-surface-mark {
   flex: 0 0 auto;
@@ -5581,7 +5618,7 @@ body.theme-light .preset-scrim,
 /* --- Region 3: proxy tokens -------------------------------------------- */
 
 /* States what the router does today, next to a table that shows what it
-   would do once per-client tokens exist. A --bezel rule rather than
+   would do once per-client tokens exist. A --legend rule rather than
    --state-failed: nothing has failed here, and red would read as an
    incident rather than as a design limit. */
 .cn-notice {
@@ -5969,7 +6006,7 @@ body.theme-light .preset-scrim,
 /* --- Region 2: log and capture ------------------------------------------ */
 
 /* A sentence the operator needs to read before touching the group under it:
-   ink-coloured words against an amber rule. Amber measures 3.16:1 in light
+   ink-coloured words against an amber rule. Amber measures 3.19:1 against --surface in light
    mode and can never be set as text, so the colour lives entirely in the
    2px rule and the words stay legible in both themes. */
 .set-note-warn {
@@ -6121,7 +6158,7 @@ body.theme-light .preset-scrim,
 .set-srckey .set-config-src { flex: 0 0 auto; }
 .set-srckey .micro { margin-right: var(--gutter); }
 
-/* A count that is not yet a failure. Amber measures 3.16:1 in light and can
+/* A count that is not yet a failure. Amber measures 3.19:1 against --surface in light and can
    never be set as words, so it lives in the chip's border while the count
    itself stays --ink-muted, the same split .pd-cooling-chip already makes. */
 .set-chip-warn { border-color: var(--state-cooling); }
@@ -6191,8 +6228,8 @@ body.theme-light .preset-scrim,
  * .control, .control-primary, .status-badge, .field, .field-input,
  * .field-input-inert, .legend, .legend-caps, .section-title, .spec-note,
  * .prose, .mono, .micro, .region, .pin, .pin-note (darkrouter-ui.css).
- * The sign-in field is a .field-input on --well cut into the card's
- * --panel, which is the same recessed step every data region in the
+ * The sign-in field is a .field-input on --surface-2 cut into the card's
+ * --surface, which is the same recessed step every data region in the
  * product gets and the one that inverts between themes; the unconfigured
  * state's field is .field-input-inert, the dashed "there is nothing to
  * read here" variant, because a password box on a gateway with no hash is
@@ -6316,7 +6353,7 @@ body.theme-light .preset-scrim,
 /* --- Messages ---------------------------------------------------------- */
 
 /* One message block, two tones. The rule carries the colour and the words
-   stay in --ink: --state-cooling measures 3.02:1 against --panel in light and
+   stay in --ink: --state-cooling measures 3.19:1 against --surface in light and
    fails AA as text, so the unconfigured tone could not be said in amber words even if
    it wanted to be, and using the same construction for both tones keeps
    the two states comparable side by side. Red is the rejected tone because
@@ -6369,7 +6406,7 @@ body.theme-light .preset-scrim,
 }
 
 /* A command or an environment value exactly as it is typed: wire text, so
-   mono, and a --well because it is data the operator copies rather than
+   mono, and a --surface-2 because it is data the operator copies rather than
    chrome the console draws. nowrap plus an ellipsis rather than a wrap:
    a hash broken across two lines invites a copy that is missing a
    character, which is the same failure this whole state exists to
@@ -6388,7 +6425,7 @@ body.theme-light .preset-scrim,
 
 /* The doubled dollar signs, marked so the difference between the two
    spellings is visible without counting characters. --accent-ink, not
-   --trace: this is accent-coloured TEXT, and --trace only reaches 3.93:1
+   --trace: this is accent-coloured TEXT, and --trace only reaches 5.17:1
    in light mode. */
 .login-esc {
   color: var(--accent-ink);
@@ -6460,7 +6497,7 @@ body.theme-light .preset-scrim,
  * router has no state to report. The single accent is --accent-ink on the
  * one call to action and on the active step's index, both of them UI
  * selection, the same register the rail's active item uses. Every "there is
- * no value here" mark is drawn in --bezel, --legend or a dash — never in
+ * no value here" mark is drawn in --legend, --legend or a dash — never in
  * --state-cooling, which would say something is wrong when nothing is.
  *
  * The classes below all carry the fr- slug so the screens being built
@@ -6469,7 +6506,7 @@ body.theme-light .preset-scrim,
 
 /* --- Region 1: the one call to action ---------------------------------
    The only committing control on the screen, so the panel it sits in gets
-   the full --hairline border rather than .panel's default --hairline-
+   the full --border border rather than .panel's default --border-
    subtle: a structural step up in weight, not a colour one, since a
    coloured rule here would have to borrow --trace and claim a routing
    decision that has not happened. */
@@ -6595,8 +6632,8 @@ body.theme-light .preset-scrim,
 }
 
 /* Where the operator is now. Selection, not a verdict, so --accent-ink,
-   filled against --well for the same contrast pairing .pin uses (clears
-   4.5:1 in both modes; --trace on --panel does not). */
+   filled against --surface-2 for the same contrast pairing .pin uses (clears
+   4.5:1 in both modes; --trace on --surface does not). */
 .fr-step[data-state="active"] {
   border-color: var(--accent-ink);
 }
@@ -6951,8 +6988,8 @@ body.theme-light .preset-scrim,
   outline-offset: 1px;
 }
 .lp-input-shipped {
-  border-color: var(--shipped-primary);
-  outline: 1px solid var(--shipped-primary);
+  border-color: var(--shipped-light-accent-ink);
+  outline: 1px solid var(--shipped-light-accent-ink);
 }
 .lp-input-repaired {
   border-color: var(--accent);
@@ -6964,7 +7001,7 @@ body.theme-light .preset-scrim,
   height: 15px;
   margin-left: -4px;
 }
-.lp-caret-shipped { background: var(--shipped-primary); }
+.lp-caret-shipped { background: var(--shipped-light-accent-ink); }
 .lp-caret-repaired { background: var(--accent); }
 
 /* --- Region 5: cooling headroom --------------------------------------- */
@@ -6986,10 +7023,10 @@ body.theme-light .preset-scrim,
   flex-wrap: wrap;
 }
 
-/* The 0.02 the cooling mark clears the floor by, drawn to scale: a 300px
-   bar spanning 3.00:1 to 3.20:1 with the measurement sitting near its left
-   edge. Printing "3.02:1" states the margin; drawing it shows how little
-   of the bar it is. */
+/* The margin the cooling mark clears the floor by, drawn to scale: a 300px
+   bar spanning 3.00:1 to 4.00:1 with the measurement near its left edge.
+   Printing "3.19:1" states the margin; drawing it shows how little of the
+   bar it is. */
 .lp-gauge{
   position: relative;
   width: 300px;
@@ -7290,11 +7327,11 @@ body.theme-light .preset-scrim,
         </div>
         <div class="row">
           <span class="section-title" style="margin:0">ROUTING</span>
-          <span class="spec-note">12px / Sans 600 / +0.06em / uppercase &mdash; Section title</span>
+          <span class="spec-note">16px / Inter 600 / &minus;0.01em / sentence case &mdash; Section title</span>
         </div>
         <div class="row">
           <p class="doc-title" style="margin:0">operate/requests</p>
-          <span class="spec-note">15px / Sans 600 &mdash; Page title</span>
+          <span class="spec-note">20px / Inter 600 / &minus;0.015em &mdash; Page title</span>
         </div>
         <div class="row">
           <span class="readout">142</span><span class="unit">ms</span>
@@ -7391,21 +7428,24 @@ body.theme-light .preset-scrim,
         6px on a chip, 8px on a card, 12px on the chrome. It matches
         darkraise-ui's --radius at data-radius="rounded" and Tailwind's
         derived md/sm exactly, so the implementation sets one axis and writes
-        no radius rule. Two marks are true circles because roundness is doing
-        work &mdash; the cooling mark's centre dot and the stale-discovery ring
-        each have to read as a different shape from the square pip beside them
-        at 7 and 8 pixels. A circle used as a corner treatment is still a bug,
-        and so is --radius on a mark small enough that 8px makes it one.
+        no radius rule. Round is reserved for a STATUS DOT and for nothing else: the state pip,
+        the cooling mark's centre dot and the stale-discovery ring. Everything
+        that carries a silhouette reading stays square-cornered &mdash; the four
+        ladder marks depend on filled-versus-hollow and square-versus-round to
+        say what happened, and a circular ladder mark would collide with the
+        pip vocabulary. A circle used as a corner treatment is still a bug, and
+        so is --radius on a mark small enough that 8px makes it one.
       </p>
 
               <p class="prose">
-          Surfaces STACK UPWARD. The ground is the darkest thing in dark mode
-          and the palest in light; a card sits on it, an inset region sits on
-          the card, and each step is lighter than the one beneath. The
-          previous language cut wells DOWN into the panel and inverted that
-          ordering between modes; this one does not, which is why light here
-          is a palette swap and not a polarity flip, and why the light proof
-          now measures contrast rather than direction.
+          Surfaces STACK UPWARD. A card is lighter than the ground it sits on,
+          in both modes. The INSET inside a card is where that stops in light:
+          nothing sits above white, so it steps down to --surface-2 instead and
+          is read from its border rather than its fill. The previous language
+          cut wells DOWN into the panel and inverted that ordering between
+          modes; this one does not, which is why light here is a palette swap
+          and not a polarity flip, and why the light proof measures contrast
+          rather than direction.
         </p>
         <p class="prose">
           Elevation is real and is spent in four places: --shadow-soft on a
@@ -7413,12 +7453,10 @@ body.theme-light .preset-scrim,
           the one lifted panel that also carries an inset highlight, and
           --shadow-warm, the coral-tinted one, reserved for the brand mark.
           A fifth, --shadow-focus, is the 3px coral ring a focused control
-          takes. Radius runs 4 / 8 / 10 / 14px by element size, and a mark
-          under 10px keeps a 2px corner so its silhouette still reads.
-        </p>
+          takes. Radius runs 4 / 6 / 8 / 12px by element size</p>
 
 <p class="section-title">Density</p>
-      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; roomy: 36px rows, 36px controls, 64px header, 288px rail, 40px page padding, 1280px measure.</span></p>
+      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; roomy: 36px rows, 36px controls, 64px header, 256px rail, 40px page padding, 1280px measure.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
         <div>
           <div class="table" style="width:220px">
@@ -7428,11 +7466,11 @@ body.theme-light .preset-scrim,
               <span class="micro">healthy</span>
             </div>
           </div>
-          <p class="spec-note">30px row &mdash; var(--row-h)</p>
+          <p class="spec-note">36px row &mdash; var(--row-h)</p>
         </div>
         <div>
           <span class="control">Apply changes</span>
-          <p class="spec-note">30px control &mdash; var(--control-h)</p>
+          <p class="spec-note">36px control &mdash; var(--control-h)</p>
         </div>
         <div>
           <div style="display:flex">
@@ -7484,14 +7522,14 @@ body.theme-light .preset-scrim,
               <span class="micro">hover this row</span>
             </div>
           </div>
-          <p class="spec-note">120ms opacity on hover</p>
+          <p class="spec-note">150ms opacity on hover</p>
         </div>
         <div>
           <div class="disclosure" style="width:220px">
             <p class="mono" style="margin:0">groq &mdash; healthy</p>
             <p class="prose" style="margin:6px 0 0">Hover to reveal the rest &mdash; latency, model list, last checked.</p>
           </div>
-          <p class="spec-note">160ms height on disclosure</p>
+          <p class="spec-note">200ms height on disclosure</p>
         </div>
         <div>
           <span class="value-swap">
@@ -7816,7 +7854,7 @@ body.theme-light .preset-scrim,
             <span class="mark mark-failed" style="transform:scale(4)"></span>
             <span class="stub stub-dashed" style="width:12px;transform:scale(4)"></span>
           </div>
-          <p class="spec-note" style="width:200px">attempted, failed &mdash; filled 7px --state-failed; stub 12px dashed 3px-on-3px, --state-failed</p>
+          <p class="spec-note" style="width:200px">attempted, failed &mdash; filled 8px --state-failed; stub 12px dashed 3px-on-3px, --state-failed</p>
           <div class="ladder" style="width:200px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
               <span class="rank rank-tick">01</span>
@@ -7835,7 +7873,7 @@ body.theme-light .preset-scrim,
             <span class="mark mark-served" style="transform:scale(4)"></span>
             <span class="stub" style="width:12px;transform:scale(4)"></span>
           </div>
-          <p class="spec-note" style="width:200px">served &mdash; filled 7px --trace-fill, 1px --trace ring; stub 12px solid --trace</p>
+          <p class="spec-note" style="width:200px">served &mdash; filled 8px --trace-fill, 1px --trace ring; stub 12px solid --trace</p>
           <div class="ladder" style="width:200px;margin-top:8px">
             <div class="ladder-row ladder-row-served" style="gap:8px">
               <span class="rank rank-tick">03</span>
@@ -8165,7 +8203,7 @@ body.theme-light .preset-scrim,
 
         <div class="region">
           <p class="section-title">Routing flow &middot; last 24h</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to a group_by=alias usage extension. NEW: &sect;8.2 defines group_by=provider|model only, so the alias dimension this graph needs is a spec gap, not a shipped call. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
           <p class="prose rf-lede">
             Left, the aliases traffic arrived under. Right, the eight configured
             providers in the order the router walks them, top to bottom by
@@ -8355,7 +8393,7 @@ body.theme-light .preset-scrim,
         <div class="region">
           <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
           <p class="ops-footer">
-            <span class="mono">v0.9.3</span> &middot;
+            <span class="mono">v0.10.0</span> &middot;
             <span class="mono">up 6d 14h</span> &middot;
             <span class="mono">1,204,881 log records written</span> &middot;
             <span class="mono ops-footer-dropped" data-alert="false" title="A non-zero value means the usage figures on this screen are a lower bound.">0 dropped</span>
@@ -8488,9 +8526,9 @@ body.theme-light .preset-scrim,
               </div>
               <div class="time-range-custom">
                 <span class="micro">custom</span>
-                <input class="time-range-input" value="2026-08-23 09:41" readonly>
-                <span class="micro">&rarr;</span>
                 <input class="time-range-input" value="2026-08-24 09:41" readonly>
+                <span class="micro">&rarr;</span>
+                <input class="time-range-input" value="2026-08-25 09:41" readonly>
               </div>
             </div>
           </div>
@@ -8595,7 +8633,7 @@ body.theme-light .preset-scrim,
               <span class="mono col-time">09:39:40</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">claude-opus-4-20250514</span></span>
-              <span class="mono col-provider">bedrock</span>
+              <span class="mono col-provider">anthropic</span>
               <span class="mono col-status status-success">success</span>
               <span class="mono col-attempts col-right">1</span>
               <span class="mono col-tokens col-right">2,048/890</span>
@@ -8639,7 +8677,7 @@ body.theme-light .preset-scrim,
               <span class="mono col-time">09:38:20</span>
               <span class="mono col-surface">llm</span>
               <span class="col-model"><span class="mono col-model-text">openai/gpt-oss-120b</span></span>
-              <span class="mono col-provider">deepinfra</span>
+              <span class="mono col-provider">cerebras</span>
               <span class="mono col-status status-error">error</span>
               <span class="mono col-attempts col-right">1</span>
               <span class="mono col-tokens col-right">0/0</span>
@@ -8917,7 +8955,7 @@ body.theme-light .preset-scrim,
             The axis runs to cerebras' 30,000ms timeout, the ladder's own
             maximum &mdash; the same scale that makes rank 01 and rank 03
             read as slivers on the ladder does it here too. Bezel marks the
-            wait for a first byte; together's bar turns &mdash;trace once
+            wait for a first byte; together's bar turns --trace once
             its first token lands at 284ms, then ends in the same
             served mark the ladder uses for rank 03.
           </p>
@@ -8945,12 +8983,12 @@ body.theme-light .preset-scrim,
 
             <div class="well readout-tile">
               <p class="spec-note">ttft_ms</p>
-              <span class="readout">284</span><span class="unit">ms</span>
+              <span class="readout-value"><span class="readout">284</span><span class="unit">ms</span></span>
             </div>
 
             <div class="well readout-tile">
               <p class="spec-note">total_ms</p>
-              <span class="readout">32,259</span><span class="unit">ms</span>
+              <span class="readout-value"><span class="readout">32,259</span><span class="unit">ms</span></span>
             </div>
 
           </div>
@@ -9266,32 +9304,32 @@ body.theme-light .preset-scrim,
       </a>
       <a class="row" href="#/requests?provider=deepinfra">
         <span class="mono rank-col-id">deepinfra</span>
-        <span class="data-emph rank-col-num">410</span>
-        <span class="rank-col-num"><span class="data-emph">244.7</span><span class="unit">k</span></span>
-        <span class="data-emph rank-col-num">$0.26</span>
+        <span class="data-emph rank-col-num">0</span>
+        <span class="rank-col-num"><span class="data-emph">0</span><span class="unit">&nbsp;</span></span>
+        <span class="data-emph rank-col-num">$0.00</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:6.3%"></span></span>
-          <span class="micro share-pct">2.3%</span>
+          <span class="micro share-pct">0.0%</span>
         </span>
       </a>
       <a class="row" href="#/requests?provider=bedrock">
         <span class="mono rank-col-id">bedrock</span>
-        <span class="data-emph rank-col-num">96</span>
-        <span class="rank-col-num"><span class="data-emph">125.4</span><span class="unit">k</span></span>
-        <span class="data-emph rank-col-num">$4.39</span>
+        <span class="data-emph rank-col-num">0</span>
+        <span class="rank-col-num"><span class="data-emph">0</span><span class="unit">&nbsp;</span></span>
+        <span class="data-emph rank-col-num">$0.00</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:1.5%"></span></span>
-          <span class="micro share-pct">0.5%</span>
+          <span class="micro share-pct">0.0%</span>
         </span>
       </a>
       <a class="row" href="#/requests?provider=vertex">
         <span class="mono rank-col-id">vertex</span>
-        <span class="data-emph rank-col-num">34</span>
-        <span class="rank-col-num"><span class="data-emph">28.8</span><span class="unit">k</span></span>
-        <span class="data-emph rank-col-num">$0.42</span>
+        <span class="data-emph rank-col-num">540</span>
+        <span class="rank-col-num"><span class="data-emph">398.9</span><span class="unit">k</span></span>
+        <span class="data-emph rank-col-num">$5.07</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:0.5%"></span></span>
-          <span class="micro share-pct">0.2%</span>
+          <span class="micro share-pct">3.1%</span>
         </span>
       </a>
               </div>
@@ -9309,7 +9347,7 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=openai%2Fgpt-oss-120b">
         <span class="mono rank-col-id">openai/gpt-oss-120b</span>
         <span class="data-emph rank-col-num">6,210</span>
-        <span class="rank-col-num"><span class="data-emph">4.10</span><span class="unit">M</span></span>
+        <span class="rank-col-num"><span class="data-emph">3.51</span><span class="unit">M</span></span>
         <span class="data-emph rank-col-num">$3.48</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:100.0%"></span></span>
@@ -9319,7 +9357,7 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=openai%2Fgpt-oss-20b">
         <span class="mono rank-col-id">openai/gpt-oss-20b</span>
         <span class="data-emph rank-col-num">3,480</span>
-        <span class="rank-col-num"><span class="data-emph">1.81</span><span class="unit">M</span></span>
+        <span class="rank-col-num"><span class="data-emph">1.55</span><span class="unit">M</span></span>
         <span class="data-emph rank-col-num">$0.69</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:56.0%"></span></span>
@@ -9329,7 +9367,7 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=llama-3.3-70b-versatile">
         <span class="mono rank-col-id">llama-3.3-70b-versatile</span>
         <span class="data-emph rank-col-num">2,360</span>
-        <span class="rank-col-num"><span class="data-emph">1.65</span><span class="unit">M</span></span>
+        <span class="rank-col-num"><span class="data-emph">1.41</span><span class="unit">M</span></span>
         <span class="data-emph rank-col-num">$1.24</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:38.0%"></span></span>
@@ -9339,7 +9377,7 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=deepseek-v3">
         <span class="mono rank-col-id">deepseek-v3</span>
         <span class="data-emph rank-col-num">1,970</span>
-        <span class="rank-col-num"><span class="data-emph">1.60</span><span class="unit">M</span></span>
+        <span class="rank-col-num"><span class="data-emph">1.37</span><span class="unit">M</span></span>
         <span class="data-emph rank-col-num">$1.76</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:31.7%"></span></span>
@@ -9349,7 +9387,7 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=claude-sonnet-4-20250514">
         <span class="mono rank-col-id">claude-sonnet-4-20250514</span>
         <span class="data-emph rank-col-num">1,640</span>
-        <span class="rank-col-num"><span class="data-emph">2.26</span><span class="unit">M</span></span>
+        <span class="rank-col-num"><span class="data-emph">1.94</span><span class="unit">M</span></span>
         <span class="data-emph rank-col-num">$26.03</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:26.4%"></span></span>
@@ -9359,7 +9397,7 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=claude-opus-4-20250514">
         <span class="mono rank-col-id">claude-opus-4-20250514</span>
         <span class="data-emph rank-col-num">812</span>
-        <span class="rank-col-num"><span class="data-emph">1.31</span><span class="unit">M</span></span>
+        <span class="rank-col-num"><span class="data-emph">1.12</span><span class="unit">M</span></span>
         <span class="data-emph rank-col-num">$44.67</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:13.1%"></span></span>
@@ -9369,17 +9407,17 @@ body.theme-light .preset-scrim,
       <a class="row" href="#/requests?model=gemini-2.0-flash">
         <span class="mono rank-col-id">gemini-2.0-flash</span>
         <span class="data-emph rank-col-num">690</span>
-        <span class="rank-col-num"><span class="data-emph">648.6</span><span class="unit">k</span></span>
+        <span class="rank-col-num"><span class="data-emph">555.6</span><span class="unit">k</span></span>
         <span class="data-emph rank-col-num">$1.10</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:11.1%"></span></span>
           <span class="micro share-pct">3.9%</span>
         </span>
       </a>
-      <a class="row" href="#/requests?model=command-r-plus">
+      <a class="row" href="#/requests?model=bge-reranker-v2-m3">
         <span class="mono rank-col-id">command-r-plus</span>
         <span class="data-emph rank-col-num">399</span>
-        <span class="rank-col-num"><span class="data-emph">303.2</span><span class="unit">k</span></span>
+        <span class="rank-col-num"><span class="data-emph">259.7</span><span class="unit">k</span></span>
         <span class="data-emph rank-col-num">$0.86</span>
         <span class="rank-col-share">
           <span class="share-track"><span class="share-bar" style="width:6.4%"></span></span>
@@ -10055,7 +10093,7 @@ body.theme-light .preset-scrim,
               <div class="well pd-stat">
                 <span class="micro pd-stat-key">backoff_level</span>
                 <span><span class="readout">3</span><span class="unit">of 5</span></span>
-                <span class="mono pd-stat-sub">next trip cools 8s, then 15s</span>
+                <span class="mono pd-stat-sub">next trip cools 8m 24s, then 16m 48s</span>
               </div>
               <div class="well pd-stat">
                 <span class="micro pd-stat-key">consecutive_failures</span>
@@ -11112,7 +11150,7 @@ body.theme-light .preset-scrim,
         <!-- ============ Regions 4 and 5 — detail sheet ============ -->
         <div class="region">
           <p class="section-title">Model detail sheet &mdash; open</p>
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview (NEW, &sect;8.2). Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
           <div class="sheet">
 
             <div class="sheet-head">
@@ -11652,7 +11690,7 @@ body.theme-light .preset-scrim,
                 <span class="target">anthropic/claude-opus-4-20250514</span>
                 <span class="reason">
                   <span class="reason-code">no_capability</span>
-                  <span class="reason-prose">vision demanded, model has none</span>
+                  <span class="reason-prose">vision demanded, model is text-only</span>
                 </span>
               </div>
               <div class="ladder-row">
@@ -11863,7 +11901,7 @@ body.theme-light .preset-scrim,
                   <span class="micro rt-tcol-ord">04</span>
                   <span class="mono rt-tcol-target">deepinfra/gpt-oss-120b</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; healthy</span>
+                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; disabled &mdash; skipped, never a candidate</span>
                 </div>
 
                 <div class="row">
@@ -11887,7 +11925,7 @@ body.theme-light .preset-scrim,
                   <span class="micro rt-tcol-ord">07</span>
                   <span class="mono rt-tcol-target">bedrock/us.anthropic.claude-opus-4</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; needs reconnection</span>
+                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; no credential &mdash; skipped, never a candidate</span>
                 </div>
 
                 <div class="row">
@@ -11931,7 +11969,7 @@ body.theme-light .preset-scrim,
                   <span class="micro rt-tcol-ord">02</span>
                   <span class="mono rt-tcol-target">deepinfra/text-embedding-3-large</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; healthy</span>
+                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; disabled &mdash; skipped, never a candidate</span>
                 </div>
 
                 <div class="row rt-row-dangling">
@@ -12020,7 +12058,7 @@ body.theme-light .preset-scrim,
                   <span class="micro rt-tcol-ord">04</span>
                   <span class="mono rt-tcol-target">bedrock/us.anthropic.claude-opus-4</span>
                   <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
-                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; needs reconnection</span>
+                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; no credential &mdash; skipped, never a candidate</span>
                 </div>
 
               </div>
@@ -12059,7 +12097,7 @@ body.theme-light .preset-scrim,
 
         <div class="region">
           <p class="section-title">Policy</p>
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Policy &mdash; GET/PUT /api/policy. GET /api/config already returns the whole policy block and the SPA's Config type does not declare it.</span></p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Policy &mdash; GET/PUT /api/policy. NEW per &sect;8.2 &mdash; the PUT does not exist today. GET /api/config already returns the whole policy block and the SPA's Config type does not declare it.</span></p>
 
           <div class="panel rt-policy">
 
@@ -12296,7 +12334,7 @@ body.theme-light .preset-scrim,
           <div class="pg-field">
             <p class="legend-caps">Surface</p>
             <div class="segmented" aria-label="request surface">
-              <span class="segmented-option" data-active="true">chat</span>
+              <span class="segmented-option" data-active="true">llm</span>
               <span class="segmented-option">embeddings</span>
               <span class="segmented-option">rerank</span>
               <span class="segmented-option">moderation</span>
@@ -13447,7 +13485,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
         <div class="region">
           <p class="section-title">Server</p>
-          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/config returns the whole server, log, capture and catalog blocks today and the SPA's Config type declares none of them. Writes need GET/PUT endpoints per &sect;8.2.</span></p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/config returns valid, warnings, aliases, policy and server today &mdash; NOT log, capture or catalog, which have no read endpoint shipped and none in &sect;8.2 either. Both the reads and the writes for those three blocks are new.</span></p>
           <div class="panel set-panel">
             <div class="set-head">
               <span class="mono set-head-id">server</span>
@@ -13590,7 +13628,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
         <div class="region">
           <p class="section-title">Catalog</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync now &rarr; POST /api/catalog/sync. Discovery enabled is a pointer in the schema so an explicit false is distinguishable from absent.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync now &rarr; POST /api/catalog/sync (NEW, &sect;8.2 &mdash; Sync Now does not work today). Discovery enabled is a pointer in the schema so an explicit false is distinguishable from absent.</span></p>
           <div class="panel set-panel">
             <div class="set-head">
               <span class="mono set-head-id">catalog</span>
@@ -13930,7 +13968,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
                   <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
                   <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
                   <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
-                  <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
                 </svg>
                 <p class="login-wordmark">darkrouter</p>
                 <p class="micro">192.168.0.10:8081</p>
@@ -13970,7 +14008,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
                   <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
                   <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
                   <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
-                  <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
                 </svg>
                 <p class="login-wordmark">darkrouter</p>
                 <p class="micro">192.168.0.10:8081</p>
@@ -14018,7 +14056,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
                   <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
                   <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
                   <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
-                  <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
                 </svg>
                 <p class="login-wordmark">darkrouter</p>
                 <p class="micro">192.168.0.10:8081</p>
@@ -14108,7 +14146,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
               <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
               <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
               <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
-              <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
             </svg>
             <span class="spec-note">96px &mdash; sign-in</span>
           </div>
@@ -14124,7 +14162,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
               <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
               <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
               <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
-              <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
             </svg>
             <span class="spec-note">24px &mdash; inline</span>
           </div>
@@ -14140,7 +14178,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
               <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
               <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
               <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
-              <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
             </svg>
             <span class="spec-note">16px &mdash; favicon</span>
           </div>
@@ -14149,7 +14187,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
         <div class="login-mark-text">
           <p class="prose">The routing ladder and the logo drawn as the same figure: a bezel around a spine, three candidates entering from the left, two of them stopping at a hollow skip mark on the spine, and the third crossing it and running out to a single bright pip that breaks the frame. That is one request walking a failover chain, and it is also the instrument itself &mdash; a screen with something on it.</p>
           <p class="prose">At 16px the interior detail drops out and what survives is a bracket, a crosshair and one dot pushed right, which is enough to find the tab by. It is the only place in the product where <span class="mono">--trace</span> appears without a routing decision behind it, and it is doing the same job: marking the one candidate that came out.</p>
-          <p class="spec-note">24 grid, rects only, no curve and no gradient. Bezel square (2,2)&ndash;(22,22) &middot; spine 1px at x=12 &middot; stubs 1px at y=7, y=12 and y=17, the outer two stopping at x=12 and the middle one crossing to x=19 &middot; skip marks 3&times;3 hollow, centred on the spine at (12,7) and (12,17) &middot; pip 4&times;4 filled, centred at (20,12), the one element in var(--trace).</p>
+          <p class="spec-note">24 grid, rects only, no curve and no gradient. Bezel square (2,2)&ndash;(22,22) &middot; spine 1px at x=12 &middot; stubs 1px at y=7, y=12 and y=17, the outer two stopping at x=12 and the middle one crossing to x=19 &middot; skip marks 3&times;3 hollow, centred on the spine at (12,7) and (12,17) &middot; pip 4&times;4 filled, centred at (20,12), the one element in var(--accent).</p>
           <p class="spec-note">One deviation from the written geometry, and it is visible above: the spine breaks either side of each skip mark instead of running unbroken from y=2 to y=22. A 3&times;3 outline drawn with a 1px stroke has a 1px core, which a 1px rule through it fills exactly &mdash; the two marks would render solid at every size and read as served rather than skipped, inverting the figure's meaning.</p>
         </div>
 
@@ -14494,7 +14532,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
             <span class="mono">--accent-ink</span>
             <span class="micro lp-mode">light</span>
             <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-dark-accent-ink)"></span>
+              <span class="swatch" style="background:var(--shipped-light-accent-ink)"></span>
               <span class="mono lp-ratio lp-ratio-fail">3.23:1</span>
             </span>
             <span class="lp-side">
@@ -14564,7 +14602,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
       <div class="region">
         <p class="section-title">2 &mdash; Elevation, both modes</p>
         <p>
-          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Elevation &mdash; ground &rarr; card &rarr; inset, each lighter than the last, in BOTH modes. No polarity inversion; light is a palette swap by design.</span>
+          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Elevation &mdash; a card is lighter than its ground in both modes. The inset is where that stops in light: nothing sits above white, so it steps down and is read from its border.</span>
         </p>
         <div class="lp-split">
           <div class="force-dark lp-half">

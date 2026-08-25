@@ -103,8 +103,8 @@
   );
 }
 
-/* Default fill is neutral --bezel: elapsed time before an outcome is
-   known, the same "nothing has been decided yet" register --bezel already
+/* Default fill is neutral --legend: elapsed time before an outcome is
+   known, the same "nothing has been decided yet" register --legend already
    carries on a skipped ladder mark. Only once an outcome exists does a
    segment take the router-verdict or provider-outcome colour below. */
 .waterfall-seg{
@@ -155,6 +155,15 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* The unit hugs its number. In a column flex the .unit span was blockified
+   into a second flex item and dropped to the tile's bottom-left, reading as
+   a stray label rather than a suffix — setting display:inline on a flex item
+   does not help, so the pair gets a wrapper of its own. */
+.readout-value {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
   padding: var(--section-pad);
 }
 
@@ -221,6 +230,8 @@
 /* --- Region 8: open in playground ---------------------------------------- */
 
 .trace-footer {
+  gap: var(--gutter);
+  flex-wrap: wrap;
   display: flex;
   justify-content: flex-end;
 }

@@ -403,10 +403,11 @@ was right for the cool language this phase was first drawn in and is wrong for t
 the widening, the identity's foundation is an override block per mode that a future library upgrade
 can silently strip, taking the design with it.
 
-**Add a `coral` accent.** `ACCENT_COLORS` is eighteen named hues and coral — hsl(12, 75%, 59%),
+**Add a `coral` accent.** `ACCENT_COLORS` is seventeen named hues and coral — hsl(12, 75%, 59%),
 the brand this console adopts — sits between `red` at hue 0 and `orange` at hue 25, matching
-neither. The engine emits only `--primary`, `--primary-fill` and `--primary-foreground` from the
-accent scale, so the override is three declarations and the cost of *not* doing this is small. It
+neither. The accent scale drives `--ring`, `--focus-ring`, `--chart-1..5` and the destructive
+branch as well as the three `--primary*` tokens, so the override is five declarations before the
+chart ramp. It
 is listed because a themeable accent is the difference between a product that picks a brand colour
 and one that patches around the theme, and because the ramp is eleven values another consumer can
 use.
@@ -430,7 +431,7 @@ those correct a different vendor's values, these correct the kit's own:
 
 `--primary` is a fifth, and what it measures depends on the accent chosen: at the sky this console
 was first drawn in it was 2.74:1, and at the coral it now uses it is 3.23:1 against white — over
-the 3:1 a mark is held to, under the 4.5:1 text is. Either way it matters more than it looks: `dist/styles.css:10749` documents that form controls take
+the 3:1 a mark is held to, under the 4.5:1 text is. Either way it matters more than it looks: `dist/styles.css` (~line 12362 in 6.4.0) documents that form controls take
 their focus indicator from `--primary` rather than `--focus-ring`, so at 2.74:1 every text field,
 select and textarea in every consuming app has a sub-3:1 focus ring in light mode. `pickForeground`
 enforces only `FOREGROUND_MIN_RATIO = 3`, which is why button labels are not AA-safe at every

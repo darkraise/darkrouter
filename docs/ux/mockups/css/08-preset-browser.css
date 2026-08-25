@@ -58,7 +58,7 @@ body.theme-light .preset-scrim,
 .force-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
 
 /* --- The dialog -------------------------------------------------------
-   --overlay plus --shadow-overlay: the single permitted shadow in the
+   --surface-2 plus --shadow-elevated: the single permitted shadow in the
    product (0 8px 24px -8px). 96px of clearance at the top so the page
    behind is visibly a page and not just a border. */
 .preset-modal {
@@ -124,11 +124,11 @@ body.theme-light .preset-scrim,
 }
 
 /* --- Search -----------------------------------------------------------
-   The browse surface used to be a .panel laid inside the --overlay dialog
-   purely to work around light mode: --overlay and --well were the same
+   The browse surface used to be a .panel laid inside the --surface-2 dialog
+   purely to work around light mode: --surface-2 and --surface-2 were the same
    value there, so a well cut straight into the dialog would have no
-   recess. Now that the overlay ruling makes --overlay panel-valued in
-   light (with lift from --shadow-overlay and the hairline, not from a
+   recess. Now that the overlay ruling makes --surface-2 panel-valued in
+   light (with lift from --shadow-elevated and the hairline, not from a
    brighter fill), that intermediate panel is redundant — a well cut
    directly into .preset-modal gets the same well/panel step every other
    well gets. .preset-browse keeps its padding and drops the surface. */
@@ -157,7 +157,7 @@ body.theme-light .preset-scrim,
 }
 
 /* A text cursor parked after the query. Static — the product has exactly
-   three animations and none of them is a blink. */
+   four movements and none of them is a blink. */
 .preset-caret {
   width: 1px;
   height: 15px;
@@ -294,14 +294,14 @@ body.theme-light .preset-scrim,
 /* The chosen preset. Trace border and the shared 0.08 trace wash — a
    selection is what was CHOSEN, never a state colour. */
 .preset-card[data-selected="true"] {
-  border-color: var(--trace);
+  border-color: var(--accent);
   opacity: 1;
 }
 .preset-card[data-selected="true"]::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--trace);
+  background: var(--accent);
   opacity: 0.08;
   pointer-events: none;
 }
@@ -371,7 +371,7 @@ body.theme-light .preset-scrim,
 
 /* Free tier is an attribute of the vendor's plan, not a health reading and
    not a routing decision, so it takes neither a state colour nor trace. A
-   --bezel stroke is the loudest neutral available. */
+   --legend stroke is the loudest neutral available. */
 .preset-free{
   display: inline-flex;
   align-items: center;
@@ -437,10 +437,10 @@ body.theme-light .preset-scrim,
 /* The inventory of everything the operator is not typing. A two-column
    key/value run rather than prose, because the point is that these are
    fields, and a field list is what a form would have made them fill in.
-   It sits on --panel, not --well: the form around it is already a well cut
+   It sits on --surface, not --surface-2: the form around it is already a well cut
    into the results grid, and a well inside a well is the same value twice
-   with a hairline between — no recess in either theme. On --panel it is a
-   peer of the id input beside it, which is on --panel for the same reason. */
+   with a hairline between — no recess in either theme. On --surface it is a
+   peer of the id input beside it, which is on --surface for the same reason. */
 .preset-supplies {
   display: grid;
   grid-template-columns: 124px 1fr;

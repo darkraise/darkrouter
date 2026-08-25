@@ -300,7 +300,7 @@
   padding: 8px var(--section-pad);
 }
 
-/* One bar per component, magnitude as height. Neutral --bezel: a vector is
+/* One bar per component, magnitude as height. Neutral --legend: a vector is
    neither an outcome nor a routing decision, so it gets no state colour
    and no trace. Heights are set per bar inline — geometry, not colour. */
 .pg-bars {

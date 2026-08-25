@@ -120,7 +120,7 @@
 
         <div class="region">
           <p class="section-title">Routing flow &middot; last 24h</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to a group_by=alias usage extension. NEW: &sect;8.2 defines group_by=provider|model only, so the alias dimension this graph needs is a spec gap, not a shipped call. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
           <p class="prose rf-lede">
             Left, the aliases traffic arrived under. Right, the eight configured
             providers in the order the router walks them, top to bottom by
@@ -310,7 +310,7 @@
         <div class="region">
           <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
           <p class="ops-footer">
-            <span class="mono">v0.9.3</span> &middot;
+            <span class="mono">v0.10.0</span> &middot;
             <span class="mono">up 6d 14h</span> &middot;
             <span class="mono">1,204,881 log records written</span> &middot;
             <span class="mono ops-footer-dropped" data-alert="false" title="A non-zero value means the usage figures on this screen are a lower bound.">0 dropped</span>
