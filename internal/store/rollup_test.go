@@ -355,6 +355,35 @@ func TestRollupAttributesUsageToTheAttemptsOwnProvider(t *testing.T) {
 	}
 }
 
+func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// A finalized day: its rollup exists, its raw requests are long gone.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
+		 VALUES (?,'groq','m','fast',42,4200)`, yesterday); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, tokensIn int64
+	err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day=?`, yesterday,
+	).Scan(&requests, &tokensIn)
+	if err != nil {
+		t.Fatalf("the day's rollup was destroyed: %v", err)
+	}
+	if requests != 42 || tokensIn != 4200 {
+		t.Fatalf("requests=%d tokens_in=%d, want 42/4200", requests, tokensIn)
+	}
+}
+
 func TestRollupClearsItsWindowBeforeReinserting(t *testing.T) {
 	// 0006 copied every pre-existing row in with alias ''. Recomputing the
 	// same day grouped by a wider key inserts new rows without matching the
