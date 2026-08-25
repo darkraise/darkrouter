@@ -8,7 +8,13 @@
  * of this file; nothing here references a font file directly.
  */
 
-:root {
+/* .force-dark and .force-light pin a subtree to one mode whatever the T
+   toggle says, so a single document can set the two side by side. They name
+   the blocks below rather than copying them: a forced container that had
+   drifted from the mode it claims to depict would be a worse proof than
+   none. Only fragments/17-light-proof.html uses them. */
+:root,
+.force-dark {
   color-scheme: dark;
 
   --ground: #101214;
@@ -52,7 +58,8 @@
   --dur-swap: 90ms;
 }
 
-body.theme-light {
+body.theme-light,
+.force-light {
   color-scheme: light;
 
   --ground: #E5E8EB;
@@ -84,6 +91,27 @@ body.theme-light {
   --well: #FFFFFF;
 
   --shadow-overlay: 0 8px 24px -8px rgba(15, 23, 41, 0.18);
+}
+
+/* A forced container is the page ground for everything inside it, so it
+   paints the two surface tokens body would otherwise have supplied. */
+.force-dark,
+.force-light {
+  background: var(--ground);
+  color: var(--ink);
+}
+
+/* The light-mode values darkraise-ui 6.5.0 ships broken, per spec §7. They
+   live here because this is the one file allowed to hold a hex, and they are
+   shown in exactly one place — the light proof — measured against the tokens
+   that replace them. §7 gives a hex for these three and names only a palette
+   step for --focus-ring and --destructive, so those two are cited by measured
+   ratio on that screen and get no specimen: a swatch would mean guessing a
+   value the spec does not state. */
+:root {
+  --shipped-primary: #0DA2E7;
+  --shipped-success: #10B77F;
+  --shipped-warning: #F59F0A;
 }
 
 /* --- Reset & base -------------------------------------------------- */

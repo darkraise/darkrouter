@@ -19,7 +19,13 @@
  * of this file; nothing here references a font file directly.
  */
 
-:root {
+/* .force-dark and .force-light pin a subtree to one mode whatever the T
+   toggle says, so a single document can set the two side by side. They name
+   the blocks below rather than copying them: a forced container that had
+   drifted from the mode it claims to depict would be a worse proof than
+   none. Only fragments/17-light-proof.html uses them. */
+:root,
+.force-dark {
   color-scheme: dark;
 
   --ground: #101214;
@@ -63,7 +69,8 @@
   --dur-swap: 90ms;
 }
 
-body.theme-light {
+body.theme-light,
+.force-light {
   color-scheme: light;
 
   --ground: #E5E8EB;
@@ -95,6 +102,27 @@ body.theme-light {
   --well: #FFFFFF;
 
   --shadow-overlay: 0 8px 24px -8px rgba(15, 23, 41, 0.18);
+}
+
+/* A forced container is the page ground for everything inside it, so it
+   paints the two surface tokens body would otherwise have supplied. */
+.force-dark,
+.force-light {
+  background: var(--ground);
+  color: var(--ink);
+}
+
+/* The light-mode values darkraise-ui 6.5.0 ships broken, per spec §7. They
+   live here because this is the one file allowed to hold a hex, and they are
+   shown in exactly one place — the light proof — measured against the tokens
+   that replace them. §7 gives a hex for these three and names only a palette
+   step for --focus-ring and --destructive, so those two are cited by measured
+   ratio on that screen and get no specimen: a swatch would mean guessing a
+   value the spec does not state. */
+:root {
+  --shipped-primary: #0DA2E7;
+  --shipped-success: #10B77F;
+  --shipped-warning: #F59F0A;
 }
 
 /* --- Reset & base -------------------------------------------------- */
@@ -6425,6 +6453,193 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   color: var(--ink-muted);
 }
 
+/* Light proof (fragments/17-light-proof.html) — "Graticule Bench".
+ *
+ * The board is pinned light by .force-light from darkrouter-ui.css, so this
+ * partial declares layout and specimen geometry only. It never declares a
+ * colour that is not already a token: a proof screen that painted its own
+ * values would be proving something other than the shipped stylesheet.
+ */
+
+.lp-board {
+  padding: var(--gutter);
+  border-radius: var(--radius);
+}
+
+/* --- Region 1: well polarity ------------------------------------------ */
+
+/* The two modes get equal width and equal treatment. Anything that differs
+   between the halves below is the finding; anything that matches is layout. */
+.lp-split {
+  display: flex;
+  gap: var(--gutter);
+  align-items: stretch;
+}
+.lp-half {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--section-pad);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.lp-card { padding: var(--section-pad); }
+
+.lp-well {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+  margin-top: 8px;
+}
+
+/* A measured reading, not a caption: mono because it came off the render. */
+.lp-measure {
+  margin: 8px 0 0;
+  color: var(--legend);
+}
+
+/* The word the reading resolves to. Emphasis by value step rather than by
+   weight or size, because a 12.5px emphasis face inside an 11px micro line
+   would break the type scale to make one word louder. */
+.lp-verdict { color: var(--ink); }
+
+/* --- Region 3: the five repaired tokens -------------------------------- */
+
+/* Five columns rather than a .table row, because each token carries a
+   before and an after and both need a swatch beside their ratio. Fixed
+   column widths keep the two ratio columns aligned down the block, which
+   is the comparison the region exists to make. */
+.lp-repair-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 84px 1fr 84px;
+  align-items: center;
+  gap: var(--section-pad);
+  min-height: var(--row-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.lp-repair-row:last-child { border-bottom: none; }
+
+.lp-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Ratios right-align on the colon so the before and after columns can be
+   read as two stacks of numbers rather than ten separate labels. */
+.lp-ratio {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lp-ratio-fail { color: var(--state-failed); }
+.lp-ratio-pass { color: var(--state-healthy); }
+
+/* A token §7 names by palette step without giving a hex. Rendering a swatch
+   would mean inventing the value, so the slot stays empty and says so. */
+.lp-no-specimen {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius);
+}
+
+/* --- Region 4: input focus -------------------------------------------- */
+
+.lp-fields {
+  display: flex;
+  gap: var(--gutter);
+  align-items: flex-start;
+}
+.lp-field { flex: 1 1 0; min-width: 0; }
+
+/* The focused-field treatment from the preset browser, with the ring colour
+   left to a modifier: this region's whole point is that the ring is the one
+   thing that changes between the two specimens. */
+.lp-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 10px;
+  outline-offset: 1px;
+}
+.lp-input-shipped {
+  border-color: var(--shipped-primary);
+  outline: 1px solid var(--shipped-primary);
+}
+.lp-input-repaired {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+
+.lp-caret {
+  width: 1px;
+  height: 15px;
+  margin-left: -4px;
+}
+.lp-caret-shipped { background: var(--shipped-primary); }
+.lp-caret-repaired { background: var(--focus); }
+
+/* --- Region 5: cooling headroom --------------------------------------- */
+
+/* The scale(4) box is the state gallery's idiom from the ladder specimen,
+   kept identical so the two screens' enlargements are the same enlargement. */
+.lp-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  height: 64px;
+}
+
+.lp-headroom {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+  flex-wrap: wrap;
+}
+
+/* The 0.02 the cooling mark clears the floor by, drawn to scale: a 300px
+   bar spanning 3.00:1 to 3.20:1 with the measurement sitting near its left
+   edge. Printing "3.02:1" states the margin; drawing it shows how little
+   of the bar it is. */
+.lp-gauge {
+  position: relative;
+  width: 300px;
+  height: 20px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.lp-gauge-floor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--state-failed);
+}
+.lp-gauge-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--state-cooling);
+}
+.lp-gauge-caption {
+  display: flex;
+  justify-content: space-between;
+  width: 300px;
+  margin-top: 4px;
+}
+
+/* --- Region 6: charts in light ---------------------------------------- */
+
+.lp-chart-panel { padding: var(--section-pad); }
+
 </style>
   </head>
   <body>
@@ -6434,7 +6649,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-14-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-15-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-16-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-14-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-15-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-16-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li><li><a href="#s-17-light-proof"><span class="toc-n">17</span>light proof</a></li></ol></nav>
 <section class="screen" id="s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -6528,7 +6743,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
         <div class="row">
           <span class="swatch" style="background:var(--state-healthy)"></span>
           <span class="mono" style="min-width:140px">--state-healthy</span>
-          <span class="micro">vs --well &mdash; dark 10.31:1 &middot; light 3.86:1</span>
+          <span class="micro">vs --well &mdash; dark 10.31:1 &middot; light 5.48:1</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--state-cooling)"></span>
@@ -13458,6 +13673,436 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
         </div>
 
       </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-17-light-proof" data-screen-title="light proof">
+  <p class="legend">
+    Light mode is first-class, so it gets a proof rather than a gesture. This
+    board renders light whatever the <kbd>T</kbd> toggle says, so the two modes
+    can be read against each other inside one document. Every number printed
+    below was measured &mdash; the luminance figures from the rendered pixels of
+    a Chrome screenshot, the contrast ratios computed from the token hexes the
+    shipped stylesheet actually declares &mdash; and where a measurement
+    contradicts what this screen was briefed to say, the measurement is what is
+    printed. Press <kbd>A</kbd> to reveal pins.
+  </p>
+
+  <div class="force-light lp-board">
+    <div class="panel" style="padding:0 var(--gutter)">
+
+      <div class="region">
+        <p class="section-title">1 &mdash; Well polarity</p>
+        <p>
+          <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Well polarity &mdash; :root {--well darker than --panel}; body.theme-light {--well brighter}. Spec &sect;3.3. This is why light is not a palette swap.</span>
+        </p>
+        <div class="lp-split">
+
+          <div class="force-dark lp-half">
+            <p class="legend-caps">dark</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0">requests &middot; last 24h</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">
+              panel luma 27.6 &rarr; well luma 9.9 of 255<br />
+              well is <span class="lp-verdict">darker</span> by 17.6 &middot; step 1.157:1
+            </p>
+          </div>
+
+          <div class="force-light lp-half">
+            <p class="legend-caps">light</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0">requests &middot; last 24h</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">
+              panel luma 249.9 &rarr; well luma 255.0 of 255<br />
+              well is <span class="lp-verdict">brighter</span> by 5.1 &middot; step 1.045:1
+            </p>
+          </div>
+
+        </div>
+        <p class="prose">
+          Sampled from two screenshots of the overview screen at the same
+          coordinate pair &mdash; x 700, y 70 on a panel and y 330 on a well
+          &mdash; one rendered dark and one light, decoded pixel by pixel. The
+          ordering reverses: the recessed surface is the darkest thing in the
+          dark frame and the brightest thing in the light one. That is the
+          structural rule, and it is the reason a screen cannot be relit by
+          lightening every token in place.
+        </p>
+        <p class="prose">
+          The measurement also reports something the rule alone does not. The
+          light step is far weaker &mdash; 1.045:1 against dark's 1.157:1, a
+          separation of five values out of 255 rather than eighteen. Light mode
+          keeps the polarity but spends most of its separation budget on the
+          1px --hairline around the well rather than on the value step inside
+          it. Every recessed region in light is carried by its border.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">2 &mdash; The ladder in light</p>
+        <p>
+          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder in light &mdash; the termination rule is the at-risk mark: --hairline-subtle on a near-white well.</span>
+        </p>
+        <p class="micro">request 01JBXTG4R8ZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
+      <div class="ladder">
+        <div class="ladder-row">
+          <span class="rank">01</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">groq/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">http</span>
+            <span class="reason-prose">429 rate limited</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:2px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank">02</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">cerebras/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">timeout</span>
+            <span class="reason-prose">30000ms elapsed before first byte</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:64px"></span>
+        </div>
+        <div class="ladder-row ladder-row-served">
+          <span class="rank">03</span>
+          <span class="spine"></span>
+          <span class="mark mark-served"></span>
+          <span class="stub"></span>
+          <span class="target">together/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">200</span>
+            <span class="reason-prose">1,847ms total &middot; 284ms time-to-first-token</span>
+          </span>
+          <span class="latency-bar" style="width:4px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">04</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick rank-tick-major text-terminated">05</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">06</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">07</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank text-terminated">08</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">vertex/gemini-2.5-pro</span>
+        </div>
+      </div>
+        <p class="prose">
+          The same eight rows the ladder specimen carries, in light. Ranks
+          04&ndash;08 are the termination rule: a 5px hollow mark in
+          --hairline-subtle sitting on the well, which is the faintest
+          deliberate mark in the product and the one this screen exists to
+          check.
+        </p>
+        <p class="prose">
+          It survives, and by a narrower margin than the dark rendering rather
+          than a wider one: --hairline-subtle against --well measures 1.39:1 in
+          dark and 1.32:1 in light. The loss is 5%, not the collapse the brief
+          for this screen anticipated &mdash; light's well is pure white and its
+          hairline is a pale grey, but dark's well is nearly black and its
+          hairline nearly as dark, so neither mode was ever relying on much. The
+          skipped mark's --bezel stroke gives up more: 4.11:1 dark against
+          3.42:1 light. Both marks clear the 3:1 non-text floor in both modes
+          only because the terminated mark is not asked to; it is the absence of
+          a decision, and the spine beneath it carries the same reading.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">3 &mdash; The five repaired tokens</p>
+        <p>
+          <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Repaired tokens &mdash; five shipped darkraise-ui light-mode failures. Fixed upstream in 6.5.0 per spec &sect;7; mocked here as repaired.</span>
+        </p>
+        <div class="table">
+          <div class="lp-repair-row row-head">
+            <span class="legend-caps">token</span>
+            <span class="legend-caps">shipped</span>
+            <span class="legend-caps lp-ratio">measured</span>
+            <span class="legend-caps">repaired to</span>
+            <span class="legend-caps lp-ratio">measured</span>
+          </div>
+
+          <div class="lp-repair-row">
+            <span class="mono">--primary</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-primary)"></span>
+              <span class="micro">sky-500</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-fail">2.74:1</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--trace)"></span>
+              <span class="micro">--trace</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-pass">3.93:1</span>
+          </div>
+
+          <div class="lp-repair-row">
+            <span class="mono">--focus-ring</span>
+            <span class="lp-side">
+              <span class="lp-no-specimen"></span>
+              <span class="micro">sky-200/300</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-fail">1.28:1</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--focus)"></span>
+              <span class="micro">--focus</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-pass">3.34:1</span>
+          </div>
+
+          <div class="lp-repair-row">
+            <span class="mono">--success</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-success)"></span>
+              <span class="micro">emerald-500</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-fail">2.48:1</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-healthy)"></span>
+              <span class="micro">--state-healthy</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-pass">5.25:1</span>
+          </div>
+
+          <div class="lp-repair-row">
+            <span class="mono">--warning</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-warning)"></span>
+              <span class="micro">amber-500</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-fail">2.04:1</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-cooling)"></span>
+              <span class="micro">--state-cooling</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-pass">3.02:1</span>
+          </div>
+
+          <div class="lp-repair-row">
+            <span class="mono">--destructive</span>
+            <span class="lp-side">
+              <span class="lp-no-specimen"></span>
+              <span class="micro">red-500</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-fail">fails</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-failed)"></span>
+              <span class="micro">--state-failed</span>
+            </span>
+            <span class="mono lp-ratio lp-ratio-pass">4.59:1</span>
+          </div>
+        </div>
+        <p class="prose">
+          Measured against --panel in light, which is the surface a UI mark
+          lands on, except --focus-ring, measured against --ground because a
+          focus ring is drawn outside the control it belongs to. --primary,
+          --success and --warning need 3:1 as non-text marks; --destructive
+          needs 4.5:1 because it is used as text. All five shipped values fail
+          the floor they are held to, and the middle column is what that failure
+          measures.
+        </p>
+        <p class="prose">
+          The two dashed slots are deliberate. Spec &sect;7 states a hex for
+          sky-500, emerald-500 and amber-500 and names only a palette step for
+          the other two, so those get their measured ratio and no swatch:
+          rendering one would mean guessing a value the source does not give,
+          and an invented specimen on a proof screen is worse than a gap.
+        </p>
+        <p class="prose">
+          One number here contradicts the brief this screen was written from,
+          which expected --success to be repaired to 3.70:1. It measures
+          5.25:1. The green was strengthened after that brief was written, when
+          a set review ruled it had to clear AA as body text and not merely the
+          3:1 non-text floor. The screen prints what the stylesheet does.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">4 &mdash; Input focus in light</p>
+        <p>
+          <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Input focus &mdash; styles.css:10749: inputs use --primary, not --focus-ring. Fixing --focus-ring alone does not fix form controls.</span>
+        </p>
+        <div class="lp-fields">
+
+          <div class="lp-field">
+            <p class="legend-caps">shipped &mdash; ring from --primary</p>
+            <div class="well lp-input lp-input-shipped">
+              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-shipped"></span>
+            </div>
+            <p class="spec-note">
+              2.86:1 against the field's own well &middot; 2.74:1 against the
+              panel behind it. Both under the 3:1 floor.
+            </p>
+          </div>
+
+          <div class="lp-field">
+            <p class="legend-caps">repaired &mdash; ring from --focus</p>
+            <div class="well lp-input lp-input-repaired">
+              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-repaired"></span>
+            </div>
+            <p class="spec-note">
+              4.11:1 against the field's own well &middot; 3.93:1 against the
+              panel behind it. Both clear it.
+            </p>
+          </div>
+
+        </div>
+        <p class="prose">
+          A focus ring is drawn across two surfaces at once &mdash; the control
+          it outlines and the panel around it &mdash; so it is measured against
+          both, and the weaker of the two is the one that counts. The shipped
+          ring fails on both.
+        </p>
+        <p class="prose">
+          This is the control the library defect actually breaks, and the reason
+          --focus-ring is not the token to fix. Form controls take their
+          indicator from --primary; repairing --focus-ring alone leaves every
+          text field, select and textarea in every consuming application with a
+          sub-3:1 ring in light mode while the audit reports the ring token as
+          fixed.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">5 &mdash; The cooling mark's headroom</p>
+        <p>
+          <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Cooling headroom &mdash; 3.02:1, clears the floor by 0.02. Accepted deliberately.</span>
+        </p>
+        <div class="lp-headroom">
+          <div>
+            <div class="lp-zoom">
+              <span class="mark mark-cooling"></span>
+            </div>
+            <p class="spec-note" style="width:120px">actual size &mdash; 7px</p>
+          </div>
+          <div>
+            <div class="lp-zoom">
+              <span class="mark mark-cooling" style="transform:scale(4)"></span>
+            </div>
+            <p class="spec-note" style="width:120px">4&times;</p>
+          </div>
+          <div>
+            <div class="lp-gauge">
+              <span class="lp-gauge-floor" style="left:0"></span>
+              <span class="lp-gauge-mark" style="left:30px"></span>
+            </div>
+            <div class="lp-gauge-caption">
+              <span class="micro">3.00:1 floor</span>
+              <span class="micro">3.20:1</span>
+            </div>
+            <p class="spec-note" style="width:300px">
+              --state-cooling against --panel in light: 3.02:1. The gauge spans
+              0.20 of ratio; the margin is the gap between the two rules.
+            </p>
+          </div>
+        </div>
+        <p class="prose">
+          Amber is the hardest hue to bring over the non-text floor against a
+          near-white surface without turning it brown, and 3.02:1 is what this
+          one manages. The margin is 0.02 &mdash; small enough that a future
+          panel token a shade lighter would put it under, which is why the pip
+          and the skip mark are the only two places amber is allowed, and why
+          neither of them carries meaning that colour alone conveys. The
+          cooling mark keeps a hollow ring and a centre dot precisely so that
+          the colour is the second channel and not the only one.
+        </p>
+        <p class="prose">
+          Against --well the same mark measures 3.16:1, so a cooling mark
+          inside a ladder has slightly more room than one on a panel. The
+          smaller of the two is the number the decision was made on.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">6 &mdash; Charts in light</p>
+        <p>
+          <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Charts in light &mdash; .chart-scope, monochrome accent plus fill patterns.</span>
+        </p>
+        <div class="chart-scope lp-chart-panel panel"
+             style="--chart-3:url(#proof-hatch--s-17-light-proof);--chart-4:url(#proof-dot--s-17-light-proof)">
+          <div class="chart-head">
+            <p class="section-title" style="margin:0">Requests over time</p>
+          </div>
+          <div class="well chart-well">
+            <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="requests per day by provider, last 30 days, rendered in light mode">
+              <defs>
+                <pattern id="proof-grat--s-17-light-proof" width="90" height="40" patternUnits="userSpaceOnUse">
+                  <path class="grat-line" d="M0 0H90M0 0V40"/>
+                </pattern>
+                <pattern id="proof-hatch--s-17-light-proof" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <line class="hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+                </pattern>
+                <pattern id="proof-dot--s-17-light-proof" width="7" height="7" patternUnits="userSpaceOnUse">
+                  <circle class="dot-mark" cx="2" cy="2" r="1"/>
+                </pattern>
+              </defs>
+              <rect x="0" y="0" width="900" height="200" fill="url(#proof-grat--s-17-light-proof)"/>
+<path class="chart-area chart-fill-1" d="M10.0,153.3 L40.3,150.7 L70.7,145.2 L101.0,151.5 L131.4,142.8 L161.7,140.0 L192.1,147.4 L222.4,158.3 L252.8,148.4 L283.1,150.9 L313.4,146.0 L343.8,146.4 L374.1,153.9 L404.5,159.7 L434.8,159.1 L465.2,138.8 L495.5,140.4 L525.9,134.2 L556.2,132.0 L586.6,150.1 L616.9,153.1 L647.2,152.1 L677.6,142.6 L707.9,148.8 L738.3,123.8 L768.6,145.6 L799.0,150.9 L829.3,161.7 L859.7,143.6 L890.0,141.6 L890.0,190.0 L859.7,190.0 L829.3,190.0 L799.0,190.0 L768.6,190.0 L738.3,190.0 L707.9,190.0 L677.6,190.0 L647.2,190.0 L616.9,190.0 L586.6,190.0 L556.2,190.0 L525.9,190.0 L495.5,190.0 L465.2,190.0 L434.8,190.0 L404.5,190.0 L374.1,190.0 L343.8,190.0 L313.4,190.0 L283.1,190.0 L252.8,190.0 L222.4,190.0 L192.1,190.0 L161.7,190.0 L131.4,190.0 L101.0,190.0 L70.7,190.0 L40.3,190.0 L10.0,190.0 Z"/>
+<path class="chart-area chart-fill-2" d="M10.0,130.6 L40.3,123.8 L70.7,122.1 L101.0,128.2 L131.4,114.5 L161.7,112.5 L192.1,122.9 L222.4,141.4 L252.8,115.7 L283.1,122.3 L313.4,120.7 L343.8,111.9 L374.1,127.0 L404.5,137.0 L434.8,134.6 L465.2,111.3 L495.5,114.3 L525.9,104.3 L556.2,97.7 L586.6,127.4 L616.9,131.8 L647.2,131.2 L677.6,111.9 L707.9,119.9 L738.3,85.8 L768.6,116.5 L799.0,121.5 L829.3,142.8 L859.7,117.1 L890.0,111.9 L890.0,141.6 L859.7,143.6 L829.3,161.7 L799.0,150.9 L768.6,145.6 L738.3,123.8 L707.9,148.8 L677.6,142.6 L647.2,152.1 L616.9,153.1 L586.6,150.1 L556.2,132.0 L525.9,134.2 L495.5,140.4 L465.2,138.8 L434.8,159.1 L404.5,159.7 L374.1,153.9 L343.8,146.4 L313.4,146.0 L283.1,150.9 L252.8,148.4 L222.4,158.3 L192.1,147.4 L161.7,140.0 L131.4,142.8 L101.0,151.5 L70.7,145.2 L40.3,150.7 L10.0,153.3 Z"/>
+<path class="chart-area chart-fill-3" d="M10.0,116.3 L40.3,106.9 L70.7,105.7 L101.0,111.9 L131.4,95.4 L161.7,90.8 L192.1,106.9 L222.4,130.8 L252.8,94.4 L283.1,105.5 L313.4,101.9 L343.8,91.8 L374.1,108.3 L404.5,123.6 L434.8,118.5 L465.2,91.0 L495.5,95.6 L525.9,82.2 L556.2,73.2 L586.6,107.5 L616.9,113.5 L647.2,113.9 L677.6,93.2 L707.9,99.5 L738.3,62.1 L768.6,95.6 L799.0,104.1 L829.3,128.4 L859.7,99.9 L890.0,89.8 L890.0,111.9 L859.7,117.1 L829.3,142.8 L799.0,121.5 L768.6,116.5 L738.3,85.8 L707.9,119.9 L677.6,111.9 L647.2,131.2 L616.9,131.8 L586.6,127.4 L556.2,97.7 L525.9,104.3 L495.5,114.3 L465.2,111.3 L434.8,134.6 L404.5,137.0 L374.1,127.0 L343.8,111.9 L313.4,120.7 L283.1,122.3 L252.8,115.7 L222.4,141.4 L192.1,122.9 L161.7,112.5 L131.4,114.5 L101.0,128.2 L70.7,122.1 L40.3,123.8 L10.0,130.6 Z"/>
+<path class="chart-area chart-fill-4" d="M10.0,102.1 L40.3,91.2 L70.7,91.2 L101.0,96.0 L131.4,74.8 L161.7,74.6 L192.1,92.4 L222.4,120.7 L252.8,78.4 L283.1,91.8 L313.4,84.0 L343.8,76.4 L374.1,93.6 L404.5,110.5 L434.8,104.9 L465.2,73.0 L495.5,80.6 L525.9,63.1 L556.2,53.3 L586.6,90.2 L616.9,97.1 L647.2,98.7 L677.6,73.6 L707.9,84.4 L738.3,40.8 L768.6,79.2 L799.0,85.6 L829.3,117.5 L859.7,83.6 L890.0,70.4 L890.0,89.8 L859.7,99.9 L829.3,128.4 L799.0,104.1 L768.6,95.6 L738.3,62.1 L707.9,99.5 L677.6,93.2 L647.2,113.9 L616.9,113.5 L586.6,107.5 L556.2,73.2 L525.9,82.2 L495.5,95.6 L465.2,91.0 L434.8,118.5 L404.5,123.6 L374.1,108.3 L343.8,91.8 L313.4,101.9 L283.1,105.5 L252.8,94.4 L222.4,130.8 L192.1,106.9 L161.7,90.8 L131.4,95.4 L101.0,111.9 L70.7,105.7 L40.3,106.9 L10.0,116.3 Z"/>
+<path class="chart-area chart-fill-5" d="M10.0,95.4 L40.3,82.8 L70.7,83.4 L101.0,87.6 L131.4,64.1 L161.7,64.9 L192.1,83.8 L222.4,114.9 L252.8,68.3 L283.1,84.0 L313.4,75.2 L343.8,67.9 L374.1,86.0 L404.5,103.1 L434.8,97.7 L465.2,61.3 L495.5,70.0 L525.9,53.5 L556.2,43.7 L586.6,80.4 L616.9,90.0 L647.2,91.6 L677.6,63.9 L707.9,75.4 L738.3,30.0 L768.6,69.9 L799.0,75.0 L829.3,111.3 L859.7,74.2 L890.0,59.3 L890.0,70.4 L859.7,83.6 L829.3,117.5 L799.0,85.6 L768.6,79.2 L738.3,40.8 L707.9,84.4 L677.6,73.6 L647.2,98.7 L616.9,97.1 L586.6,90.2 L556.2,53.3 L525.9,63.1 L495.5,80.6 L465.2,73.0 L434.8,104.9 L404.5,110.5 L374.1,93.6 L343.8,76.4 L313.4,84.0 L283.1,91.8 L252.8,78.4 L222.4,120.7 L192.1,92.4 L161.7,74.6 L131.4,74.8 L101.0,96.0 L70.7,91.2 L40.3,91.2 L10.0,102.1 Z"/>
+            </svg>
+          </div>
+          <div class="chart-key">
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-1"/></svg>groq</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-2"/></svg>cerebras</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-3"/></svg>together</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-4"/></svg>openrouter</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-5"/></svg>anthropic</span>
+          </div>
+        </div>
+        <p class="prose">
+          The usage screen's first chart, path for path, in light. Five series
+          differentiated by fill treatment against one hue rather than by five
+          hues: solid --accent-ink, a 60% tint, a 45&deg; hatch, a dot texture,
+          and a stroked outline with no fill. Nothing here reaches for orange or
+          lime, which is what the library's generated five-colour ramp emits at
+          positions four and five and what would collide with the cooling and
+          healthy state colours on the same page.
+        </p>
+        <p class="prose">
+          The two textured series are the ones worth checking in light, because
+          a hatch and a dot are thin marks on a white well rather than on a near
+          -black one. They hold: the texture is drawn in --accent-ink, which is
+          the readable accent at 5.69:1 against the panel, not the visible one.
+        </p>
+      </div>
+
     </div>
   </div>
 </section>
