@@ -18,9 +18,10 @@ type Metadata struct {
 	ContextWindow   int
 	MaxOutputTokens int
 
-	InputMicrosPerMTok     int64
-	OutputMicrosPerMTok    int64
-	CacheReadMicrosPerMTok int64
+	InputMicrosPerMTok      int64
+	OutputMicrosPerMTok     int64
+	CacheReadMicrosPerMTok  int64
+	CacheWriteMicrosPerMTok int64
 	// PriceKnown separates a free model from an unpriced one. Both are zero.
 	PriceKnown bool
 
@@ -61,9 +62,10 @@ func (d Doc) Metadata(modelsDevID, modelID string) (Metadata, bool) {
 
 type liveModel struct {
 	Cost struct {
-		Input     *float64 `json:"input"`
-		Output    *float64 `json:"output"`
-		CacheRead *float64 `json:"cache_read"`
+		Input      *float64 `json:"input"`
+		Output     *float64 `json:"output"`
+		CacheRead  *float64 `json:"cache_read"`
+		CacheWrite *float64 `json:"cache_write"`
 	} `json:"cost"`
 	Limit struct {
 		Context int `json:"context"`
@@ -131,6 +133,9 @@ func (m liveModel) metadata() Metadata {
 	}
 	if m.Cost.CacheRead != nil {
 		out.CacheReadMicrosPerMTok = micros(*m.Cost.CacheRead)
+	}
+	if m.Cost.CacheWrite != nil {
+		out.CacheWriteMicrosPerMTok = micros(*m.Cost.CacheWrite)
 	}
 	return out
 }
