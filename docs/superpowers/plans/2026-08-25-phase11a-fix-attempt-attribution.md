@@ -697,3 +697,166 @@ Every existing rollup test must still pass — in particular the one asserting a
 - [ ] **Step 5: Commit**
 
 Subject: `fix(store): keep rollups for pruned days`
+
+---
+
+### Task 8: Never recompute a day that pruning has already touched
+
+**Files:**
+- Modify: `internal/store/rollup.go` — `Rollup`, `RunRollup`
+- Modify: `internal/server/server.go:503` — the rollup worker
+- Test: `internal/store/rollup_test.go`
+
+**Interfaces:**
+- Produces: `func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Duration) error` and `func RunRollup(ctx context.Context, d *DB, cfgStore *config.Store, interval time.Duration) error`.
+
+Task 7 stopped the rollup destroying a day whose requests were ALL pruned. It does nothing for a day that is partly pruned, which is the ordinary path rather than a corner case: with a short `log.retention`, `Prune` eats into yesterday hour by hour, so the rollup finds some rows surviving, deletes the day's finalized totals, and recomputes a smaller number from the remnant. Nothing marks it incomplete. A day finalized at 100 requests silently becomes 60.
+
+That is worse than the bug Task 7 fixed. A missing row is loud; a plausible wrong number is not.
+
+A day is safe to recompute only when none of its requests can have been pruned. Every request in day D has `ts >= D`'s midnight, so D is safe exactly when that midnight is still inside the retention window.
+
+This arithmetic has been verified: at `now = 2026-08-25 15:00 UTC`, retention `720h` and `48h` both leave `from` at 08-24 — today's behaviour, unchanged — while `24h` advances it to 08-25, leaving yesterday's finalized rows untouched, and `6h` or less yields an empty window.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestRollupSkipsADayPruningHasAlreadyTouched(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// Yesterday, finalized when it was complete.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
+		 VALUES (?,'groq','m','fast',100,10000)`, yesterday); err != nil {
+		t.Fatal(err)
+	}
+
+	// A remnant of yesterday that pruning has not reached yet.
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "leftover", TS: now.AddDate(0, 0, -1), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 7,
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", TokensIn: 7,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A 24h retention means yesterday's midnight is already outside it.
+	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day=?`, yesterday,
+	).Scan(&requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	// Recomputing from the remnant alone would have written 1 and 7.
+	if requests != 100 || tokensIn != 10000 {
+		t.Fatalf("a partly-pruned day was recomputed from its remnant: "+
+			"requests=%d tokens_in=%d, want 100/10000", requests, tokensIn)
+	}
+}
+
+func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
+	// The guard must not change behaviour for anyone running a sane retention.
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
+		 VALUES (?,'groq','m','',9,900)`, today); err != nil {
+		t.Fatal(err)
+	}
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "live", TS: now, ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 10,
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", TokensIn: 10,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows, requests int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*), coalesce(sum(requests),0) FROM usage_daily WHERE day=?`, today,
+	).Scan(&rows, &requests); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || requests != 1 {
+		t.Fatalf("stale row survived under a sane retention: rows=%d requests=%d",
+			rows, requests)
+	}
+}
+```
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/store/ -run TestRollup -v`
+Expected: a compile failure first (`Rollup` takes two arguments), then the skip test failing with `requests=1 tokens_in=7`.
+
+- [ ] **Step 3: Narrow the window**
+
+In `Rollup`, after computing `from` and `to`:
+
+```go
+	// A day may only be recomputed when none of its requests can have been
+	// pruned. Every request in a day has a timestamp at or after that day's
+	// midnight, so the day is safe exactly while its midnight is still inside
+	// the retention window. Recomputing a day pruning has already eaten into
+	// would replace a finalized total with a smaller one and leave nothing to
+	// say it is incomplete.
+	cutoff := utc.Add(-logRetention)
+	cutoffDay := time.Date(cutoff.Year(), cutoff.Month(), cutoff.Day(),
+		0, 0, 0, 0, time.UTC)
+	if safeFrom := cutoffDay.AddDate(0, 0, 1); safeFrom.After(from) {
+		from = safeFrom
+	}
+	if !from.Before(to) {
+		// Retention is shorter than a day, so no day can be rolled up whole.
+		// Saying so once per run beats an empty usage table with no
+		// explanation.
+		log.Printf("rollup: log.retention %s leaves no complete day to roll up", logRetention)
+		return nil
+	}
+```
+
+Guard against a non-positive `logRetention` by treating it as the 720h default rather than skipping everything — a zero value reaching here means a caller did not supply it, not that the operator asked for nothing.
+
+- [ ] **Step 4: Thread the config through**
+
+`RunRollup` reads retention live, exactly as `RunRetention` does (`internal/store/retention.go:125-135`):
+
+```go
+func RunRollup(ctx context.Context, d *DB, cfgStore *config.Store, interval time.Duration) error {
+```
+
+and inside the loop, `cfg := cfgStore.Current()` then `d.Rollup(ctx, time.Now(), cfg.Log.Retention)`.
+
+Update `internal/server/server.go:503` to pass `s.store`, matching how the retention worker on the following lines already does it.
+
+- [ ] **Step 5: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./internal/store/ ./internal/server/`
+
+Every existing rollup test must still pass. They now need a retention argument — pass `720*time.Hour` so they keep testing what they tested before, and say in the report if any test's meaning changed rather than just its signature.
+
+- [ ] **Step 6: Commit**
+
+Subject: `fix(store): roll up only fully retained days`
