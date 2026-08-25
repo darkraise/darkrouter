@@ -645,3 +645,134 @@ Run: `go build ./... && go vet ./... && go test -race ./...`
 - [ ] **Step 6: Commit**
 
 Subject: `refactor(store): drop the rollup shrink guard`
+
+---
+
+### Task 8: Make today_spend cover today
+
+**Files:**
+- Modify: `internal/store/adminstore.go` — add a day-scoped spend query
+- Modify: `internal/admin/usage.go` — `handleOverview`
+- Test: `internal/store/adminstore_test.go`, `internal/admin/usage_test.go`
+
+`overviewWindow` is `5 * time.Minute` (`internal/admin/usage.go:14`), and `today_spend.micros` is sourced from `RecentStats(ctx, overviewWindow)`. So the tile the console labels as today's spend reports the last five minutes of it.
+
+Spec line 253 says the strip carries "requests per minute, error rate, latency percentiles and **spend today**", and the mockup renders `today_spend` as a live tile. This is a bug, not a design choice: on any gateway with steady traffic the headline money figure under-reports the day by orders of magnitude, and it does so confidently.
+
+`requests_per_min` and `error_rate` are correct on a five-minute window and must not change. Only the spend figure moves.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestSpendSinceCoversTheWholeDay(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// One request early today, one just now. A five-minute window sees only
+	// the second; the day's spend is both.
+	early, recent := int64(1000), int64(250)
+	for i, r := range []struct {
+		ts   time.Time
+		cost int64
+	}{
+		{startOfDay.Add(30 * time.Minute), early},
+		{now.Add(-time.Minute), recent},
+	} {
+		c := r.cost
+		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("s%d", i), TS: r.ts, ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", CostMicros: &c,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !priced {
+		t.Fatal("priced must be true when any row carries a cost")
+	}
+	if micros == nil || *micros != early+recent {
+		t.Fatalf("spend = %v, want %d: a request from earlier today was dropped",
+			micros, early+recent)
+	}
+}
+```
+
+If the request early in the day would fall before `startOfDay` when the test runs just after midnight, clamp the fixture to `startOfDay.Add(1*time.Minute)` and note it — the test must not be flaky at the day boundary.
+
+And in `internal/admin`:
+
+```go
+func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
+	// The tile is labelled as the day's spend. Sourcing it from the live
+	// window makes it report a few minutes and read as "today was nearly
+	// free".
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	c := int64(4200)
+	w := store.NewLogWriter(db, store.LogOptions{})
+	if _, err := w.WriteBatchForTest(context.Background(), []*store.RequestRecord{{
+		ID: "old", TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
+		Attempts: []store.AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", CostMicros: &c,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
+	var got struct {
+		TodaySpend struct {
+			Micros *int64 `json:"micros"`
+		} `json:"today_spend"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.TodaySpend.Micros == nil || *got.TodaySpend.Micros != 4200 {
+		t.Fatalf("today_spend = %v, want 4200 from an hour into the day",
+			got.TodaySpend.Micros)
+	}
+}
+```
+
+`writeBatch` is unexported; use whatever the `internal/admin` tests already use to seed request rows, and if there is no exported path, seed with direct SQL rather than inventing an export.
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/store/ -run TestSpendSince -v` and `go test ./internal/admin/ -run TestTodaySpend -v`
+
+- [ ] **Step 3: Implement**
+
+Add `SpendSince(ctx context.Context, since time.Time) (*int64, bool, error)` to `internal/store/adminstore.go`. Reuse the attempt-level cost shape `RecentStats` already uses — the one that sums attempt cost and falls back to the request's own for attempt-less requests — so the tile keeps agreeing with the usage chart. Return a nil `*int64` and `false` when nothing in the range is priced, exactly as `RecentStats` does: a confident zero would read as "today was free".
+
+In `handleOverview`, source `today_spend` from `SpendSince(ctx, startOfUTCDay(time.Now()))`. Leave `requests_per_min`, `error_rate` and `window_sec` on `overviewWindow` — they describe the live strip and are correct as they are.
+
+Use UTC days, matching the rollup's `strftime('%Y-%m-%d', ..., 'unixepoch')`. A tile disagreeing with the chart about when the day starts is the bug this plan just finished fixing in another form.
+
+- [ ] **Step 4: Bound it**
+
+`since` is at most 24 hours back and `requests.ts` is indexed, so this is the same order of cost as the sibling queries. Confirm the query filters on `r.ts >= ?` and add no unbounded scan to an endpoint polled every few seconds.
+
+- [ ] **Step 5: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+- [ ] **Step 6: Commit**
+
+Subject: `fix(admin): make today_spend cover the day`
