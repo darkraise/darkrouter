@@ -496,12 +496,12 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 
 // UsageDay is one row of the usage chart.
 type UsageDay struct {
-	Day        string
-	Requests   int64
-	Attempts   int64
-	TokensIn   int64
-	TokensOut  int64
-	CostMicros *int64
+	Day        string `json:"day"`
+	Requests   int64  `json:"requests"`
+	Attempts   int64  `json:"attempts"`
+	TokensIn   int64  `json:"tokens_in"`
+	TokensOut  int64  `json:"tokens_out"`
+	CostMicros *int64 `json:"cost_micros"`
 }
 
 // UsageDimension is the column usage rolls up by. The zero value aggregates
@@ -536,7 +536,7 @@ func (d UsageDimension) column() string {
 // Key is empty for UsageByDayOnly.
 type UsageRow struct {
 	UsageDay
-	Key string
+	Key string `json:"key,omitempty"`
 }
 
 // UsageBy rolls usage_daily up over the last `days` days, split by one
@@ -655,29 +655,36 @@ func (d *DB) LatencyPercentiles(ctx context.Context, window time.Duration) (int6
 
 // FailoverRow is one request the router had to walk past a candidate for.
 type FailoverRow struct {
-	ID              string
-	TS              int64
-	Alias           string
-	FinalProviderID string
-	FinalModel      string
-	Attempts        int
-	TotalMs         int64
+	ID              string `json:"id"`
+	TS              int64  `json:"ts"`
+	Alias           string `json:"alias"`
+	FinalProviderID string `json:"final_provider_id"`
+	FinalModel      string `json:"final_model"`
+	Attempts        int    `json:"attempts"`
+	TotalMs         int64  `json:"total_ms"`
 }
 
-// RecentFailovers returns the newest requests that took more than one attempt.
-func (d *DB) RecentFailovers(ctx context.Context, limit int) ([]FailoverRow, error) {
+// RecentFailovers returns the newest requests within window that took more
+// than one attempt. Bounded the same way its RecentStats and
+// LatencyPercentiles siblings are: the overview polls this every few
+// seconds, and without a window it joins and groups the entire request
+// history on every call, plus a quiet gateway would show a month-old
+// failover as though it just happened.
+func (d *DB) RecentFailovers(ctx context.Context, window time.Duration, limit int) ([]FailoverRow, error) {
 	if limit <= 0 {
 		limit = 5
 	}
+	since := time.Now().Add(-window).UnixMilli()
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT r.id, r.ts, r.resolved_alias, r.final_provider_id, r.final_model,
 		        count(a.seq) AS attempts, coalesce(r.total_ms, 0)
 		   FROM requests r
 		   JOIN request_attempts a ON a.request_id = r.id
+		  WHERE r.ts >= ?
 		  GROUP BY r.id
 		 HAVING attempts > 1
 		  ORDER BY r.ts DESC
-		  LIMIT ?`, limit)
+		  LIMIT ?`, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("recent failovers: %w", err)
 	}

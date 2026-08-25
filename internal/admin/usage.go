@@ -89,7 +89,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		// the bare number it renders today.
 		p50, p95 = 0, 0
 	}
-	failovers, err := s.deps.DB.RecentFailovers(r.Context(), 5)
+	failovers, err := s.deps.DB.RecentFailovers(r.Context(), overviewWindow, 5)
 	if err != nil {
 		failovers = []store.FailoverRow{}
 	}
@@ -153,7 +153,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 			priced = true
 		}
 		row := map[string]any{
-			"day": u.Day, "requests": u.Requests,
+			"day": u.Day, "requests": u.Requests, "attempts": u.Attempts,
 			"tokens_in": u.TokensIn, "tokens_out": u.TokensOut,
 			"cost_micros": u.CostMicros,
 		}
