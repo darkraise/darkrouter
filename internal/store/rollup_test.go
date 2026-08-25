@@ -218,3 +218,41 @@ func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
 		t.Fatalf("want 500 tokens including the failed attempt, got %d", total)
 	}
 }
+
+// A group that mixes an attempt-bearing request with an attempt-less one
+// must add both contributions, not let the attempt-bearing row's non-NULL
+// sum silently coalesce away the attempt-less row's own tokens.
+func TestRollupMixesAttemptBearingAndAttemptLessRequests(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
+
+	withAttempt := &RequestRecord{
+		ID: "r-with-attempt", TS: ts, RequestedModel: "m",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
+		Attempts: []AttemptRecord{
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success", TokensIn: 100},
+		},
+	}
+	withoutAttempt := &RequestRecord{
+		ID: "r-without-attempt", TS: ts, RequestedModel: "m",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 50,
+	}
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{withAttempt, withoutAttempt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Rollup(ctx, ts); err != nil {
+		t.Fatal(err)
+	}
+
+	var total int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(tokens_in), 0) FROM usage_daily`).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	// 100 from the attempt-bearing request plus 50 from the attempt-less one.
+	if total != 150 {
+		t.Fatalf("want 150 tokens from the mixed group, got %d", total)
+	}
+}
