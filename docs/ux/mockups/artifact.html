@@ -522,6 +522,11 @@ a.row { text-decoration: none; }
 
 .state-pip {
   display: inline-block;
+  /* A pip is 7px and carries the row's whole state reading, so it must never
+     be a shrink candidate: inside a crowded flex row the default
+     flex-shrink:1 collapses it to zero width and the state silently
+     disappears rather than overflowing visibly. */
+  flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -690,6 +695,7 @@ a.row { text-decoration: none; }
    footnotes the second (and later) row rather than letting it read as an
    accidental duplicate — legend weight, off to the side of the id. */
 .credential-tag {
+  flex: 0 0 auto;
   margin-left: 4px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
@@ -1510,7 +1516,7 @@ body.pins-on .pin-note { display: inline; }
  * New component classes this screen introduces: .config-banner (alarm
  * strip), .live-strip/.live-tile/.live-tile-caption (readout-over-sparkline
  * tiles), .sparkline (svg trend line, reused by Task 9), .load-bar (per-tile
- * refresh indicator), .health-grid/.health-tile (provider tiles, .health-tile
+ * refresh indicator), .health-tile (provider tiles, .health-tile
  * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
  * this screen composes .well/.table/.row/a.row/.chip/.chip-failover/.mono/
  * .readout/.unit/.micro/.data-emph/.section-title/.legend-caps/.region from
@@ -1638,12 +1644,11 @@ body.pins-on .pin-note { display: inline; }
   opacity: 0.08;
 }
 
-/* --- Region 3: provider health grid ------------------------------------ */
-.health-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--gutter);
-}
+/* --- Provider tiles ----------------------------------------------------
+   The four-up .health-grid this screen used is gone — the routing flow shows
+   provider state now, with the routing that a grid of tiles could not. The
+   TILE survives because Providers and First run both build their own layouts
+   out of it, so it is shared vocabulary that happens to live here. */
 .health-tile {
   display: flex;
   flex-direction: column;
@@ -1706,6 +1711,131 @@ body.pins-on .pin-note { display: inline; }
 .ops-footer-dropped[data-alert="true"] {
   color: var(--state-cooling);
 }
+
+/* --- Routing flow graph -------------------------------------------------
+   A left-to-right flow rather than the radial hub OmniRoute draws. A ring
+   cannot encode order, and order is the whole point here: the router walks
+   candidates by priority, so priority is the vertical axis and a reader can
+   see what was tried before what. Edge thickness carries volume, and a
+   provider that is not a candidate simply has no edge — absence is the
+   clearest way to say "this one is not in the path".
+
+   Nodes are HTML positioned over an SVG edge layer, so text is real text at
+   real weights instead of <text> that ignores the type scale. Coordinates
+   are fixed px and the SVG viewBox matches them 1:1, which is why the whole
+   graph scrolls rather than scales: a scaled graph distorts stroke widths,
+   and stroke width is data here. */
+
+.rf-wrap { overflow-x: auto; }
+
+.rf-graph { position: relative; }
+
+.rf-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rf-edge { fill: none; stroke-linecap: round; }
+/* Inbound is plumbing, not a decision: the thinnest structural stroke. */
+.rf-edge-in { stroke: var(--border); stroke-width: 1; }
+/* Outbound is the router's verdict, so it takes --trace and its width is
+   share of the window. */
+.rf-edge-out { stroke: var(--trace); opacity: 0.55; }
+/* Traffic that landed here because somewhere else refused it. Dashed for the
+   same reason the ladder dashes an attempted-and-failed stub. */
+.rf-edge-fail {
+  stroke: var(--trace);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+.rf-fo-label {
+  fill: var(--legend);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.rf-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  /* A node is a fixed box: nothing inside it may escape to the right, or a
+     count lands on top of the failover arcs drawn beside the column. */
+  overflow: hidden;
+}
+
+.rf-alias { justify-content: space-between; }
+.rf-alias .rf-vol { color: var(--legend); }
+
+/* The one node that is the product rather than a participant, so it is the
+   one node allowed to carry the brand. */
+.rf-router {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-warm);
+}
+.rf-router-label { margin: 0; color: var(--accent-ink); }
+.rf-router-total { font-size: 20px; font-weight: 500; }
+.rf-router-unit,
+.rf-router-fo { color: var(--legend); }
+.rf-router-fo { margin-top: 4px; }
+
+.rf-prio {
+  min-width: 22px;
+  text-align: right;
+  color: var(--legend);
+  font-variant-numeric: tabular-nums;
+}
+.rf-name { flex: 0 0 auto; }
+.rf-note {
+  /* The note takes the slack and the bar is fixed, not the other way round:
+     "1 cooling" is the reason a row is degraded and must not be the thing
+     an ellipsis eats. */
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--legend);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* No share bar. Edge thickness already encodes share, and far more
+   legibly than a 56px bar repeating it — the space is better spent on the
+   credential note, which nothing else on the screen carries. */
+
+.rf-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+.rf-count { font-variant-numeric: tabular-nums; }
+.rf-pct, .rf-out { color: var(--legend); }
+.rf-fo { color: var(--trace); }
+
+/* Not a candidate. The node stays legible — it is still configured — but it
+   reads as out of the path, which is exactly what it is. */
+.rf-provider-idle {
+  background: var(--ground-alt);
+  border-style: dashed;
+  box-shadow: none;
+}
+.rf-provider-idle .rf-name { color: var(--ink-muted); }
+
+.rf-lede { margin-bottom: var(--gutter); }
 
 /*
  * Task 6 — the Requests log ("operate/requests").
@@ -2503,7 +2633,7 @@ body.pins-on .pin-note { display: inline; }
 }
 
 /* --- Region 3: discovery health ---------------------------------------
-   Three tiles, not Overview's four-up .health-grid, because these are
+   Three tiles, not a four-up grid, because these are
    three named states side by side rather than a fleet roster. The tile
    itself is .well.health-tile, reused verbatim. */
 .discovery-grid {
@@ -3559,6 +3689,7 @@ body.theme-light .preset-scrim,
 }
 .lifecycle[data-state="stale"] { color: var(--legend); }
 .lifecycle[data-state="stale"] .lifecycle-mark {
+  flex: 0 0 auto;
   background: transparent;
   border: 1px solid var(--bezel);
 }
@@ -5380,6 +5511,7 @@ body.theme-light .preset-scrim,
    and --hairline is a structural seam colour that measures under 1.6:1
    against a well in both modes — invisible at 7px. */
 .cn-surface-off .cn-surface-mark {
+  flex: 0 0 auto;
   background: transparent;
   border: 1px solid var(--bezel);
 }
@@ -6253,7 +6385,7 @@ body.theme-light .preset-scrim,
  * This screen is the Overview with nothing in it, so it borrows the
  * Overview's own layout wholesale rather than inventing an empty variant of
  * it: .live-strip/.live-tile/.live-tile-caption/.live-tile-metric,
- * .health-grid's .health-tile/.health-tile-head and .ops-footer (+ -dropped)
+ * Overview's .health-tile/.health-tile-head and .ops-footer (+ -dropped)
  * all come from css/02-overview.css unchanged, and .empty-well comes from
  * css/03-requests.css. From darkrouter-ui.css: .panel/.well/.region/.chip,
  * .control (+ -primary/-ghost), .readout/.unit/.mono/.micro/.prose/
@@ -7979,77 +8111,149 @@ body.theme-light .preset-scrim,
         </div>
 
         <div class="region">
-          <p class="section-title">Provider health</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace. needs_reauth renders its callout in --state-cooling, not --state-failed &mdash; the vertex provider itself is healthy, and reconnecting it is the one state only the operator can fix, the cooling/attention colour rather than an outage.</span></p>
-          <div class="health-grid">
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">groq</span>
-              </div>
-              <p class="micro">2 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="degraded"></span>
-                <span class="mono health-tile-name">cerebras</span>
-              </div>
-              <p class="micro">3 credentials &middot; 1 cooling</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">anthropic</span>
-              </div>
-              <p class="micro">1 credential</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">openrouter</span>
-              </div>
-              <p class="micro">3 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">together</span>
-              </div>
-              <p class="micro">2 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="disabled"></span>
-                <span class="mono health-tile-name">deepinfra</span>
-              </div>
-              <p class="micro">disabled</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="unconfigured"></span>
-                <span class="mono health-tile-name">bedrock</span>
-              </div>
-              <p class="micro">0 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">vertex</span>
-              </div>
-              <div class="health-tile-alert">
-                <p class="health-tile-alert-text">needs reconnection</p>
-              </div>
-            </div>
-
+          <p class="section-title">Routing flow &middot; last 24h</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p class="prose rf-lede">
+            Left, the aliases traffic arrived under. Right, the eight configured
+            providers in the order the router walks them, top to bottom by
+            priority. Edge thickness is share of the 4,909 requests routed in
+            the window; a provider with no edge is not a candidate at all, which
+            is the fastest way to see that a disabled or unconfigured provider is
+            not quietly absorbing work.
+          </p>
+        <div class="rf-wrap">
+          <div class="rf-graph" style="width:1040px;height:520px">
+            <svg class="rf-edges" width="1040" height="520" viewBox="0 0 1040 520" fill="none" aria-hidden="true">
+      <path class="rf-edge rf-edge-in" d="M164 106 C 204 106, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 154 C 204 154, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 202 C 204 202, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 250 C 204 250, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 298 C 204 298, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 346 C 204 346, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 394 C 204 394, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:10.0" d="M336 250 C 388 250, 346 47, 398 47"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:5.1" d="M336 250 C 388 250, 346 105, 398 105"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:3.5" d="M336 250 C 388 250, 346 163, 398 163"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:2.3" d="M336 250 C 388 250, 346 221, 398 221"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:2.2" d="M336 250 C 388 250, 346 279, 398 279"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:1.5" d="M336 250 C 388 250, 346 453, 398 453"/>
+      <path class="rf-edge rf-edge-fail" d="M794 47 C 808 47, 808 105, 794 105"/>
+      <text class="rf-fo-label" x="858" y="80">41 from groq</text>
+      <path class="rf-edge rf-edge-fail" d="M794 47 C 823 47, 823 279, 794 279"/>
+      <text class="rf-fo-label" x="858" y="167">96 from groq</text>
+      <path class="rf-edge rf-edge-fail" d="M794 221 C 838 221, 838 453, 794 453"/>
+      <text class="rf-fo-label" x="858" y="341">58 from openrouter</text>
+            </svg>
+      <div class="rf-node rf-router" style="left:232px;top:180px;width:104px;height:140px">
+        <span class="legend-caps rf-router-label">router</span>
+        <span class="mono rf-router-total">4,909</span>
+        <span class="micro rf-router-unit">requests</span>
+        <span class="micro rf-router-fo">4.0% failed over</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:89px;width:152px;height:34px">
+        <span class="mono rf-name">fast-coder</span>
+        <span class="micro rf-vol">2,481</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:137px;width:152px;height:34px">
+        <span class="mono rf-name">cheap</span>
+        <span class="micro rf-vol">1,096</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:185px;width:152px;height:34px">
+        <span class="mono rf-name">smart</span>
+        <span class="micro rf-vol">640</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:233px;width:152px;height:34px">
+        <span class="mono rf-name">long-context</span>
+        <span class="micro rf-vol">312</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:281px;width:152px;height:34px">
+        <span class="mono rf-name">cheap-embed</span>
+        <span class="micro rf-vol">188</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:329px;width:152px;height:34px">
+        <span class="mono rf-name">vision</span>
+        <span class="micro rf-vol">96</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:377px;width:152px;height:34px">
+        <span class="mono rf-name">rerank-default</span>
+        <span class="micro rf-vol">96</span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:24px;width:396px;height:46px">
+        <span class="micro rf-prio">100</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">groq</span>
+        <span class="micro rf-note">2 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">2,481</span><span class="micro rf-pct">50.5%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:82px;width:396px;height:46px">
+        <span class="micro rf-prio">90</span>
+        <span class="state-pip" data-state="degraded"></span>
+        <span class="mono rf-name">cerebras</span>
+        <span class="micro rf-note">3 credentials &middot; 1 cooling</span>
+        <span class="rf-right"><span class="mono rf-count">1,096</span><span class="micro rf-pct">22.3%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:140px;width:396px;height:46px">
+        <span class="micro rf-prio">80</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">anthropic</span>
+        <span class="micro rf-note">1 credential</span>
+        <span class="rf-right"><span class="mono rf-count">640</span><span class="micro rf-pct">13.0%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:198px;width:396px;height:46px">
+        <span class="micro rf-prio">70</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">openrouter</span>
+        <span class="micro rf-note">3 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">312</span><span class="micro rf-pct">6.4%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:256px;width:396px;height:46px">
+        <span class="micro rf-prio">60</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">together</span>
+        <span class="micro rf-note">2 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">284</span><span class="micro rf-pct">5.8%</span></span>
+      </div>
+      <div class="rf-node rf-provider rf-provider-idle" style="left:398px;top:314px;width:396px;height:46px">
+        <span class="micro rf-prio">50</span>
+        <span class="state-pip" data-state="disabled"></span>
+        <span class="mono rf-name">deepinfra</span>
+        <span class="micro rf-note">disabled</span>
+        
+        <span class="rf-right"><span class="micro rf-out">no traffic</span></span>
+      </div>
+      <div class="rf-node rf-provider rf-provider-idle" style="left:398px;top:372px;width:396px;height:46px">
+        <span class="micro rf-prio">40</span>
+        <span class="state-pip" data-state="unconfigured"></span>
+        <span class="mono rf-name">bedrock</span>
+        <span class="micro rf-note">0 credentials</span>
+        
+        <span class="rf-right"><span class="micro rf-out">no traffic</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:430px;width:396px;height:46px">
+        <span class="micro rf-prio">30</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">vertex</span>
+        <span class="micro rf-note">needs reconnection</span>
+        <span class="rf-right"><span class="mono rf-count">96</span><span class="micro rf-pct">2.0%</span></span>
+      </div>
           </div>
+        </div>
+          <p class="prose">
+            The three dashed returns are the part a status grid cannot show:
+            traffic that arrived somewhere because somewhere else refused it.
+            41 requests reached cerebras and 96 reached together after groq
+            rate-limited, and 58 reached vertex after openrouter did. They sum
+            to 195 &mdash; the 4.0% printed on the router, and the reason
+            together and vertex carry more than their priority alone would
+            earn them.
+          </p>
+          <p class="prose">
+            Cerebras is the row worth reading twice. It is degraded, not failed:
+            one of its three credentials is cooling, and it still carried 1,096
+            requests. A grid that renders it amber says something is wrong with
+            it; this says something is wrong with one of its keys and the other
+            two are working.
+          </p>
         </div>
 
         <div class="region">
@@ -8183,7 +8387,8 @@ body.theme-light .preset-scrim,
               <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>cerebras</span><span class="combo-count">1,096</span></span>
               <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>anthropic</span><span class="combo-count">640</span></span>
               <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>openrouter</span><span class="combo-count">312</span></span>
-              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>together</span><span class="combo-count">188</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>together</span><span class="combo-count">284</span></span>
+              <span class="combo-option" data-checked="false"><span class="combo-check">✓</span><span>vertex</span><span class="combo-count">96</span></span>
             </div>
           </div>
 
@@ -8244,7 +8449,7 @@ body.theme-light .preset-scrim,
         <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}. Status stays state colour &mdash; an outcome, whether it's a provider's health or a request's result. The failover chip stays trace/accent-ink &mdash; a routing choice among alternatives, not an outcome.</span></p>
         <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
         <div class="table-toolbar">
-          <span class="micro">14 of 2,481 requests</span>
+          <span class="micro">14 of 4,909 requests</span>
           <div class="table-toolbar-actions">
             <button class="control">Columns ▾</button>
             <div class="col-menu">

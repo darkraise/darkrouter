@@ -4,7 +4,7 @@
  * This screen is the Overview with nothing in it, so it borrows the
  * Overview's own layout wholesale rather than inventing an empty variant of
  * it: .live-strip/.live-tile/.live-tile-caption/.live-tile-metric,
- * .health-grid's .health-tile/.health-tile-head and .ops-footer (+ -dropped)
+ * Overview's .health-tile/.health-tile-head and .ops-footer (+ -dropped)
  * all come from css/02-overview.css unchanged, and .empty-well comes from
  * css/03-requests.css. From darkrouter-ui.css: .panel/.well/.region/.chip,
  * .control (+ -primary/-ghost), .readout/.unit/.mono/.micro/.prose/

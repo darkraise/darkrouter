@@ -119,77 +119,149 @@
         </div>
 
         <div class="region">
-          <p class="section-title">Provider health</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Health grid &mdash; GET /api/overview providers[]{id,name,state,cooling,credentials,needs_reauth}. State pip is provider identity, never --trace. needs_reauth renders its callout in --state-cooling, not --state-failed &mdash; the vertex provider itself is healthy, and reconnecting it is the one state only the operator can fix, the cooling/attention colour rather than an outage.</span></p>
-          <div class="health-grid">
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">groq</span>
-              </div>
-              <p class="micro">2 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="degraded"></span>
-                <span class="mono health-tile-name">cerebras</span>
-              </div>
-              <p class="micro">3 credentials &middot; 1 cooling</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">anthropic</span>
-              </div>
-              <p class="micro">1 credential</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">openrouter</span>
-              </div>
-              <p class="micro">3 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">together</span>
-              </div>
-              <p class="micro">2 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="disabled"></span>
-                <span class="mono health-tile-name">deepinfra</span>
-              </div>
-              <p class="micro">disabled</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="unconfigured"></span>
-                <span class="mono health-tile-name">bedrock</span>
-              </div>
-              <p class="micro">0 credentials</p>
-            </div>
-
-            <div class="well health-tile">
-              <div class="health-tile-head">
-                <span class="state-pip" data-state="healthy"></span>
-                <span class="mono health-tile-name">vertex</span>
-              </div>
-              <div class="health-tile-alert">
-                <p class="health-tile-alert-text">needs reconnection</p>
-              </div>
-            </div>
-
+          <p class="section-title">Routing flow &middot; last 24h</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p class="prose rf-lede">
+            Left, the aliases traffic arrived under. Right, the eight configured
+            providers in the order the router walks them, top to bottom by
+            priority. Edge thickness is share of the 4,909 requests routed in
+            the window; a provider with no edge is not a candidate at all, which
+            is the fastest way to see that a disabled or unconfigured provider is
+            not quietly absorbing work.
+          </p>
+        <div class="rf-wrap">
+          <div class="rf-graph" style="width:1040px;height:520px">
+            <svg class="rf-edges" width="1040" height="520" viewBox="0 0 1040 520" fill="none" aria-hidden="true">
+      <path class="rf-edge rf-edge-in" d="M164 106 C 204 106, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 154 C 204 154, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 202 C 204 202, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 250 C 204 250, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 298 C 204 298, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 346 C 204 346, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 394 C 204 394, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:10.0" d="M336 250 C 388 250, 346 47, 398 47"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:5.1" d="M336 250 C 388 250, 346 105, 398 105"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:3.5" d="M336 250 C 388 250, 346 163, 398 163"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:2.3" d="M336 250 C 388 250, 346 221, 398 221"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:2.2" d="M336 250 C 388 250, 346 279, 398 279"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:1.5" d="M336 250 C 388 250, 346 453, 398 453"/>
+      <path class="rf-edge rf-edge-fail" d="M794 47 C 808 47, 808 105, 794 105"/>
+      <text class="rf-fo-label" x="858" y="80">41 from groq</text>
+      <path class="rf-edge rf-edge-fail" d="M794 47 C 823 47, 823 279, 794 279"/>
+      <text class="rf-fo-label" x="858" y="167">96 from groq</text>
+      <path class="rf-edge rf-edge-fail" d="M794 221 C 838 221, 838 453, 794 453"/>
+      <text class="rf-fo-label" x="858" y="341">58 from openrouter</text>
+            </svg>
+      <div class="rf-node rf-router" style="left:232px;top:180px;width:104px;height:140px">
+        <span class="legend-caps rf-router-label">router</span>
+        <span class="mono rf-router-total">4,909</span>
+        <span class="micro rf-router-unit">requests</span>
+        <span class="micro rf-router-fo">4.0% failed over</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:89px;width:152px;height:34px">
+        <span class="mono rf-name">fast-coder</span>
+        <span class="micro rf-vol">2,481</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:137px;width:152px;height:34px">
+        <span class="mono rf-name">cheap</span>
+        <span class="micro rf-vol">1,096</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:185px;width:152px;height:34px">
+        <span class="mono rf-name">smart</span>
+        <span class="micro rf-vol">640</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:233px;width:152px;height:34px">
+        <span class="mono rf-name">long-context</span>
+        <span class="micro rf-vol">312</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:281px;width:152px;height:34px">
+        <span class="mono rf-name">cheap-embed</span>
+        <span class="micro rf-vol">188</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:329px;width:152px;height:34px">
+        <span class="mono rf-name">vision</span>
+        <span class="micro rf-vol">96</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:377px;width:152px;height:34px">
+        <span class="mono rf-name">rerank-default</span>
+        <span class="micro rf-vol">96</span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:24px;width:396px;height:46px">
+        <span class="micro rf-prio">100</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">groq</span>
+        <span class="micro rf-note">2 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">2,481</span><span class="micro rf-pct">50.5%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:82px;width:396px;height:46px">
+        <span class="micro rf-prio">90</span>
+        <span class="state-pip" data-state="degraded"></span>
+        <span class="mono rf-name">cerebras</span>
+        <span class="micro rf-note">3 credentials &middot; 1 cooling</span>
+        <span class="rf-right"><span class="mono rf-count">1,096</span><span class="micro rf-pct">22.3%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:140px;width:396px;height:46px">
+        <span class="micro rf-prio">80</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">anthropic</span>
+        <span class="micro rf-note">1 credential</span>
+        <span class="rf-right"><span class="mono rf-count">640</span><span class="micro rf-pct">13.0%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:198px;width:396px;height:46px">
+        <span class="micro rf-prio">70</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">openrouter</span>
+        <span class="micro rf-note">3 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">312</span><span class="micro rf-pct">6.4%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:256px;width:396px;height:46px">
+        <span class="micro rf-prio">60</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">together</span>
+        <span class="micro rf-note">2 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">284</span><span class="micro rf-pct">5.8%</span></span>
+      </div>
+      <div class="rf-node rf-provider rf-provider-idle" style="left:398px;top:314px;width:396px;height:46px">
+        <span class="micro rf-prio">50</span>
+        <span class="state-pip" data-state="disabled"></span>
+        <span class="mono rf-name">deepinfra</span>
+        <span class="micro rf-note">disabled</span>
+        
+        <span class="rf-right"><span class="micro rf-out">no traffic</span></span>
+      </div>
+      <div class="rf-node rf-provider rf-provider-idle" style="left:398px;top:372px;width:396px;height:46px">
+        <span class="micro rf-prio">40</span>
+        <span class="state-pip" data-state="unconfigured"></span>
+        <span class="mono rf-name">bedrock</span>
+        <span class="micro rf-note">0 credentials</span>
+        
+        <span class="rf-right"><span class="micro rf-out">no traffic</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:430px;width:396px;height:46px">
+        <span class="micro rf-prio">30</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">vertex</span>
+        <span class="micro rf-note">needs reconnection</span>
+        <span class="rf-right"><span class="mono rf-count">96</span><span class="micro rf-pct">2.0%</span></span>
+      </div>
           </div>
+        </div>
+          <p class="prose">
+            The three dashed returns are the part a status grid cannot show:
+            traffic that arrived somewhere because somewhere else refused it.
+            41 requests reached cerebras and 96 reached together after groq
+            rate-limited, and 58 reached vertex after openrouter did. They sum
+            to 195 &mdash; the 4.0% printed on the router, and the reason
+            together and vertex carry more than their priority alone would
+            earn them.
+          </p>
+          <p class="prose">
+            Cerebras is the row worth reading twice. It is degraded, not failed:
+            one of its three credentials is cooling, and it still carried 1,096
+            requests. A grid that renders it amber says something is wrong with
+            it; this says something is wrong with one of its keys and the other
+            two are working.
+          </p>
         </div>
 
         <div class="region">

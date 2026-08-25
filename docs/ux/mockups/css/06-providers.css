@@ -113,7 +113,7 @@
 }
 
 /* --- Region 3: discovery health ---------------------------------------
-   Three tiles, not Overview's four-up .health-grid, because these are
+   Three tiles, not a four-up grid, because these are
    three named states side by side rather than a fleet roster. The tile
    itself is .well.health-tile, reused verbatim. */
 .discovery-grid {

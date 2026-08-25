@@ -195,6 +195,7 @@
 }
 .lifecycle[data-state="stale"] { color: var(--legend); }
 .lifecycle[data-state="stale"] .lifecycle-mark {
+  flex: 0 0 auto;
   background: transparent;
   border: 1px solid var(--bezel);
 }

@@ -163,6 +163,7 @@
    and --hairline is a structural seam colour that measures under 1.6:1
    against a well in both modes — invisible at 7px. */
 .cn-surface-off .cn-surface-mark {
+  flex: 0 0 auto;
   background: transparent;
   border: 1px solid var(--bezel);
 }
