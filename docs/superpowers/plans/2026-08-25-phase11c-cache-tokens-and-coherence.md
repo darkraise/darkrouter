@@ -1201,3 +1201,123 @@ Run: `go build ./... && go vet ./... && go test -race ./...`
 - [ ] **Step 7: Commit**
 
 Subject: `fix(exec): backfill the serving attempt's usage`
+
+---
+
+### Task 14: Close the cache leak the hardened guard opened
+
+**Files:**
+- Modify: `internal/exec/exec.go` — `demoteLastAttempt`, `priceRecord`
+- Test: `internal/exec/exec_test.go`
+
+Task 13 re-keyed `demoteLastAttempt`'s idempotency check onto token state. The check reads only `TokensIn`/`TokensOut`, but the record carries three more burn fields, and the early return fires **before** the line that zeroes them. So a failed attempt whose usage is cache-only leaves its cache reads on the shared record for the next attempt to inherit.
+
+Reproduced against the committed code — a fully-cached prompt, which is ordinary now that the adapters subtract cached tokens from the input count, so `in == 0` with `cache_read == 3000` is a normal shape:
+
+    after demote: record cache_read=3000   (it belonged to other/x)
+    request cost billed to groq/m: 300 micros
+
+That is a mis-attribution in the OVER-billing direction. Every other known gap on this branch under-prices; this one charges a provider for another's burn.
+
+A second, smaller issue in the same area: with the `claimed` guard gone, a serving attempt that reported no usage of its own now receives a **non-nil cost of zero** copied from the request. The codebase's own rule says otherwise — `TestAnAttemptWithNoTokensIsUnpricedNotFree` exists because the rollup treats a non-NULL cost as authoritative, and a confident zero is a false claim.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestACacheOnlyBurnDoesNotFollowTheFailover(t *testing.T) {
+	// After the adapters subtract cached tokens from the input count, a fully
+	// cached prompt legitimately has in=0 with a large cache read. Treating
+	// "no in/out" as "nothing burned" leaves that on the shared record for
+	// whoever serves next.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{CacheReadTokens: 3000})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if rec.CacheReadTokens != 0 {
+		t.Fatalf("the record kept %d cache reads that belonged to the failed attempt",
+			rec.CacheReadTokens)
+	}
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.CostMicros != nil && *rec.CostMicros != 0 {
+		t.Fatalf("the serving provider was billed %d micros it did not burn",
+			*rec.CostMicros)
+	}
+}
+
+func TestAServingAttemptWithNoUsageStaysUnpriced(t *testing.T) {
+	// A non-NULL zero is authoritative downstream: the rollup reads it as
+	// "this cost nothing", not as "this is unknown".
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeRetryableProvider), TokensIn: 500,
+	})
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.Attempts[1].CostMicros != nil {
+		t.Fatalf("a serving attempt that burned nothing must stay unpriced, got %d",
+			*rec.Attempts[1].CostMicros)
+	}
+}
+```
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/exec/ -run 'TestACacheOnlyBurn|TestAServingAttemptWithNoUsage' -v`
+
+- [ ] **Step 3: Consider every burn field**
+
+In `demoteLastAttempt`, the "nothing to move" test must cover all five fields the record carries, not two:
+
+```go
+	if rec.TokensIn == 0 && rec.TokensOut == 0 &&
+		rec.CacheReadTokens == 0 && rec.CacheWriteTokens == 0 &&
+		rec.ReasoningTokens == 0 {
+		return
+	}
+```
+
+The attempt row has no cache or reasoning columns, so those cannot be transferred — but they must still be cleared from the record, which the existing zeroing line already does once the early return stops swallowing it. That loses the failed attempt's cache detail rather than misattributing it, which is the honest option available without a migration.
+
+- [ ] **Step 4: Do not price an attempt that burned nothing**
+
+In `priceRecord`'s backfill, copy the request's cost only when the attempt actually received tokens:
+
+```go
+			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+			if rec.CostMicros != nil && (a.TokensIn != 0 || a.TokensOut != 0) {
+				c := *rec.CostMicros
+				a.CostMicros = &c
+			}
+```
+
+- [ ] **Step 5: Correct the comment**
+
+The comment above the transfer says `applyUsage` "accumulates onto the shared record". It assigns; the adapters accumulate internally before it is called. The invariant it argues for still holds, but the sentence is wrong.
+
+- [ ] **Step 6: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+`TestAnAttemptWithNoTokensIsUnpricedNotFree` and the double-demote test must both still pass — they pin the two properties this task is protecting.
+
+- [ ] **Step 7: Commit**
+
+Subject: `fix(exec): clear every burn field on demote`
