@@ -488,6 +488,20 @@ Subject: `test(exec): cover the exec to rollup seam`
 
 Add a test asserting the overview's `series` and `failovers` rows carry snake_case keys, so the shape is pinned before a console is built against it.
 
+- [ ] **Step 1b: Expose attempts on the usage endpoint**
+
+`handleUsage` in `internal/admin/usage.go` builds each row by hand-picking fields
+off `UsageDay`, so the `attempts` column added in Task 2 never reaches a
+consumer. Add it to the row map alongside `requests`.
+
+This matters because of what the pair means together: `requests` counts only the
+attempt that served, so a provider that failed every time reads as
+`requests: 0, attempts: 7`. Without `attempts` in the payload that provider looks
+like it did nothing, when in fact it burned tokens on seven failures — the exact
+case the attribution rework exists to surface.
+
+Add a test asserting a grouped row carries both `requests` and `attempts`.
+
 - [ ] **Step 2: Bound RecentFailovers**
 
 `RecentFailovers` joins and groups the entire request history on every call, and the overview polls every three seconds. Give it the same window its two sibling queries use, so "recent" means recent and the query does not scan months of history:
