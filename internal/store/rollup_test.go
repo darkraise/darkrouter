@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -425,6 +426,45 @@ func TestRollupSkipsADayPruningHasAlreadyTouched(t *testing.T) {
 	if requests != 100 || tokensIn != 10000 {
 		t.Fatalf("a partly-pruned day was recomputed from its remnant: "+
 			"requests=%d tokens_in=%d, want 100/10000", requests, tokensIn)
+	}
+}
+
+func TestADayIsFinalizedBeforeItIsFrozen(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	// 00:30 UTC: yesterday is complete and, at a 24h retention, none of it
+	// has been pruned yet. It must still be recomputable.
+	now := time.Date(2026, 8, 25, 0, 30, 0, 0, time.UTC)
+	w := NewLogWriter(db, LogOptions{})
+
+	for i, ts := range []time.Time{
+		time.Date(2026, 8, 24, 22, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 24, 23, 40, 0, 0, time.UTC),
+	} {
+		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("r%d", i), TS: ts, ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", TokensIn: 5,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", TokensIn: 5,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day='2026-08-24'`,
+	).Scan(&requests, &tokensIn); err != nil {
+		t.Fatalf("yesterday was frozen before it was ever finalized: %v", err)
+	}
+	if requests != 2 || tokensIn != 10 {
+		t.Fatalf("requests=%d tokens_in=%d, want 2/10", requests, tokensIn)
 	}
 }
 
