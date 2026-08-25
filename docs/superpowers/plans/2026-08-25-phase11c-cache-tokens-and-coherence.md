@@ -842,3 +842,119 @@ Run: `go build ./... && go vet ./... && go test -race ./internal/config/ ./inter
 - [ ] **Step 6: Commit**
 
 Subject: `test(config): pin the two-day retention floor`
+
+---
+
+### Task 10: Move a failed attempt's usage onto its own row
+
+**Files:**
+- Modify: `internal/exec/exec.go` — `demoteLastAttempt`, `reclassifyStream`
+- Modify: `internal/store/log.go` — the `AttemptRecord` usage comment
+- Modify: `internal/store/adminstore.go` — remove the dead cost query from `RecentStats`
+- Test: `internal/exec/exec_test.go`
+
+An earlier task added a guard meant to stop a failed provider's tokens being stamped onto whichever provider served the retry. **The guard is inert in production.** It decides by summing `rec.Attempts[i].TokensIn/TokensOut`, and nothing in production ever writes those fields before `priceRecord` runs — the only non-test appearances are two read comparisons and `priceRecord`'s own copy loop. So the sum is always zero, the guard always passes, and the copy always happens.
+
+Demonstrated against the committed code with a production-shaped record — a failed attempt on `other/x`, 5000 tokens carried on the shared request record by `applyUsage`, a serving attempt on `groq/m` that reported no usage of its own:
+
+    failed attempt (other/x):  tokens_in=0
+    serving attempt (groq/m):  tokens_in=5000
+    serving attempt cost:      5000 micros
+
+The existing test passes only because it fabricates `Attempts[0].TokensIn: 5000`, a state the executor cannot produce.
+
+The same root cause leaves spec §8.3's second capability undelivered: tokens burned by failed pre-commit attempts still never reach `usage_daily`, because nothing ever puts them on an attempt row. The columns, the rollup's reader, and two comments all claim otherwise.
+
+One change fixes both. `applyUsage` writes onto the shared record as events arrive, so at the moment an attempt is demoted pre-commit, that record holds exactly what the attempt burned. Move it onto the attempt's own row and reset the record, so the next attempt starts clean.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestADemotedAttemptKeepsItsOwnBurn(t *testing.T) {
+	// applyUsage writes onto the shared record as events arrive, so at demote
+	// time the record holds what THIS attempt burned. Leaving it there hands
+	// it to whoever serves next.
+	rec := &store.RequestRecord{TokensIn: 5000, TokensOut: 120}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if rec.Attempts[0].TokensIn != 5000 || rec.Attempts[0].TokensOut != 120 {
+		t.Fatalf("the demoted attempt must carry its own burn, got %d/%d",
+			rec.Attempts[0].TokensIn, rec.Attempts[0].TokensOut)
+	}
+	if rec.TokensIn != 0 || rec.TokensOut != 0 {
+		t.Fatalf("the shared record must be reset for the next attempt, got %d/%d",
+			rec.TokensIn, rec.TokensOut)
+	}
+}
+
+func TestTheServingProviderIsNotBilledAnotherProvidersTokens(t *testing.T) {
+	// The production shape: recordAttempt never writes attempt tokens, so a
+	// guard that reads them cannot see anything.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{TokensIn: 5000}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	// The retry serves and reports no usage of its own.
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if got := rec.Attempts[1].TokensIn; got != 0 {
+		t.Fatalf("the serving attempt was billed %d tokens it never burned", got)
+	}
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+}
+```
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/exec/ -run 'TestADemotedAttempt|TestTheServingProvider' -v`
+
+- [ ] **Step 3: Transfer the usage at demote time**
+
+In `demoteLastAttempt`, after rewriting the outcome:
+
+```go
+	// applyUsage accumulates onto the shared record as events arrive, so at
+	// this point it holds what this attempt burned before it failed. Moving it
+	// onto the attempt's own row is what lets the burn be priced at the
+	// provider that incurred it, and what stops the next attempt inheriting it.
+	a := &rec.Attempts[n-1]
+	a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+	rec.TokensIn, rec.TokensOut = 0, 0
+	rec.CacheReadTokens, rec.CacheWriteTokens, rec.ReasoningTokens = 0, 0, 0
+```
+
+`reclassifyStream` demotes on its own path; make it call `demoteLastAttempt` rather than rewriting `Outcome` inline, so the transfer happens there too. Keep the Error string it sets.
+
+The attempt row has no cache columns, so a failed attempt's cache-read burn is dropped rather than misattributed. That is the honest outcome available without another migration — note it in your report, do not invent a column.
+
+- [ ] **Step 4: Correct the comments that claim the capability**
+
+`internal/store/log.go`'s `AttemptRecord` usage comment describes behaviour that only now becomes true. Leave it accurate. If migration `0006`'s header makes the same claim, leave the migration file alone — it is committed and append-only — but say so in your report.
+
+- [ ] **Step 5: Drop the dead cost query**
+
+`RecentStats` in `internal/store/adminstore.go` still runs a union-join to compute `CostMicros`/`PricedRows` on every overview poll, but no production caller reads them — `handleOverview` uses only `Requests`, `Errors` and `WindowSec` now that the tile comes from `SpendSince`. Remove the query and the unread fields, and any test that only pinned them. It is a hand-kept duplicate of `SpendSince`'s shape and will drift.
+
+- [ ] **Step 6: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+- [ ] **Step 7: Commit**
+
+Subject: `fix(exec): keep a failed attempt's usage on it`
