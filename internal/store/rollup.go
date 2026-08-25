@@ -6,18 +6,47 @@ import (
 	"log"
 	"math/rand"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/config"
 )
+
+// defaultLogRetention mirrors config's own default so a caller that forgets
+// to pass a retention gets the safe behaviour rather than an empty window.
+const defaultLogRetention = 720 * time.Hour
 
 // Rollup recomputes usage_daily for yesterday and today in UTC.
 //
 // Two days rather than one: a request logged just after midnight belongs to
 // yesterday, and the batching writer may not have flushed it before the day
 // turned. Recomputing yesterday on every run is what finalizes it.
-func (d *DB) Rollup(ctx context.Context, now time.Time) error {
+func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Duration) error {
+	if logRetention <= 0 {
+		logRetention = defaultLogRetention
+	}
 	utc := now.UTC()
 	startOfToday := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 	from := startOfToday.AddDate(0, 0, -1)
 	to := startOfToday.AddDate(0, 0, 1)
+
+	// A day may only be recomputed when none of its requests can have been
+	// pruned. Every request in a day has a timestamp at or after that day's
+	// midnight, so the day is safe exactly while its midnight is still inside
+	// the retention window. Recomputing a day pruning has already eaten into
+	// would replace a finalized total with a smaller one and leave nothing to
+	// say it is incomplete.
+	cutoff := utc.Add(-logRetention)
+	cutoffDay := time.Date(cutoff.Year(), cutoff.Month(), cutoff.Day(),
+		0, 0, 0, 0, time.UTC)
+	if safeFrom := cutoffDay.AddDate(0, 0, 1); safeFrom.After(from) {
+		from = safeFrom
+	}
+	if !from.Before(to) {
+		// Retention is shorter than a day, so no day can be rolled up whole.
+		// Saying so once per run beats an empty usage table with no
+		// explanation.
+		log.Printf("rollup: log.retention %s leaves no complete day to roll up", logRetention)
+		return nil
+	}
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
@@ -93,7 +122,7 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 //
 // The interval is jittered so that a restart of several services does not line
 // every worker up on the same instant.
-func RunRollup(ctx context.Context, d *DB, interval time.Duration) error {
+func RunRollup(ctx context.Context, d *DB, cfgStore *config.Store, interval time.Duration) error {
 	if interval <= 0 {
 		interval = time.Hour
 	}
@@ -102,7 +131,8 @@ func RunRollup(ctx context.Context, d *DB, interval time.Duration) error {
 		case <-ctx.Done():
 			return nil
 		case <-time.After(jitter(interval)):
-			if err := d.Rollup(ctx, time.Now()); err != nil {
+			cfg := cfgStore.Current()
+			if err := d.Rollup(ctx, time.Now(), cfg.Log.Retention); err != nil {
 				// Logged, not fatal: a missed rollup is recomputed on the next
 				// run, because finalization is idempotent.
 				log.Printf("rollup: %v", err)
