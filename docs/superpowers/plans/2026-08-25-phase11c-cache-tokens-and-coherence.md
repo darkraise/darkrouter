@@ -1113,3 +1113,91 @@ Run: `go build ./... && go vet ./... && go test -race ./tools/... ./internal/cat
 - [ ] **Step 4: Commit**
 
 Subject: `fix(presetgen): keep the cache-write rate`
+
+---
+
+### Task 13: Retire the obsolete guard
+
+**Files:**
+- Modify: `internal/exec/exec.go` — `priceRecord`, `demoteLastAttempt`
+- Test: `internal/exec/exec_test.go`
+
+Task 10 moved a failed attempt's usage onto its own row at demote time and zeroed the shared record. That inverted the invariant the `claimed` guard was written for — the record can no longer hold a dead attempt's usage at log time — but the guard was left in place, and it now suppresses the one backfill that matters.
+
+Reproduced against the committed code with a production sequence (demote, then `applyUsage` for the retry, then `priceRecord`):
+
+    request:  tokens=800/200
+    attempt0: other/x tokens=5000/120   <- the failed provider's burn, correct
+    attempt1: groq/m  tokens=0/0 cost=nil  <- the provider that SERVED
+
+The rollup and `SpendSince` source tokens and cost exclusively from attempt rows whenever any exist — the request-row branch requires `NOT EXISTS` attempts. So the serving provider's tokens and dollars are counted zero times in `usage_daily`, the spend tile and the usage chart, on exactly the failover traffic §8.3 was written for.
+
+Every existing test misses it because each has the serving attempt report no usage of its own, which is the one shape where the suppression is invisible.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestBothProvidersInAFailoverKeepTheirOwnBurn(t *testing.T) {
+	// The shape no test covered: the failed attempt reported usage AND the
+	// retry reported its own. Aggregates read attempt rows, so a serving
+	// attempt left at zero is spend that reaches no total anywhere.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 5000, OutputTokens: 120})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 800, OutputTokens: 200})
+
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+	if rec.Attempts[1].TokensIn != 800 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt reaches no aggregate: %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[1].CostMicros == nil {
+		t.Fatal("the serving attempt was left unpriced")
+	}
+}
+```
+
+- [ ] **Step 2: Run it, watch it fail**
+
+Run: `go test ./internal/exec/ -run TestBothProvidersInAFailover -v`
+Expected: FAIL with `the serving attempt reaches no aggregate: 0/0`.
+
+- [ ] **Step 3: Delete the guard**
+
+Remove the `claimed` sum and the `if claimed == 0 {` wrapper from `priceRecord`, leaving the backfill loop to run unconditionally. It is already keyed on `Outcome == success` with zero tokens, which after the demote transfer is exactly the serving attempt.
+
+The reasoning, which you should verify rather than take on trust: at log time the record's usage can only belong to the attempt that succeeded or committed. Pre-commit failures always transfer and zero it. A committed failure keeps its success outcome and owns that usage. Parse failures fire before any `applyUsage`. The pre-commit 400 retry's rejected attempt has outcome `fatal`, so an outcome-keyed backfill skips it anyway. Check each of these against the code and say what you found.
+
+- [ ] **Step 4: Rewrite the test that pins the retired invariant**
+
+`TestAFailedProvidersTokensAreNotStampedOnTheNextOne` fabricates 5000 tokens on the failed attempt *while leaving them on the record* — a state the transfer makes unreachable, and the assertion it makes is now wrong. Rewrite it to the production shape: the record zeroed by the transfer, and the serving attempt correctly receiving only its own usage. Keep the name if it still describes the check; rename it if it does not.
+
+- [ ] **Step 5: Harden the double-demote guard**
+
+`demoteLastAttempt`'s idempotency check compares outcome strings, which works only because every `reclassifyStream` site happens to return the same constant the loop later passes back. A future path demoting with one outcome and surfacing another would re-run the transfer against the zeroed record and wipe the moved usage — the bug caught during Task 10, one refactor from returning.
+
+Key it on state instead: transfer only when the attempt still has zero tokens and the record has some. That is true exactly once per attempt regardless of how the outcomes line up.
+
+- [ ] **Step 6: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+- [ ] **Step 7: Commit**
+
+Subject: `fix(exec): backfill the serving attempt's usage`
