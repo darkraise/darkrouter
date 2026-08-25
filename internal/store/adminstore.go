@@ -503,35 +503,91 @@ type UsageDay struct {
 	CostMicros *int64
 }
 
-// UsageByDay rolls usage_daily up across providers and models, oldest first
-// because a chart reads left to right.
-func (d *DB) UsageByDay(ctx context.Context, days int) ([]UsageDay, error) {
+// UsageDimension is the column usage rolls up by. The zero value aggregates
+// across everything, which is what UsageByDay reported before there was a
+// choice.
+type UsageDimension int
+
+const (
+	UsageByDayOnly UsageDimension = iota
+	UsageByProvider
+	UsageByModel
+	UsageByAlias
+)
+
+// column is the SQL identifier for a dimension. It returns "" for the
+// day-only case, and the caller must not interpolate anything else -- these
+// are fixed identifiers, never user input.
+func (d UsageDimension) column() string {
+	switch d {
+	case UsageByProvider:
+		return "provider_id"
+	case UsageByModel:
+		return "model"
+	case UsageByAlias:
+		return "alias"
+	default:
+		return ""
+	}
+}
+
+// UsageRow is a UsageDay plus the value of the dimension it was grouped by.
+// Key is empty for UsageByDayOnly.
+type UsageRow struct {
+	UsageDay
+	Key string
+}
+
+// UsageBy rolls usage_daily up over the last `days` days, split by one
+// dimension, oldest first because a chart reads left to right.
+func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]UsageRow, error) {
 	if days <= 0 || days > 365 {
 		days = 30
 	}
-	rows, err := d.Read.QueryContext(ctx,
-		`SELECT day, sum(requests), sum(tokens_in), sum(tokens_out), sum(cost_micros)
-		   FROM usage_daily GROUP BY day ORDER BY day DESC LIMIT ?`, days)
+	col := dim.column()
+	sel, group := "'' AS k", "day"
+	if col != "" {
+		sel, group = col+" AS k", "day, "+col
+	}
+	// The LIMIT is on DAYS, not on rows. Grouping by a dimension multiplies
+	// the row count by that dimension's cardinality, so a row limit would
+	// silently return thirty rows covering four days once eight providers
+	// are in play.
+	q := `SELECT day, ` + sel + `,
+	             sum(requests), sum(tokens_in), sum(tokens_out),
+	             CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
+	        FROM usage_daily
+	       WHERE day IN (SELECT day FROM usage_daily
+	                      GROUP BY day ORDER BY day DESC LIMIT ?)
+	       GROUP BY ` + group + `
+	       ORDER BY day, k`
+	rows, err := d.Read.QueryContext(ctx, q, days)
 	if err != nil {
-		return nil, fmt.Errorf("usage by day: %w", err)
+		return nil, fmt.Errorf("usage by: %w", err)
 	}
 	defer rows.Close()
-
-	out := []UsageDay{}
+	out := []UsageRow{}
 	for rows.Next() {
-		var u UsageDay
-		if err := rows.Scan(&u.Day, &u.Requests, &u.TokensIn, &u.TokensOut, &u.CostMicros); err != nil {
-			return nil, fmt.Errorf("usage by day: %w", err)
+		var r UsageRow
+		if err := rows.Scan(&r.Day, &r.Key, &r.Requests,
+			&r.TokensIn, &r.TokensOut, &r.CostMicros); err != nil {
+			return nil, fmt.Errorf("usage by: %w", err)
 		}
-		out = append(out, u)
+		out = append(out, r)
 	}
-	if err := rows.Err(); err != nil {
+	return out, rows.Err()
+}
+
+// UsageByDay rolls usage_daily up across every dimension, oldest first. Its
+// signature and its ordering are unchanged; only its implementation moved.
+func (d *DB) UsageByDay(ctx context.Context, days int) ([]UsageDay, error) {
+	rows, err := d.UsageBy(ctx, days, UsageByDayOnly)
+	if err != nil {
 		return nil, err
 	}
-	// Reversed after the LIMIT: the query takes the newest N, the chart shows
-	// them oldest first.
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+	out := make([]UsageDay, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.UsageDay)
 	}
 	return out, nil
 }

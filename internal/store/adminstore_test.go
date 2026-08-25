@@ -591,3 +591,39 @@ func TestCapturedBodiesAreReadWhenPresent(t *testing.T) {
 		t.Errorf("bodies = %+v", tr.Bodies)
 	}
 }
+
+func TestUsageByAliasSplitsTheDay(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	for _, r := range []struct {
+		alias string
+		n     int64
+	}{{"fast-coder", 7}, {"cheap", 3}} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+			 VALUES ('2026-08-25','groq','m',?,?)`, r.alias, r.n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.UsageBy(ctx, 30, UsageByAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Key] = r.Requests
+	}
+	if got["fast-coder"] != 7 || got["cheap"] != 3 {
+		t.Fatalf("want fast-coder=7 cheap=3, got %v", got)
+	}
+
+	// The day-only rollup still aggregates across aliases.
+	flat, err := db.UsageByDay(ctx, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(flat) != 1 || flat[0].Requests != 10 {
+		t.Fatalf("want one day totalling 10, got %+v", flat)
+	}
+}
