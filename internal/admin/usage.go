@@ -95,7 +95,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	series, err := s.deps.DB.UsageBy(r.Context(), 30, store.UsageByDayOnly)
 	if err != nil {
-		series = nil
+		series = []store.UsageRow{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -105,9 +105,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"window_sec":       stats.WindowSec,
 		"today_spend": map[string]any{
 			"micros": stats.CostMicros,
-			// Nothing computes cost yet: phase 5 recorded that it is blocked on
-			// ir.Usage.InputTokens meaning different things across adapters. A
-			// confident zero would read as "today was free".
+			// An unpriced model leaves cost_micros NULL rather than zero, so a
+			// summed total of zero is ambiguous between "no spend" and "no
+			// price data for what ran". PricedRows disambiguates: it is what
+			// zero actually means.
 			"priced": stats.PricedRows > 0,
 		},
 		"latency":   map[string]any{"p50_ms": p50, "p95_ms": p95},
