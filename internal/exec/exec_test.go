@@ -93,6 +93,30 @@ func TestAnAttemptWithNoTokensIsUnpricedNotFree(t *testing.T) {
 	}
 }
 
+func TestARetriedProviderAttributesUsageToTheAttemptThatServed(t *testing.T) {
+	// The pre-commit 400 retry re-attempts the same provider and model, so
+	// two attempt rows carry identical provider and model and only the
+	// second one served.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 400, TokensOut: 200,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "fatal"},
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].TokensIn != 0 {
+		t.Fatalf("the rejected attempt must stay at zero, got %d", rec.Attempts[0].TokensIn)
+	}
+	if rec.Attempts[1].TokensIn != 400 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt must carry the usage, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+}
+
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
 // total leaves the default of 10m in place. It is a thin wrapper over
 // newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
