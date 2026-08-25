@@ -1481,19 +1481,83 @@ Expected: all packages PASS. A failure in `internal/exec` or `internal/admin` af
 
 - [ ] **Step 2: Verify a migration from a pre-0006 database**
 
-The rebuild of `usage_daily` is the only destructive step in this plan, so it is
-verified against real data rather than a fresh schema.
+The rebuild of `usage_daily` is the only destructive step in this plan. Task 2's
+`TestMigration0006AddsAliasAndAttemptUsage` asserts the resulting *schema*, but it
+builds from `migrated(t)` — a fresh database, where the `INSERT INTO
+usage_daily_new … SELECT … FROM usage_daily` copies zero rows. The half of the
+migration that carries existing data across the drop is therefore untested.
 
-```bash
-cp data/darkrouter.db /tmp/pre0006.db 2>/dev/null || echo "no live db; skip"
-go run ./cmd/darkrouter migrate --db /tmp/pre0006.db 2>/dev/null || \
-  echo "no migrate subcommand; open the db through internal/store instead"
-sqlite3 /tmp/pre0006.db "SELECT count(*), sum(requests) FROM usage_daily;"
+There is no live database on this machine, and a check that silently skips is not
+a check. Build the pre-0006 database instead: apply migrations `0001`–`0005` only,
+insert known rows, then let `Migrate` apply `0006` and assert nothing was lost.
+
+Add to `internal/store/migrate_test.go`:
+
+```go
+func TestMigration0006PreservesExistingUsageRows(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version > 5 {
+			continue
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("apply %04d: %v", m.version, err)
+		}
+	}
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out)
+		 VALUES ('2026-08-01','groq','a',5,100,200),
+		        ('2026-08-02','openai','b',7,300,400)`); err != nil {
+		t.Fatalf("pre-0006 insert: %v", err)
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to 0006: %v", err)
+	}
+
+	var rows, requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*), sum(requests), sum(tokens_in) FROM usage_daily`,
+	).Scan(&rows, &requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || requests != 12 || tokensIn != 400 {
+		t.Fatalf("rows lost across the rebuild: rows=%d requests=%d tokens_in=%d, want 2/12/400",
+			rows, requests, tokensIn)
+	}
+
+	var alias string
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT alias FROM usage_daily WHERE provider_id='groq'`).Scan(&alias); err != nil {
+		t.Fatal(err)
+	}
+	if alias != "" {
+		t.Fatalf("a row that predates aliases must carry the empty alias, got %q", alias)
+	}
+}
 ```
 
-Expected: the row count and request total match what the pre-migration database
-held. If `cmd/darkrouter` has no `migrate` subcommand, open the copy through
-`store.Open` in a scratch test instead — the point is that no row is lost.
+- [ ] **Step 2b: Run it**
+
+Run: `go test ./internal/store/ -run TestMigration0006Preserves -v`
+Expected: PASS. If it fails on the insert, the pre-0006 `usage_daily` shape
+assumed here is wrong — read `0001`–`0005` and correct the column list, not the
+assertion. If it fails on the counts, `0006`'s `SELECT` is dropping data and the
+migration is what changes.
 
 - [ ] **Step 3: Record the phase**
 
