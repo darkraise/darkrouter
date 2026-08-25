@@ -560,15 +560,21 @@ func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, commit
 		return
 	}
 	a := &rec.Attempts[n-1]
-	if a.Outcome == string(outcome) {
-		// A pre-commit path (reclassifyStream) already demoted this attempt
-		// and moved its usage. The loop's own demote call on the same outcome
-		// is the same fault surfacing a second time, and re-running the
-		// transfer here would overwrite the moved usage with the zeroes it
-		// left behind.
+	a.Outcome = string(outcome)
+	// The transfer is safe to run exactly once per attempt: true only while
+	// the attempt has not yet claimed anything and the record still holds
+	// what it burned. A pre-commit path (reclassifyStream) may already have
+	// demoted this attempt and moved its usage; a second demote call for the
+	// same fault, even one surfacing a different outcome, then finds the
+	// attempt already holding its tokens and skips, rather than re-running
+	// the transfer against the now-zeroed record and overwriting the moved
+	// usage with the zeroes it left behind.
+	if a.TokensIn != 0 || a.TokensOut != 0 {
 		return
 	}
-	a.Outcome = string(outcome)
+	if rec.TokensIn == 0 && rec.TokensOut == 0 {
+		return
+	}
 	// applyUsage accumulates onto the shared record as events arrive, so at
 	// this point it holds what this attempt burned before it failed. Moving it
 	// onto the attempt's own row is what lets the burn be priced at the
@@ -763,37 +769,29 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		}
 	}
 
-	// A pre-commit stream failure can report usage before it dies, and
-	// nothing resets the shared record between attempts. If another attempt
-	// already carries that usage, it is not the served attempt's to claim --
-	// handing it over would bill one provider for tokens another one burned.
-	var claimed int64
-	for i := range rec.Attempts {
-		claimed += rec.Attempts[i].TokensIn + rec.Attempts[i].TokensOut
-	}
-
 	// recordAttempt runs while the attempt is still in flight, before its
 	// usage is known. By log time applyUsage has put the served attempt's
 	// usage on the request, so this is the first point it can be attributed.
-	if claimed == 0 {
-		for i := range rec.Attempts {
-			a := &rec.Attempts[i]
-			// Identified by outcome, not by matching the request's final provider:
-			// the pre-commit 400 retry re-attempts the same provider and model, so
-			// a provider match would find the rejected attempt first.
-			if a.Outcome == string(adapter.OutcomeSuccess) &&
-				a.TokensIn == 0 && a.TokensOut == 0 {
-				a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
-				// The same model at the same rates on the same tokens. Re-pricing
-				// it separately drops the cache-read and cache-write components the
-				// attempt row has no columns for, and the two cost surfaces stop
-				// agreeing.
-				if rec.CostMicros != nil {
-					c := *rec.CostMicros
-					a.CostMicros = &c
-				}
-				break
+	for i := range rec.Attempts {
+		a := &rec.Attempts[i]
+		// Identified by outcome, not by matching the request's final provider:
+		// the pre-commit 400 retry re-attempts the same provider and model, so
+		// a provider match would find the rejected attempt first. Zero tokens
+		// on a success row is not ambiguous: demoteLastAttempt moves a failed
+		// attempt's burn onto its own row and zeroes the record, so the record's
+		// usage at this point can only belong to the attempt that served.
+		if a.Outcome == string(adapter.OutcomeSuccess) &&
+			a.TokensIn == 0 && a.TokensOut == 0 {
+			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+			// The same model at the same rates on the same tokens. Re-pricing
+			// it separately drops the cache-read and cache-write components the
+			// attempt row has no columns for, and the two cost surfaces stop
+			// agreeing.
+			if rec.CostMicros != nil {
+				c := *rec.CostMicros
+				a.CostMicros = &c
 			}
+			break
 		}
 	}
 
