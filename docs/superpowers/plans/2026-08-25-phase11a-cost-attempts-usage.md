@@ -1578,7 +1578,7 @@ git commit -m "docs: record the cost and usage-dimension phase"
 
 ## Notes for the executor
 
-**The one destructive step.** Task 2 drops and recreates `usage_daily`. Everything else in this plan is additive. If the migration is wrong, it is wrong in a way that loses a month of rolled-up usage, which is why Task 10 verifies it against a copy of a real database rather than only a fresh one.
+**The one destructive step.** Task 2 drops and recreates `usage_daily`. Everything else in this plan is additive. If the migration is wrong, it is wrong in a way that loses a month of rolled-up usage. Task 2's own test builds from a fresh database, where the row-copying `SELECT` moves nothing, so it proves only the resulting schema. Task 10 is what proves the data survives: it constructs a pre-0006 database by applying migrations `0001`-`0005` alone, seeds known rows, and asserts the totals across the rebuild.
 
 **Where the double-count hides.** Task 6's rollup uses `coalesce(sum(au.a_in), sum(r.tokens_in), 0)` — attempt usage *replaces* the request's own counts. The served attempt already carries what the request reports, so adding both would double every completed request's tokens. The test `TestRollupCountsTokensFromFailedAttempts` is what pins this: it expects 500, not 600.
 
