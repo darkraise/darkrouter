@@ -10,6 +10,9 @@ import (
 )
 
 //go:embed models_snapshot.json
+// snapshotJSON is the embedded fallback metadata for Darkrouter's first run.
+// It was generated before cache-write rates were added to the cost model,
+// so models priced from it do not include a cache-write cost component.
 var snapshotJSON []byte
 
 // Metadata is what a metadata source knows about one model. It is deliberately
@@ -164,14 +167,15 @@ func micros(usdPerMTok float64) int64 {
 // fallbackModel is the trimmed shape tools/presetgen emits. The short keys are
 // what keeps a 4.2 MB document under a megabyte in the binary.
 type fallbackModel struct {
-	InputMicros     int64 `json:"i,omitempty"`
-	OutputMicros    int64 `json:"o,omitempty"`
-	CacheReadMicros int64 `json:"c,omitempty"`
-	Context         int   `json:"w,omitempty"`
-	MaxOutput       int   `json:"m,omitempty"`
-	Tools           bool  `json:"t,omitempty"`
-	Reasoning       bool  `json:"r,omitempty"`
-	Vision          bool  `json:"v,omitempty"`
+	InputMicros      int64 `json:"i,omitempty"`
+	OutputMicros     int64 `json:"o,omitempty"`
+	CacheReadMicros  int64 `json:"c,omitempty"`
+	CacheWriteMicros int64 `json:"x,omitempty"`
+	Context          int   `json:"w,omitempty"`
+	MaxOutput        int   `json:"m,omitempty"`
+	Tools            bool  `json:"t,omitempty"`
+	Reasoning        bool  `json:"r,omitempty"`
+	Vision           bool  `json:"v,omitempty"`
 }
 
 var (
@@ -199,12 +203,13 @@ func FallbackDoc() Doc {
 			out := make(map[string]Metadata, len(models))
 			for mid, m := range models {
 				out[mid] = Metadata{
-					ContextWindow:          m.Context,
-					MaxOutputTokens:        m.MaxOutput,
-					InputMicrosPerMTok:     m.InputMicros,
-					OutputMicrosPerMTok:    m.OutputMicros,
-					CacheReadMicrosPerMTok: m.CacheReadMicros,
-					PriceKnown:             m.InputMicros != 0 || m.OutputMicros != 0,
+					ContextWindow:           m.Context,
+					MaxOutputTokens:         m.MaxOutput,
+					InputMicrosPerMTok:      m.InputMicros,
+					OutputMicrosPerMTok:     m.OutputMicros,
+					CacheReadMicrosPerMTok:  m.CacheReadMicros,
+					CacheWriteMicrosPerMTok: m.CacheWriteMicros,
+					PriceKnown:              m.InputMicros != 0 || m.OutputMicros != 0,
 					Capabilities: Capabilities{
 						Tools: m.Tools, Reasoning: m.Reasoning, Vision: m.Vision, Known: true,
 					},

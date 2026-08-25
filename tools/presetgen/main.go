@@ -428,9 +428,10 @@ func writePresets(path string, p catalog.Presets) error {
 
 type mdModel struct {
 	Cost struct {
-		Input     *float64 `json:"input"`
-		Output    *float64 `json:"output"`
-		CacheRead *float64 `json:"cache_read"`
+		Input      *float64 `json:"input"`
+		Output     *float64 `json:"output"`
+		CacheRead  *float64 `json:"cache_read"`
+		CacheWrite *float64 `json:"cache_write"`
 	} `json:"cost"`
 	Limit struct {
 		Context int `json:"context"`
@@ -476,14 +477,15 @@ func countModels(doc map[string]mdProvider) int {
 // on a first run rather than only after one successful sync.
 func writeSnapshot(path string, doc map[string]mdProvider) error {
 	type out struct {
-		InputMicros     int64 `json:"i,omitempty"`
-		OutputMicros    int64 `json:"o,omitempty"`
-		CacheReadMicros int64 `json:"c,omitempty"`
-		Context         int   `json:"w,omitempty"`
-		MaxOutput       int   `json:"m,omitempty"`
-		Tools           bool  `json:"t,omitempty"`
-		Reasoning       bool  `json:"r,omitempty"`
-		Vision          bool  `json:"v,omitempty"`
+		InputMicros      int64 `json:"i,omitempty"`
+		OutputMicros     int64 `json:"o,omitempty"`
+		CacheReadMicros  int64 `json:"c,omitempty"`
+		CacheWriteMicros int64 `json:"x,omitempty"`
+		Context          int   `json:"w,omitempty"`
+		MaxOutput        int   `json:"m,omitempty"`
+		Tools            bool  `json:"t,omitempty"`
+		Reasoning        bool  `json:"r,omitempty"`
+		Vision           bool  `json:"v,omitempty"`
 	}
 	trimmed := map[string]map[string]out{}
 	for pid, p := range doc {
@@ -506,6 +508,9 @@ func writeSnapshot(path string, doc map[string]mdProvider) error {
 			}
 			if m.Cost.CacheRead != nil {
 				o.CacheReadMicros = int64(*m.Cost.CacheRead*1_000_000 + 0.5)
+			}
+			if m.Cost.CacheWrite != nil {
+				o.CacheWriteMicros = int64(*m.Cost.CacheWrite*1_000_000 + 0.5)
 			}
 			for _, in := range m.Modalities.Input {
 				if in == "image" {
