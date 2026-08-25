@@ -286,6 +286,7 @@ type RequestSummary struct {
 	Status          string
 	TokensIn        int64
 	TokensOut       int64
+	CacheReadTokens int64
 	CostMicros      *int64
 	TTFTMs          *int64
 	TotalMs         *int64
@@ -344,7 +345,7 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT r.id, r.ts, r.dialect, r.surface, r.requested_model, r.resolved_alias,
 		        r.final_provider_id, r.final_model, r.status,
-		        r.tokens_in, r.tokens_out, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
+		        r.tokens_in, r.tokens_out, r.cache_read_tokens, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
 		        (SELECT count(*) FROM request_attempts a WHERE a.request_id = r.id)
 		   FROM requests r
 		  WHERE `+strings.Join(where, " AND ")+`
@@ -360,7 +361,7 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		var s RequestSummary
 		if err := rows.Scan(&s.ID, &s.TSMs, &s.Dialect, &s.Surface, &s.RequestedModel,
 			&s.ResolvedAlias, &s.FinalProviderID, &s.FinalModel, &s.Status,
-			&s.TokensIn, &s.TokensOut, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
+			&s.TokensIn, &s.TokensOut, &s.CacheReadTokens, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
 			&s.ErrorCode, &s.Attempts); err != nil {
 			return nil, fmt.Errorf("list requests: %w", err)
 		}
@@ -413,13 +414,13 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT id, ts, dialect, surface, requested_model, resolved_alias,
 		        final_provider_id, final_model, status,
-		        tokens_in, tokens_out, cost_micros, ttft_ms, total_ms, error_code,
+		        tokens_in, tokens_out, cache_read_tokens, cost_micros, ttft_ms, total_ms, error_code,
 		        candidates_json, warnings_json, surface_meta_json,
 		        response_bytes, response_content_type
 		   FROM requests WHERE id = ?`, id).Scan(
 		&tr.ID, &tr.TSMs, &tr.Dialect, &tr.Surface, &tr.RequestedModel, &tr.ResolvedAlias,
 		&tr.FinalProviderID, &tr.FinalModel, &tr.Status,
-		&tr.TokensIn, &tr.TokensOut, &tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
+		&tr.TokensIn, &tr.TokensOut, &tr.CacheReadTokens, &tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
 		&traceJSON, &warningsJSON, &metaJSON,
 		&tr.ResponseBytes, &tr.ResponseContentType)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -455,7 +456,8 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	}
 
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path
+		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path,
+		        tokens_in, tokens_out, cost_micros
 		   FROM request_attempts WHERE request_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
@@ -465,7 +467,8 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	for rows.Next() {
 		var a AttemptRecord
 		if err := rows.Scan(&a.Seq, &a.ProviderID, &a.KeyID, &a.Model,
-			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error, &a.Path); err != nil {
+			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error, &a.Path,
+			&a.TokensIn, &a.TokensOut, &a.CostMicros); err != nil {
 			return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
 		}
 		tr.Attempts = append(tr.Attempts, a)
@@ -505,7 +508,7 @@ type UsageDay struct {
 }
 
 // UsageDimension is the column usage rolls up by. The zero value aggregates
-// across everything, which is what UsageByDay reported before there was a
+// across everything, which is what the rollup reported before there was a
 // choice.
 type UsageDimension int
 
@@ -579,20 +582,6 @@ func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]Usage
 	return out, rows.Err()
 }
 
-// UsageByDay rolls usage_daily up across every dimension, oldest first. Its
-// signature and its ordering are unchanged; only its implementation moved.
-func (d *DB) UsageByDay(ctx context.Context, days int) ([]UsageDay, error) {
-	rows, err := d.UsageBy(ctx, days, UsageByDayOnly)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]UsageDay, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r.UsageDay)
-	}
-	return out, nil
-}
-
 // RecentStats is the overview's headline numbers over a window.
 type RecentStats struct {
 	Requests  int64
@@ -612,11 +601,35 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	// int64 fails rather than yielding zero.
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT count(*),
-		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0),
-		        coalesce(sum(CASE WHEN cost_micros IS NOT NULL THEN 1 ELSE 0 END), 0),
-		        coalesce(sum(cost_micros), 0)
+		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0)
 		   FROM requests WHERE ts >= ?`, since).
-		Scan(&s.Requests, &s.Errors, &s.PricedRows, &s.CostMicros)
+		Scan(&s.Requests, &s.Errors)
+	if err != nil {
+		return s, fmt.Errorf("recent stats: %w", err)
+	}
+
+	// Cost is sourced the same way the daily rollup sources it: from each
+	// attempt's own cost, so a failover's discarded spend counts here just as
+	// it counts in usage_daily, rather than only the try that served. A
+	// request with no attempt rows falls back to its own cost_micros, the
+	// same fallback the rollup uses for requests written before attempt-level
+	// cost existed.
+	err = d.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(CASE WHEN c IS NOT NULL THEN 1 ELSE 0 END), 0), coalesce(sum(c), 0)
+		   FROM (
+		     SELECT a.cost_micros AS c
+		       FROM requests r
+		       JOIN request_attempts a ON a.request_id = r.id
+		      WHERE r.ts >= ?
+		     UNION ALL
+		     SELECT r.cost_micros
+		       FROM requests r
+		      WHERE r.ts >= ?
+		        AND r.final_provider_id <> ''
+		        AND NOT EXISTS (
+		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
+		   )`, since, since).
+		Scan(&s.PricedRows, &s.CostMicros)
 	if err != nil {
 		return s, fmt.Errorf("recent stats: %w", err)
 	}
