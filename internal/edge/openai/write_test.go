@@ -10,6 +10,16 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
+func TestPromptTokensStayInclusiveOnTheWire(t *testing.T) {
+	// The IR excludes cache reads; the OpenAI dialect reports them inside
+	// prompt_tokens. A client reconciling against its own provider bill must
+	// see the number the provider would have sent.
+	u := ir.Usage{InputTokens: 2000, OutputTokens: 500, CacheReadTokens: 8000}
+	if got := u.PromptTokens(); got != 10000 {
+		t.Fatalf("PromptTokens() = %d, want 10000", got)
+	}
+}
+
 func TestWriteResponseProducesOpenAIShape(t *testing.T) {
 	rec := httptest.NewRecorder()
 	err := WriteResponse(rec, &ir.Response{

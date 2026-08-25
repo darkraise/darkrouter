@@ -63,11 +63,11 @@ func responseParts(blocks []ir.ContentBlock) []any {
 
 func usageBody(u ir.Usage) map[string]any {
 	return map[string]any{
-		"promptTokenCount":        u.InputTokens,
+		"promptTokenCount":        u.PromptTokens(),
 		"candidatesTokenCount":    u.OutputTokens,
 		"cachedContentTokenCount": u.CacheReadTokens,
 		"thoughtsTokenCount":      u.ReasoningTokens,
-		"totalTokenCount":         u.InputTokens + u.OutputTokens,
+		"totalTokenCount":         u.PromptTokens() + u.OutputTokens,
 	}
 }
 
