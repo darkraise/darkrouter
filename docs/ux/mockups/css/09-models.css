@@ -63,7 +63,7 @@
    an operator would type into this box in the real product, unlike a
    Provider-detail field .field-input[readonly] marks as not patchable —
    so it keeps the live input's own well/ink weight instead of dimming. */
-.q-input[readonly] { background: var(--well); color: var(--ink); }
+.q-input[readonly] { background: var(--surface-2); color: var(--ink); }
 
 /* A span, not one of N. The two ends are real numbers the operator types,
    and the track between them is the reading — how much of the catalog's
@@ -74,8 +74,8 @@
   gap: 8px;
   height: var(--control-h);
   padding: 0 10px;
-  background: var(--panel);
-  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -88,8 +88,8 @@
   width: 76px;
   height: 20px;
   padding: 0 4px;
-  background: var(--well);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -104,7 +104,7 @@
   width: 56px;
   height: 3px;
   border-radius: var(--radius-pill);
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
 }
 /* The selected span, in --accent-ink because it reports a control's own
    state, the same register .view-chip[data-active] and .segmented-option
@@ -137,7 +137,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
@@ -145,7 +145,7 @@
   color: var(--ink);
 }
 .cap-bit[data-on="false"] {
-  border-color: var(--hairline);
+  border-color: var(--border);
   color: var(--ink-muted);
   opacity: 0.3;
 }
@@ -161,20 +161,20 @@
   align-items: center;
   height: 18px;
   padding: 0 5px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
   white-space: nowrap;
 }
-.source-tag[data-source="discovered"] { border-color: var(--hairline-subtle); }
+.source-tag[data-source="discovered"] { border-color: var(--border-subtle); }
 .source-tag[data-source="inferred"] {
   border-style: dashed;
-  border-color: var(--bezel);
+  border-color: var(--legend);
 }
 .source-tag[data-source="override"] {
-  border-color: var(--bezel);
+  border-color: var(--legend);
   color: var(--ink);
 }
 
@@ -197,26 +197,26 @@
 .lifecycle[data-state="stale"] .lifecycle-mark {
   flex: 0 0 auto;
   background: transparent;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
 }
 .lifecycle[data-state="removed_upstream"] { color: var(--legend); }
 .lifecycle[data-state="removed_upstream"] .lifecycle-mark {
   height: 1px;
-  background: var(--bezel);
+  background: var(--legend);
 }
 
 /* A number inference produced rather than an API. The row already carries
    an "≈" in front of each such value; the dashed rule under it is the
    second, non-textual channel, so the guess survives a squint. */
 .value-guessed {
-  border-bottom: 1px dashed var(--bezel);
+  border-bottom: 1px dashed var(--legend);
   color: var(--ink-muted);
 }
 
 /* The row-level reading of the same fact: an inferred row routes with a
    warning, so its left edge breaks. --bezel, not amber — this is not a
    health reading. */
-.row-inferred { border-left: 1px dashed var(--bezel); }
+.row-inferred { border-left: 1px dashed var(--legend); }
 
 .row-retired { opacity: 0.6; }
 .row-retired > span { text-decoration: line-through; }
@@ -269,11 +269,11 @@
    is — the one elevated surface open on the page, same as a popover. */
 
 .sheet {
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-top: 1px solid var(--accent-ink);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 .sheet-head {
@@ -281,7 +281,7 @@
   align-items: center;
   gap: 10px;
   padding: 10px var(--section-pad);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 
 .sheet-title {
@@ -346,7 +346,7 @@
   color: var(--legend);
 }
 .precedence-step[data-winner="true"] {
-  border-color: var(--bezel);
+  border-color: var(--legend);
   color: var(--ink);
 }
 
@@ -386,7 +386,7 @@
   flex-wrap: wrap;
   min-height: 44px;
   padding: 4px 0;
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .field-row:last-of-type { border-bottom: none; }
 
@@ -406,7 +406,7 @@
    value here is one an operator could type over, so it stays on the live
    input's well/ink weight rather than the "not patchable" dimming. */
 .override-editor input.field-input[readonly] {
-  background: var(--well);
+  background: var(--surface-2);
   color: var(--ink);
 }
 /* An edited-but-unsaved field. Accent, not a state colour: nothing has
@@ -426,15 +426,15 @@
   gap: 5px;
   height: var(--control-h);
   padding: 0 8px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--well);
+  background: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
 }
 .cap-toggle[data-on="true"] {
-  border-color: var(--bezel);
+  border-color: var(--legend);
   color: var(--ink);
 }
 .cap-toggle-box{
@@ -443,7 +443,7 @@
   justify-content: center;
   width: 11px;
   height: 11px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
@@ -471,7 +471,7 @@
    stays a column, but it is plainly inert. */
 .field-revert[data-inert="true"] {
   opacity: 0.35;
-  border-color: var(--hairline-subtle);
+  border-color: var(--border-subtle);
 }
 
 .override-footer {
@@ -480,7 +480,7 @@
   gap: 10px;
   margin-top: var(--section-pad);
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline);
+  border-top: 1px solid var(--border);
 }
 .override-footer .micro { margin-left: auto; text-align: right; }
 
@@ -528,8 +528,8 @@
   gap: var(--section-pad);
   flex-wrap: wrap;
   padding: 8px var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   margin-bottom: 10px;
 }

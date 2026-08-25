@@ -31,7 +31,7 @@
   gap: 10px;
   padding-bottom: var(--section-pad);
   margin-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .set-head-id {
   font-weight: 500;
@@ -81,7 +81,7 @@
 .set-subgroup {
   margin-top: var(--gutter);
   padding-top: var(--gutter);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- The scope marker ---------------------------------------------------
@@ -114,7 +114,7 @@
   width: 3px;
   height: 11px;
   border-radius: var(--radius-xs);
-  background: var(--bezel);
+  background: var(--legend);
 }
 /* Segmented, not dashed: a dashed 3px bar renders as two dots at this size.
    The gradient is the same technique .priority-handle uses to draw a rule
@@ -122,7 +122,7 @@
 .set-scope[data-scope="restart"]::before {
   background: repeating-linear-gradient(
     to bottom,
-    var(--bezel) 0 3px,
+    var(--legend) 0 3px,
     transparent 3px 5px
   );
 }
@@ -130,7 +130,7 @@
 /* Nothing reads it, so the bar is an outline around nothing. */
 .set-scope[data-scope="inert"]::before {
   background: transparent;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
 }
 
 /* The key strip that teaches the marker once, above the first panel, so no
@@ -142,8 +142,8 @@
   gap: 8px var(--gutter);
   padding: 10px var(--section-pad);
   margin-bottom: var(--gutter);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 .set-key .legend-caps { margin: 0; }
@@ -377,7 +377,7 @@
 .set-ruling {
   margin: var(--gutter) 0 0;
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
   color: var(--ink-muted);
 }
 .set-ruling .legend-caps {
@@ -394,7 +394,7 @@
   margin: 0;
   padding: 8px var(--section-pad);
   border-left: 2px solid var(--state-cooling);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   line-height: 1.45;

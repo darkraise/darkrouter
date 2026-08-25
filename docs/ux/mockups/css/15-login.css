@@ -65,7 +65,7 @@
   min-height: 420px;
   padding: var(--gutter);
   background: var(--ground);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -92,7 +92,7 @@
   align-items: center;
   gap: 6px;
   padding-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* The product name set beside its mark. One step above table data and one
@@ -146,7 +146,7 @@
   flex-direction: column;
   gap: 8px;
   padding-left: var(--section-pad);
-  border-left: 2px solid var(--hairline);
+  border-left: 2px solid var(--border);
 }
 .login-alert[data-tone="rejected"] { border-left-color: var(--state-failed); }
 .login-alert[data-tone="unconfigured"] { border-left-color: var(--state-cooling); }
@@ -217,7 +217,7 @@
   flex-direction: column;
   gap: 6px;
   padding-top: 10px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- Identity mark board ----------------------------------------------- */

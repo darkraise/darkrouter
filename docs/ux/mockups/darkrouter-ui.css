@@ -205,28 +205,6 @@ body.theme-light,
    component — the shell included: layout/sidebar, layout-header,
    page-header, brand-logo and user-menu are the console chrome. */
 
-/* MIGRATION ALIASES. The previous language named its surfaces panel/well/
-   rail/overlay and its rules hairline/bezel. Every screen still uses those
-   names, so they are kept pointing at the new ramp: the whole set renders in
-   the new palette immediately, and each screen drops its alias as it is
-   rebuilt. Delete this block when no fragment references it. */
-:root,
-.force-dark,
-body.theme-light,
-.force-light {
-  --panel: var(--surface);
-  --well: var(--surface-2);
-  --rail: var(--sidebar);
-  --overlay: var(--surface-2);
-  --hairline: var(--border);
-  --hairline-subtle: var(--border-subtle);
-  --bezel: var(--legend);
-  --focus: var(--accent);
-  --radius-legacy: var(--radius);
-  --shadow-card: none;
-  --shadow-overlay: var(--shadow-elevated);
-}
-
 /* A forced container pins a subtree to one mode whatever the T toggle says,
    so one document can set the two side by side. */
 .force-dark,
@@ -305,7 +283,7 @@ body.pins-on .pin {
   /* accent-ink/well clears 4.5:1 in both modes (dark ~9.4:1, light ~6:1);
      trace-fill/ground only managed ~2.2:1 in light mode. */
   background: var(--accent-ink);
-  color: var(--well);
+  color: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
   font-size: 10px;
@@ -356,6 +334,20 @@ body.pins-on .pin {
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 12.5px;
   line-height: 1.45;
+  color: var(--legend);
+}
+
+/* A label that IS an identifier — a config key, an API field, an env var.
+   It takes mono and no transform, because .legend-caps uppercases, and
+   `proxy_listen` uppercased is `PROXY_LISTEN`, which is not the key. The
+   type rule already says it: mono means this came off the wire, and a
+   config key is the most literal off-the-wire string on any screen. */
+.field-key {
+  margin: 0 0 6px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--legend);
 }
 
@@ -414,9 +406,9 @@ kbd {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--overlay);
+  background: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   color: var(--ink-muted);
@@ -481,7 +473,7 @@ kbd {
    more than one screen. */
 .control-ghost {
   background: transparent;
-  border-color: var(--hairline-subtle);
+  border-color: var(--border-subtle);
   color: var(--ink-muted);
   opacity: 0.8;
   transition: opacity var(--dur-hover) ease;
@@ -499,9 +491,9 @@ kbd {
   display: inline-flex;
   align-items: stretch;
   height: var(--control-h);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--surface);
   overflow: hidden;
 }
 
@@ -511,7 +503,7 @@ kbd {
   justify-content: center;
   min-width: 44px;
   padding: 0 10px;
-  border-right: 1px solid var(--hairline-subtle);
+  border-right: 1px solid var(--border-subtle);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
   color: var(--ink-muted);
@@ -523,7 +515,7 @@ kbd {
 .segmented-option:hover { opacity: 1; color: var(--ink); }
 .segmented-option[data-active="true"] {
   opacity: 1;
-  background: var(--well);
+  background: var(--surface-2);
   color: var(--accent-ink);
 }
 
@@ -563,7 +555,7 @@ a.row { text-decoration: none; }
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--overlay);
+  background: var(--surface-2);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-hover) ease;
@@ -598,10 +590,10 @@ a.row { text-decoration: none; }
    is a thing with nothing in it. */
 .state-pip[data-state="healthy"] { background: var(--state-healthy); }
 .state-pip[data-state="degraded"] { background: var(--state-cooling); }
-.state-pip[data-state="disabled"] { background: var(--bezel); }
+.state-pip[data-state="disabled"] { background: var(--legend); }
 .state-pip[data-state="unconfigured"] {
   background: transparent;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
 }
 /* Outcome, not health — a finished request or probe. Never on a provider. */
 .state-pip[data-state="failed"] { background: var(--state-failed); }
@@ -617,8 +609,8 @@ a.row { text-decoration: none; }
 .ladder {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -629,7 +621,7 @@ a.row { text-decoration: none; }
   gap: 8px;
   height: var(--row-h);
   padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .ladder-row:last-child { border-bottom: none; }
 
@@ -669,7 +661,7 @@ a.row { text-decoration: none; }
   width: 3px;
   height: 1px;
   transform: translateY(-50%);
-  background: var(--bezel);
+  background: var(--legend);
 }
 .rank-tick-major::after { width: 5px; }
 /* Below the served row a candidate's text is still printed, just at the
@@ -681,11 +673,11 @@ a.row { text-decoration: none; }
 .spine {
   align-self: stretch;
   width: 1px;
-  background: var(--hairline);
+  background: var(--border);
 }
 /* The termination rule: below the served row the run of ink itself gives
    out, not just the marks sitting on it. */
-.spine-terminated { background: var(--hairline-subtle); }
+.spine-terminated { background: var(--border-subtle); }
 
 /* All four states share one 7px silhouette footprint so the gutter column
    never jitters between rows, and split into two families: filled means an
@@ -703,7 +695,7 @@ a.row { text-decoration: none; }
    neither a routing decision nor a health report, so it carries no state
    colour, and its hollow silhouette matches "no attempt occurred" rather
    than the filled attempt outcomes below. */
-.mark-skipped { background: transparent; border: 1px solid var(--bezel); }
+.mark-skipped { background: transparent; border: 1px solid var(--legend); }
 /* The one other place amber is allowed, per the colour-discipline rule.
    A centre dot gives it a second, shape-based channel distinct from
    .mark-skipped's plain hollow ring, since stroke weight alone (1px vs
@@ -738,7 +730,7 @@ a.row { text-decoration: none; }
   width: 5px;
   height: 5px;
   background: transparent;
-  border: 1px solid var(--hairline-subtle);
+  border: 1px solid var(--border-subtle);
 }
 /* The compressed catalog reading: rank plus mark plus provider id only,
    at a size step up from the ladder's own 7px so a dense column of them
@@ -1010,8 +1002,8 @@ a.row { text-decoration: none; }
   max-width: 1440px;
   margin: 0 auto 32px;
   padding: var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 .toc ol {
@@ -1019,7 +1011,7 @@ a.row { text-decoration: none; }
   margin: 0;
   padding: 0;
 }
-.toc li { border-top: 1px solid var(--hairline-subtle); }
+.toc li { border-top: 1px solid var(--border-subtle); }
 .toc li:first-child { border-top: none; }
 .toc a {
   display: flex;
@@ -1064,9 +1056,9 @@ a.row { text-decoration: none; }
   flex: 0 0 auto;
   width: 26px;
   height: 14px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--well);
+  background: var(--surface-2);
 }
 .switch-knob{
   position: absolute;
@@ -1075,7 +1067,7 @@ a.row { text-decoration: none; }
   width: 10px;
   height: 10px;
   border-radius: var(--radius-pill);
-  background: var(--bezel);
+  background: var(--legend);
 }
 .switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
 .switch[data-on="true"] .switch-knob {
@@ -1120,8 +1112,9 @@ a.row { text-decoration: none; }
 /* A table header row: the hairline it sits on is one step darker than a
    body row's, and its .legend-caps labels lose their own bottom margin,
    which a 30px flex row does not collapse on its own. */
-.row-head { border-bottom-color: var(--hairline); }
-.row-head .legend-caps { margin: 0; }
+.row-head { border-bottom-color: var(--border); }
+.row-head .legend-caps,
+.row-head .field-key { margin: 0; }
 
 /* The grip for drag-to-reprioritise. Three 1px rules painted with a
    gradient rather than a glyph or an image: it stays crisp at any zoom,
@@ -1134,7 +1127,7 @@ a.row { text-decoration: none; }
   height: var(--control-h);
   background-image: repeating-linear-gradient(
     to bottom,
-    var(--bezel) 0 1px,
+    var(--legend) 0 1px,
     transparent 1px 4px
   );
   background-size: 10px 9px;
@@ -1177,7 +1170,7 @@ a.row { text-decoration: none; }
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: 50%;
   background: transparent;
 }
@@ -1228,10 +1221,10 @@ a.row { text-decoration: none; }
   gap: 1px;
   margin-top: 4px;
   padding: 4px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 .combo[data-open="true"] .combo-menu { display: flex; }
 
@@ -1257,7 +1250,7 @@ a.row { text-decoration: none; }
   justify-content: center;
   width: 12px;
   height: 12px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
@@ -1321,7 +1314,8 @@ a.row { text-decoration: none; }
   gap: 4px;
   min-width: 0;
 }
-.field .legend-caps { margin: 0; }
+.field .legend-caps,
+.field .field-key { margin: 0; }
 .field .spec-note { margin-top: 2px; }
 .field-span-2 { grid-column: span 2; }
 
@@ -1346,8 +1340,8 @@ a.row { text-decoration: none; }
 /* Read-only: still a fact worth a well's worth of weight, just not one
    this control can change right now. */
 .field-input[readonly] {
-  background: var(--panel);
-  border-color: var(--hairline-subtle);
+  background: var(--surface);
+  border-color: var(--border-subtle);
   color: var(--ink-muted);
 }
 /* Not applicable to the current selection, which is a different fact
@@ -1355,7 +1349,7 @@ a.row { text-decoration: none; }
    value at all. Dashed says "there is nothing to read here" where a
    solid border would say "there is, you just cannot change it". */
 .field-input-inert {
-  background: var(--panel);
+  background: var(--surface);
   border-style: dashed;
   color: var(--legend);
 }
@@ -1369,7 +1363,7 @@ a.row { text-decoration: none; }
   gap: 8px;
   height: var(--control-h);
   padding: 0 8px;
-  border: 1px solid var(--hairline-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
@@ -1422,7 +1416,7 @@ a.row { text-decoration: none; }
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
 }
 
@@ -1464,9 +1458,9 @@ body.pins-on .pin-note { display: inline; }
    outside real overlay chrome (menus, popovers). */
 .surface-overlay {
   padding: var(--section-pad);
-  background: var(--overlay);
+  background: var(--surface-2);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 /* Region 5 (surface): the radius comparison. border-radius is set per
@@ -1475,8 +1469,8 @@ body.pins-on .pin-note { display: inline; }
 .radius-demo {
   width: 48px;
   height: 32px;
-  background: var(--panel);
-  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
 /* Region 6 (density): a generic 30px control silhouette proving
@@ -1512,7 +1506,7 @@ body.pins-on .pin-note { display: inline; }
   content: "";
   width: 1px;
   height: 8px;
-  background: var(--bezel);
+  background: var(--legend);
 }
 
 /* Region 8 (motion): the 160ms height-disclosure specimen. Collapsed to
@@ -1527,8 +1521,8 @@ body.pins-on .pin-note { display: inline; }
   max-height: 43px;
   padding: var(--section-pad);
   overflow: hidden;
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   transition: max-height var(--dur-disclosure) ease;
 }
@@ -1562,5 +1556,5 @@ body.pins-on .pin-note { display: inline; }
 .region + .region {
   margin-top: var(--gutter);
   padding-top: var(--gutter);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }

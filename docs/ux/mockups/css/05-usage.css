@@ -106,7 +106,7 @@
    rather than three independently gridded widgets. */
 .grat-line {
   fill: none;
-  stroke: var(--hairline-subtle);
+  stroke: var(--border-subtle);
   stroke-width: 1;
 }
 
@@ -163,14 +163,14 @@
 .rank-table {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
 .rank-table-head {
   color: var(--legend);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 /* Matches Requests' .row-head .legend-caps: zero the label's own 6px
    bottom margin, which the shared flex row does not collapse on its own. */
@@ -197,14 +197,14 @@
 .share-track{
   flex: 1 1 auto;
   height: 5px;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
 .share-bar {
   display: block;
   height: 100%;
-  background: var(--bezel);
+  background: var(--legend);
 }
 .share-pct {
   flex: 0 0 auto;

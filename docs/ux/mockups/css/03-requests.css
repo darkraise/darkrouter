@@ -27,9 +27,9 @@
   align-items: center;
   height: 22px;
   padding: 0 10px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -43,7 +43,7 @@
 .view-chip[data-active="true"] {
   color: var(--accent-ink);
   border-color: var(--accent-ink);
-  background: var(--overlay);
+  background: var(--surface-2);
   opacity: 1;
 }
 
@@ -68,10 +68,10 @@
   margin-top: 4px;
   padding: 8px;
   width: 340px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 .time-range[data-open="true"] .time-range-menu { display: flex; }
 
@@ -84,9 +84,9 @@
 .time-range-preset{
   height: 22px;
   padding: 0 8px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -94,7 +94,7 @@
 .time-range-preset[data-active="true"] {
   color: var(--accent-ink);
   border-color: var(--accent-ink);
-  background: var(--well);
+  background: var(--surface-2);
 }
 
 .time-range-custom {
@@ -102,7 +102,7 @@
   align-items: center;
   gap: 6px;
   padding-top: 8px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .time-range-input{
@@ -110,8 +110,8 @@
   min-width: 128px;
   height: 24px;
   padding: 0 6px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -136,10 +136,10 @@
   gap: 1px;
   width: 240px;
   padding: 4px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 .col-menu-item {
@@ -161,7 +161,7 @@
 .col-menu-sep {
   height: 1px;
   margin: 4px 2px;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
 }
 
 /* Export is an action, not a toggle — its glyph would otherwise inherit
@@ -218,10 +218,10 @@
   gap: 6px;
   height: 22px;
   padding: 0 10px;
-  background: var(--overlay);
+  background: var(--surface-2);
   border: 1px solid var(--accent-ink);
   border-radius: var(--radius-xs);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--accent-ink);
