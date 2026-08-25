@@ -173,6 +173,55 @@ func TestAFailedProvidersTokensAreNotStampedOnTheNextOne(t *testing.T) {
 	}
 }
 
+func TestADemotedAttemptKeepsItsOwnBurn(t *testing.T) {
+	// applyUsage writes onto the shared record as events arrive, so at demote
+	// time the record holds what THIS attempt burned. Leaving it there hands
+	// it to whoever serves next.
+	rec := &store.RequestRecord{TokensIn: 5000, TokensOut: 120}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if rec.Attempts[0].TokensIn != 5000 || rec.Attempts[0].TokensOut != 120 {
+		t.Fatalf("the demoted attempt must carry its own burn, got %d/%d",
+			rec.Attempts[0].TokensIn, rec.Attempts[0].TokensOut)
+	}
+	if rec.TokensIn != 0 || rec.TokensOut != 0 {
+		t.Fatalf("the shared record must be reset for the next attempt, got %d/%d",
+			rec.TokensIn, rec.TokensOut)
+	}
+}
+
+func TestTheServingProviderIsNotBilledAnotherProvidersTokens(t *testing.T) {
+	// The production shape: recordAttempt never writes attempt tokens, so a
+	// guard that reads them cannot see anything.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{TokensIn: 5000}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	// The retry serves and reports no usage of its own.
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if got := rec.Attempts[1].TokensIn; got != 0 {
+		t.Fatalf("the serving attempt was billed %d tokens it never burned", got)
+	}
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+}
+
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
 // total leaves the default of 10m in place. It is a thin wrapper over
 // newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
