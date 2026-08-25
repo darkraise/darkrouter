@@ -92,6 +92,16 @@ class TestBuild(unittest.TestCase):
             [], [p for p in qa.check_index(self.index) if "duplicate id" in p]
         )
 
+    def test_screen_anchor_survives_id_suffixing(self):
+        # The table of contents links to the screen's own section id. Suffixing
+        # that id along with the SVG ids renames every anchor target out from
+        # under the nav, and nothing in a per-screen render shows it.
+        text = self.index.read_text(encoding="utf-8")
+        for sid in ("s-90-alpha", "s-91-beta"):
+            self.assertIn(f'id="{sid}"', text)
+            self.assertIn(f'href="#{sid}"', text)
+            self.assertNotIn(f"{sid}--{sid}", text)
+
     def test_every_fragment_reaches_the_built_index(self):
         # Counted dynamically, not hardcoded to the 2 fixtures this test
         # writes: real fragments now live alongside them, and a fixed count

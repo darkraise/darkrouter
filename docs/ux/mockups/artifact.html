@@ -1986,8 +1986,12 @@ body.pins-on .pin-note { display: inline; }
 .chart-scope {
   --chart-1: var(--accent-ink);
   --chart-2: color-mix(in srgb, var(--accent-ink) 60%, transparent);
-  --chart-3: url(#usage-hatch);
-  --chart-4: url(#usage-dot);
+  /* --chart-3 and --chart-4 are paint-server references and are set on the
+     .chart-scope element itself, beside the <defs> they point at, not here.
+     build.py namespaces every SVG id per screen so two screens cannot
+     collide, which means a pattern reference written in this shared sheet
+     names the pre-namespaced id and resolves to nothing once the fragments
+     are assembled — a series that renders with no fill at all. */
   --chart-5: transparent;
 }
 
@@ -6423,7 +6427,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
       </p>
     </header>
     <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-14-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-15-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-16-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li></ol></nav>
-<section class="screen" id="s-00-design-language--s-00-design-language" data-screen-title="design language">
+<section class="screen" id="s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
     sentence beside each pin stating the component it annotates, the tokens
@@ -6816,7 +6820,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-01-ladder-specimen--s-01-ladder-specimen" data-screen-title="ladder specimen">
+<section class="screen" id="s-01-ladder-specimen" data-screen-title="ladder specimen">
   <p class="legend">
     The routing ladder in its three modes, plus the state gallery that
     isolates its four marks at 4&times; scale. Nine later screens embed this
@@ -7362,7 +7366,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-02-overview--s-02-overview" data-screen-title="operate/overview">
+<section class="screen" id="s-02-overview" data-screen-title="operate/overview">
   <p class="legend">
     The screen an operator leaves open: live throughput, error rate,
     latency and spend over the last five minutes, the health of all eight
@@ -7599,7 +7603,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-03-requests--s-03-requests" data-screen-title="operate/requests">
+<section class="screen" id="s-03-requests" data-screen-title="operate/requests">
   <p class="legend">
     Fourteen of the operator's most recent requests under the active saved
     view and filters, the six real controls that replace today's four
@@ -7931,7 +7935,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-04-request-trace--s-04-request-trace" data-screen-title="operate/requests &mdash; request trace">
+<section class="screen" id="s-04-request-trace" data-screen-title="operate/requests &mdash; request trace">
   <p class="legend">
     The payoff of the whole design: the request trace, opened from the row
     Requests already showed for this failover. Same eight-candidate ladder
@@ -8220,7 +8224,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-05-usage--s-05-usage" data-screen-title="operate/usage">
+<section class="screen" id="s-05-usage" data-screen-title="operate/usage">
   <p class="legend">
     Requests, tokens and cost over the selected range, ranked by provider and
     by model. The chart-heaviest screen in the set — every well below shares
@@ -8268,7 +8272,8 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
             </div>
           </div>
 
-          <div class="chart-scope usage-charts">
+          <div class="chart-scope usage-charts"
+               style="--chart-3:url(#usage-hatch--s-05-usage);--chart-4:url(#usage-dot--s-05-usage)">
 
             <div class="panel usage-chart-panel">
               <div class="chart-head">
@@ -8592,7 +8597,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-06-providers--s-06-providers" data-screen-title="configure/providers">
+<section class="screen" id="s-06-providers" data-screen-title="configure/providers">
   <p class="legend">
     The eight configured providers in the order the router walks them, the
     drag-and-switch controls that finally give <span class="mono">PATCH
@@ -8971,7 +8976,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-07-provider-detail--s-07-provider-detail" data-screen-title="configure/providers &mdash; provider detail">
+<section class="screen" id="s-07-provider-detail" data-screen-title="configure/providers &mdash; provider detail">
   <p class="legend">
     One provider opened from the list &mdash; cerebras, deliberately, because
     it is the one with something wrong: a rotated key its cooldown ladder is
@@ -9382,7 +9387,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-08-preset-browser--s-08-preset-browser" data-screen-title="configure/providers &mdash; preset browser">
+<section class="screen" id="s-08-preset-browser" data-screen-title="configure/providers &mdash; preset browser">
   <p class="legend">
     All 197 shipped presets, browsable by surface, auth kind and free tier,
     with <span class="mono">cerebras</span> picked and its create form open.
@@ -9805,7 +9810,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
     </div>
   </div>
 </section>
-<section class="screen" id="s-09-models--s-09-models" data-screen-title="configure/models">
+<section class="screen" id="s-09-models" data-screen-title="configure/models">
   <p class="legend">
     The model catalog with six facets instead of two text boxes and eleven
     columns instead of six &mdash; pricing, max output tokens, publisher,
@@ -10653,7 +10658,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-10-routing--s-10-routing" data-screen-title="configure/routing">
+<section class="screen" id="s-10-routing" data-screen-title="configure/routing">
   <p class="legend">
     The route preview &mdash; type an alias or a model string and read the
     ladder the router would walk right now, before anything is sent &mdash;
@@ -11324,7 +11329,7 @@ body.theme-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
   </div>
 </section>
 
-<section class="screen" id="s-11-playground--s-11-playground" data-screen-title="use/playground">
+<section class="screen" id="s-11-playground" data-screen-title="use/playground">
   <p class="legend">
     The playground the gateway actually deserves: three inbound dialects and
     eight surfaces selectable, a multi-turn conversation with the reply still
@@ -11778,7 +11783,7 @@ def ulid_ms(ulid: str) -&gt; int:
   </div>
 </section>
 
-<section class="screen" id="s-12-playground-compare--s-12-playground-compare" data-screen-title="use/playground">
+<section class="screen" id="s-12-playground-compare" data-screen-title="use/playground">
   <p class="legend">
     Compare mode: one prompt, two panes, two independent calls. The left pane
     has closed its stream and the right one is still open, so both states of
@@ -12067,7 +12072,7 @@ def ulid_ms(ulid: str) -&gt; int:
   </div>
 </section>
 
-<section class="screen" id="s-13-connect--s-13-connect" data-screen-title="use/connect">
+<section class="screen" id="s-13-connect" data-screen-title="use/connect">
   <p class="legend">
     The screen a stranger opens first: the three base URLs this router answers
     on, which of the seven surfaces its configured providers can actually
@@ -12457,7 +12462,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
   </div>
 </section>
 
-<section class="screen" id="s-14-settings--s-14-settings" data-screen-title="settings">
+<section class="screen" id="s-14-settings" data-screen-title="settings">
   <p class="legend">
     Every knob the operator has, grouped by the concern it belongs to rather
     than by the shape of the YAML file it came from, and each one marked with
@@ -12955,7 +12960,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
   </div>
 </section>
 
-<section class="screen" id="s-15-login--s-15-login" data-screen-title="sign in">
+<section class="screen" id="s-15-login" data-screen-title="sign in">
   <p class="legend">
     The sign-in screen in the three states it actually has. It carries no
     rail and no top bar, because neither exists before a session does, so
@@ -13225,7 +13230,7 @@ X-Darkrouter-Request: 01JKQ4T7ZC5N8XW2VR6MBD3HYA</pre></div>
   </div>
 </section>
 
-<section class="screen" id="s-16-first-run--s-16-first-run" data-screen-title="operate/overview &mdash; first run">
+<section class="screen" id="s-16-first-run" data-screen-title="operate/overview &mdash; first run">
   <p class="legend">
     The console minutes after a fresh install: the gateway is up, the
     configuration is valid, and there is nothing behind it &mdash; zero

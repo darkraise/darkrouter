@@ -12,8 +12,12 @@
 .chart-scope {
   --chart-1: var(--accent-ink);
   --chart-2: color-mix(in srgb, var(--accent-ink) 60%, transparent);
-  --chart-3: url(#usage-hatch);
-  --chart-4: url(#usage-dot);
+  /* --chart-3 and --chart-4 are paint-server references and are set on the
+     .chart-scope element itself, beside the <defs> they point at, not here.
+     build.py namespaces every SVG id per screen so two screens cannot
+     collide, which means a pattern reference written in this shared sheet
+     names the pre-namespaced id and resolves to nothing once the fragments
+     are assembled — a series that renders with no fill at all. */
   --chart-5: transparent;
 }
 

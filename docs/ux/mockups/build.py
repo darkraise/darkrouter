@@ -42,7 +42,15 @@ def font_face_block() -> str:
 
 
 def suffix_svg_ids(fragment: str, screen_id: str) -> str:
-    return SVG_ID.sub(lambda m: f"{m.group(1)}{m.group(2)}--{screen_id}", fragment)
+    # The screen's own <section id> is the anchor the table of contents links
+    # to, and it is already unique per fragment. Renaming it leaves every TOC
+    # entry pointing at a target that no longer exists.
+    def rename(m: re.Match) -> str:
+        if m.group(2) == screen_id:
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)}--{screen_id}"
+
+    return SVG_ID.sub(rename, fragment)
 
 
 def css_partials() -> str:
