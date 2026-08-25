@@ -467,10 +467,24 @@ from the file" from "this value is live", because today it cannot.
 Extended:
 
 - `GET /api/overview` — add latency percentiles, a short series for sparklines, recent failovers.
-- `GET /api/usage` — add `group_by=provider|model`; `usage_daily` already carries the detail and
-  the endpoint currently aggregates it away before anyone could show it.
+- `GET /api/usage` — add `group_by=provider|model|alias`. `usage_daily` already carries provider
+  and model and the endpoint aggregates them away before anyone could show them; it does **not**
+  carry alias, so the alias dimension needs the key widened to
+  `(day, provider_id, model, alias)`. That migration lands with §8.3's rollup change rather than
+  on its own, because §8.3 is rewriting the rollup anyway and doing it twice would mean two
+  migrations over one table. Alias is the routing unit, and the overview's routing-flow graph
+  reads its whole left-hand column from this dimension.
 - `GET /api/providers` — add discovery health and OAuth account detail per credential.
-- `GET /api/config` — mark each value's source and whether it is hot-reloadable.
+- `GET /api/config` — return **every** block, not the five it returns today. `server`, `log`,
+  `capture` and `catalog`/`discovery` all appear on the Settings screen and only `server` is
+  currently served, so those three regions have no data source at all. Mark each value's source
+  and whether it is hot-reloadable.
+- `PUT /api/config` — accept only fields a running worker actually re-reads. The catalog sync
+  worker and the discovery sweeper each capture their interval into an options struct at
+  construction, so they are restart-only in behaviour while `config.RestartOnly` does not list
+  them: a reload changing one is accepted, warns about nothing, and takes effect at the next
+  process start. Correct `RestartOnly` to name them, and let the endpoint refuse what it cannot
+  apply rather than accepting a write that silently does nothing.
 
 New:
 
@@ -511,7 +525,8 @@ attempt row and rolling them up is what lets §6.4 drop its footnote.
 
 The API work gates screens unevenly, so it is ordered by what unblocks the most:
 
-1. Cost computation and usage detail — unblocks Usage (§6.4) and every cost figure elsewhere.
+1. Cost computation and usage detail — unblocks Usage (§6.4), the overview's routing-flow graph,
+   and every cost figure elsewhere. Carries the `usage_daily` alias migration.
 2. Health, discovery and breaker reset — unblocks Providers (§6.5).
 3. Route preview — unblocks Routing (§6.7) and the compressed ladder in Models (§6.6).
 4. Aliases, policy and overrides — the §8.1 migration, unblocking the rest of Routing and Models.
@@ -613,8 +628,13 @@ This is too large for one implementation plan and splits into four, in dependenc
 2. **The mockup phase** (§10) — depends on §3 and §4 being settled, which they are. It does not
    depend on 6.5.0 shipping: the mockups are authored against the intended tokens, and 6.5.0 is
    what makes those tokens reachable from the app rather than from hand-written CSS.
-3. **The API additions** (§8) — sequenced internally by §8.4, and the §8.1 migration is its own
-   reviewable change because it alters where two config concerns live.
+3. **The API additions** (§8) — three implementation plans, not one, because §8 is two backend
+   capabilities, a storage migration and twelve endpoints, and those fail in different ways:
+   **(a)** §8.3's cost and attempt accounting plus the `usage_daily` alias migration and the
+   §8.2 usage/overview extensions; **(b)** §8.1's move of aliases and policy into SQLite plus the
+   `GET`/`PUT /api/config` work; **(c)** the twelve endpoints in §8.4's order. (a) touches the
+   commit path and (b) changes where config lives, so each is isolated to keep a regression
+   bisectable.
 4. **The console** (§6, §9) — gated on approved mockups. Overview, Requests, the trace and the
    Playground need no new endpoint from step 3 and can proceed in parallel with it, picking up the
    §8.2 extensions as they land; every other screen waits on its slice of §8.4.
