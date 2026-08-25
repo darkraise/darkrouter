@@ -1361,12 +1361,18 @@ func (d *DB) LatencyPercentiles(ctx context.Context, window time.Duration) (int6
 	row := d.Read.QueryRowContext(ctx,
 		`WITH ranked AS (
 		     SELECT total_ms,
-		            percent_rank() OVER (ORDER BY total_ms) AS pr
+		            row_number() OVER (ORDER BY total_ms) AS rn,
+		            count(*)     OVER ()                  AS n
 		       FROM requests
 		      WHERE ts >= ? AND total_ms IS NOT NULL
 		 )
-		 SELECT coalesce((SELECT total_ms FROM ranked WHERE pr >= 0.50 LIMIT 1), 0),
-		        coalesce((SELECT total_ms FROM ranked WHERE pr >= 0.95 LIMIT 1), 0)`,
+		 -- Nearest-rank: the ceil(n*p)-th value. percent_rank() is
+		 -- (rank-1)/(n-1), so "pr >= 0.50" over 100 values returns the 51st,
+		 -- not the 50th -- one position high on every sample, on a tile an
+		 -- operator reads as p50. Integer division truncates, so
+		 -- (n*50 + 99)/100 is ceil(n*50/100).
+		 SELECT coalesce((SELECT total_ms FROM ranked WHERE rn = (n * 50 + 99) / 100), 0),
+		        coalesce((SELECT total_ms FROM ranked WHERE rn = (n * 95 + 99) / 100), 0)`,
 		since)
 	var p50, p95 int64
 	if err := row.Scan(&p50, &p95); err != nil {
