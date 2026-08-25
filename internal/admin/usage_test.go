@@ -207,4 +207,7 @@ func TestOverviewCarriesLatencySeriesAndFailovers(t *testing.T) {
 	if got["failovers"] == nil {
 		t.Fatal("failovers must be [] rather than null")
 	}
+	if got["series"] == nil {
+		t.Fatal("series must be [] rather than null")
+	}
 }
