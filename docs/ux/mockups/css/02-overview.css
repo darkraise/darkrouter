@@ -70,7 +70,7 @@
    scoped label, not a general-purpose caption class. */
 .live-tile-caption {
   margin: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   color: var(--legend);
 }
@@ -176,7 +176,7 @@
 .health-tile-alert-text {
   position: relative;
   margin: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   line-height: 1.4;
   color: var(--ink);

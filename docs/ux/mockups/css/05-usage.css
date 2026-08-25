@@ -53,7 +53,7 @@
    second .legend instance, which qa.py's exactly-one rule would reject. */
 .usage-footnote {
   margin: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--legend);

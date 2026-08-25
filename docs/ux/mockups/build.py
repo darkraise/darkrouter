@@ -22,8 +22,9 @@ SCREEN_ID = re.compile(r'<section[^>]*\bid="([^"]+)"')
 
 def font_face_block() -> str:
     faces = {
-        "ibm-plex-sans-400.woff2": ("IBM Plex Sans", 400, "normal"),
-        "ibm-plex-sans-600.woff2": ("IBM Plex Sans", 600, "normal"),
+        "inter-400.woff2": ("Inter", 400, "normal"),
+        "inter-500.woff2": ("Inter", 500, "normal"),
+        "inter-600.woff2": ("Inter", 600, "normal"),
         "ibm-plex-mono-400.woff2": ("IBM Plex Mono", 400, "normal"),
         "ibm-plex-mono-500.woff2": ("IBM Plex Mono", 500, "normal"),
     }

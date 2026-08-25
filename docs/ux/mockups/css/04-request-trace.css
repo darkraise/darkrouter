@@ -213,7 +213,7 @@
    register, since it is metadata about the tree, not data from it. */
 .json-collapsed-count {
   margin: 0 2px;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 10px;
   color: var(--legend);
 }

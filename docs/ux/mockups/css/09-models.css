@@ -314,7 +314,7 @@
 
 .sheet-caption {
   margin: 6px 0 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   line-height: 1.45;
   color: var(--legend);
@@ -456,7 +456,7 @@
 .field-detected {
   flex: 1 1 200px;
   min-width: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   color: var(--legend);
 }
@@ -496,7 +496,7 @@
 
 .alias-note {
   margin: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--legend);
