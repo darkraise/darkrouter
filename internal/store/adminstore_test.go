@@ -793,3 +793,104 @@ func TestRecentFailoversExcludesOnesOlderThanTheWindow(t *testing.T) {
 		t.Fatalf("want only the failover inside the window, got %+v", got)
 	}
 }
+
+func TestSpendSinceCoversTheWholeDay(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Both rows are placed relative to startOfDay rather than to time.Now():
+	// a row placed relative to "now" (e.g. "an hour ago") can land before
+	// midnight and flip days when the test happens to run in the small hours,
+	// which would make this flaky rather than a fixed fixture.
+	early, late := int64(1000), int64(250)
+	for i, r := range []struct {
+		ts   time.Time
+		cost int64
+	}{
+		{startOfDay.Add(30 * time.Minute), early},
+		{startOfDay.Add(20 * time.Hour), late},
+	} {
+		c := r.cost
+		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("s%d", i), TS: r.ts, ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", CostMicros: &c,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !priced {
+		t.Fatal("priced must be true when any row carries a cost")
+	}
+	if micros == nil || *micros != early+late {
+		t.Fatalf("spend = %v, want %d: a request from earlier today was dropped",
+			micros, early+late)
+	}
+}
+
+func TestSpendSinceExcludesRowsBeforeSince(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	yesterday := int64(9999)
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "before", TS: startOfDay.Add(-time.Hour), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", CostMicros: &yesterday,
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", CostMicros: &yesterday,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if priced || micros != nil {
+		t.Fatalf("spend = %v priced=%v, want nil/false: only a row from before "+
+			"since exists", micros, priced)
+	}
+}
+
+func TestSpendSinceIsNilWhenNothingIsPriced(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "unpriced", TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m",
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m", Outcome: "success",
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if priced || micros != nil {
+		t.Fatalf("spend = %v priced=%v, want nil/false: an unpriced model must "+
+			"not read as a confident zero", micros, priced)
+	}
+}
