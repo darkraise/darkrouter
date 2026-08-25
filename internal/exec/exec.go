@@ -533,6 +533,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	default:
 		outcome, aerr = op.Respond(cw, resp, ac)
 	}
+	demoteLastAttempt(rec, outcome, cw.Committed())
 	// The loop asks the writer, not the op. An op that reports a retryable
 	// outcome after bytes have gone out is describing a post-commit failure,
 	// and phase 3's rule says the chain ends there regardless — a second
@@ -544,6 +545,19 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	}
 	return attemptResult{Outcome: outcome, Status: statusCode, Err: aerr,
 		Path: path, Committed: cw.Committed()}
+}
+
+// The attempt row is written from the HTTP status before the body is read,
+// so a 200 that fails while forwarding is recorded as a success it never
+// was. A committed attempt keeps its success: bytes reached the client and
+// the chain ends there regardless of what the op reports afterwards.
+func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, committed bool) {
+	if committed || outcome == adapter.OutcomeSuccess {
+		return
+	}
+	if n := len(rec.Attempts); n > 0 {
+		rec.Attempts[n-1].Outcome = string(outcome)
+	}
 }
 
 // attemptStream buffers the upstream's events until one of them commits the
