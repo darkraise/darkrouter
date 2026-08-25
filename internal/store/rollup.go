@@ -22,7 +22,11 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
 	// key wrote: upserting alone would leave the old row behind and double the
-	// day permanently.
+	// day permanently. But the clear only reaches days the requests table can
+	// still rebuild: retention prunes requests well before usage_daily's
+	// retention, so a finalized day can enter this window with nothing left
+	// to recompute it from, and clearing it unconditionally would erase it
+	// for good.
 	tx, err := d.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("rollup: %w", err)
@@ -31,8 +35,10 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM usage_daily
-		  WHERE day >= strftime('%Y-%m-%d', ? / 1000, 'unixepoch')
-		    AND day <  strftime('%Y-%m-%d', ? / 1000, 'unixepoch')`,
+		  WHERE day IN (
+		        SELECT DISTINCT strftime('%Y-%m-%d', ts / 1000, 'unixepoch')
+		          FROM requests
+		         WHERE ts >= ? AND ts < ?)`,
 		from.UnixMilli(), to.UnixMilli()); err != nil {
 		return fmt.Errorf("rollup clear: %w", err)
 	}
