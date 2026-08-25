@@ -24,6 +24,12 @@ Copy these values verbatim. Every task's requirements implicitly include this se
 
 **Pricing units.** `catalog.Pricing` is micro-dollars per **million** tokens: `InputMicrosPerMTok`, `OutputMicrosPerMTok`, `CacheReadMicrosPerMTok`, and `Known bool` which separates a free model from an unpriced one — both are zero.
 
+**Test helpers already exist; do not invent them.** `internal/store` tests get a fully-migrated
+database from `migrated(t) *DB` (89 existing uses). `internal/admin` tests use
+`testServerFull(t) (server, db)`, `login(t, s) (cookie, token)` and
+`do(t, s, cookie, token, method, path, body)`; admin endpoints reject an unauthenticated request
+with 401.
+
 **Commit style.** `<type>(<scope>): <subject>`, type = feat|fix|docs|style|refactor|test|chore|perf. Subject ≤50 chars, imperative, no period. English only, everywhere.
 
 **Language.** allowlist/blocklist, primary/replica, placeholder/example, main branch.
@@ -214,7 +220,7 @@ Add to `internal/store/migrate_test.go`:
 
 ```go
 func TestMigration0006AddsAliasAndAttemptUsage(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 
 	// usage_daily carries alias and keys on it
@@ -337,7 +343,7 @@ Add to `internal/store/log_test.go`:
 
 ```go
 func TestAttemptUsageIsPersisted(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 	cost := int64(4321)
 
@@ -696,7 +702,7 @@ Add to `internal/store/rollup_test.go`:
 
 ```go
 func TestRollupGroupsByAlias(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 	ts := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
 
@@ -735,7 +741,7 @@ func TestRollupGroupsByAlias(t *testing.T) {
 }
 
 func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 	ts := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
 
@@ -840,6 +846,12 @@ git commit -m "feat(store): roll up by alias and count failed attempts"
 
 **Interfaces:**
 - Consumes: `usage_daily` from Task 6.
+**Do not regress `UsageByDay`.** It clamps `days` to 1..365 defaulting to 30, and it returns
+**oldest first** — `internal/admin`'s `TestUsageRollsUpByDay` asserts that ordering explicitly,
+with the comment "a chart reads left to right". The current implementation gets there by
+selecting `DESC LIMIT` and reversing the slice in Go; the replacement selects the newest N days
+in a subquery and orders ascending, which is the same result without the reversal.
+
 - Produces: `store.UsageDimension` (`UsageByDayOnly`, `UsageByProvider`, `UsageByModel`, `UsageByAlias`) and `(*DB).UsageBy(ctx context.Context, days int, dim UsageDimension) ([]UsageRow, error)`, where `UsageRow` is `UsageDay` plus a `Key string`. `UsageByDay` keeps its signature and delegates with `UsageByDayOnly`, so existing callers do not change.
 
 - [ ] **Step 1: Write the failing test**
@@ -848,7 +860,7 @@ Add to `internal/store/adminstore_test.go`:
 
 ```go
 func TestUsageByAliasSplitsTheDay(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 	for _, r := range []struct {
 		alias string
@@ -930,28 +942,39 @@ type UsageRow struct {
 }
 
 // UsageBy rolls usage_daily up over the last `days` days, split by one
-// dimension.
+// dimension, oldest first because a chart reads left to right.
 func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]UsageRow, error) {
+	if days <= 0 || days > 365 {
+		days = 30
+	}
 	col := dim.column()
 	sel, group := "'' AS k", "day"
 	if col != "" {
-		sel, group = col+" AS k", "day, "+col
+		sel, group = col + " AS k", "day, " + col
 	}
+	// The LIMIT is on DAYS, not on rows. Grouping by a dimension multiplies
+	// the row count by that dimension's cardinality, so a row limit would
+	// silently return thirty rows covering four days once eight providers
+	// are in play.
 	q := `SELECT day, ` + sel + `,
 	             sum(requests), sum(tokens_in), sum(tokens_out),
 	             CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
-	        FROM usage_daily GROUP BY ` + group + ` ORDER BY day DESC, k LIMIT ?`
+	        FROM usage_daily
+	       WHERE day IN (SELECT day FROM usage_daily
+	                      GROUP BY day ORDER BY day DESC LIMIT ?)
+	       GROUP BY ` + group + `
+	       ORDER BY day, k`
 	rows, err := d.Read.QueryContext(ctx, q, days)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("usage by: %w", err)
 	}
 	defer rows.Close()
-	var out []UsageRow
+	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
 		if err := rows.Scan(&r.Day, &r.Key, &r.Requests,
 			&r.TokensIn, &r.TokensOut, &r.CostMicros); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("usage by: %w", err)
 		}
 		out = append(out, r)
 	}
@@ -962,6 +985,8 @@ func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]Usage
 Then rewrite `UsageByDay` to delegate:
 
 ```go
+// UsageByDay rolls usage_daily up across every dimension, oldest first. Its
+// signature and its ordering are unchanged; only its implementation moved.
 func (d *DB) UsageByDay(ctx context.Context, days int) ([]UsageDay, error) {
 	rows, err := d.UsageBy(ctx, days, UsageByDayOnly)
 	if err != nil {
@@ -1006,16 +1031,16 @@ Add to `internal/admin/usage_test.go`:
 
 ```go
 func TestUsageGroupByAlias(t *testing.T) {
-	srv, db := newTestServer(t)
-	ctx := context.Background()
-	if _, err := db.Write.ExecContext(ctx,
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
 		 VALUES ('2026-08-25','groq','m','fast-coder',7)`); err != nil {
 		t.Fatal(err)
 	}
 
-	rr := doGET(t, srv, "/api/usage?group_by=alias")
-	if rr.Code != 200 {
+	rr := do(t, s, cookie, token, "GET", "/api/usage?group_by=alias", "")
+	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
 	var got struct {
@@ -1039,23 +1064,24 @@ func TestUsageGroupByAlias(t *testing.T) {
 func TestUsageRejectsAnUnknownGroupBy(t *testing.T) {
 	// A typo must not silently fall back to the day-only rollup: the caller
 	// would render a chart with one series and no way to tell it asked wrong.
-	srv, _ := newTestServer(t)
-	rr := doGET(t, srv, "/api/usage?group_by=providr")
-	if rr.Code != 400 {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	rr := do(t, s, cookie, token, "GET", "/api/usage?group_by=providr", "")
+	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 for an unknown dimension, got %d", rr.Code)
 	}
 }
 
 func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
-	srv, db := newTestServer(t)
-	ctx := context.Background()
-	if _, err := db.Write.ExecContext(ctx,
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
 		 VALUES ('2026-08-25','groq','m','fast-coder',7),
 		        ('2026-08-25','groq','m','cheap',3)`); err != nil {
 		t.Fatal(err)
 	}
-	rr := doGET(t, srv, "/api/usage")
+	rr := do(t, s, cookie, token, "GET", "/api/usage", "")
 	var got struct {
 		Days []struct {
 			Requests int64 `json:"requests"`
@@ -1070,8 +1096,11 @@ func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 }
 ```
 
-Use whatever helpers `internal/admin`'s existing tests use in place of
-`newTestServer` and `doGET`; the assertions are what matters.
+These are the helpers `internal/admin`'s existing tests already use:
+`testServerFull(t)` returns `(server, db)`, `login(t, s)` returns `(cookie, token)`, and
+`do(t, s, cookie, token, method, path, body)` issues an authenticated request. Admin endpoints
+require the session cookie and CSRF token — a request without them gets 401, not the status the
+test expects.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1172,7 +1201,7 @@ Add to `internal/store/adminstore_test.go`:
 
 ```go
 func TestLatencyPercentiles(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 	now := time.Now()
 	// 1..100ms; p50 is the 50th value and p95 the 95th.
@@ -1197,7 +1226,7 @@ func TestLatencyPercentiles(t *testing.T) {
 }
 
 func TestRecentFailoversReturnsOnlyMultiAttemptRequests(t *testing.T) {
-	db := openTestDB(t)
+	db := migrated(t)
 	ctx := context.Background()
 	now := time.Now()
 	mk := func(id string, attempts int) {
@@ -1231,9 +1260,10 @@ Add to `internal/admin/usage_test.go`:
 
 ```go
 func TestOverviewCarriesLatencySeriesAndFailovers(t *testing.T) {
-	srv, _ := newTestServer(t)
-	rr := doGET(t, srv, "/api/overview")
-	if rr.Code != 200 {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
+	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d", rr.Code)
 	}
 	var got map[string]any
