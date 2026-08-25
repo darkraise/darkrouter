@@ -28,17 +28,36 @@ func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Durati
 	from := startOfToday.AddDate(0, 0, -1)
 	to := startOfToday.AddDate(0, 0, 1)
 
-	// A day may only be recomputed when none of its requests can have been
-	// pruned. Every request in a day has a timestamp at or after that day's
-	// midnight, so the day is safe exactly while its midnight is still inside
-	// the retention window. Recomputing a day pruning has already eaten into
-	// would replace a finalized total with a smaller one and leave nothing to
-	// say it is incomplete.
+	// A day whose midnight has left the retention window is not necessarily
+	// missing anything yet: it is flagged as AT RISK, not as pruned. A day
+	// gets its first usage_daily row long before midnight, while it is still
+	// "today", so presence of a row cannot tell a merely-stale day (still
+	// fully backed by requests) from one pruning has actually eaten into.
+	// The direct check is whether recomputing would shrink it: if the
+	// requests table still holds at least as many rows for the day as its
+	// last rollup recorded, nothing has been lost and the refresh is safe.
+	// Only an actual shrink means the guard's danger — replacing a finalized
+	// total with a smaller one — is real, and the day is frozen instead.
+	originalFrom := from
 	cutoff := utc.Add(-logRetention)
 	cutoffDay := time.Date(cutoff.Year(), cutoff.Month(), cutoff.Day(),
 		0, 0, 0, 0, time.UTC)
 	if safeFrom := cutoffDay.AddDate(0, 0, 1); safeFrom.After(from) {
-		from = safeFrom
+		var storedRequests int64
+		if err := d.Read.QueryRowContext(ctx,
+			`SELECT COALESCE(SUM(requests), 0) FROM usage_daily WHERE day = ?`,
+			from.Format("2006-01-02")).Scan(&storedRequests); err != nil {
+			return fmt.Errorf("rollup: %w", err)
+		}
+		var availableRequests int64
+		if err := d.Read.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM requests WHERE ts >= ? AND ts < ?`,
+			from.UnixMilli(), from.AddDate(0, 0, 1).UnixMilli()).Scan(&availableRequests); err != nil {
+			return fmt.Errorf("rollup: %w", err)
+		}
+		if availableRequests < storedRequests {
+			from = safeFrom
+		}
 	}
 	if !from.Before(to) {
 		// Retention is shorter than a day, so no day can be rolled up whole.
@@ -46,6 +65,11 @@ func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Durati
 		// explanation.
 		log.Printf("rollup: log.retention %s leaves no complete day to roll up", logRetention)
 		return nil
+	}
+	if from.After(originalFrom) {
+		log.Printf("rollup: log.retention %s excludes %s; "+
+			"days older than the retention window are not recomputed",
+			logRetention, originalFrom.Format("2006-01-02"))
 	}
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
