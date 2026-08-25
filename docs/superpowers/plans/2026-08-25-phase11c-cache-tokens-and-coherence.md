@@ -958,3 +958,126 @@ Run: `go build ./... && go vet ./... && go test -race ./...`
 - [ ] **Step 7: Commit**
 
 Subject: `fix(exec): keep a failed attempt's usage on it`
+
+---
+
+### Task 11: Price cache writes
+
+**Files:**
+- Modify: `internal/catalog/catalog.go` — `Pricing`, `Model`
+- Modify: `internal/catalog/modelsdev.go` — the cost mapping
+- Modify: `internal/catalog/pricing.go` — `CostMicros`
+- Modify: `internal/exec/exec.go` — `priceRecord`
+- Test: `internal/catalog/pricing_test.go`, `internal/catalog/modelsdev_test.go`, `internal/exec/exec_test.go`
+
+Cache-write tokens are parsed into the IR and stored in `requests.cache_write_tokens`, and never priced. Anthropic and Bedrock bill cache creation at a premium — models.dev reports `cache_write: 6.25` against `input: 5` for a Claude-class model, exactly the 1.25x multiplier — and exclude it from `input_tokens`. So the first request of every cached session, the one that writes the whole context, is costed as if writing the cache were free.
+
+This is the mirror image of the double-charge fixed earlier in this plan: that one overstated cache-heavy traffic, this one understates it.
+
+The rate is already in the payload. `liveModel.Cost` (`internal/catalog/modelsdev.go:62`) declares only `input`, `output` and `cache_read`, so `cache_write` is silently discarded during decode — and the repo's own fixture at `internal/catalog/modelsdev_test.go:15` already carries it.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `internal/catalog`:
+
+```go
+func TestCacheWriteRateIsParsed(t *testing.T) {
+	// models.dev reports cache creation at a premium over input. Discarding
+	// it prices the first request of every cached session as if writing the
+	// context were free.
+	snap := snapshotFromTestPayload(t) // whatever the package's helper is
+	m, ok := snap.Lookup("test-provider", "smart-model")
+	if !ok {
+		t.Fatal("smart-model missing from the snapshot")
+	}
+	if m.Pricing.CacheWriteMicrosPerMTok != 6_250_000 {
+		t.Fatalf("cache-write rate = %d, want 6250000 (6.25 per Mtok)",
+			m.Pricing.CacheWriteMicrosPerMTok)
+	}
+}
+
+func TestCacheWritesAreBilled(t *testing.T) {
+	p := Pricing{
+		Known:                   true,
+		InputMicrosPerMTok:      1_000_000,
+		OutputMicrosPerMTok:     2_000_000,
+		CacheReadMicrosPerMTok:  100_000,
+		CacheWriteMicrosPerMTok: 1_250_000,
+	}
+	got := p.CostMicros(2000, 500, 8000, 4000)
+	// 2000*1 + 500*2 + 8000*0.1 + 4000*1.25
+	want := int64(2000 + 1000 + 800 + 5000)
+	if got == nil || *got != want {
+		t.Fatalf("cost = %v, want %d", got, want)
+	}
+}
+
+func TestAnUnknownCacheWriteRateCostsNothingRatherThanGuessing(t *testing.T) {
+	// A model whose payload omits cache_write must not have the input rate
+	// substituted: a wrong number is worse than a missing component.
+	p := Pricing{Known: true, InputMicrosPerMTok: 1_000_000}
+	got := p.CostMicros(1000, 0, 0, 5000)
+	if got == nil || *got != 1000 {
+		t.Fatalf("cost = %v, want 1000 with no cache-write rate", got)
+	}
+}
+```
+
+Use the package's existing helpers for building a snapshot from the test payload; the fixture at `modelsdev_test.go:15` already has `"cache_write": 6.25` on `smart-model`.
+
+And in `internal/exec`, that the request's stored cache-write tokens reach the formula:
+
+```go
+func TestTheRequestsCacheWritesArePriced(t *testing.T) {
+	e := newPricedExecutorWithCacheWrite(t) // extend the helper's rates
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 1000, TokensOut: 0, CacheWriteTokens: 4000,
+	}
+	e.priceRecord(rec)
+	if rec.CostMicros == nil {
+		t.Fatal("not priced")
+	}
+	// The cache-write component must be present, not silently dropped.
+	if *rec.CostMicros <= 1000 {
+		t.Fatalf("cost %d does not include the cache write", *rec.CostMicros)
+	}
+}
+```
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/catalog/ ./internal/exec/ -run 'CacheWrite|CacheWrites' -v`
+
+- [ ] **Step 3: Implement**
+
+Add `CacheWriteMicrosPerMTok int64` to `Pricing` and to `Model`'s pricing fields, declare `CacheWrite *float64` with tag `json:"cache_write"` on `liveModel.Cost`, and carry it through the same conversion the other rates use.
+
+Extend the formula:
+
+```go
+func (p Pricing) CostMicros(in, out, cacheRead, cacheWrite int64) *int64 {
+	if !p.Known {
+		return nil
+	}
+	total := rateMicros(p.InputMicrosPerMTok, in) +
+		rateMicros(p.OutputMicrosPerMTok, out) +
+		rateMicros(p.CacheReadMicrosPerMTok, cacheRead) +
+		rateMicros(p.CacheWriteMicrosPerMTok, cacheWrite)
+	return &total
+}
+```
+
+`rateMicros` already returns zero when a rate is zero, so a model without a cache-write rate contributes nothing rather than being priced at the input rate.
+
+Update both call sites in `priceRecord`: the request passes `rec.CacheWriteTokens`; each attempt passes `0` for both cache arguments, because the attempt row has no cache columns.
+
+- [ ] **Step 4: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+Every existing pricing test now needs a fourth argument. Passing `0` preserves what each was testing — but check each one and say in your report if any was actually about cache handling and now needs a real value.
+
+- [ ] **Step 5: Commit**
+
+Subject: `feat(catalog): price cache writes`
