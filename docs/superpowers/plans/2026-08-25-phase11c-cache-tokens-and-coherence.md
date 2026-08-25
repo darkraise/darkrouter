@@ -409,6 +409,22 @@ Subject: `fix(exec): do not reassign a failed attempt's use`
 
 `RequestTrace`'s attempt query selects neither `tokens_in`, `tokens_out` nor `cost_micros`, so the trace drawer — where an operator inspects one specific failover — cannot show the burn that is now recorded in the row underneath it. Add the three columns to the SELECT, the struct, and the handler's attempt view, in the snake_case the rest of the API uses. Add a test that a failover's trace carries per-attempt tokens.
 
+- [ ] **Step 1b: Make the prompt size reconstructible**
+
+Task 1 changed what `tokens_in` means: it now excludes cache reads on every
+provider, where for OpenAI-compatible and Gemini sources it previously carried
+the full prompt count. `requests.cache_read_tokens` has been stored since
+migration `0001` but is exposed by no admin endpoint, so an operator comparing
+`tokens_in` against a provider invoice now sees a smaller number with no way to
+account for the difference.
+
+Add `cache_read_tokens` alongside `tokens_in` wherever a request's own token
+counts are already returned — the request list and the trace detail. Do not add
+it to `usage_daily`; that table has no cache column and this plan is not opening
+another migration.
+
+Add a test that a request logged with cache reads reports them.
+
 - [ ] **Step 2: Make today_spend agree with the usage chart**
 
 `today_spend` sums `requests.cost_micros`, so a failover's burn appears in `usage_daily` but never in the tile. With per-attempt cost now recorded, that gap becomes visible. Source the tile from the same attempt-level cost the rollup uses, so the two surfaces answer the same question. Add a test that a day containing a failed attempt's cost reports the same total through both.
