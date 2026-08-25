@@ -71,9 +71,11 @@
      fails the text floor a status label needs. 5.47:1. */
   --state-failed: #F87171;
 
+  --radius-xs: 4px;
   --radius-sm: 8px;
   --radius: 10px;
   --radius-lg: 14px;
+  --radius-pill: 999px;
 
   --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
   --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.25);
@@ -184,15 +186,20 @@ body.theme-light,
   color: var(--ink);
 }
 
-/* The light-mode values 9router ships that a measurement rejected. They live
-   here because this is the one file allowed to hold a hex, and they appear in
-   exactly one place — the light proof — beside the tokens that replace them. */
+/* The nine values 9router ships that a measurement rejected. They live here
+   because this is the one file allowed to hold a hex, and they appear in
+   exactly one place — the contrast proof — beside the tokens replacing them.
+   Nothing else may reference them. */
 :root {
-  --shipped-primary: #E56A4A;
-  --shipped-success: #10B981;
-  --shipped-warning: #F59E0B;
-  --shipped-info: #3B82F6;
-  --shipped-subtle: #9CA3AF;
+  --shipped-dark-legend: #6b7280;
+  --shipped-dark-state-failed: #ef4444;
+  --shipped-dark-accent-ink: #E56A4A;
+  --shipped-light-ink-muted: #6B7280;
+  --shipped-light-legend: #9CA3AF;
+  --shipped-light-accent-ink: #E56A4A;
+  --shipped-light-trace: #3B82F6;
+  --shipped-light-state-healthy: #10B981;
+  --shipped-light-state-cooling: #F59E0B;
 }
 
 /* --- Reset & base -------------------------------------------------- */
@@ -319,14 +326,18 @@ body.pins-on .pin {
    .legend-caps in size and down in tracking. Without this class a later
    screen's panel headers would need inline styles, which is how a type
    scale erodes one screen at a time. */
+/* A block heading, sentence case at 16px. 9router leads its sections with
+   a real heading rather than a silkscreened legend; the uppercase small-caps
+   role survives only as .legend-caps, on nav groups and column heads, where
+   the label really is a legend and not a title. */
 .section-title {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--ink);
 }
 
 .readout {
@@ -363,33 +374,38 @@ kbd {
 }
 
 /* --- Surfaces ---------------------------------------------------------
-   Separation is a value step plus a 1px hairline, never a shadow. --shadow-
-   overlay is the one exception in the whole product, and it belongs on
-   elements whose background is --overlay, not on .panel or .well. */
+   Cards sit ON the ground rather than being cut into it. Each carries a
+   border, a radius and a soft shadow, and cards are separated by a gutter
+   instead of sharing a seam — the elevation model 9router uses, and the
+   reason light mode here is a palette swap rather than a polarity flip. */
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-soft);
 }
 
+/* An inset region INSIDE a card — a chart bed, a code block, a readout
+   trough. It is not recessed below the ground; it is a quieter surface
+   within a card, which is the only kind of "inside" this language has. */
 .well {
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--overlay);
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
   font-size: 11px;
   color: var(--ink-muted);
   white-space: nowrap;
@@ -403,8 +419,8 @@ kbd {
    in light mode). Requests and Overview both report it, so both consume
    this chip rather than reinventing it. */
 .chip-failover {
-  border-color: var(--trace);
-  color: var(--accent-ink);
+  background: var(--trace-fill);
+  color: var(--trace);
 }
 
 /* Dialect/path annotations — quiet facts about how a request was handled,
@@ -467,9 +483,10 @@ kbd {
 .table {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .row {
@@ -477,9 +494,9 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--section-pad);
-  height: var(--row-h);
+  min-height: var(--row-h);
   padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .row:last-child { border-bottom: none; }
 /* Every screen with a clickable row (Overview's failover log, Usage's rank
@@ -511,10 +528,10 @@ a.row { text-decoration: none; }
 
 .state-pip {
   display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius);
-  background: var(--bezel);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--legend);
 }
 /* The four states GET /api/overview actually emits for a provider tile.
    "degraded" rather than "cooling" is the API's word and the accurate one:
@@ -623,10 +640,10 @@ a.row { text-decoration: none; }
    channel on top of it, never the only one. */
 .mark {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius);
-  background: var(--bezel);
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--legend);
 }
 /* Passed over without an attempt: hollow, 1px --bezel stroke, no fill —
    neither a routing decision nor a health report, so it carries no state
@@ -743,14 +760,14 @@ a.row { text-decoration: none; }
 /* A 2px bar in the row's own right margin, width set per row from the
    ladder's own maximum latency — the ladder becomes a waterfall with no
    second axis to read. */
-.latency-bar {
+.latency-bar{
   flex: 0 0 auto;
   align-self: center;
   height: 2px;
   min-width: 2px;
   max-width: 64px;
   margin-left: auto;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--trace);
 }
 .latency-bar-failed { background: var(--state-failed); }
@@ -987,22 +1004,22 @@ a.row { text-decoration: none; }
   gap: 8px;
   height: var(--control-h);
 }
-.switch-track {
+.switch-track{
   position: relative;
   flex: 0 0 auto;
   width: 26px;
   height: 14px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--well);
 }
-.switch-knob {
+.switch-knob{
   position: absolute;
   top: 1px;
   left: 1px;
   width: 10px;
   height: 10px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--bezel);
 }
 .switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
@@ -1020,21 +1037,28 @@ a.row { text-decoration: none; }
 
 /* The one committing action on a screen. Outlined in --accent-ink rather
    than filled — this console has no filled buttons. */
+/* The one filled control in the product. Coral marks the primary action on
+   a screen, which is the second and last job brand colour has here. */
 .control-primary {
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-soft);
 }
+.control-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 /* A generic status pill: box shape from .chip, colour from data-status.
    success/error are outcomes — a request's own result or a probe's own
    result — never a routing verdict, which is the same reasoning that lets
    .status-success/-error use the state colours on the Requests table. */
 .status-badge[data-status="success"] {
-  border-color: var(--state-healthy);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--state-healthy) 15%, transparent);
   color: var(--state-healthy);
 }
 .status-badge[data-status="error"] {
-  border-color: var(--state-failed);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--state-failed) 15%, transparent);
   color: var(--state-failed);
 }
 
@@ -1156,13 +1180,13 @@ a.row { text-decoration: none; }
 }
 .combo[data-open="true"] .combo-menu { display: flex; }
 
-.combo-option {
+.combo-option{
   display: flex;
   align-items: center;
   gap: 8px;
   height: 24px;
   padding: 0 6px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
   color: var(--ink);
@@ -1171,7 +1195,7 @@ a.row { text-decoration: none; }
 }
 .combo-option:hover { opacity: 1; }
 
-.combo-check {
+.combo-check{
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -1179,7 +1203,7 @@ a.row { text-decoration: none; }
   width: 12px;
   height: 12px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
   color: transparent;
@@ -1251,13 +1275,18 @@ a.row { text-decoration: none; }
    rather than chrome, and the one that inverts polarity between themes. */
 .field-input {
   height: var(--control-h);
-  padding: 0 8px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
+}
+.field-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 /* Read-only: still a fact worth a well's worth of weight, just not one
    this control can change right now. */
@@ -1334,12 +1363,12 @@ a.row { text-decoration: none; }
 
 /* Region 1 (palette): one colour chip per token row. Size and border only
    — the fill always comes from an inline var(--token), never from here. */
-.swatch {
+.swatch{
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
 }
 
 /* The annotation sentence beside a numbered .pin badge. A 16px pill has no
@@ -1401,15 +1430,20 @@ body.pins-on .pin-note { display: inline; }
 .control {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 8px;
   height: var(--control-h);
-  padding: 0 var(--section-pad);
-  border: 1px solid var(--hairline);
+  padding: 0 16px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
+  background: var(--surface-2);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 13px;
   color: var(--ink);
+  transition: background var(--dur-hover) ease, border-color var(--dur-hover) ease;
 }
+.control:hover { background: var(--surface-3); }
 
 /* Region 6 (density): a caliper bracket for calling out an exact pixel
    measurement next to the thing it measures. */
@@ -1568,7 +1602,7 @@ body.pins-on .pin-note { display: inline; }
    own top inner edge. A track plus a narrower filled span rather than one
    element with a background-position trick, so the determinate width is
    a plain, inspectable percentage. */
-.load-bar {
+.load-bar{
   position: absolute;
   top: 0;
   left: 0;
@@ -1576,7 +1610,7 @@ body.pins-on .pin-note { display: inline; }
   height: 2px;
   overflow: hidden;
   background: var(--hairline-subtle);
-  border-radius: var(--radius) var(--radius) 0 0;
+  border-radius: var(--radius-pill) var(--radius) 0 0;
 }
 .load-bar-fill {
   display: block;
@@ -1703,13 +1737,13 @@ body.pins-on .pin-note { display: inline; }
   margin-bottom: var(--section-pad);
 }
 
-.view-chip {
+.view-chip{
   display: inline-flex;
   align-items: center;
   height: 22px;
   padding: 0 10px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--panel);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -1762,11 +1796,11 @@ body.pins-on .pin-note { display: inline; }
   flex-wrap: wrap;
 }
 
-.time-range-preset {
+.time-range-preset{
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--panel);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -1786,14 +1820,14 @@ body.pins-on .pin-note { display: inline; }
   border-top: 1px solid var(--hairline-subtle);
 }
 
-.time-range-input {
+.time-range-input{
   flex: 1 1 0;
   min-width: 128px;
   height: 24px;
   padding: 0 6px;
   background: var(--well);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink);
@@ -1889,7 +1923,7 @@ body.pins-on .pin-note { display: inline; }
    Floats astride the table's top edge on purpose — that seam is where a
    queued-rows affordance belongs, not a layout accident. --accent-ink,
    not --trace: this reports a UI/polling event, not a routing verdict. */
-.newer-pill {
+.newer-pill{
   position: absolute;
   top: -11px;
   left: 50%;
@@ -1901,7 +1935,7 @@ body.pins-on .pin-note { display: inline; }
   padding: 0 10px;
   background: var(--overlay);
   border: 1px solid var(--accent-ink);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   box-shadow: var(--shadow-overlay);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -2028,14 +2062,14 @@ body.pins-on .pin-note { display: inline; }
    known, the same "nothing has been decided yet" register --bezel already
    carries on a skipped ladder mark. Only once an outcome exists does a
    segment take the router-verdict or provider-outcome colour below. */
-.waterfall-seg {
+.waterfall-seg{
   position: absolute;
   top: 50%;
   left: 0;
   height: 8px;
   min-width: 2px;
   margin-top: -4px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--bezel);
 }
 .waterfall-seg-serve { background: var(--trace); }
@@ -2148,6 +2182,12 @@ body.pins-on .pin-note { display: inline; }
 
 /* Usage screen (fragments/05-usage.html) — "Graticule Bench".
  *
+ * Series take --trace, not the coral brand. Coral marks position and primary
+ * action and stays scarce so it keeps meaning that; --trace is the colour of a
+ * routing decision, and every request in a usage chart is one. The five series
+ * are separated by FILL TREATMENT against that single hue, never by adding
+ * hues, so no series can collide with a state colour.
+ *
  * .chart-scope is the mandatory ramp override: darkraise-ui's generated
  * five-colour categorical ramp emits orange-400 and lime-400 at positions 4
  * and 5 with a sky accent, colliding with the reserved cooling/healthy
@@ -2158,8 +2198,8 @@ body.pins-on .pin-note { display: inline; }
  * of selector.
  */
 .chart-scope {
-  --chart-1: var(--accent-ink);
-  --chart-2: color-mix(in srgb, var(--accent-ink) 60%, transparent);
+  --chart-1: var(--trace);
+  --chart-2: color-mix(in srgb, var(--trace) 60%, transparent);
   /* --chart-3 and --chart-4 are paint-server references and are set on the
      .chart-scope element itself, beside the <defs> they point at, not here.
      build.py namespaces every SVG id per screen so two screens cannot
@@ -2253,17 +2293,17 @@ body.pins-on .pin-note { display: inline; }
 }
 
 .hatch-line {
-  stroke: var(--accent-ink);
+  stroke: var(--trace);
   stroke-width: 1;
   opacity: 0.55;
 }
-.dot-mark { fill: var(--accent-ink); opacity: 0.6; }
+.dot-mark { fill: var(--trace); opacity: 0.6; }
 
 /* Every stacked band shares one accent-toned edge stroke; on chart-fill-5
    (fill: transparent) that edge is the entire visible mark — the "outline"
    member of the five-way fill ramp. */
 .chart-area {
-  stroke: var(--accent-ink);
+  stroke: var(--trace);
   stroke-width: 1;
   opacity: 0.94;
 }
@@ -2336,11 +2376,11 @@ body.pins-on .pin-note { display: inline; }
   gap: 6px;
 }
 
-.share-track {
+.share-track{
   flex: 1 1 auto;
   height: 5px;
   background: var(--hairline-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 .share-bar {
@@ -2944,14 +2984,14 @@ body.theme-light .preset-scrim,
   color: var(--ink);
 }
 
-.preset-modal-close {
+.preset-modal-close{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--panel);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -3208,13 +3248,13 @@ body.theme-light .preset-scrim,
 
 /* Lighter than .chip on purpose: a card carries up to three of these at
    once, and three 20px chips would outweigh the preset name above them. */
-.preset-surface-chip {
+.preset-surface-chip{
   display: inline-flex;
   align-items: center;
   height: 16px;
   padding: 0 5px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   color: var(--ink-muted);
@@ -3223,13 +3263,13 @@ body.theme-light .preset-scrim,
 /* Free tier is an attribute of the vendor's plan, not a health reading and
    not a routing decision, so it takes neither a state colour nor trace. A
    --bezel stroke is the loudest neutral available. */
-.preset-free {
+.preset-free{
   display: inline-flex;
   align-items: center;
   height: 16px;
   padding: 0 5px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   font-size: 10px;
@@ -3414,13 +3454,13 @@ body.theme-light .preset-scrim,
   color: var(--legend);
 }
 
-.range-input {
+.range-input{
   width: 76px;
   height: 20px;
   padding: 0 4px;
   background: var(--well);
   border: 1px solid var(--hairline-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -3429,11 +3469,11 @@ body.theme-light .preset-scrim,
 }
 .range-input-wide { width: 84px; }
 
-.range-track {
+.range-track{
   position: relative;
   width: 56px;
   height: 3px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--hairline-subtle);
 }
 /* The selected span, in --accent-ink because it reports a control's own
@@ -3461,14 +3501,14 @@ body.theme-light .preset-scrim,
   gap: 4px;
 }
 
-.cap-bit {
+.cap-bit{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   line-height: 1;
@@ -3486,13 +3526,13 @@ body.theme-light .preset-scrim,
    treatment and ink level instead: dashed means guessed, full ink means an
    operator asserted it, and the two machine sources sit between. */
 
-.source-tag {
+.source-tag{
   display: inline-flex;
   align-items: center;
   height: 18px;
   padding: 0 5px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -3516,11 +3556,11 @@ body.theme-light .preset-scrim,
   font-size: 11px;
   color: var(--ink-muted);
 }
-.lifecycle-mark {
+.lifecycle-mark{
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: var(--ink-muted);
 }
 .lifecycle[data-state="stale"] { color: var(--legend); }
@@ -3766,14 +3806,14 @@ body.theme-light .preset-scrim,
   border-color: var(--bezel);
   color: var(--ink);
 }
-.cap-toggle-box {
+.cap-toggle-box{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 11px;
   height: 11px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
   color: transparent;
@@ -4061,7 +4101,7 @@ body.theme-light .preset-scrim,
 /* Ordinal, not a pin: it numbers a rule in a sequence the router walks,
    so it takes the ladder's own rank treatment (mono, --legend) rather
    than the accent pill a .pin uses for an annotation. */
-.rt-rule-n {
+.rt-rule-n{
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -4069,7 +4109,7 @@ body.theme-light .preset-scrim,
   width: 18px;
   height: 18px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--legend);
@@ -4261,7 +4301,7 @@ body.theme-light .preset-scrim,
 
 /* A value box, not an <input>: the same 24px well-backed field .field-input
    established on Models, sized to hold a duration plus its unit. */
-.rt-pvalue {
+.rt-pvalue{
   display: inline-flex;
   align-items: baseline;
   width: 76px;
@@ -4269,7 +4309,7 @@ body.theme-light .preset-scrim,
   padding: 2px 8px 0;
   background: var(--well);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
@@ -4287,12 +4327,12 @@ body.theme-light .preset-scrim,
   border-color: var(--hairline-subtle);
   color: var(--legend);
 }
-.rt-effect-mark {
+.rt-effect-mark{
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border: 1px solid var(--legend);
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: transparent;
 }
 .rt-effect[data-effect="live"] {
@@ -4545,13 +4585,13 @@ body.theme-light .preset-scrim,
 /* .range-track/.range-fill report a span, so they never needed a handle.
    A sampling parameter is a single value and wants one. --accent-ink to
    match .range-fill: a control's own state, not a routing verdict. */
-.pg-param-knob {
+.pg-param-knob{
   position: absolute;
   top: -3px;
   width: 3px;
   height: 9px;
   transform: translateX(-50%);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--accent-ink);
 }
 
@@ -4741,7 +4781,7 @@ body.theme-light .preset-scrim,
   height: 34px;
 }
 
-.pg-player-btn {
+.pg-player-btn{
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4749,18 +4789,18 @@ body.theme-light .preset-scrim,
   width: 20px;
   height: 20px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   font-size: 9px;
   color: var(--ink);
 }
 
 /* Playback position is the page's own state, the register --accent-ink
    already covers for .range-fill and .newer-pill — not a routing verdict. */
-.pg-player-track {
+.pg-player-track{
   position: relative;
   flex: 1 1 auto;
   height: 3px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--hairline-subtle);
 }
 
@@ -4773,13 +4813,13 @@ body.theme-light .preset-scrim,
   background: var(--accent-ink);
 }
 
-.pg-player-head {
+.pg-player-head{
   position: absolute;
   top: -3px;
   width: 3px;
   height: 9px;
   transform: translateX(-50%);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--accent-ink);
 }
 
@@ -5101,14 +5141,14 @@ body.theme-light .preset-scrim,
    green/amber/red family would claim the right pane is unhealthy for being
    dearer, which it is not. --accent-ink rather than --trace for the text
    because --trace only reaches 3.93:1 on light-mode panel. */
-.pgc-win {
+.pgc-win{
   display: inline-flex;
   align-items: center;
   gap: 4px;
   height: 16px;
   padding: 0 5px;
   border: 1px solid var(--trace);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 10px;
   line-height: 1;
@@ -5322,11 +5362,11 @@ body.theme-light .preset-scrim,
    enabled provider declares a model for it. Silhouette carries it in
    greyscale, exactly as the ladder's marks do, and no hue is spent —
    availability is neither a health reading nor a routing verdict. */
-.cn-surface-mark {
+.cn-surface-mark{
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: var(--ink);
 }
 
@@ -5659,12 +5699,12 @@ body.theme-light .preset-scrim,
   color: var(--legend);
   white-space: nowrap;
 }
-.set-scope::before {
+.set-scope::before{
   content: "";
   flex: 0 0 auto;
   width: 3px;
   height: 11px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--bezel);
 }
 /* Segmented, not dashed: a dashed 3px bar renders as two dots at this size.
@@ -6332,7 +6372,7 @@ body.theme-light .preset-scrim,
   gap: 8px;
 }
 
-.fr-step-index {
+.fr-step-index{
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -6340,7 +6380,7 @@ body.theme-light .preset-scrim,
   width: 20px;
   height: 20px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
   font-size: 10px;
@@ -6481,12 +6521,12 @@ body.theme-light .preset-scrim,
 /* Hollow where .state-pip is filled, and never given a data-state: a
    specimen reports no health, and the absence of any pip colour is the
    fastest of the four inert channels to read at tile size. */
-.fr-ghost-pip {
+.fr-ghost-pip{
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: transparent;
 }
 
@@ -6529,7 +6569,7 @@ body.theme-light .preset-scrim,
 /* Keyed to the rule list, and deliberately hollow: a filled 16px numbered
    square is .pin, which means "specification annotation" everywhere else
    in this set and must not be echoed by page content. */
-.fr-part-n {
+.fr-part-n{
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -6537,7 +6577,7 @@ body.theme-light .preset-scrim,
   width: 16px;
   height: 16px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
   font-size: 10px;
@@ -6550,9 +6590,9 @@ body.theme-light .preset-scrim,
    for content rather than being content. .fr-specimen supplies the dashed
    border style and the hatch; only the width is set here so it does not
    reset the style back to solid. */
-.fr-ghost-rows {
+.fr-ghost-rows{
   border-width: 1px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
 }
 .fr-ghost-row {
   position: relative;
@@ -6663,22 +6703,25 @@ body.theme-light .preset-scrim,
    would break the type scale to make one word louder. */
 .lp-verdict { color: var(--ink); }
 
-/* --- Region 3: the five repaired tokens -------------------------------- */
+/* --- Region 1: the nine repairs ---------------------------------------
 
-/* Five columns rather than a .table row, because each token carries a
-   before and an after and both need a swatch beside their ratio. Fixed
-   column widths keep the two ratio columns aligned down the block, which
-   is the comparison the region exists to make. */
+   Five columns: the token, which mode it is in, the shipped value with its
+   ratio, the repaired value with its ratio, and one line saying why. Both
+   ratio columns are fixed-width so the before and after read as two stacks
+   of numbers rather than eighteen separate labels. */
 .lp-repair-row {
   display: grid;
-  grid-template-columns: 150px 1fr 84px 1fr 84px;
+  grid-template-columns: 150px 56px 116px 116px 1fr;
   align-items: center;
   gap: var(--section-pad);
   min-height: var(--row-h);
-  padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  padding: 8px var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .lp-repair-row:last-child { border-bottom: none; }
+
+.lp-mode { color: var(--legend); }
+.lp-verdict-note { color: var(--legend); }
 
 .lp-side {
   display: flex;
@@ -6687,24 +6730,16 @@ body.theme-light .preset-scrim,
   min-width: 0;
 }
 
-/* Ratios right-align on the colon so the before and after columns can be
-   read as two stacks of numbers rather than ten separate labels. */
 .lp-ratio {
+  margin-left: auto;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .lp-ratio-fail { color: var(--state-failed); }
+/* Cleared its floor already and moved anyway, so it is neither a failure
+   nor a repair — the one case that needs a third colour. */
+.lp-ratio-warn { color: var(--state-cooling); }
 .lp-ratio-pass { color: var(--state-healthy); }
-
-/* A token §7 names by palette step without giving a hex. Rendering a swatch
-   would mean inventing the value, so the slot stays empty and says so. */
-.lp-no-specimen {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border: 1px dashed var(--hairline);
-  border-radius: var(--radius);
-}
 
 /* --- Region 4: input focus -------------------------------------------- */
 
@@ -6766,13 +6801,13 @@ body.theme-light .preset-scrim,
    bar spanning 3.00:1 to 3.20:1 with the measurement sitting near its left
    edge. Printing "3.02:1" states the margin; drawing it shows how little
    of the bar it is. */
-.lp-gauge {
+.lp-gauge{
   position: relative;
   width: 300px;
   height: 20px;
   background: var(--well);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
 }
 .lp-gauge-floor {
   position: absolute;
@@ -6808,7 +6843,7 @@ body.theme-light .preset-scrim,
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-14-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-15-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-16-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li><li><a href="#s-17-light-proof"><span class="toc-n">17</span>light proof</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-14-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-15-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-16-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li><li><a href="#s-17-light-proof"><span class="toc-n">17</span>contrast proof</a></li></ol></nav>
 <section class="screen" id="s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -6826,107 +6861,104 @@ body.theme-light .preset-scrim,
       <div class="table">
         <div class="row">
           <span class="swatch" style="background:var(--ground)"></span>
-          <span class="mono" style="min-width:140px">--ground</span>
-          <span class="micro">vs --ink &mdash; dark 16.01:1 &middot; light 13.21:1</span>
+          <span class="mono" style="min-width:150px">--ground</span>
+          <span class="micro">vs --ink &mdash; dark 14.87:1 &middot; light 19.03:1</span>
         </div>
         <div class="row">
-          <span class="swatch" style="background:var(--rail)"></span>
-          <span class="mono" style="min-width:140px">--rail</span>
-          <span class="micro">vs --ink-muted &mdash; dark 6.86:1 &middot; light 5.34:1</span>
+          <span class="swatch" style="background:var(--ground-alt)"></span>
+          <span class="mono" style="min-width:150px">--ground-alt</span>
+          <span class="micro">vs --ink &mdash; dark 14.09:1 &middot; light 17.92:1</span>
         </div>
         <div class="row">
-          <span class="swatch" style="background:var(--panel)"></span>
-          <span class="mono" style="min-width:140px">--panel</span>
-          <span class="micro">vs --ink &mdash; dark 14.59:1 &middot; light 15.55:1</span>
+          <span class="swatch" style="background:var(--surface)"></span>
+          <span class="mono" style="min-width:150px">--surface</span>
+          <span class="micro">vs --ink &mdash; dark 12.93:1 &middot; light 19.80:1</span>
         </div>
         <div class="row">
-          <span class="swatch" style="background:var(--overlay)"></span>
-          <span class="mono" style="min-width:140px">--overlay</span>
-          <span class="micro">vs --ink-muted &mdash; dark 5.81:1 &middot; light 5.84:1 (light: same hex as --panel)</span>
+          <span class="swatch" style="background:var(--surface-2)"></span>
+          <span class="mono" style="min-width:150px">--surface-2</span>
+          <span class="micro">vs --ink &mdash; dark 11.27:1 &middot; light 18.01:1</span>
         </div>
         <div class="row">
-          <span class="swatch" style="background:var(--well)"></span>
-          <span class="mono" style="min-width:140px">--well</span>
-          <span class="micro">vs --ink &mdash; dark 16.89:1 &middot; light 16.25:1</span>
+          <span class="swatch" style="background:var(--surface-3)"></span>
+          <span class="mono" style="min-width:150px">--surface-3</span>
+          <span class="micro">vs --ink &mdash; dark 9.72:1 &middot; light 16.03:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--border)"></span>
+          <span class="mono" style="min-width:150px">--border</span>
+          <span class="micro">vs --surface &mdash; dark 1.20:1 &middot; light 1.24:1 (structural, not text)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--border-subtle)"></span>
+          <span class="mono" style="min-width:150px">--border-subtle</span>
+          <span class="micro">vs --surface &mdash; dark 1.05:1 &middot; light 1.13:1 (structural, not text)</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--ink)"></span>
-          <span class="mono" style="min-width:140px">--ink</span>
-          <span class="micro">vs --panel &mdash; dark 14.59:1 &middot; light 15.55:1</span>
+          <span class="mono" style="min-width:150px">--ink</span>
+          <span class="micro">vs --surface &mdash; dark 12.93:1 &middot; light 19.80:1</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--ink-muted)"></span>
-          <span class="mono" style="min-width:140px">--ink-muted</span>
-          <span class="micro">vs --panel dark 6.52:1 &middot; vs --ground light 4.96:1</span>
+          <span class="mono" style="min-width:150px">--ink-muted</span>
+          <span class="micro">vs --surface &mdash; dark 5.96:1 &middot; light 7.56:1</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--legend)"></span>
-          <span class="mono" style="min-width:140px">--legend</span>
-          <span class="micro">vs --panel &mdash; dark 4.87:1 &middot; light 4.63:1</span>
+          <span class="mono" style="min-width:150px">--legend</span>
+          <span class="micro">vs --surface &mdash; dark 4.82:1 &middot; light 4.83:1</span>
         </div>
         <div class="row">
-          <span class="swatch" style="background:var(--hairline-subtle)"></span>
-          <span class="mono" style="min-width:140px">--hairline-subtle</span>
-          <span class="micro">vs --panel &mdash; dark 1.20:1 &middot; light 1.27:1 (structural, not text)</span>
-        </div>
-        <div class="row">
-          <span class="swatch" style="background:var(--hairline)"></span>
-          <span class="mono" style="min-width:140px">--hairline</span>
-          <span class="micro">vs --panel &mdash; dark 1.56:1 &middot; light 1.60:1 (structural, not text)</span>
-        </div>
-        <div class="row">
-          <span class="swatch" style="background:var(--bezel)"></span>
-          <span class="mono" style="min-width:140px">--bezel</span>
-          <span class="micro">vs --panel &mdash; dark 3.55:1 &middot; light 3.27:1</span>
-        </div>
-        <div class="row">
-          <span class="swatch" style="background:var(--trace)"></span>
-          <span class="mono" style="min-width:140px">--trace</span>
-          <span class="micro">vs --panel &mdash; dark 8.14:1 &middot; light 3.93:1</span>
-        </div>
-        <div class="row">
-          <span class="swatch" style="background:var(--trace-fill)"></span>
-          <span class="mono" style="min-width:140px">--trace-fill</span>
-          <span class="micro">vs --well &mdash; dark 3.99:1 &middot; light 2.86:1 (fill only; the --trace stroke carries legibility)</span>
+          <span class="swatch" style="background:var(--accent)"></span>
+          <span class="mono" style="min-width:150px">--accent</span>
+          <span class="micro">vs --surface &mdash; dark 4.68:1 &middot; light 3.23:1 (mark only)</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--accent-ink)"></span>
-          <span class="mono" style="min-width:140px">--accent-ink</span>
-          <span class="micro">dark = --trace (identical hex) &middot; vs --panel light 5.69:1</span>
+          <span class="mono" style="min-width:150px">--accent-ink</span>
+          <span class="micro">vs --surface &mdash; dark 5.27:1 &middot; light 6.21:1</span>
         </div>
         <div class="row">
-          <span class="swatch" style="background:var(--focus)"></span>
-          <span class="mono" style="min-width:140px">--focus</span>
-          <span class="micro">vs --ground &mdash; dark 11.36:1 &middot; light 3.34:1</span>
+          <span class="swatch" style="background:var(--accent-hover)"></span>
+          <span class="mono" style="min-width:150px">--accent-hover</span>
+          <span class="micro">vs --surface &mdash; dark 3.48:1 &middot; light 4.35:1 (mark only)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--trace)"></span>
+          <span class="mono" style="min-width:150px">--trace</span>
+          <span class="micro">vs --surface &mdash; dark 5.95:1 &middot; light 5.17:1</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--state-healthy)"></span>
-          <span class="mono" style="min-width:140px">--state-healthy</span>
-          <span class="micro">vs --well &mdash; dark 10.31:1 &middot; light 5.48:1</span>
+          <span class="mono" style="min-width:150px">--state-healthy</span>
+          <span class="micro">vs --surface &mdash; dark 6.64:1 &middot; light 5.48:1</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--state-cooling)"></span>
-          <span class="mono" style="min-width:140px">--state-cooling</span>
-          <span class="micro">vs --well &mdash; dark 11.70:1 &middot; light 3.16:1</span>
+          <span class="mono" style="min-width:150px">--state-cooling</span>
+          <span class="micro">vs --surface &mdash; dark 9.07:1 &middot; light 3.19:1 (mark only)</span>
         </div>
         <div class="row">
           <span class="swatch" style="background:var(--state-failed)"></span>
-          <span class="mono" style="min-width:140px">--state-failed</span>
-          <span class="micro">vs --well &mdash; dark 7.21:1 &middot; light 4.80:1</span>
+          <span class="mono" style="min-width:150px">--state-failed</span>
+          <span class="micro">vs --surface &mdash; dark 5.47:1 &middot; light 5.36:1</span>
         </div>
       </div>
       <p class="prose">
-        Seven tokens &mdash; ink, ink-muted, legend, trace, bezel, accent-ink,
-        focus &mdash; carry the exact pairs the phase's contrast script
-        re-verifies from these hexes on every review. The rest are computed
-        here against the surface the shared stylesheet actually composites
-        them on.
+        Every ratio above is computed from the hexes the shipped stylesheet
+        declares, against the surface it actually composites the token on.
+        Nine of these values are REPAIRED &mdash; 9router's own light mode
+        ships a success green at 2.54:1 and an amber at 2.15:1, both under
+        the 3:1 floor a mark has to clear, and its brand at text size reaches
+        only 3.23:1. The light proof shows each repair beside the value it
+        replaces.
       </p>
     </div>
 
     <div class="region">
-      <p class="section-title">Health / decision split</p>
-      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Health/decision split &mdash; state colours are provider identity, --trace is router verdict. Spec &sect;3.1. Three carve-outs are named below; a state colour used for anything not on that list is a bug.</span></p>
+      <p class="section-title">Brand / decision / health</p>
+      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Three-way colour split &mdash; coral is BRAND, --trace is the router's VERDICT, state colours are provider IDENTITY. Three carve-outs are named below; a state colour used for anything not on that list is a bug.</span></p>
       <div style="display:flex;gap:var(--gutter)">
         <div style="flex:1 1 0">
           <p class="spec-note">what the provider is</p>
@@ -6996,6 +7028,15 @@ body.theme-light .preset-scrim,
         split the way the ladder marks split: disabled is filled --bezel, a
         thing that exists and is switched off; unconfigured is a hollow
         --bezel ring, a thing with nothing in it yet.
+      </p>
+      <p class="prose">
+        And a fourth colour that is none of these three. CORAL is BRAND: it
+        marks where you are in the nav and which control is the primary
+        action on a screen, and it means nothing about the system's state.
+        It is kept out of the ladder gutter and off every pip deliberately
+        &mdash; coral sits between amber and red in hue, so a coral routing
+        mark beside an amber cooling mark and a red failure would be three
+        warm hues doing three unrelated jobs in one column.
       </p>
       <p class="prose">
         Three carve-outs are named, and only three. Each is a use of a state
@@ -7110,7 +7151,7 @@ body.theme-light .preset-scrim,
 
     <div class="region">
       <p class="section-title">Surface</p>
-      <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Surface &mdash; separation is value step + hairline. --shadow-card: none. One shadow, on --overlay only.</span></p>
+      <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Surface &mdash; cards sit ON the ground and stack upward. Border + radius + --shadow-soft; separation is a gutter, not a seam.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
         <div>
           <div style="padding:14px;background:var(--ground);border-radius:var(--radius)">
@@ -7180,8 +7221,27 @@ body.theme-light .preset-scrim,
         that survive. A circle used as a corner treatment is still a bug.
       </p>
 
-      <p class="section-title">Density</p>
-      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; compact: 30px rows, 30px controls, 44px topbar, 200px rail, 1px panel seams.</span></p>
+              <p class="prose">
+          Surfaces STACK UPWARD. The ground is the darkest thing in dark mode
+          and the palest in light; a card sits on it, an inset region sits on
+          the card, and each step is lighter than the one beneath. The
+          previous language cut wells DOWN into the panel and inverted that
+          ordering between modes; this one does not, which is why light here
+          is a palette swap and not a polarity flip, and why the light proof
+          now measures contrast rather than direction.
+        </p>
+        <p class="prose">
+          Elevation is real and is spent in four places: --shadow-soft on a
+          card, --shadow-elevated under a menu or dialog, --shadow-elev for
+          the one lifted panel that also carries an inset highlight, and
+          --shadow-warm, the coral-tinted one, reserved for the brand mark.
+          A fifth, --shadow-focus, is the 3px coral ring a focused control
+          takes. Radius runs 4 / 8 / 10 / 14px by element size, and a mark
+          under 10px keeps a 2px corner so its silhouette still reads.
+        </p>
+
+<p class="section-title">Density</p>
+      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; roomy: 36px rows, 36px controls, 64px header, 288px rail, 40px page padding, 1280px measure.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
         <div>
           <div class="table" style="width:220px">
@@ -7209,7 +7269,7 @@ body.theme-light .preset-scrim,
 
     <div class="region">
       <p class="section-title">Mono vs sans</p>
-      <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Type lanes &mdash; mono means this came off the wire, sans means a person is telling you something.</span></p>
+      <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Type lanes &mdash; Inter is the console speaking; IBM Plex Mono means this came off the wire. The one rule kept from the previous language.</span></p>
       <div class="table">
         <div class="row">
           <span class="mono">claude-opus-4-20250514</span>
@@ -7238,7 +7298,7 @@ body.theme-light .preset-scrim,
 
     <div class="region">
       <p class="section-title">Motion</p>
-      <p><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; Motion &mdash; 120ms hover, 160ms disclosure, 90ms value swap. Nothing else moves.</span></p>
+      <p><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; Motion &mdash; 150ms hover, 200ms disclosure, 90ms value swap, and a press-scale on a control. Nothing else moves.</span></p>
       <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
         <div>
           <div class="table" style="width:220px">
@@ -7819,7 +7879,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -8070,7 +8130,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -8420,7 +8480,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -8714,7 +8774,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -9105,7 +9165,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -9500,7 +9560,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -9925,7 +9985,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -10366,7 +10426,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -11214,7 +11274,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -11900,7 +11960,7 @@ body.theme-light .preset-scrim,
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -12368,7 +12428,7 @@ def ulid_ms(ulid: str) -&gt; int:
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -12673,7 +12733,7 @@ def ulid_ms(ulid: str) -&gt; int:
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -13077,7 +13137,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -13863,7 +13923,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
   <div class="chrome">
     <nav class="rail">
       <a class="rail-brand" href="#">
-        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="2.6" r="1.6"/><circle cx="9" cy="15.4" r="1.6"/><circle cx="2.6" cy="9" r="1.6"/><circle cx="15.4" cy="9" r="1.6"/><path d="M9 4.2v2.8M9 11v2.8M4.2 9h2.8M11 9h2.8"/></svg></span>
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
         <span class="rail-brand-text">
           <span class="rail-brand-name">darkrouter</span>
           <span class="rail-brand-version mono">v0.10.0</span>
@@ -14088,80 +14148,281 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
   </div>
 </section>
 
-<section class="screen" id="s-17-light-proof" data-screen-title="light proof">
+<section class="screen" id="s-17-light-proof" data-screen-title="contrast proof">
   <p class="legend">
     Light mode is first-class, so it gets a proof rather than a gesture. This
     board renders light whatever the <kbd>T</kbd> toggle says, so the two modes
-    can be read against each other inside one document. Every number printed
-    below was measured &mdash; the luminance figures from the rendered pixels of
-    a Chrome screenshot, the contrast ratios computed from the token hexes the
-    shipped stylesheet actually declares &mdash; and where a measurement
-    contradicts what this screen was briefed to say, the measurement is what is
-    printed. Press <kbd>A</kbd> to reveal pins.
+    can be read against each other inside one document. Under this language
+    surfaces stack upward in both modes, so light is a palette swap by design
+    and there is no polarity to verify &mdash; what needs verifying instead is
+    that the palette holds its floors, because the one it was adopted from does
+    not. Press <kbd>A</kbd> to reveal pins.
   </p>
 
   <div class="force-light lp-board">
     <div class="panel" style="padding:0 var(--gutter)">
 
       <div class="region">
-        <p class="section-title">1 &mdash; Well polarity</p>
+        <p class="section-title">1 &mdash; The nine changes</p>
         <p>
-          <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Well polarity &mdash; :root {--well darker than --panel}; body.theme-light {--well brighter}. Spec &sect;3.3. This is why light is not a palette swap.</span>
+          <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Repairs &mdash; nine token values differ from 9router's src/app/globals.css. Seven were under a floor; two were strengthened to keep two tiers apart.</span>
         </p>
-        <div class="lp-split">
-
-          <div class="force-dark lp-half">
-            <p class="legend-caps">dark</p>
-            <div class="panel lp-card">
-              <p class="section-title" style="margin:0">requests &middot; last 24h</p>
-              <div class="well lp-well">
-                <span class="readout">1,284<span class="unit">req</span></span>
-              </div>
-            </div>
-            <p class="micro lp-measure">
-              panel luma 27.6 &rarr; well luma 9.9 of 255<br />
-              well is <span class="lp-verdict">darker</span> by 17.6 &middot; step 1.157:1
-            </p>
+        <div class="table">
+          <div class="lp-repair-row row-head">
+            <span class="legend-caps">token</span>
+            <span class="legend-caps">mode</span>
+            <span class="legend-caps">shipped</span>
+            <span class="legend-caps">repaired</span>
+            <span class="legend-caps">why</span>
           </div>
-
-          <div class="force-light lp-half">
-            <p class="legend-caps">light</p>
-            <div class="panel lp-card">
-              <p class="section-title" style="margin:0">requests &middot; last 24h</p>
-              <div class="well lp-well">
-                <span class="readout">1,284<span class="unit">req</span></span>
-              </div>
-            </div>
-            <p class="micro lp-measure">
-              panel luma 249.9 &rarr; well luma 255.0 of 255<br />
-              well is <span class="lp-verdict">brighter</span> by 5.1 &middot; step 1.045:1
-            </p>
+          <div class="lp-repair-row">
+            <span class="mono">--legend</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-legend)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.13:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--legend)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">4.82:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
           </div>
-
+          <div class="lp-repair-row">
+            <span class="mono">--state-failed</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-state-failed)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">4.02:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-failed)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.47:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--accent-ink</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-warn">4.68:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.27:1</span>
+            </span>
+            <span class="micro lp-verdict-note">held the floor already; strengthened so brand-as-text stays clear of brand-as-fill</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--ink-muted</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-ink-muted)"></span>
+              <span class="mono lp-ratio lp-ratio-warn">4.83:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--ink-muted)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">7.56:1</span>
+            </span>
+            <span class="micro lp-verdict-note">held the floor already; strengthened so two grey tiers stay apart</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--legend</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-legend)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.54:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--legend)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">4.83:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--accent-ink</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.23:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">6.21:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--trace</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-trace)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.68:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--trace)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.17:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-healthy</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-state-healthy)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.54:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-healthy)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.48:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-cooling</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-state-cooling)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.15:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-cooling)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">3.19:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 3:1 floor it is held to</span>
+          </div>
         </div>
         <p class="prose">
-          Sampled from two screenshots of the overview screen at the same
-          coordinate pair &mdash; x 700, y 70 on a panel and y 330 on a well
-          &mdash; one rendered dark and one light, decoded pixel by pixel. The
-          ordering reverses: the recessed surface is the darkest thing in the
-          dark frame and the brightest thing in the light one. That is the
-          structural rule, and it is the reason a screen cannot be relit by
-          lightening every token in place.
+          Every ratio is computed from the hexes each stylesheet declares,
+          against --surface in that mode &mdash; white in light, the card grey
+          in dark. Seven of the nine sat under the floor their role is held to:
+          a mark needs 3:1 and text needs 4.5:1. Two already cleared it and
+          moved anyway, because the tier below them had to move and two greys
+          a quarter of a step apart are one grey.
         </p>
         <p class="prose">
-          The measurement also reports something the rule alone does not. The
-          light step is far weaker &mdash; 1.045:1 against dark's 1.157:1, a
-          separation of five values out of 255 rather than eighteen. Light mode
-          keeps the polarity but spends most of its separation budget on the
-          1px --hairline around the well rather than on the value step inside
-          it. Every recessed region in light is carried by its border.
+          The worst of them is worth naming. 9router's light success green
+          measures 2.54:1 and its amber 2.15:1 &mdash; both under the 3:1 floor
+          that applies to a shape, not just to text. A provider list that says
+          "connected" in that green on a white card is stating the most
+          load-bearing fact on the screen in a colour a third of readers cannot
+          separate from the background.
         </p>
       </div>
 
       <div class="region">
-        <p class="section-title">2 &mdash; The ladder in light</p>
+        <p class="section-title">2 &mdash; Elevation, both modes</p>
         <p>
-          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder in light &mdash; the termination rule is the at-risk mark: --hairline-subtle on a near-white well.</span>
+          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Elevation &mdash; ground &rarr; card &rarr; inset, each lighter than the last, in BOTH modes. No polarity inversion; light is a palette swap by design.</span>
+        </p>
+        <div class="lp-split">
+          <div class="force-dark lp-half">
+            <p class="legend-caps">dark</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0 0 8px">Requests</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">ground 26 &rarr; card 38 &rarr; inset 48 of 255 &middot; each step up</p>
+          </div>
+          <div class="force-light lp-half">
+            <p class="legend-caps">light</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0 0 8px">Requests</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">ground 250 &rarr; card 255 &rarr; inset 244 of 255 &middot; the inset dips</p>
+          </div>
+        </div>
+        <p class="prose">
+          The card lifts off the ground in both modes and carries a border, a
+          radius and --shadow-soft. The inset region behaves differently in the
+          two: in dark it continues upward, in light it has nowhere left to go
+          above white and steps down to --surface-2 instead. That is the honest
+          consequence of a white card, and it is why an inset in light is read
+          from its border rather than its fill.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">3 &mdash; The cooling mark's headroom</p>
+        <p>
+          <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Cooling headroom &mdash; 3.19:1 against a white card, the tightest margin in the palette. Non-text only; a cooling reading never says its word in amber.</span>
+        </p>
+        <div class="lp-headroom">
+          <div>
+            <div class="lp-zoom"><span class="mark mark-cooling"></span></div>
+            <p class="spec-note" style="width:120px">actual size &mdash; 8px</p>
+          </div>
+          <div>
+            <div class="lp-zoom"><span class="mark mark-cooling" style="transform:scale(4)"></span></div>
+            <p class="spec-note" style="width:120px">4&times;</p>
+          </div>
+          <div>
+            <div class="lp-gauge">
+              <span class="lp-gauge-floor" style="left:0"></span>
+              <span class="lp-gauge-mark" style="left:57px"></span>
+            </div>
+            <div class="lp-gauge-caption">
+              <span class="micro">3.00:1 floor</span>
+              <span class="micro">4.00:1</span>
+            </div>
+            <p class="spec-note" style="width:300px">
+              3.19:1. The gauge spans one full point of ratio; the margin is the
+              gap between the two rules. 9router ships this at 2.15:1, which
+              would sit left of the floor line entirely.
+            </p>
+          </div>
+        </div>
+        <p class="prose">
+          Amber is the hardest hue to bring over the floor against a near-white
+          surface without turning brown, and 3.19:1 is what this one manages
+          &mdash; better than the 3.02:1 the previous language accepted, and
+          still the tightest value in the set. The mark keeps a hollow ring and
+          a centre dot so colour is its second channel and never its only one.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">4 &mdash; Focus in light</p>
+        <p>
+          <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Focus &mdash; 9router's --shadow-focus, a 3px coral ring at 18% alpha, plus a solid coral border. The ring is a wash; the border is what carries the 3:1.</span>
+        </p>
+        <div class="lp-fields">
+          <div class="lp-field">
+            <p class="legend-caps">focused</p>
+            <div class="field-input lp-input lp-input-repaired">
+              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-repaired"></span>
+            </div>
+            <p class="spec-note">
+              border --accent 3.23:1 against the card &middot; the 18% ring is
+              decoration and is not counted.
+            </p>
+          </div>
+          <div class="lp-field">
+            <p class="legend-caps">resting</p>
+            <div class="field-input lp-input">
+              <span class="mono">sk-dr-v1-9f2c</span>
+            </div>
+            <p class="spec-note">border --border 1.24:1 &middot; structural, not an indicator.</p>
+          </div>
+        </div>
+        <p class="prose">
+          A soft ring is the part of this treatment that reads first and the
+          part that carries no contrast at all. The solid 1px coral border
+          underneath it is what actually distinguishes a focused field from a
+          resting one, which is why the ring is allowed to be as faint as it is.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">5 &mdash; The ladder in light</p>
+        <p>
+          <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ladder in light &mdash; the terminated mark is the faintest deliberate thing in the product: --border-subtle on --surface-2.</span>
         </p>
         <p class="micro">request 01M0W4NWMRZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
       <div class="ladder">
@@ -14233,238 +14494,18 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
         </div>
       </div>
         <p class="prose">
-          The same eight rows the ladder specimen carries, in light. Ranks
-          04&ndash;08 are the termination rule: a 5px hollow mark in
-          --hairline-subtle sitting on the well, which is the faintest
-          deliberate mark in the product and the one this screen exists to
-          check.
-        </p>
-        <p class="prose">
-          It survives, and by a narrower margin than the dark rendering rather
-          than a wider one: --hairline-subtle against --well measures 1.39:1 in
-          dark and 1.32:1 in light. The loss is 5%, not the collapse the brief
-          for this screen anticipated &mdash; light's well is pure white and its
-          hairline is a pale grey, but dark's well is nearly black and its
-          hairline nearly as dark, so neither mode was ever relying on much. The
-          skipped mark's --bezel stroke gives up more: 4.11:1 dark against
-          3.42:1 light, and it clears the 3:1 non-text floor in both. The
-          terminated mark clears nothing, and is not asked to: it reports the
-          absence of a decision rather than a decision, the spine beneath it
-          says the same thing at the same weight, and the row's text carries
-          the rest. A mark that has to be found is held to the floor; a mark
-          whose whole job is to stop asking for attention is not.
-        </p>
-      </div>
-
-      <div class="region">
-        <p class="section-title">3 &mdash; The five repaired tokens</p>
-        <p>
-          <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Repaired tokens &mdash; five shipped darkraise-ui light-mode failures. Fixed upstream in 6.5.0 per spec &sect;7; mocked here as repaired.</span>
-        </p>
-        <div class="table">
-          <div class="lp-repair-row row-head">
-            <span class="legend-caps">token</span>
-            <span class="legend-caps">shipped</span>
-            <span class="legend-caps lp-ratio">measured</span>
-            <span class="legend-caps">repaired to</span>
-            <span class="legend-caps lp-ratio">measured</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--primary</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-primary)"></span>
-              <span class="micro">sky-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">2.74:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--trace)"></span>
-              <span class="micro">--trace</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">3.93:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--focus-ring</span>
-            <span class="lp-side">
-              <span class="lp-no-specimen"></span>
-              <span class="micro">sky-200/300</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">1.28:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--focus)"></span>
-              <span class="micro">--focus</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">3.34:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--success</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-success)"></span>
-              <span class="micro">emerald-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">2.48:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--state-healthy)"></span>
-              <span class="micro">--state-healthy</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">5.25:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--warning</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-warning)"></span>
-              <span class="micro">amber-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">2.04:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--state-cooling)"></span>
-              <span class="micro">--state-cooling</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">3.02:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--destructive</span>
-            <span class="lp-side">
-              <span class="lp-no-specimen"></span>
-              <span class="micro">red-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">fails</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--state-failed)"></span>
-              <span class="micro">--state-failed</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">4.59:1</span>
-          </div>
-        </div>
-        <p class="prose">
-          Measured against --panel in light, which is the surface a UI mark
-          lands on, except --focus-ring, measured against --ground because a
-          focus ring is drawn outside the control it belongs to. --primary,
-          --success and --warning need 3:1 as non-text marks; --destructive
-          needs 4.5:1 because it is used as text. All five shipped values fail
-          the floor they are held to, and the middle column is what that failure
-          measures.
-        </p>
-        <p class="prose">
-          The two dashed slots are deliberate. Spec &sect;7 states a hex for
-          sky-500, emerald-500 and amber-500 and names only a palette step for
-          the other two, so those get their measured ratio and no swatch:
-          rendering one would mean guessing a value the source does not give,
-          and an invented specimen on a proof screen is worse than a gap.
-        </p>
-        <p class="prose">
-          One number here contradicts the brief this screen was written from,
-          which expected --success to be repaired to 3.70:1. It measures
-          5.25:1. The green was strengthened after that brief was written, when
-          a set review ruled it had to clear AA as body text and not merely the
-          3:1 non-text floor. The screen prints what the stylesheet does.
-        </p>
-      </div>
-
-      <div class="region">
-        <p class="section-title">4 &mdash; Input focus in light</p>
-        <p>
-          <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Input focus &mdash; styles.css:10749: inputs use --primary, not --focus-ring. Fixing --focus-ring alone does not fix form controls.</span>
-        </p>
-        <div class="lp-fields">
-
-          <div class="lp-field">
-            <p class="legend-caps">shipped &mdash; ring from --primary</p>
-            <div class="well lp-input lp-input-shipped">
-              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-shipped"></span>
-            </div>
-            <p class="spec-note">
-              2.86:1 against the field's own well &middot; 2.74:1 against the
-              panel behind it. Both under the 3:1 floor.
-            </p>
-          </div>
-
-          <div class="lp-field">
-            <p class="legend-caps">repaired &mdash; ring from --focus</p>
-            <div class="well lp-input lp-input-repaired">
-              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-repaired"></span>
-            </div>
-            <p class="spec-note">
-              4.11:1 against the field's own well &middot; 3.93:1 against the
-              panel behind it. Both clear it.
-            </p>
-          </div>
-
-        </div>
-        <p class="prose">
-          A focus ring is drawn across two surfaces at once &mdash; the control
-          it outlines and the panel around it &mdash; so it is measured against
-          both, and the weaker of the two is the one that counts. The shipped
-          ring fails on both.
-        </p>
-        <p class="prose">
-          This is the control the library defect actually breaks, and the reason
-          --focus-ring is not the token to fix. Form controls take their
-          indicator from --primary; repairing --focus-ring alone leaves every
-          text field, select and textarea in every consuming application with a
-          sub-3:1 ring in light mode while the audit reports the ring token as
-          fixed.
-        </p>
-      </div>
-
-      <div class="region">
-        <p class="section-title">5 &mdash; The cooling mark's headroom</p>
-        <p>
-          <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Cooling headroom &mdash; 3.02:1, clears the floor by 0.02. Accepted deliberately.</span>
-        </p>
-        <div class="lp-headroom">
-          <div>
-            <div class="lp-zoom">
-              <span class="mark mark-cooling"></span>
-            </div>
-            <p class="spec-note" style="width:120px">actual size &mdash; 7px</p>
-          </div>
-          <div>
-            <div class="lp-zoom">
-              <span class="mark mark-cooling" style="transform:scale(4)"></span>
-            </div>
-            <p class="spec-note" style="width:120px">4&times;</p>
-          </div>
-          <div>
-            <div class="lp-gauge">
-              <span class="lp-gauge-floor" style="left:0"></span>
-              <span class="lp-gauge-mark" style="left:30px"></span>
-            </div>
-            <div class="lp-gauge-caption">
-              <span class="micro">3.00:1 floor</span>
-              <span class="micro">3.20:1</span>
-            </div>
-            <p class="spec-note" style="width:300px">
-              --state-cooling against --panel in light: 3.02:1. The gauge spans
-              0.20 of ratio; the margin is the gap between the two rules.
-            </p>
-          </div>
-        </div>
-        <p class="prose">
-          Amber is the hardest hue to bring over the non-text floor against a
-          near-white surface without turning it brown, and 3.02:1 is what this
-          one manages. The margin is 0.02 &mdash; small enough that a future
-          panel token a shade lighter would put it under, which is why the pip
-          and the skip mark are the only two places amber is allowed, and why
-          neither of them carries meaning that colour alone conveys. The
-          cooling mark keeps a hollow ring and a centre dot precisely so that
-          the colour is the second channel and not the only one.
-        </p>
-        <p class="prose">
-          Against --well the same mark measures 3.16:1, so a cooling mark
-          inside a ladder has slightly more room than one on a panel. The
-          smaller of the two is the number the decision was made on.
+          The four marks and the termination rule survive the move to a lighter
+          ground and a larger radius. The terminated mark is not held to the 3:1
+          floor and does not clear it: it reports the absence of a decision, the
+          spine beneath it says the same thing at the same weight, and the row's
+          text carries the rest.
         </p>
       </div>
 
       <div class="region">
         <p class="section-title">6 &mdash; Charts in light</p>
         <p>
-          <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Charts in light &mdash; .chart-scope, monochrome accent plus fill patterns.</span>
+          <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Charts in light &mdash; .chart-scope. Five series separated by fill treatment against one hue, so no series reaches for the state colours.</span>
         </p>
         <div class="chart-scope lp-chart-panel panel"
              style="--chart-3:url(#proof-hatch--s-17-light-proof);--chart-4:url(#proof-dot--s-17-light-proof)">
@@ -14502,18 +14543,10 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
         </div>
         <p class="prose">
           The usage screen's first chart, path for path, in light. Five series
-          differentiated by fill treatment against one hue rather than by five
-          hues: solid --accent-ink, a 60% tint, a 45&deg; hatch, a dot texture,
-          and a stroked outline with no fill. Nothing here reaches for orange or
-          lime, which is what the library's generated five-colour ramp emits at
-          positions four and five and what would collide with the cooling and
-          healthy state colours on the same page.
-        </p>
-        <p class="prose">
-          The two textured series are the ones worth checking in light, because
-          a hatch and a dot are thin marks on a white well rather than on a near
-          -black one. They hold: the texture is drawn in --accent-ink, which is
-          the readable accent at 5.69:1 against the panel, not the visible one.
+          differentiated by fill rather than by hue: solid, a 60% tint, a
+          45&deg; hatch, a dot texture, and a stroked outline with no fill. The
+          hue is --accent-ink, the readable member of the brand ramp at 6.21:1,
+          not the brand fill at 3.23:1.
         </p>
       </div>
 

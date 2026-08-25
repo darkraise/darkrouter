@@ -107,14 +107,14 @@
    known, the same "nothing has been decided yet" register --bezel already
    carries on a skipped ladder mark. Only once an outcome exists does a
    segment take the router-verdict or provider-outcome colour below. */
-.waterfall-seg {
+.waterfall-seg{
   position: absolute;
   top: 50%;
   left: 0;
   height: 8px;
   min-width: 2px;
   margin-top: -4px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--bezel);
 }
 .waterfall-seg-serve { background: var(--trace); }

@@ -180,7 +180,7 @@
 /* Ordinal, not a pin: it numbers a rule in a sequence the router walks,
    so it takes the ladder's own rank treatment (mono, --legend) rather
    than the accent pill a .pin uses for an annotation. */
-.rt-rule-n {
+.rt-rule-n{
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -188,7 +188,7 @@
   width: 18px;
   height: 18px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--legend);
@@ -380,7 +380,7 @@
 
 /* A value box, not an <input>: the same 24px well-backed field .field-input
    established on Models, sized to hold a duration plus its unit. */
-.rt-pvalue {
+.rt-pvalue{
   display: inline-flex;
   align-items: baseline;
   width: 76px;
@@ -388,7 +388,7 @@
   padding: 2px 8px 0;
   background: var(--well);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
@@ -406,12 +406,12 @@
   border-color: var(--hairline-subtle);
   color: var(--legend);
 }
-.rt-effect-mark {
+.rt-effect-mark{
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border: 1px solid var(--legend);
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: transparent;
 }
 .rt-effect[data-effect="live"] {

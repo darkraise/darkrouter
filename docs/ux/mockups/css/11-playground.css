@@ -190,13 +190,13 @@
 /* .range-track/.range-fill report a span, so they never needed a handle.
    A sampling parameter is a single value and wants one. --accent-ink to
    match .range-fill: a control's own state, not a routing verdict. */
-.pg-param-knob {
+.pg-param-knob{
   position: absolute;
   top: -3px;
   width: 3px;
   height: 9px;
   transform: translateX(-50%);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--accent-ink);
 }
 
@@ -386,7 +386,7 @@
   height: 34px;
 }
 
-.pg-player-btn {
+.pg-player-btn{
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -394,18 +394,18 @@
   width: 20px;
   height: 20px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   font-size: 9px;
   color: var(--ink);
 }
 
 /* Playback position is the page's own state, the register --accent-ink
    already covers for .range-fill and .newer-pill — not a routing verdict. */
-.pg-player-track {
+.pg-player-track{
   position: relative;
   flex: 1 1 auto;
   height: 3px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--hairline-subtle);
 }
 
@@ -418,13 +418,13 @@
   background: var(--accent-ink);
 }
 
-.pg-player-head {
+.pg-player-head{
   position: absolute;
   top: -3px;
   width: 3px;
   height: 9px;
   transform: translateX(-50%);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--accent-ink);
 }
 

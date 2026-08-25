@@ -1,5 +1,11 @@
 /* Usage screen (fragments/05-usage.html) — "Graticule Bench".
  *
+ * Series take --trace, not the coral brand. Coral marks position and primary
+ * action and stays scarce so it keeps meaning that; --trace is the colour of a
+ * routing decision, and every request in a usage chart is one. The five series
+ * are separated by FILL TREATMENT against that single hue, never by adding
+ * hues, so no series can collide with a state colour.
+ *
  * .chart-scope is the mandatory ramp override: darkraise-ui's generated
  * five-colour categorical ramp emits orange-400 and lime-400 at positions 4
  * and 5 with a sky accent, colliding with the reserved cooling/healthy
@@ -10,8 +16,8 @@
  * of selector.
  */
 .chart-scope {
-  --chart-1: var(--accent-ink);
-  --chart-2: color-mix(in srgb, var(--accent-ink) 60%, transparent);
+  --chart-1: var(--trace);
+  --chart-2: color-mix(in srgb, var(--trace) 60%, transparent);
   /* --chart-3 and --chart-4 are paint-server references and are set on the
      .chart-scope element itself, beside the <defs> they point at, not here.
      build.py namespaces every SVG id per screen so two screens cannot
@@ -105,17 +111,17 @@
 }
 
 .hatch-line {
-  stroke: var(--accent-ink);
+  stroke: var(--trace);
   stroke-width: 1;
   opacity: 0.55;
 }
-.dot-mark { fill: var(--accent-ink); opacity: 0.6; }
+.dot-mark { fill: var(--trace); opacity: 0.6; }
 
 /* Every stacked band shares one accent-toned edge stroke; on chart-fill-5
    (fill: transparent) that edge is the entire visible mark — the "outline"
    member of the five-way fill ramp. */
 .chart-area {
-  stroke: var(--accent-ink);
+  stroke: var(--trace);
   stroke-width: 1;
   opacity: 0.94;
 }
@@ -188,11 +194,11 @@
   gap: 6px;
 }
 
-.share-track {
+.share-track{
   flex: 1 1 auto;
   height: 5px;
   background: var(--hairline-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 .share-bar {

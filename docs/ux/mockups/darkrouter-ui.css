@@ -59,9 +59,11 @@
      fails the text floor a status label needs. 5.47:1. */
   --state-failed: #F87171;
 
+  --radius-xs: 4px;
   --radius-sm: 8px;
   --radius: 10px;
   --radius-lg: 14px;
+  --radius-pill: 999px;
 
   --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
   --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.25);
@@ -172,15 +174,20 @@ body.theme-light,
   color: var(--ink);
 }
 
-/* The light-mode values 9router ships that a measurement rejected. They live
-   here because this is the one file allowed to hold a hex, and they appear in
-   exactly one place — the light proof — beside the tokens that replace them. */
+/* The nine values 9router ships that a measurement rejected. They live here
+   because this is the one file allowed to hold a hex, and they appear in
+   exactly one place — the contrast proof — beside the tokens replacing them.
+   Nothing else may reference them. */
 :root {
-  --shipped-primary: #E56A4A;
-  --shipped-success: #10B981;
-  --shipped-warning: #F59E0B;
-  --shipped-info: #3B82F6;
-  --shipped-subtle: #9CA3AF;
+  --shipped-dark-legend: #6b7280;
+  --shipped-dark-state-failed: #ef4444;
+  --shipped-dark-accent-ink: #E56A4A;
+  --shipped-light-ink-muted: #6B7280;
+  --shipped-light-legend: #9CA3AF;
+  --shipped-light-accent-ink: #E56A4A;
+  --shipped-light-trace: #3B82F6;
+  --shipped-light-state-healthy: #10B981;
+  --shipped-light-state-cooling: #F59E0B;
 }
 
 /* --- Reset & base -------------------------------------------------- */
@@ -307,14 +314,18 @@ body.pins-on .pin {
    .legend-caps in size and down in tracking. Without this class a later
    screen's panel headers would need inline styles, which is how a type
    scale erodes one screen at a time. */
+/* A block heading, sentence case at 16px. 9router leads its sections with
+   a real heading rather than a silkscreened legend; the uppercase small-caps
+   role survives only as .legend-caps, on nav groups and column heads, where
+   the label really is a legend and not a title. */
 .section-title {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--ink);
 }
 
 .readout {
@@ -351,33 +362,38 @@ kbd {
 }
 
 /* --- Surfaces ---------------------------------------------------------
-   Separation is a value step plus a 1px hairline, never a shadow. --shadow-
-   overlay is the one exception in the whole product, and it belongs on
-   elements whose background is --overlay, not on .panel or .well. */
+   Cards sit ON the ground rather than being cut into it. Each carries a
+   border, a radius and a soft shadow, and cards are separated by a gutter
+   instead of sharing a seam — the elevation model 9router uses, and the
+   reason light mode here is a palette swap rather than a polarity flip. */
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-soft);
 }
 
+/* An inset region INSIDE a card — a chart bed, a code block, a readout
+   trough. It is not recessed below the ground; it is a quieter surface
+   within a card, which is the only kind of "inside" this language has. */
 .well {
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--overlay);
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
   font-size: 11px;
   color: var(--ink-muted);
   white-space: nowrap;
@@ -391,8 +407,8 @@ kbd {
    in light mode). Requests and Overview both report it, so both consume
    this chip rather than reinventing it. */
 .chip-failover {
-  border-color: var(--trace);
-  color: var(--accent-ink);
+  background: var(--trace-fill);
+  color: var(--trace);
 }
 
 /* Dialect/path annotations — quiet facts about how a request was handled,
@@ -455,9 +471,10 @@ kbd {
 .table {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .row {
@@ -465,9 +482,9 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--section-pad);
-  height: var(--row-h);
+  min-height: var(--row-h);
   padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .row:last-child { border-bottom: none; }
 /* Every screen with a clickable row (Overview's failover log, Usage's rank
@@ -499,10 +516,10 @@ a.row { text-decoration: none; }
 
 .state-pip {
   display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius);
-  background: var(--bezel);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--legend);
 }
 /* The four states GET /api/overview actually emits for a provider tile.
    "degraded" rather than "cooling" is the API's word and the accurate one:
@@ -611,10 +628,10 @@ a.row { text-decoration: none; }
    channel on top of it, never the only one. */
 .mark {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius);
-  background: var(--bezel);
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--legend);
 }
 /* Passed over without an attempt: hollow, 1px --bezel stroke, no fill —
    neither a routing decision nor a health report, so it carries no state
@@ -731,14 +748,14 @@ a.row { text-decoration: none; }
 /* A 2px bar in the row's own right margin, width set per row from the
    ladder's own maximum latency — the ladder becomes a waterfall with no
    second axis to read. */
-.latency-bar {
+.latency-bar{
   flex: 0 0 auto;
   align-self: center;
   height: 2px;
   min-width: 2px;
   max-width: 64px;
   margin-left: auto;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--trace);
 }
 .latency-bar-failed { background: var(--state-failed); }
@@ -975,22 +992,22 @@ a.row { text-decoration: none; }
   gap: 8px;
   height: var(--control-h);
 }
-.switch-track {
+.switch-track{
   position: relative;
   flex: 0 0 auto;
   width: 26px;
   height: 14px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--well);
 }
-.switch-knob {
+.switch-knob{
   position: absolute;
   top: 1px;
   left: 1px;
   width: 10px;
   height: 10px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--bezel);
 }
 .switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
@@ -1008,21 +1025,28 @@ a.row { text-decoration: none; }
 
 /* The one committing action on a screen. Outlined in --accent-ink rather
    than filled — this console has no filled buttons. */
+/* The one filled control in the product. Coral marks the primary action on
+   a screen, which is the second and last job brand colour has here. */
 .control-primary {
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-soft);
 }
+.control-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 /* A generic status pill: box shape from .chip, colour from data-status.
    success/error are outcomes — a request's own result or a probe's own
    result — never a routing verdict, which is the same reasoning that lets
    .status-success/-error use the state colours on the Requests table. */
 .status-badge[data-status="success"] {
-  border-color: var(--state-healthy);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--state-healthy) 15%, transparent);
   color: var(--state-healthy);
 }
 .status-badge[data-status="error"] {
-  border-color: var(--state-failed);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--state-failed) 15%, transparent);
   color: var(--state-failed);
 }
 
@@ -1144,13 +1168,13 @@ a.row { text-decoration: none; }
 }
 .combo[data-open="true"] .combo-menu { display: flex; }
 
-.combo-option {
+.combo-option{
   display: flex;
   align-items: center;
   gap: 8px;
   height: 24px;
   padding: 0 6px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
   color: var(--ink);
@@ -1159,7 +1183,7 @@ a.row { text-decoration: none; }
 }
 .combo-option:hover { opacity: 1; }
 
-.combo-check {
+.combo-check{
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -1167,7 +1191,7 @@ a.row { text-decoration: none; }
   width: 12px;
   height: 12px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
   color: transparent;
@@ -1239,13 +1263,18 @@ a.row { text-decoration: none; }
    rather than chrome, and the one that inverts polarity between themes. */
 .field-input {
   height: var(--control-h);
-  padding: 0 8px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
+}
+.field-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 /* Read-only: still a fact worth a well's worth of weight, just not one
    this control can change right now. */
@@ -1322,12 +1351,12 @@ a.row { text-decoration: none; }
 
 /* Region 1 (palette): one colour chip per token row. Size and border only
    — the fill always comes from an inline var(--token), never from here. */
-.swatch {
+.swatch{
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
 }
 
 /* The annotation sentence beside a numbered .pin badge. A 16px pill has no
@@ -1389,15 +1418,20 @@ body.pins-on .pin-note { display: inline; }
 .control {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 8px;
   height: var(--control-h);
-  padding: 0 var(--section-pad);
-  border: 1px solid var(--hairline);
+  padding: 0 16px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
+  background: var(--surface-2);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 13px;
   color: var(--ink);
+  transition: background var(--dur-hover) ease, border-color var(--dur-hover) ease;
 }
+.control:hover { background: var(--surface-3); }
 
 /* Region 6 (density): a caliper bracket for calling out an exact pixel
    measurement next to the thing it measures. */

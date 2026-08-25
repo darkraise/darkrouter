@@ -91,14 +91,14 @@ body.theme-light .preset-scrim,
   color: var(--ink);
 }
 
-.preset-modal-close {
+.preset-modal-close{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--panel);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -355,13 +355,13 @@ body.theme-light .preset-scrim,
 
 /* Lighter than .chip on purpose: a card carries up to three of these at
    once, and three 20px chips would outweigh the preset name above them. */
-.preset-surface-chip {
+.preset-surface-chip{
   display: inline-flex;
   align-items: center;
   height: 16px;
   padding: 0 5px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   color: var(--ink-muted);
@@ -370,13 +370,13 @@ body.theme-light .preset-scrim,
 /* Free tier is an attribute of the vendor's plan, not a health reading and
    not a routing decision, so it takes neither a state colour nor trace. A
    --bezel stroke is the loudest neutral available. */
-.preset-free {
+.preset-free{
   display: inline-flex;
   align-items: center;
   height: 16px;
   padding: 0 5px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   font-size: 10px;

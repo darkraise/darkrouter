@@ -54,7 +54,10 @@ def main() -> int:
     ap.add_argument("--light", action="store_true")
     ap.add_argument("--no-pins", action="store_true")
     ap.add_argument("--width", type=int, default=1440)
-    ap.add_argument("--height", type=int, default=6000)
+    # The Warm Console language is roomier than the one this default was
+    # set for: 14px Inter, 36px rows and 40px page padding put several
+    # screens past 6000px.
+    ap.add_argument("--height", type=int, default=12000)
     args = ap.parse_args()
 
     fragment = HERE / "fragments" / f"{args.stem}.html"

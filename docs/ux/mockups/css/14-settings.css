@@ -108,12 +108,12 @@
   color: var(--legend);
   white-space: nowrap;
 }
-.set-scope::before {
+.set-scope::before{
   content: "";
   flex: 0 0 auto;
   width: 3px;
   height: 11px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--bezel);
 }
 /* Segmented, not dashed: a dashed 3px bar renders as two dots at this size.

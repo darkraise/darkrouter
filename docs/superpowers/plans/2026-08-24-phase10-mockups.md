@@ -12,6 +12,13 @@
 
 ## Global Constraints
 
+> **SUPERSEDED — 2026-08-25.** The palette, type, surface and motion rules below describe
+> "Graticule Bench", the language this phase was built in. The set has since been moved to
+> "Warm Console", adopted from 9router. **Spec §3 is the contract; this section is kept only as
+> the record of what the phase originally executed against.** Do not copy these values.
+> What still holds: the file structure, the fragment/gate/assembler architecture, the data-realism
+> rules (real preset ids, 26-character ULIDs, no placeholders), and the qa.py invariants.
+
 Copy these values verbatim. Every task's requirements implicitly include this section.
 
 **Palette — declared once in `docs/ux/mockups/darkrouter-ui.css`, referenced everywhere as `var(--token)`:**

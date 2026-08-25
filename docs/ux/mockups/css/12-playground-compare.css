@@ -259,14 +259,14 @@
    green/amber/red family would claim the right pane is unhealthy for being
    dearer, which it is not. --accent-ink rather than --trace for the text
    because --trace only reaches 3.93:1 on light-mode panel. */
-.pgc-win {
+.pgc-win{
   display: inline-flex;
   align-items: center;
   gap: 4px;
   height: 16px;
   padding: 0 5px;
   border: 1px solid var(--trace);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 10px;
   line-height: 1;

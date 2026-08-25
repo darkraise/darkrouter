@@ -139,11 +139,11 @@
    enabled provider declares a model for it. Silhouette carries it in
    greyscale, exactly as the ladder's marks do, and no hue is spent —
    availability is neither a health reading nor a routing verdict. */
-.cn-surface-mark {
+.cn-surface-mark{
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: var(--ink);
 }
 

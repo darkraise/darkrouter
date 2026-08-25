@@ -1,77 +1,278 @@
-<section class="screen" id="s-17-light-proof" data-screen-title="light proof">
+<section class="screen" id="s-17-light-proof" data-screen-title="contrast proof">
   <p class="legend">
     Light mode is first-class, so it gets a proof rather than a gesture. This
     board renders light whatever the <kbd>T</kbd> toggle says, so the two modes
-    can be read against each other inside one document. Every number printed
-    below was measured &mdash; the luminance figures from the rendered pixels of
-    a Chrome screenshot, the contrast ratios computed from the token hexes the
-    shipped stylesheet actually declares &mdash; and where a measurement
-    contradicts what this screen was briefed to say, the measurement is what is
-    printed. Press <kbd>A</kbd> to reveal pins.
+    can be read against each other inside one document. Under this language
+    surfaces stack upward in both modes, so light is a palette swap by design
+    and there is no polarity to verify &mdash; what needs verifying instead is
+    that the palette holds its floors, because the one it was adopted from does
+    not. Press <kbd>A</kbd> to reveal pins.
   </p>
 
   <div class="force-light lp-board">
     <div class="panel" style="padding:0 var(--gutter)">
 
       <div class="region">
-        <p class="section-title">1 &mdash; Well polarity</p>
+        <p class="section-title">1 &mdash; The nine changes</p>
         <p>
-          <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Well polarity &mdash; :root {--well darker than --panel}; body.theme-light {--well brighter}. Spec &sect;3.3. This is why light is not a palette swap.</span>
+          <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Repairs &mdash; nine token values differ from 9router's src/app/globals.css. Seven were under a floor; two were strengthened to keep two tiers apart.</span>
         </p>
-        <div class="lp-split">
-
-          <div class="force-dark lp-half">
-            <p class="legend-caps">dark</p>
-            <div class="panel lp-card">
-              <p class="section-title" style="margin:0">requests &middot; last 24h</p>
-              <div class="well lp-well">
-                <span class="readout">1,284<span class="unit">req</span></span>
-              </div>
-            </div>
-            <p class="micro lp-measure">
-              panel luma 27.6 &rarr; well luma 9.9 of 255<br />
-              well is <span class="lp-verdict">darker</span> by 17.6 &middot; step 1.157:1
-            </p>
+        <div class="table">
+          <div class="lp-repair-row row-head">
+            <span class="legend-caps">token</span>
+            <span class="legend-caps">mode</span>
+            <span class="legend-caps">shipped</span>
+            <span class="legend-caps">repaired</span>
+            <span class="legend-caps">why</span>
           </div>
-
-          <div class="force-light lp-half">
-            <p class="legend-caps">light</p>
-            <div class="panel lp-card">
-              <p class="section-title" style="margin:0">requests &middot; last 24h</p>
-              <div class="well lp-well">
-                <span class="readout">1,284<span class="unit">req</span></span>
-              </div>
-            </div>
-            <p class="micro lp-measure">
-              panel luma 249.9 &rarr; well luma 255.0 of 255<br />
-              well is <span class="lp-verdict">brighter</span> by 5.1 &middot; step 1.045:1
-            </p>
+          <div class="lp-repair-row">
+            <span class="mono">--legend</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-legend)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.13:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--legend)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">4.82:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
           </div>
-
+          <div class="lp-repair-row">
+            <span class="mono">--state-failed</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-state-failed)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">4.02:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-failed)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.47:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--accent-ink</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-warn">4.68:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.27:1</span>
+            </span>
+            <span class="micro lp-verdict-note">held the floor already; strengthened so brand-as-text stays clear of brand-as-fill</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--ink-muted</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-ink-muted)"></span>
+              <span class="mono lp-ratio lp-ratio-warn">4.83:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--ink-muted)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">7.56:1</span>
+            </span>
+            <span class="micro lp-verdict-note">held the floor already; strengthened so two grey tiers stay apart</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--legend</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-legend)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.54:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--legend)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">4.83:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--accent-ink</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.23:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">6.21:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--trace</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-trace)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.68:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--trace)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.17:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-healthy</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-state-healthy)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.54:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-healthy)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.48:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-cooling</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-state-cooling)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.15:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-cooling)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">3.19:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 3:1 floor it is held to</span>
+          </div>
         </div>
         <p class="prose">
-          Sampled from two screenshots of the overview screen at the same
-          coordinate pair &mdash; x 700, y 70 on a panel and y 330 on a well
-          &mdash; one rendered dark and one light, decoded pixel by pixel. The
-          ordering reverses: the recessed surface is the darkest thing in the
-          dark frame and the brightest thing in the light one. That is the
-          structural rule, and it is the reason a screen cannot be relit by
-          lightening every token in place.
+          Every ratio is computed from the hexes each stylesheet declares,
+          against --surface in that mode &mdash; white in light, the card grey
+          in dark. Seven of the nine sat under the floor their role is held to:
+          a mark needs 3:1 and text needs 4.5:1. Two already cleared it and
+          moved anyway, because the tier below them had to move and two greys
+          a quarter of a step apart are one grey.
         </p>
         <p class="prose">
-          The measurement also reports something the rule alone does not. The
-          light step is far weaker &mdash; 1.045:1 against dark's 1.157:1, a
-          separation of five values out of 255 rather than eighteen. Light mode
-          keeps the polarity but spends most of its separation budget on the
-          1px --hairline around the well rather than on the value step inside
-          it. Every recessed region in light is carried by its border.
+          The worst of them is worth naming. 9router's light success green
+          measures 2.54:1 and its amber 2.15:1 &mdash; both under the 3:1 floor
+          that applies to a shape, not just to text. A provider list that says
+          "connected" in that green on a white card is stating the most
+          load-bearing fact on the screen in a colour a third of readers cannot
+          separate from the background.
         </p>
       </div>
 
       <div class="region">
-        <p class="section-title">2 &mdash; The ladder in light</p>
+        <p class="section-title">2 &mdash; Elevation, both modes</p>
         <p>
-          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder in light &mdash; the termination rule is the at-risk mark: --hairline-subtle on a near-white well.</span>
+          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Elevation &mdash; ground &rarr; card &rarr; inset, each lighter than the last, in BOTH modes. No polarity inversion; light is a palette swap by design.</span>
+        </p>
+        <div class="lp-split">
+          <div class="force-dark lp-half">
+            <p class="legend-caps">dark</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0 0 8px">Requests</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">ground 26 &rarr; card 38 &rarr; inset 48 of 255 &middot; each step up</p>
+          </div>
+          <div class="force-light lp-half">
+            <p class="legend-caps">light</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0 0 8px">Requests</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">ground 250 &rarr; card 255 &rarr; inset 244 of 255 &middot; the inset dips</p>
+          </div>
+        </div>
+        <p class="prose">
+          The card lifts off the ground in both modes and carries a border, a
+          radius and --shadow-soft. The inset region behaves differently in the
+          two: in dark it continues upward, in light it has nowhere left to go
+          above white and steps down to --surface-2 instead. That is the honest
+          consequence of a white card, and it is why an inset in light is read
+          from its border rather than its fill.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">3 &mdash; The cooling mark's headroom</p>
+        <p>
+          <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Cooling headroom &mdash; 3.19:1 against a white card, the tightest margin in the palette. Non-text only; a cooling reading never says its word in amber.</span>
+        </p>
+        <div class="lp-headroom">
+          <div>
+            <div class="lp-zoom"><span class="mark mark-cooling"></span></div>
+            <p class="spec-note" style="width:120px">actual size &mdash; 8px</p>
+          </div>
+          <div>
+            <div class="lp-zoom"><span class="mark mark-cooling" style="transform:scale(4)"></span></div>
+            <p class="spec-note" style="width:120px">4&times;</p>
+          </div>
+          <div>
+            <div class="lp-gauge">
+              <span class="lp-gauge-floor" style="left:0"></span>
+              <span class="lp-gauge-mark" style="left:57px"></span>
+            </div>
+            <div class="lp-gauge-caption">
+              <span class="micro">3.00:1 floor</span>
+              <span class="micro">4.00:1</span>
+            </div>
+            <p class="spec-note" style="width:300px">
+              3.19:1. The gauge spans one full point of ratio; the margin is the
+              gap between the two rules. 9router ships this at 2.15:1, which
+              would sit left of the floor line entirely.
+            </p>
+          </div>
+        </div>
+        <p class="prose">
+          Amber is the hardest hue to bring over the floor against a near-white
+          surface without turning brown, and 3.19:1 is what this one manages
+          &mdash; better than the 3.02:1 the previous language accepted, and
+          still the tightest value in the set. The mark keeps a hollow ring and
+          a centre dot so colour is its second channel and never its only one.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">4 &mdash; Focus in light</p>
+        <p>
+          <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Focus &mdash; 9router's --shadow-focus, a 3px coral ring at 18% alpha, plus a solid coral border. The ring is a wash; the border is what carries the 3:1.</span>
+        </p>
+        <div class="lp-fields">
+          <div class="lp-field">
+            <p class="legend-caps">focused</p>
+            <div class="field-input lp-input lp-input-repaired">
+              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-repaired"></span>
+            </div>
+            <p class="spec-note">
+              border --accent 3.23:1 against the card &middot; the 18% ring is
+              decoration and is not counted.
+            </p>
+          </div>
+          <div class="lp-field">
+            <p class="legend-caps">resting</p>
+            <div class="field-input lp-input">
+              <span class="mono">sk-dr-v1-9f2c</span>
+            </div>
+            <p class="spec-note">border --border 1.24:1 &middot; structural, not an indicator.</p>
+          </div>
+        </div>
+        <p class="prose">
+          A soft ring is the part of this treatment that reads first and the
+          part that carries no contrast at all. The solid 1px coral border
+          underneath it is what actually distinguishes a focused field from a
+          resting one, which is why the ring is allowed to be as faint as it is.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">5 &mdash; The ladder in light</p>
+        <p>
+          <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ladder in light &mdash; the terminated mark is the faintest deliberate thing in the product: --border-subtle on --surface-2.</span>
         </p>
         <p class="micro">request 01M0W4NWMRZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
       <div class="ladder">
@@ -143,238 +344,18 @@
         </div>
       </div>
         <p class="prose">
-          The same eight rows the ladder specimen carries, in light. Ranks
-          04&ndash;08 are the termination rule: a 5px hollow mark in
-          --hairline-subtle sitting on the well, which is the faintest
-          deliberate mark in the product and the one this screen exists to
-          check.
-        </p>
-        <p class="prose">
-          It survives, and by a narrower margin than the dark rendering rather
-          than a wider one: --hairline-subtle against --well measures 1.39:1 in
-          dark and 1.32:1 in light. The loss is 5%, not the collapse the brief
-          for this screen anticipated &mdash; light's well is pure white and its
-          hairline is a pale grey, but dark's well is nearly black and its
-          hairline nearly as dark, so neither mode was ever relying on much. The
-          skipped mark's --bezel stroke gives up more: 4.11:1 dark against
-          3.42:1 light, and it clears the 3:1 non-text floor in both. The
-          terminated mark clears nothing, and is not asked to: it reports the
-          absence of a decision rather than a decision, the spine beneath it
-          says the same thing at the same weight, and the row's text carries
-          the rest. A mark that has to be found is held to the floor; a mark
-          whose whole job is to stop asking for attention is not.
-        </p>
-      </div>
-
-      <div class="region">
-        <p class="section-title">3 &mdash; The five repaired tokens</p>
-        <p>
-          <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Repaired tokens &mdash; five shipped darkraise-ui light-mode failures. Fixed upstream in 6.5.0 per spec &sect;7; mocked here as repaired.</span>
-        </p>
-        <div class="table">
-          <div class="lp-repair-row row-head">
-            <span class="legend-caps">token</span>
-            <span class="legend-caps">shipped</span>
-            <span class="legend-caps lp-ratio">measured</span>
-            <span class="legend-caps">repaired to</span>
-            <span class="legend-caps lp-ratio">measured</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--primary</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-primary)"></span>
-              <span class="micro">sky-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">2.74:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--trace)"></span>
-              <span class="micro">--trace</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">3.93:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--focus-ring</span>
-            <span class="lp-side">
-              <span class="lp-no-specimen"></span>
-              <span class="micro">sky-200/300</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">1.28:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--focus)"></span>
-              <span class="micro">--focus</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">3.34:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--success</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-success)"></span>
-              <span class="micro">emerald-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">2.48:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--state-healthy)"></span>
-              <span class="micro">--state-healthy</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">5.25:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--warning</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--shipped-warning)"></span>
-              <span class="micro">amber-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">2.04:1</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--state-cooling)"></span>
-              <span class="micro">--state-cooling</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">3.02:1</span>
-          </div>
-
-          <div class="lp-repair-row">
-            <span class="mono">--destructive</span>
-            <span class="lp-side">
-              <span class="lp-no-specimen"></span>
-              <span class="micro">red-500</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-fail">fails</span>
-            <span class="lp-side">
-              <span class="swatch" style="background:var(--state-failed)"></span>
-              <span class="micro">--state-failed</span>
-            </span>
-            <span class="mono lp-ratio lp-ratio-pass">4.59:1</span>
-          </div>
-        </div>
-        <p class="prose">
-          Measured against --panel in light, which is the surface a UI mark
-          lands on, except --focus-ring, measured against --ground because a
-          focus ring is drawn outside the control it belongs to. --primary,
-          --success and --warning need 3:1 as non-text marks; --destructive
-          needs 4.5:1 because it is used as text. All five shipped values fail
-          the floor they are held to, and the middle column is what that failure
-          measures.
-        </p>
-        <p class="prose">
-          The two dashed slots are deliberate. Spec &sect;7 states a hex for
-          sky-500, emerald-500 and amber-500 and names only a palette step for
-          the other two, so those get their measured ratio and no swatch:
-          rendering one would mean guessing a value the source does not give,
-          and an invented specimen on a proof screen is worse than a gap.
-        </p>
-        <p class="prose">
-          One number here contradicts the brief this screen was written from,
-          which expected --success to be repaired to 3.70:1. It measures
-          5.25:1. The green was strengthened after that brief was written, when
-          a set review ruled it had to clear AA as body text and not merely the
-          3:1 non-text floor. The screen prints what the stylesheet does.
-        </p>
-      </div>
-
-      <div class="region">
-        <p class="section-title">4 &mdash; Input focus in light</p>
-        <p>
-          <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Input focus &mdash; styles.css:10749: inputs use --primary, not --focus-ring. Fixing --focus-ring alone does not fix form controls.</span>
-        </p>
-        <div class="lp-fields">
-
-          <div class="lp-field">
-            <p class="legend-caps">shipped &mdash; ring from --primary</p>
-            <div class="well lp-input lp-input-shipped">
-              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-shipped"></span>
-            </div>
-            <p class="spec-note">
-              2.86:1 against the field's own well &middot; 2.74:1 against the
-              panel behind it. Both under the 3:1 floor.
-            </p>
-          </div>
-
-          <div class="lp-field">
-            <p class="legend-caps">repaired &mdash; ring from --focus</p>
-            <div class="well lp-input lp-input-repaired">
-              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-repaired"></span>
-            </div>
-            <p class="spec-note">
-              4.11:1 against the field's own well &middot; 3.93:1 against the
-              panel behind it. Both clear it.
-            </p>
-          </div>
-
-        </div>
-        <p class="prose">
-          A focus ring is drawn across two surfaces at once &mdash; the control
-          it outlines and the panel around it &mdash; so it is measured against
-          both, and the weaker of the two is the one that counts. The shipped
-          ring fails on both.
-        </p>
-        <p class="prose">
-          This is the control the library defect actually breaks, and the reason
-          --focus-ring is not the token to fix. Form controls take their
-          indicator from --primary; repairing --focus-ring alone leaves every
-          text field, select and textarea in every consuming application with a
-          sub-3:1 ring in light mode while the audit reports the ring token as
-          fixed.
-        </p>
-      </div>
-
-      <div class="region">
-        <p class="section-title">5 &mdash; The cooling mark's headroom</p>
-        <p>
-          <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Cooling headroom &mdash; 3.02:1, clears the floor by 0.02. Accepted deliberately.</span>
-        </p>
-        <div class="lp-headroom">
-          <div>
-            <div class="lp-zoom">
-              <span class="mark mark-cooling"></span>
-            </div>
-            <p class="spec-note" style="width:120px">actual size &mdash; 7px</p>
-          </div>
-          <div>
-            <div class="lp-zoom">
-              <span class="mark mark-cooling" style="transform:scale(4)"></span>
-            </div>
-            <p class="spec-note" style="width:120px">4&times;</p>
-          </div>
-          <div>
-            <div class="lp-gauge">
-              <span class="lp-gauge-floor" style="left:0"></span>
-              <span class="lp-gauge-mark" style="left:30px"></span>
-            </div>
-            <div class="lp-gauge-caption">
-              <span class="micro">3.00:1 floor</span>
-              <span class="micro">3.20:1</span>
-            </div>
-            <p class="spec-note" style="width:300px">
-              --state-cooling against --panel in light: 3.02:1. The gauge spans
-              0.20 of ratio; the margin is the gap between the two rules.
-            </p>
-          </div>
-        </div>
-        <p class="prose">
-          Amber is the hardest hue to bring over the non-text floor against a
-          near-white surface without turning it brown, and 3.02:1 is what this
-          one manages. The margin is 0.02 &mdash; small enough that a future
-          panel token a shade lighter would put it under, which is why the pip
-          and the skip mark are the only two places amber is allowed, and why
-          neither of them carries meaning that colour alone conveys. The
-          cooling mark keeps a hollow ring and a centre dot precisely so that
-          the colour is the second channel and not the only one.
-        </p>
-        <p class="prose">
-          Against --well the same mark measures 3.16:1, so a cooling mark
-          inside a ladder has slightly more room than one on a panel. The
-          smaller of the two is the number the decision was made on.
+          The four marks and the termination rule survive the move to a lighter
+          ground and a larger radius. The terminated mark is not held to the 3:1
+          floor and does not clear it: it reports the absence of a decision, the
+          spine beneath it says the same thing at the same weight, and the row's
+          text carries the rest.
         </p>
       </div>
 
       <div class="region">
         <p class="section-title">6 &mdash; Charts in light</p>
         <p>
-          <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Charts in light &mdash; .chart-scope, monochrome accent plus fill patterns.</span>
+          <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Charts in light &mdash; .chart-scope. Five series separated by fill treatment against one hue, so no series reaches for the state colours.</span>
         </p>
         <div class="chart-scope lp-chart-panel panel"
              style="--chart-3:url(#proof-hatch);--chart-4:url(#proof-dot)">
@@ -412,18 +393,10 @@
         </div>
         <p class="prose">
           The usage screen's first chart, path for path, in light. Five series
-          differentiated by fill treatment against one hue rather than by five
-          hues: solid --accent-ink, a 60% tint, a 45&deg; hatch, a dot texture,
-          and a stroked outline with no fill. Nothing here reaches for orange or
-          lime, which is what the library's generated five-colour ramp emits at
-          positions four and five and what would collide with the cooling and
-          healthy state colours on the same page.
-        </p>
-        <p class="prose">
-          The two textured series are the ones worth checking in light, because
-          a hatch and a dot are thin marks on a white well rather than on a near
-          -black one. They hold: the texture is drawn in --accent-ink, which is
-          the readable accent at 5.69:1 against the panel, not the visible one.
+          differentiated by fill rather than by hue: solid, a 60% tint, a
+          45&deg; hatch, a dot texture, and a stroked outline with no fill. The
+          hue is --accent-ink, the readable member of the brand ramp at 6.21:1,
+          not the brand fill at 3.23:1.
         </p>
       </div>
 
