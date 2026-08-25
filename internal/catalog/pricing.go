@@ -4,8 +4,8 @@ package catalog
 // when the model has no price.
 //
 // A method on Pricing, in package catalog, because the arithmetic needs the
-// prices and internal/store cannot import internal/catalog: catalog imports
-// provider and provider imports store, so store->catalog closes a cycle.
+// prices and internal/store cannot import internal/catalog: catalog already
+// imports store directly, so store->catalog would close a cycle.
 //
 // Unpriced and free are both zero rates and only Pricing.Known separates
 // them. Returning nil for unpriced is what lets the trace and the spend tile
