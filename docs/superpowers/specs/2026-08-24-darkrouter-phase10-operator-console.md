@@ -383,31 +383,54 @@ well carries a legend explaining what it will show and a dimmed example.
 
 ## 7. Upstream — darkraise-ui 6.5.0
 
-Three changes, all in `/root/repositories/darkraise-web-template/packages/ui`.
+Four changes, all in `/root/repositories/darkraise-web-template/packages/ui` (6.4.0 today).
 
-**Expose the neutral surface ramps.** `graphite` is a complete `ColorScale` at
-`src/theme/palettes/surfaceColors.ts:101` — hue 210 at 3–20% saturation, exactly this language's
-ground — and is registered in the palette map. It is unreachable only because `src/theme/types.ts:24`
-reads `SURFACE_COLORS = ["slate", ...ACCENT_COLORS]`. So are `stone`, `sand`, `olive` and `sepia`:
-five neutral ramps built, shipped and impossible to select. Widening that one constant exposes all
-five, and collapses Darkrouter's surface work from a twenty-two-token override block per mode into
-`surfaceColor: "graphite"`.
+The console is built on darkraise-ui, and the mapping is close enough that most of the identity is
+an axis setting rather than a rule: `density="comfortable"` already emits a 36px cell,
+`radius="rounded"` already emits 8px, `elevation="low"` already emits this shadow ramp's geometry,
+`--font-sans` is already Inter, and the whole shell — `layout/sidebar`, `layout-header`,
+`page-header`, `brand-logo`, `user-menu` — already exists. `darkrouter-ui.css` carries the
+token-for-token mapping. What follows is the short list of things the library cannot express today.
 
-Without it, the identity's foundation is roughly forty-four `!important` declarations that a
-future library upgrade can silently strip, taking the design with it. That was named as this
-direction's fatal flaw and this change is what removes it.
+**Expose the neutral surface ramps.** Twelve neutral `ColorScale`s are built and registered in
+`src/theme/palettes/surfaceColors.ts` — slate, gray, cool, zinc, neutral, iron, mauve, graphite,
+stone, sand, olive, sepia. Exactly one is selectable, because `src/theme/types.ts:24` reads
+`SURFACE_COLORS = ["slate", ...ACCENT_COLORS]`. Widening that one constant exposes all twelve.
 
-**Repair five light-mode contrast failures.** These are library defects independent of Darkrouter:
+Warm Console wants a warm ground: `sepia` (hue 36) is a near-exact match for it and `stone` is a
+workable second. **This supersedes the earlier ask for `graphite`** — graphite is hue 210, which
+was right for the cool language this phase was first drawn in and is wrong for this one. Without
+the widening, the identity's foundation is an override block per mode that a future library upgrade
+can silently strip, taking the design with it.
+
+**Add a `coral` accent.** `ACCENT_COLORS` is eighteen named hues and coral — hsl(12, 75%, 59%),
+the brand this console adopts — sits between `red` at hue 0 and `orange` at hue 25, matching
+neither. The engine emits only `--primary`, `--primary-fill` and `--primary-foreground` from the
+accent scale, so the override is three declarations and the cost of *not* doing this is small. It
+is listed because a themeable accent is the difference between a product that picks a brand colour
+and one that patches around the theme, and because the ramp is eleven values another consumer can
+use.
+
+**Emit a third text tier.** The engine emits `--foreground` and `--muted-foreground` and stops.
+This language reads a third, quieter tier for column heads, captions and unit suffixes — `--legend`
+in `darkrouter-ui.css`. Two tiers force either a caption that competes with body text or one that
+fails its contrast floor; the light proof shows what happens when the tiers are a quarter step
+apart.
+
+**Repair the light-mode contrast failures.** These are library defects independent of Darkrouter,
+and separate from the nine repairs `darkrouter-ui.css` makes to the palette adopted from 9router —
+those correct a different vendor's values, these correct the kit's own:
 
 | Token | Light value | Measured | Required |
 |---|---|---|---|
-| `--primary` as a UI mark | sky-500 `#0DA2E7` | 2.74:1 | 3:1 |
 | `--focus-ring` | sky-200/300 | 1.28–1.58:1 | 3:1 |
 | `--success` | emerald-500 `#10B77F` | 2.48:1 | 3:1 |
 | `--warning` | amber-500 `#F59F0A` | 2.03:1 | 3:1 |
 | `--destructive` as text | red-500 | fails | 4.5:1 |
 
-`--primary` matters more than it looks: `dist/styles.css:10749` documents that form controls take
+`--primary` is a fifth, and what it measures depends on the accent chosen: at the sky this console
+was first drawn in it was 2.74:1, and at the coral it now uses it is 3.23:1 against white — over
+the 3:1 a mark is held to, under the 4.5:1 text is. Either way it matters more than it looks: `dist/styles.css:10749` documents that form controls take
 their focus indicator from `--primary` rather than `--focus-ring`, so at 2.74:1 every text field,
 select and textarea in every consuming app has a sub-3:1 focus ring in light mode. `pickForeground`
 enforces only `FOREGROUND_MIN_RATIO = 3`, which is why button labels are not AA-safe at every
