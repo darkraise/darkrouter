@@ -144,3 +144,77 @@ func TestRollupIgnoresRequestsThatNeverReachedAProvider(t *testing.T) {
 		t.Errorf("usage_daily has %d rows; a request with no provider has nothing to attribute", n)
 	}
 }
+
+func TestRollupGroupsByAlias(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
+
+	for _, alias := range []string{"fast-coder", "cheap"} {
+		rec := &RequestRecord{
+			ID: "r-" + alias, TS: ts,
+			RequestedModel: "m", ResolvedAlias: alias,
+			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Rollup(ctx, ts); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Read.QueryContext(ctx,
+		`SELECT alias, requests FROM usage_daily ORDER BY alias`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]int64{}
+	for rows.Next() {
+		var a string
+		var n int64
+		if err := rows.Scan(&a, &n); err != nil {
+			t.Fatal(err)
+		}
+		got[a] = n
+	}
+	if got["cheap"] != 1 || got["fast-coder"] != 1 {
+		t.Fatalf("want one row per alias, got %v", got)
+	}
+}
+
+func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
+
+	// 400 tokens burned failing over, 100 on the attempt that served.
+	rec := &RequestRecord{
+		ID: "r-failover", TS: ts, RequestedModel: "m",
+		FinalProviderID: "together", FinalModel: "m", TokensIn: 100,
+		Attempts: []AttemptRecord{
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider", TokensIn: 400},
+			{Seq: 2, ProviderID: "together", Model: "m", Outcome: "success", TokensIn: 100},
+		},
+	}
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Rollup(ctx, ts); err != nil {
+		t.Fatal(err)
+	}
+
+	var total int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(tokens_in), 0) FROM usage_daily`).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	// 400 from the failed attempt plus 100 from the served one. Counting only
+	// the request would report 100 and understate the day by four fifths.
+	if total != 500 {
+		t.Fatalf("want 500 tokens including the failed attempt, got %d", total)
+	}
+}
