@@ -13,6 +13,15 @@ import (
 // traffic, and a rate computed over an empty minute reads as an outage.
 const overviewWindow = 5 * time.Minute
 
+// startOfUTCDay is the day boundary the daily rollup uses (strftime's
+// '%Y-%m-%d' on a unixepoch is a UTC calendar day). A tile computed on a
+// different day boundary than the usage chart would disagree with it about
+// when "today" started.
+func startOfUTCDay(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
 type tileView struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -98,18 +107,24 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		series = []store.UsageRow{}
 	}
 
+	// The strip's other figures describe the live window; spend is labelled
+	// as the day's, so it is sourced from the day rather than from
+	// overviewWindow, or a busy gateway would report a few minutes of spend
+	// as though it were the whole day.
+	spendMicros, spendPriced, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(time.Now()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"providers":        tiles,
 		"requests_per_min": float64(stats.Requests) / (float64(stats.WindowSec) / 60),
 		"error_rate":       errRate,
 		"window_sec":       stats.WindowSec,
 		"today_spend": map[string]any{
-			"micros": stats.CostMicros,
-			// An unpriced model leaves cost_micros NULL rather than zero, so a
-			// summed total of zero is ambiguous between "no spend" and "no
-			// price data for what ran". PricedRows disambiguates: it is what
-			// zero actually means.
-			"priced": stats.PricedRows > 0,
+			"micros": spendMicros,
+			"priced": spendPriced,
 		},
 		"latency":   map[string]any{"p50_ms": p50, "p95_ms": p95},
 		"series":    series,

@@ -236,6 +236,40 @@ func TestTodaySpendAgreesWithTheUsageChartAcrossAFailover(t *testing.T) {
 	}
 }
 
+func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
+	// The tile is labelled as the day's spend. Sourcing it from the live
+	// window makes it report a few minutes and read as "today was nearly
+	// free".
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	c := int64(4200)
+	db.WriteBatchForTest(t, []*store.RequestRecord{{
+		ID: "old", TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
+		Attempts: []store.AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", CostMicros: &c,
+		}},
+	}})
+
+	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
+	var got struct {
+		TodaySpend struct {
+			Micros *int64 `json:"micros"`
+		} `json:"today_spend"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.TodaySpend.Micros == nil || *got.TodaySpend.Micros != 4200 {
+		t.Fatalf("today_spend = %v, want 4200 from an hour into the day",
+			got.TodaySpend.Micros)
+	}
+}
+
 func TestOverviewCarriesLatencySeriesAndFailovers(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)

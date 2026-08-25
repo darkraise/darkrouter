@@ -636,6 +636,43 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	return s, nil
 }
 
+// SpendSince sums cost from since through now.
+//
+// Cost is sourced the same way RecentStats and the daily rollup source it:
+// from each attempt's own cost, falling back to the request's own cost_micros
+// for requests with no attempt rows. Diverging from that shape here would
+// make this figure disagree with the usage chart about what a day cost.
+func (d *DB) SpendSince(ctx context.Context, since time.Time) (*int64, bool, error) {
+	sinceMs := since.UnixMilli()
+	var pricedRows, cost int64
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(CASE WHEN c IS NOT NULL THEN 1 ELSE 0 END), 0), coalesce(sum(c), 0)
+		   FROM (
+		     SELECT a.cost_micros AS c
+		       FROM requests r
+		       JOIN request_attempts a ON a.request_id = r.id
+		      WHERE r.ts >= ?
+		     UNION ALL
+		     SELECT r.cost_micros
+		       FROM requests r
+		      WHERE r.ts >= ?
+		        AND r.final_provider_id <> ''
+		        AND NOT EXISTS (
+		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
+		   )`, sinceMs, sinceMs).
+		Scan(&pricedRows, &cost)
+	if err != nil {
+		return nil, false, fmt.Errorf("spend since: %w", err)
+	}
+	// A nil pointer here rather than a zero: an unpriced model leaves
+	// cost_micros NULL, and a summed zero is ambiguous between "no spend" and
+	// "no price data for what ran".
+	if pricedRows == 0 {
+		return nil, false, nil
+	}
+	return &cost, true, nil
+}
+
 // LatencyPercentiles returns p50 and p95 of total_ms over the window.
 //
 // Computed in SQL with a window function rather than by loading the rows: a
