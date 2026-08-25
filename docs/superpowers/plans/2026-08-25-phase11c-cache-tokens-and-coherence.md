@@ -776,3 +776,69 @@ Run: `go build ./... && go vet ./... && go test -race ./...`
 - [ ] **Step 6: Commit**
 
 Subject: `fix(admin): make today_spend cover the day`
+
+---
+
+### Task 9: Pin the floor that everything rests on
+
+**Files:**
+- Modify: `internal/config/load_test.go`
+- Modify: `internal/admin/usage_test.go`, `internal/store/adminstore_test.go` — failure messages
+
+Deleting the rollup's shrink guard is safe for exactly one reason: the config layer cannot admit a `log.retention` below 48h, so nothing inside the rollup's two-day window is ever prunable. That reason is currently pinned by no test.
+
+Demonstrated: reverting the floor to `24*time.Hour` — the pre-fix value — with the guard still deleted leaves `internal/config` and `internal/store` both green. The rejected fixture is `6h`, which fails under either floor, and the accepted boundary is `48h`, which passes under either. So the linchpin can be regressed in one line and the suite will not notice, silently restoring the day-shrinking data loss that seven iterations went into removing.
+
+- [ ] **Step 1: Pin the floor**
+
+In `internal/config/load_test.go`, change the rejection fixture from `6h` to a value that is legal under the old floor and illegal under the new one, so the test fails if the floor ever moves back:
+
+```go
+func TestRetentionBelowTwoDaysIsRejected(t *testing.T) {
+	// The rollup rewrites yesterday and today wholesale, which is only safe
+	// while pruning cannot reach either. 24h is legal-looking and is exactly
+	// the value that reintroduces the loss, so it is the one worth pinning.
+	c := validConfigForTest()
+	c.Log.Retention = 24 * time.Hour
+	err := validate(c)
+	if err == nil {
+		t.Fatal("24h must be rejected: it leaves all of yesterday prunable")
+	}
+	if !strings.Contains(err.Error(), "log.retention") {
+		t.Fatalf("the error must name the setting, got %q", err)
+	}
+}
+```
+
+Keep the existing acceptance test at exactly `48h` — the boundary must be inclusive. Adapt the helper names to whatever the package's tests already use.
+
+- [ ] **Step 2: Run it, watch it fail against the old floor**
+
+Temporarily set the floor back to `24*time.Hour`, run `go test ./internal/config/ -run TestRetention -v`, and confirm the new test FAILS. Restore the floor to 48h and confirm it passes. Put both outputs in your report — a test that pins a constant is worthless unless you have seen it react to that constant changing.
+
+- [ ] **Step 3: Stop printing pointer addresses on failure**
+
+`TestSpendSinceCoversTheWholeDay` and `TestTodaySpendIsNotTheFiveMinuteWindow` format a `*int64` with `%v`, so a failure reads `today_spend = 0x3a92b2dc8d30, want 4200` — the address, not the value, exactly when the value is what you need. Dereference before formatting, handling nil explicitly:
+
+```go
+	got := "nil"
+	if micros != nil {
+		got = strconv.FormatInt(*micros, 10)
+	}
+```
+
+Fix every `*int64` printed with `%v` in a failure message in these two tests.
+
+- [ ] **Step 4: Harden the admin test's midnight race**
+
+`TestTodaySpendIsNotTheFiveMinuteWindow` computes the day's start itself, while the handler computes its own at request time a fraction of a second later. A UTC midnight between the two puts the seeded row before the server's day start and the test fails. The exposure is well under a second a day, but it is a real flake.
+
+Seed the row at a fixed offset that is safe on both sides of the boundary, or assert the day did not flip between seeding and the response and skip if it did. Do not simply widen the assertion until it cannot fail — that removes the coverage rather than the flake.
+
+- [ ] **Step 5: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./internal/config/ ./internal/store/ ./internal/admin/`
+
+- [ ] **Step 6: Commit**
+
+Subject: `test(config): pin the two-day retention floor`
