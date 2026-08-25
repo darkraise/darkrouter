@@ -500,7 +500,7 @@ func (s *Server) Run(ctx context.Context) error {
 	startWorker("log writer", s.logw.Run)
 	startWorker("health persister", s.persist.Run)
 	startWorker("rollup", func(c context.Context) error {
-		return store.RunRollup(c, s.db, s.store, time.Hour)
+		return store.RunRollup(c, s.db, time.Hour)
 	})
 	startWorker("retention", func(c context.Context) error {
 		return store.RunRetention(c, s.db, s.store, time.Hour)

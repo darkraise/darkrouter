@@ -6,8 +6,6 @@ import (
 	"log"
 	"math/rand"
 	"time"
-
-	"github.com/darkraise/darkrouter/internal/config"
 )
 
 // Rollup recomputes usage_daily for yesterday and today in UTC.
@@ -15,50 +13,15 @@ import (
 // Two days rather than one: a request logged just after midnight belongs to
 // yesterday, and the batching writer may not have flushed it before the day
 // turned. Recomputing yesterday on every run is what finalizes it.
-func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Duration) error {
+func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	utc := now.UTC()
 	startOfToday := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 	from := startOfToday.AddDate(0, 0, -1)
 	to := startOfToday.AddDate(0, 0, 1)
 
-	// Today only ever grows as requests land, so it is always recomputed.
-	// Yesterday is different: pruning may have removed some of its requests
-	// since its last rollup, and recomputing it blind could replace a
-	// finalized total with a smaller one. Rather than predict that from a
-	// proxy — a raw request count, say, mismatches usage_daily's tokens_in
-	// whenever the loss is entirely in failed attempts, which cost tokens
-	// but never counted toward "requests" — run yesterday's own aggregation
-	// and compare what it actually produces against what usage_daily already
-	// holds. Only a real drop freezes the day; a tie or a gain refreshes it.
-	var newTokens, oldTokens int64
-	if err := d.Read.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(t_in), 0) FROM (
-		   SELECT coalesce(a.tokens_in, 0) AS t_in
-		     FROM requests r
-		     JOIN request_attempts a ON a.request_id = r.id
-		    WHERE r.ts >= ? AND r.ts < ?
-		   UNION ALL
-		   SELECT coalesce(r.tokens_in, 0)
-		     FROM requests r
-		    WHERE r.ts >= ? AND r.ts < ?
-		      AND r.final_provider_id <> ''
-		      AND NOT EXISTS (
-		            SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
-		 )`,
-		from.UnixMilli(), startOfToday.UnixMilli(),
-		from.UnixMilli(), startOfToday.UnixMilli()).Scan(&newTokens); err != nil {
-		return fmt.Errorf("rollup: %w", err)
-	}
-	if err := d.Read.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(tokens_in), 0) FROM usage_daily WHERE day = ?`,
-		from.Format("2006-01-02")).Scan(&oldTokens); err != nil {
-		return fmt.Errorf("rollup: %w", err)
-	}
-	if newTokens < oldTokens {
-		log.Printf("rollup: %s would drop tokens_in from %d to %d; left unrecomputed",
-			from.Format("2006-01-02"), oldTokens, newTokens)
-		from = startOfToday
-	}
+	// Yesterday and today are recomputed wholesale. That is safe because
+	// log.retention is floored at two days, so pruning can never reach a row
+	// inside this window -- a recompute always sees everything the day had.
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
@@ -133,7 +96,7 @@ func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Durati
 //
 // The interval is jittered so that a restart of several services does not line
 // every worker up on the same instant.
-func RunRollup(ctx context.Context, d *DB, cfgStore *config.Store, interval time.Duration) error {
+func RunRollup(ctx context.Context, d *DB, interval time.Duration) error {
 	if interval <= 0 {
 		interval = time.Hour
 	}
@@ -142,8 +105,7 @@ func RunRollup(ctx context.Context, d *DB, cfgStore *config.Store, interval time
 		case <-ctx.Done():
 			return nil
 		case <-time.After(jitter(interval)):
-			cfg := cfgStore.Current()
-			if err := d.Rollup(ctx, time.Now(), cfg.Log.Retention); err != nil {
+			if err := d.Rollup(ctx, time.Now()); err != nil {
 				// Logged, not fatal: a missed rollup is recomputed on the next
 				// run, because finalization is idempotent.
 				log.Printf("rollup: %v", err)

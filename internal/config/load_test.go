@@ -181,24 +181,24 @@ func TestParseRejectsNonPositiveRetention(t *testing.T) {
 	}
 }
 
-func TestRetentionShorterThanADayIsRejected(t *testing.T) {
-	// The daily rollup cannot finalize a day that pruning is eating while it
-	// is still being written. Rejecting the config is honest; accepting it
-	// and silently under-reporting the day is not.
+func TestRetentionShorterThanTwoDaysIsRejected(t *testing.T) {
+	// The daily rollup rewrites yesterday and today wholesale, so pruning
+	// must never be able to reach either. Rejecting the config is honest;
+	// accepting it and silently under-reporting a day is not.
 	body := minimal + "\nlog:\n  retention: 6h\n"
 	_, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"}))
 	if err == nil {
-		t.Fatal("a retention below 24h must be rejected")
+		t.Fatal("a retention below 48h must be rejected")
 	}
 	if !strings.Contains(err.Error(), "log.retention") {
 		t.Fatalf("the error must name the setting, got %q", err)
 	}
 }
 
-func TestRetentionOfExactlyADayIsAccepted(t *testing.T) {
-	body := minimal + "\nlog:\n  retention: 24h\n"
+func TestRetentionOfExactlyTwoDaysIsAccepted(t *testing.T) {
+	body := minimal + "\nlog:\n  retention: 48h\n"
 	if _, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"})); err != nil {
-		t.Fatalf("24h is the floor and must be accepted: %v", err)
+		t.Fatalf("48h is the floor and must be accepted: %v", err)
 	}
 }
 

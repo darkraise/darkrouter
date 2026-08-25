@@ -28,7 +28,7 @@ func TestRollupAggregatesByDayProviderAndModel(t *testing.T) {
 	insertRequest(t, db, "b", now.Add(-time.Hour), "groq", "m", 5, 7, nil)
 	insertRequest(t, db, "c", now.Add(-time.Hour), "groq", "other", 1, 2, nil)
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,7 +54,7 @@ func TestRollupIsIdempotent(t *testing.T) {
 	insertRequest(t, db, "a", now.Add(-time.Hour), "groq", "m", 10, 20, nil)
 
 	for i := 0; i < 3; i++ {
-		if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+		if err := db.Rollup(ctx, now); err != nil {
 			t.Fatalf("run %d: %v", i, err)
 		}
 	}
@@ -77,7 +77,7 @@ func TestRollupKeysOnRequestStart(t *testing.T) {
 	insertRequest(t, db, "spanning", time.Date(2026, 8, 21, 23, 59, 0, 0, time.UTC),
 		"groq", "m", 10, 20, nil)
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 	var day string
@@ -95,7 +95,7 @@ func TestRollupLeavesCostNullWhenNoRequestIsPriced(t *testing.T) {
 	now := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
 	insertRequest(t, db, "a", now.Add(-time.Hour), "groq", "m", 10, 20, nil)
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 	var cost *int64
@@ -116,7 +116,7 @@ func TestRollupSumsCostWhenPricingExists(t *testing.T) {
 	insertRequest(t, db, "a", now.Add(-time.Hour), "groq", "m", 10, 20, &c1)
 	insertRequest(t, db, "b", now.Add(-time.Hour), "groq", "m", 10, 20, &c2)
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 	var cost *int64
@@ -148,7 +148,7 @@ func TestRollupAttributesAttemptTokensEvenWhenNothingServed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,7 +189,7 @@ func TestRollupGroupsByAlias(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.Rollup(ctx, ts, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, ts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +231,7 @@ func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
 	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, ts, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, ts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +270,7 @@ func TestRollupMixesAttemptBearingAndAttemptLessRequests(t *testing.T) {
 	if _, err := w.writeBatch(ctx, []*RequestRecord{withAttempt, withoutAttempt}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, ts, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, ts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -317,7 +317,7 @@ func TestRollupAttributesUsageToTheAttemptsOwnProvider(t *testing.T) {
 	if _, err := w.writeBatch(ctx, recs); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -369,7 +369,7 @@ func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -385,170 +385,48 @@ func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
 	}
 }
 
-func TestRollupSkipsADayPruningHasAlreadyTouched(t *testing.T) {
+func TestTheRollupWindowIsNeverPrunable(t *testing.T) {
+	// The rollup rewrites yesterday and today wholesale, which is only safe
+	// while pruning cannot reach either. At the retention floor it cannot,
+	// and that is what lets the rollup recompute without a shrink guard.
 	db := migrated(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
-
-	// Yesterday, finalized when it was complete.
-	if _, err := db.Write.ExecContext(ctx,
-		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
-		 VALUES (?,'groq','m','fast',100,10000)`, yesterday); err != nil {
-		t.Fatal(err)
-	}
-
-	// A remnant of yesterday that pruning has not reached yet.
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{{
-		ID: "leftover", TS: now.AddDate(0, 0, -1), ResolvedAlias: "fast",
-		FinalProviderID: "groq", FinalModel: "m", TokensIn: 7,
-		Attempts: []AttemptRecord{{
-			Seq: 0, ProviderID: "groq", Model: "m",
-			Outcome: "success", TokensIn: 7,
-		}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	// The last instant the window is still current.
+	now := time.Date(2026, 8, 25, 23, 59, 0, 0, time.UTC)
+	yStart := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
 
-	// A 24h retention means yesterday's midnight is already outside it.
-	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
-		t.Fatal(err)
-	}
-
-	var requests, tokensIn int64
-	if err := db.Read.QueryRowContext(ctx,
-		`SELECT requests, tokens_in FROM usage_daily WHERE day=?`, yesterday,
-	).Scan(&requests, &tokensIn); err != nil {
-		t.Fatal(err)
-	}
-	// Recomputing from the remnant alone would have written 1 and 7.
-	if requests != 100 || tokensIn != 10000 {
-		t.Fatalf("a partly-pruned day was recomputed from its remnant: "+
-			"requests=%d tokens_in=%d, want 100/10000", requests, tokensIn)
-	}
-}
-
-func TestADayIsFinalizedBeforeItIsFrozen(t *testing.T) {
-	db := migrated(t)
-	ctx := context.Background()
-	// 00:30 UTC: yesterday is complete and, at a 24h retention, none of it
-	// has been pruned yet. It must still be recomputable.
-	now := time.Date(2026, 8, 25, 0, 30, 0, 0, time.UTC)
-	w := NewLogWriter(db, LogOptions{})
-
-	for i, ts := range []time.Time{
-		time.Date(2026, 8, 24, 22, 0, 0, 0, time.UTC),
-		time.Date(2026, 8, 24, 23, 40, 0, 0, time.UTC),
-	} {
+	for i := 0; i < 4; i++ {
+		ts := yStart.Add(time.Duration(i*6) * time.Hour)
 		if _, err := w.writeBatch(ctx, []*RequestRecord{{
-			ID: fmt.Sprintf("r%d", i), TS: ts, ResolvedAlias: "fast",
-			FinalProviderID: "groq", FinalModel: "m", TokensIn: 5,
+			ID: fmt.Sprintf("y%d", i), TS: ts, ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
 			Attempts: []AttemptRecord{{
 				Seq: 0, ProviderID: "groq", Model: "m",
-				Outcome: "success", TokensIn: 5,
+				Outcome: "success", TokensIn: 100,
 			}},
 		}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
+	if _, err := db.Prune(ctx, now, 48*time.Hour, 72*time.Hour, 0); err != nil {
 		t.Fatal(err)
 	}
 
-	var requests, tokensIn int64
+	var n int64
 	if err := db.Read.QueryRowContext(ctx,
-		`SELECT requests, tokens_in FROM usage_daily WHERE day='2026-08-24'`,
-	).Scan(&requests, &tokensIn); err != nil {
-		t.Fatalf("yesterday was frozen before it was ever finalized: %v", err)
-	}
-	if requests != 2 || tokensIn != 10 {
-		t.Fatalf("requests=%d tokens_in=%d, want 2/10", requests, tokensIn)
-	}
-}
-
-func TestRollupNeverDropsTokensLostToPrunedFailedAttempts(t *testing.T) {
-	// Comparing request COUNTS as the safety proxy misses this: is_served
-	// only credits the attempt that succeeded, so 8 fully-failed requests
-	// contribute nothing to "requests" either before or after they are
-	// pruned. The token loss is real and only tokens_in ever shows it.
-	db := migrated(t)
-	ctx := context.Background()
-	day := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
-	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
-	w := NewLogWriter(db, LogOptions{})
-
-	var failedIDs []string
-	var recs []*RequestRecord
-	for i := 0; i < 2; i++ {
-		id := fmt.Sprintf("served-%d", i)
-		recs = append(recs, &RequestRecord{
-			ID: id, TS: day.Add(time.Duration(i) * time.Hour), ResolvedAlias: "fast",
-			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
-			Attempts: []AttemptRecord{{
-				Seq: 0, ProviderID: "groq", Model: "m",
-				Outcome: "success", TokensIn: 100,
-			}},
-		})
-	}
-	for i := 0; i < 8; i++ {
-		id := fmt.Sprintf("failed-%d", i)
-		failedIDs = append(failedIDs, id)
-		recs = append(recs, &RequestRecord{
-			ID: id, TS: day.Add(time.Duration(i) * time.Hour), ResolvedAlias: "fast",
-			Attempts: []AttemptRecord{{
-				Seq: 0, ProviderID: "groq", Model: "m",
-				Outcome: "retryable_provider", TokensIn: 1,
-			}},
-		})
-	}
-	if _, err := w.writeBatch(ctx, recs); err != nil {
+		`SELECT count(*) FROM requests`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	var requests, tokensIn int64
-	if err := db.Read.QueryRowContext(ctx,
-		`SELECT requests, tokens_in FROM usage_daily WHERE day='2026-08-24'`,
-	).Scan(&requests, &tokensIn); err != nil {
-		t.Fatal(err)
-	}
-	if requests != 2 || tokensIn != 208 {
-		t.Fatalf("finalized requests=%d tokens_in=%d, want 2/208", requests, tokensIn)
-	}
-
-	// Pruning removes the 8 failed requests wholesale: attempts first, then
-	// the request rows, mirroring retention.go's own deletion order.
-	for _, id := range failedIDs {
-		if _, err := db.Write.ExecContext(ctx,
-			`DELETE FROM request_attempts WHERE request_id = ?`, id); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.Write.ExecContext(ctx,
-			`DELETE FROM requests WHERE id = ?`, id); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := db.Rollup(ctx, now.Add(time.Hour), 24*time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Read.QueryRowContext(ctx,
-		`SELECT requests, tokens_in FROM usage_daily WHERE day='2026-08-24'`,
-	).Scan(&requests, &tokensIn); err != nil {
-		t.Fatal(err)
-	}
-	if requests != 2 || tokensIn != 208 {
-		t.Fatalf("day shrank after pruning removed only unserved rows: "+
-			"requests=%d tokens_in=%d, want 2/208 (unchanged)", requests, tokensIn)
+	if n != 4 {
+		t.Fatalf("pruning reached inside the rollup window: %d of 4 rows left", n)
 	}
 }
 
 func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
-	// The guard must not change behaviour for anyone running a sane retention.
+	// A stale row from before a schema or grouping change must not survive
+	// a recompute just because the configured retention is generous.
 	db := migrated(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -571,7 +449,7 @@ func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -588,12 +466,9 @@ func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
 }
 
 func TestTodayIsNeverPrunedAtTheRetentionFloor(t *testing.T) {
-	// Today's earliest possible request sits at today's midnight, and
-	// pruning removes anything older than now-retention. So today cannot be
-	// pruned while it is still being rolled up exactly when retention is at
-	// least 24h -- the floor config now enforces. Below the floor this same
-	// shape (requests spread across the morning, finalized once, then
-	// partly pruned by afternoon) is what silently shrinks a day's total.
+	// An end-to-end check with the real Prune, not just the arithmetic: at
+	// the retention floor, a day finalized mid-morning and pruned that same
+	// afternoon still recomputes to its full total.
 	db := migrated(t)
 	ctx := context.Background()
 	w := NewLogWriter(db, LogOptions{})
@@ -617,15 +492,15 @@ func TestTodayIsNeverPrunedAtTheRetentionFloor(t *testing.T) {
 	}
 
 	// The 08:00 rollup finalizes today at 600 tokens.
-	if err := db.Rollup(ctx, startOfToday.Add(8*time.Hour), 24*time.Hour); err != nil {
+	if err := db.Rollup(ctx, startOfToday.Add(8*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
 	// 14:00: pruning at the floor retention, then another rollup.
-	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 24*time.Hour, 24*time.Hour, 0); err != nil {
+	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 48*time.Hour, 48*time.Hour, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, startOfToday.Add(14*time.Hour), 24*time.Hour); err != nil {
+	if err := db.Rollup(ctx, startOfToday.Add(14*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -663,7 +538,7 @@ func TestRollupClearsItsWindowBeforeReinserting(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+	if err := db.Rollup(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
