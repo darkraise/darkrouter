@@ -24,6 +24,13 @@ Copy these values verbatim. Every task's requirements implicitly include this se
 
 **Pricing units.** `catalog.Pricing` is micro-dollars per **million** tokens: `InputMicrosPerMTok`, `OutputMicrosPerMTok`, `CacheReadMicrosPerMTok`, and `Known bool` which separates a free model from an unpriced one — both are zero.
 
+**There is no `db.LogRequest`.** A request row is written by building a writer and flushing a
+batch: `w := NewLogWriter(db, LogOptions{})` then
+`w.writeBatch(ctx, []*RequestRecord{rec})`. `writeBatch` is synchronous and returns
+`(int, error)`, which is what a test wants — `LogWriter.Run` is the asynchronous path and needs a
+goroutine and a drain. `internal/store/log_test.go` uses both; follow `writeBatch` for a test that
+just needs a row on disk.
+
 **Test helpers already exist; do not invent them.** `internal/store` tests get a fully-migrated
 database from `migrated(t) *DB` (89 existing uses). `internal/admin` tests use
 `testServerFull(t) (server, db)`, `login(t, s) (cookie, token)` and
@@ -356,7 +363,8 @@ func TestAttemptUsageIsPersisted(t *testing.T) {
 			TokensIn: 812, TokensOut: 0, CostMicros: &cost,
 		}},
 	}
-	if err := db.LogRequest(ctx, rec); err != nil {
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -712,7 +720,8 @@ func TestRollupGroupsByAlias(t *testing.T) {
 			RequestedModel: "m", ResolvedAlias: alias,
 			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
 		}
-		if err := db.LogRequest(ctx, rec); err != nil {
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -754,7 +763,8 @@ func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
 			{Seq: 2, ProviderID: "together", Model: "m", Outcome: "success", TokensIn: 100},
 		},
 	}
-	if err := db.LogRequest(ctx, rec); err != nil {
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Rollup(ctx, ts); err != nil {
@@ -1212,7 +1222,8 @@ func TestLatencyPercentiles(t *testing.T) {
 			RequestedModel: "m", FinalProviderID: "groq", FinalModel: "m",
 			TotalMs: &total,
 		}
-		if err := db.LogRequest(ctx, rec); err != nil {
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1239,7 +1250,8 @@ func TestRecentFailoversReturnsOnlyMultiAttemptRequests(t *testing.T) {
 				Seq: i, ProviderID: "groq", Model: "m", Outcome: "success",
 			})
 		}
-		if err := db.LogRequest(ctx, rec); err != nil {
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
