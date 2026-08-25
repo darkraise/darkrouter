@@ -727,15 +727,18 @@ a.row { text-decoration: none; }
    dimmer silhouette than "skipped", which was still a live decision.
    This one is just where the ink runs out. */
 .mark-terminated {
-  width: 5px;
-  height: 5px;
+  /* Scaled with the base mark when it went 7px -> 8px. The ratio is what
+     carries the reading: a terminated mark is visibly smaller than a live
+     one, and at 5px against an 8px base it had drifted to merely tiny. */
+  width: 6px;
+  height: 6px;
   background: transparent;
   border: 1px solid var(--border-subtle);
 }
 /* The compressed catalog reading: rank plus mark plus provider id only,
    at a size step up from the ladder's own 7px so a dense column of them
    still reads as individual marks rather than a smear. */
-.mark-catalog { width: 9px; height: 9px; }
+.mark-catalog { width: 10px; height: 10px; }
 
 /* The router expands one candidate per (provider, credential, model), so
    a provider with two configured keys legitimately earns two rows. This

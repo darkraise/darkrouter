@@ -733,15 +733,18 @@ a.row { text-decoration: none; }
    dimmer silhouette than "skipped", which was still a live decision.
    This one is just where the ink runs out. */
 .mark-terminated {
-  width: 5px;
-  height: 5px;
+  /* Scaled with the base mark when it went 7px -> 8px. The ratio is what
+     carries the reading: a terminated mark is visibly smaller than a live
+     one, and at 5px against an 8px base it had drifted to merely tiny. */
+  width: 6px;
+  height: 6px;
   background: transparent;
   border: 1px solid var(--border-subtle);
 }
 /* The compressed catalog reading: rank plus mark plus provider id only,
    at a size step up from the ladder's own 7px so a dense column of them
    still reads as individual marks rather than a smear. */
-.mark-catalog { width: 9px; height: 9px; }
+.mark-catalog { width: 10px; height: 10px; }
 
 /* The router expands one candidate per (provider, credential, model), so
    a provider with two configured keys legitimately earns two rows. This
@@ -7191,7 +7194,7 @@ body.theme-light .preset-scrim,
       <p class="prose">
         Left: three provider identity pips &mdash; what each provider IS.
         Right: the router's verdict on the same request &mdash; what it
-        DECIDED, in --trace and --bezel. A healthy provider (groq) can
+        DECIDED, in --trace and --legend. A healthy provider (groq) can
         still be skipped; a degraded one (cerebras) can still serve. State
         colour never appears in the gutter; --trace never appears on a pip.
       </p>
@@ -7209,9 +7212,9 @@ body.theme-light .preset-scrim,
       <p class="prose">
         Disabled and unconfigured take no state colour at all, because
         neither is a health reading &mdash; nobody has measured anything. They
-        split the way the ladder marks split: disabled is filled --bezel, a
+        split the way the ladder marks split: disabled is filled --legend, a
         thing that exists and is switched off; unconfigured is a hollow
-        --bezel ring, a thing with nothing in it yet.
+        --legend ring, a thing with nothing in it yet.
       </p>
       <p class="prose">
         And a fourth colour that is none of these three. CORAL is BRAND: it
@@ -7263,7 +7266,7 @@ body.theme-light .preset-scrim,
 
     <div class="region">
       <p class="section-title">Type scale</p>
-      <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Type scale &mdash; IBM Plex Sans/Mono, self-hosted. 30px ceiling enforced by qa.py.</span></p>
+      <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Type scale &mdash; Inter and IBM Plex Mono, self-hosted. 30px ceiling enforced by qa.py.</span></p>
       <div class="table">
         <div class="row">
           <span class="legend-caps">OPERATE</span>
@@ -7341,7 +7344,7 @@ body.theme-light .preset-scrim,
           <div style="padding:14px;background:var(--ground);border-radius:var(--radius)">
             <div class="panel" style="padding:10px 14px"><span class="micro">panel</span></div>
           </div>
-          <p class="spec-note">panel on ground &mdash; 1px --hairline-subtle seam</p>
+          <p class="spec-note">card on ground &mdash; border + radius + --shadow-soft</p>
         </div>
         <div>
           <div class="panel" style="padding:10px">
@@ -7349,11 +7352,11 @@ body.theme-light .preset-scrim,
               <span class="readout">142</span><span class="unit">ms</span>
             </div>
           </div>
-          <p class="spec-note">well cut into panel &mdash; value step + hairline, no shadow</p>
+          <p class="spec-note">inset region inside a card &mdash; --surface-2, quieter, not recessed</p>
         </div>
         <div>
           <div class="surface-overlay"><span class="chip">⌘K</span></div>
-          <p class="spec-note">the one permitted shadow &mdash; --shadow-overlay, on --overlay only</p>
+          <p class="spec-note">an overlay &mdash; --shadow-elevated, the menu and dialog step</p>
         </div>
         <div>
           <div style="display:flex;gap:8px">
@@ -7363,46 +7366,36 @@ body.theme-light .preset-scrim,
             </div>
             <div>
               <div class="radius-demo" style="border-radius:var(--radius)"></div>
-              <p class="spec-note">2px &mdash; spec</p>
+              <p class="spec-note">8px &mdash; --radius</p>
             </div>
             <div>
-              <div class="radius-demo" style="border-radius:4px"></div>
-              <p class="spec-note">4px</p>
+              <div class="radius-demo" style="border-radius:var(--radius-lg)"></div>
+              <p class="spec-note">12px &mdash; --radius-lg</p>
             </div>
           </div>
         </div>
       </div>
       <p class="prose">
-        In light mode, --overlay carries the same hex as --panel &mdash;
-        its lift comes entirely from --shadow-overlay and the 1px
-        --hairline border, not from sitting brighter than what is behind
-        it. Dark mode is unchanged: dark --overlay is already brighter
-        than --panel on its own. Either way, a well cut into an overlay
-        steps down to --well exactly as a well cut into a panel does, so
-        a dropdown's search box or a dialog's data region reads the same
-        recessed value everywhere in the product.
+        An overlay is a card lifted further, not a different kind of surface:
+        it takes --surface-2 and --shadow-elevated, and in light mode where
+        there is no room to go brighter than a white card, the shadow and the
+        border do the whole job. An inset region behaves the same wherever it
+        appears &mdash; a dropdown's search box and a dialog's data region read
+        the same value as one inside a card on the page.
       </p>
     </div>
 
     <div class="region">
       <p class="prose">
-        RULING &mdash; the well is a value step and a hairline, and nothing
-        else. Spec &sect;3.3 also describes a 1px inset light at the top and
-        dark at the bottom, and a graticule behind every well. Neither is
-        implemented: the inset is a bevel, which is elevation, and this
-        language spends its whole elevation budget on one shadow; the
-        graticule is drawn only where it means something, which is behind a
-        chart, and behind a table it would be decoration competing with the
-        rows. A recessed surface here is a value step plus a border, in both
-        modes, and the light proof shows what that costs.
-      </p>
-      <p class="prose">
-        RULING &mdash; radius is 2px on everything except two marks that are
-        circles: the cooling mark's centre dot and the stale-discovery ring.
-        Both are round because roundness is doing work &mdash; each has to
-        read as a different shape from the square pip beside it at 6 and 7
-        pixels, where a 2px radius and a circle are the only two silhouettes
-        that survive. A circle used as a corner treatment is still a bug.
+        RULING &mdash; radius is a scale, not a constant: 4px on a small box,
+        6px on a chip, 8px on a card, 12px on the chrome. It matches
+        darkraise-ui's --radius at data-radius="rounded" and Tailwind's
+        derived md/sm exactly, so the implementation sets one axis and writes
+        no radius rule. Two marks are true circles because roundness is doing
+        work &mdash; the cooling mark's centre dot and the stale-discovery ring
+        each have to read as a different shape from the square pip beside them
+        at 7 and 8 pixels. A circle used as a corner treatment is still a bug,
+        and so is --radius on a mark small enough that 8px makes it one.
       </p>
 
               <p class="prose">
@@ -7600,11 +7593,11 @@ body.theme-light .preset-scrim,
         </div>
       </div>
       <p>
-        <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Termination rule &mdash; below the served row the spine drops to --hairline-subtle and marks go hollow-5px at 45% opacity. Spec &sect;4.</span>
+        <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Termination rule &mdash; below the served row the spine drops to --border-subtle and marks go hollow-6px at 45% opacity. Spec &sect;4.</span>
       </p>
       <p class="prose">
         Ranks 04&ndash;08 were never attempted &mdash; the router stopped at rank
-        03. Their marks shrink to a 5px hollow square in --hairline-subtle,
+        03. Their marks shrink to a 6px hollow square in --border-subtle,
         the spine beneath them drops to the same dim token, and their text
         sits at 45% opacity. The right margin carries a latency bar scaled
         to the ladder's own maximum (rank 02's 30,000ms timeout), which is
@@ -7699,7 +7692,7 @@ body.theme-light .preset-scrim,
         Every mark here is hollow &mdash; a dry-run sends nothing, so nothing
         can be filled. Rank 02 and rank 06 carry the two skip reasons that
         would apply if this request ran right now; the other six are plain
-        --bezel hollow squares with no reason at all, since a dry run has
+        --legend hollow squares with no reason at all, since a dry run has
         no basis to predict past the top of the ladder. No stub, no
         latency bar &mdash; both describe an attempt, and none occurred.
       </p>
@@ -7708,7 +7701,7 @@ body.theme-light .preset-scrim,
     <div class="region">
       <p class="section-title">Mode 3 &mdash; compressed (models catalog)</p>
       <p class="prose">
-        The same vocabulary at catalog density: rank, a 9px mark, provider
+        The same vocabulary at catalog density: rank, a 10px mark, provider
         id, nothing else. Eight rows read as a barcode of sigils &mdash; the
         shape of the fleet at a glance, without a single word. The router
         expands one candidate per (provider, credential, model), so a
@@ -7786,7 +7779,7 @@ body.theme-light .preset-scrim,
           <div style="display:flex;align-items:center;justify-content:center;width:120px;height:64px">
             <span class="mark mark-skipped" style="transform:scale(4)"></span>
           </div>
-          <p class="spec-note" style="width:190px">skipped &mdash; hollow 7px, 1px --bezel, no fill, spine runs through undisturbed</p>
+          <p class="spec-note" style="width:190px">skipped &mdash; hollow 8px, 1px --legend, no fill, spine runs through undisturbed</p>
           <div class="ladder" style="width:190px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
               <span class="rank rank-tick">01</span>
@@ -7802,7 +7795,7 @@ body.theme-light .preset-scrim,
           <div style="display:flex;align-items:center;justify-content:center;width:120px;height:64px">
             <span class="mark mark-cooling" style="transform:scale(4)"></span>
           </div>
-          <p class="spec-note" style="width:300px">skipped, cooling &mdash; hollow 7px stroked --state-cooling, no fill</p>
+          <p class="spec-note" style="width:300px">skipped, cooling &mdash; hollow 8px stroked --state-cooling, no fill</p>
           <div class="ladder" style="width:300px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
               <span class="rank rank-tick">02</span>
@@ -8167,12 +8160,12 @@ body.theme-light .preset-scrim,
             </div>
 
           </div>
-          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
         </div>
 
         <div class="region">
           <p class="section-title">Routing flow &middot; last 24h</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
           <p class="prose rf-lede">
             Left, the aliases traffic arrived under. Right, the eight configured
             providers in the order the router walks them, top to bottom by
@@ -8318,7 +8311,7 @@ body.theme-light .preset-scrim,
 
         <div class="region">
           <p class="section-title">Recent failovers</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
           <div class="table">
 
             <a class="row" href="#01M0T2CSMRANE2FTX7RS3JV8CB">
@@ -8360,7 +8353,7 @@ body.theme-light .preset-scrim,
         </div>
 
         <div class="region">
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
           <p class="ops-footer">
             <span class="mono">v0.9.3</span> &middot;
             <span class="mono">up 6d 14h</span> &middot;
@@ -8427,14 +8420,14 @@ body.theme-light .preset-scrim,
       </header>
       <main class="content">
 
-        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
+        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
         <div class="saved-views">
           <span class="view-chip">failovers only</span>
           <span class="view-chip">errors today</span>
           <span class="view-chip">passthrough misses</span>
         </div>
 
-        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Filter bar &mdash; GET /api/requests?provider=&amp;model=&amp;alias=&amp;status=&amp;surface=&amp;since_ms=&amp;until_ms=. alias/since_ms/until_ms are accepted today and unreachable from the current UI.</span></p>
+        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Filter bar &mdash; GET /api/requests?provider=&amp;model=&amp;alias=&amp;status=&amp;surface=&amp;since_ms=&amp;until_ms=. alias/since_ms/until_ms are accepted today and unreachable from the current UI.</span></p>
         <div class="filter-bar">
 
           <div class="combo" data-open="true" style="min-width:190px">
@@ -8507,7 +8500,7 @@ body.theme-light .preset-scrim,
         </div>
 
         <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}. Status stays state colour &mdash; an outcome, whether it's a provider's health or a request's result. The failover chip stays trace/accent-ink &mdash; a routing choice among alternatives, not an outcome.</span></p>
-        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
+        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
         <div class="table-toolbar">
           <span class="micro">14 of 4,909 requests</span>
           <div class="table-toolbar-actions">
@@ -8527,7 +8520,7 @@ body.theme-light .preset-scrim,
           </div>
         </div>
 
-        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
+        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
         <div class="table-wrap">
           <span class="newer-pill">▲ 3 newer</span>
           <div class="table">
@@ -10367,8 +10360,8 @@ body.theme-light .preset-scrim,
             </div>
 
             <div class="preset-modal-body">
-              <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Overlay &mdash; the one place in the product with a shadow: 0 8px 24px -8px. Spec &sect;3.3.</span></p>
-              <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><b class="pin" data-pin="3">3</b><span class="pin-note">1-3 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
+              <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Overlay &mdash; the one place in the product with a shadow: 0 8px 24px -8px. Spec &sect;3.3.</span></p>
+              <p><b class="pin" data-pin="2">2</b><b class="pin" data-pin="3">3</b><b class="pin" data-pin="4">4</b><span class="pin-note">2-4 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
 
               <div class="preset-browse">
 
@@ -10478,7 +10471,7 @@ body.theme-light .preset-scrim,
                 </div>
                 <div class="well preset-form">
                   <div>
-                    <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/providers {id,preset}. The preset supplies kind, base_url, auth_style, declared surfaces, quirks, model traits and the models.dev join key.</span></p>
+                    <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; POST /api/providers {id,preset}. The preset supplies kind, base_url, auth_style, declared surfaces, quirks, model traits and the models.dev join key.</span></p>
                     <label class="legend-caps preset-field-label" for="preset-new-id">provider id</label>
                     <input class="field-input" id="preset-new-id--s-08-preset-browser" value="cerebras">
                     <p class="preset-field-note">Prefilled from the preset id and editable. This is the only field you type &mdash; it becomes the provider's key in routing and the left half of every <span class="mono">provider/model</span> pair it serves.</p>
@@ -10657,7 +10650,7 @@ body.theme-light .preset-scrim,
 
             <div class="preset-modal-foot">
               <span class="preset-counts">197 presets &middot; 186 openaicompat &middot; 7 anthropic &middot; 2 vertex &middot; 1 gemini &middot; 1 bedrock</span>
-              <span><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Counts &mdash; derived from the preset list.</span></span>
+              <span><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Counts &mdash; derived from the preset list.</span></span>
             </div>
           </div>
 
@@ -11048,7 +11041,7 @@ body.theme-light .preset-scrim,
             </div>
           </div>
 
-          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; inferred &mdash; an inferred model routes with a warning, so a guessed row must be visibly a guess.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; inferred &mdash; an inferred model routes with a warning, so a guessed row must be visibly a guess.</span></p>
           <p class="prose">
             Two rows here were inferred: no models.dev entry, no usable
             discovery response, so darkrouter guessed from the id and the
@@ -11067,7 +11060,7 @@ body.theme-light .preset-scrim,
         <!-- ============ Region 3 — removed_upstream ============ -->
         <div class="region">
           <p class="section-title">Retired models</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; state is live|stale|removed_upstream. Filter.IncludeRemoved exists and nothing calls it.</span></p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; state is live|stale|removed_upstream. Filter.IncludeRemoved exists and nothing calls it.</span></p>
           <div class="retired-band">
             <span class="switch" data-on="false">
               <span class="switch-track"><span class="switch-knob"></span></span>
@@ -11119,7 +11112,7 @@ body.theme-light .preset-scrim,
         <!-- ============ Regions 4 and 5 — detail sheet ============ -->
         <div class="region">
           <p class="section-title">Model detail sheet &mdash; open</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Detail &mdash; providers[] in route order via POST /api/route/preview. Override editor writes GET/PUT/DELETE /api/models/{provider}/{model}/override &mdash; the model_overrides table sits at the top of the merge precedence and has never had a writer.</span></p>
           <div class="sheet">
 
             <div class="sheet-head">
@@ -11432,7 +11425,7 @@ body.theme-light .preset-scrim,
         <!-- ============ Region 6 — aliases ============ -->
         <div class="region">
           <p class="section-title">Aliases &mdash; read only</p>
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Aliases &mdash; edited on configure/routing, not here.</span></p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Aliases &mdash; edited on configure/routing, not here.</span></p>
           <div class="panel" style="padding:var(--section-pad)">
             <div class="table">
               <div class="row row-head">
@@ -12771,7 +12764,7 @@ def ulid_ms(ulid: str) -&gt; int:
 
         </div>
 
-        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Sync toggle &mdash; locked means one variable (the model), unlocked means the operator accepts two.</span></p>
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync toggle &mdash; locked means one variable (the model), unlocked means the operator accepts two.</span></p>
         <div class="panel pgc-sync">
           <span class="switch" data-on="true">
             <span class="switch-track"><span class="switch-knob"></span></span>
@@ -12787,7 +12780,7 @@ def ulid_ms(ulid: str) -&gt; int:
         </div>
 
         <p class="section-title" style="margin-top:var(--gutter)">Two panes</p>
-        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Comparison &mdash; ttft_ms, total_ms, tokens_in/out, cost_micros per pane. Winner marks use --trace: a reading, not a health state.</span></p>
+        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Comparison &mdash; ttft_ms, total_ms, tokens_in/out, cost_micros per pane. Winner marks use --trace: a reading, not a health state.</span></p>
         <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Each pane's X-Darkrouter-Request links to its own trace.</span></p>
 
         <svg class="pgc-fanout" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="the shared prompt feeds both panes">
@@ -14099,7 +14092,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
     <div class="region">
       <p class="section-title">Identity mark</p>
-      <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Identity mark &mdash; inline SVG built from rects on a 24 grid, two tokens only: a --bezel hairline and one --trace pip. No curve, no gradient, no fetched file, so the favicon, the rail brand and the 96px sign-in mark are one figure at three scales rather than three assets to keep in step.</span></p>
+      <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Identity mark &mdash; inline SVG built from rects on a 24 grid, two tokens only: a --legend hairline and one --trace pip. No curve, no gradient, no fetched file, so the favicon, the rail brand and the 96px sign-in mark are one figure at three scales rather than three assets to keep in step.</span></p>
 
       <div class="panel login-mark-board">
 

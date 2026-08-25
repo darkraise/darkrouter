@@ -115,12 +115,12 @@
             </div>
 
           </div>
-          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
         </div>
 
         <div class="region">
           <p class="section-title">Routing flow &middot; last 24h</p>
-          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to the &sect;8.2 group_by=alias|provider usage extension. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
           <p class="prose rf-lede">
             Left, the aliases traffic arrived under. Right, the eight configured
             providers in the order the router walks them, top to bottom by
@@ -266,7 +266,7 @@
 
         <div class="region">
           <p class="section-title">Recent failovers</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
           <div class="table">
 
             <a class="row" href="#01M0T2CSMRANE2FTX7RS3JV8CB">
@@ -308,7 +308,7 @@
         </div>
 
         <div class="region">
-          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
           <p class="ops-footer">
             <span class="mono">v0.9.3</span> &middot;
             <span class="mono">up 6d 14h</span> &middot;
