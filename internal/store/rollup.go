@@ -10,76 +10,63 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
-// defaultLogRetention mirrors config's own default so a caller that forgets
-// to pass a retention gets the safe behaviour rather than an empty window.
-const defaultLogRetention = 720 * time.Hour
-
 // Rollup recomputes usage_daily for yesterday and today in UTC.
 //
 // Two days rather than one: a request logged just after midnight belongs to
 // yesterday, and the batching writer may not have flushed it before the day
 // turned. Recomputing yesterday on every run is what finalizes it.
 func (d *DB) Rollup(ctx context.Context, now time.Time, logRetention time.Duration) error {
-	if logRetention <= 0 {
-		logRetention = defaultLogRetention
-	}
 	utc := now.UTC()
 	startOfToday := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 	from := startOfToday.AddDate(0, 0, -1)
 	to := startOfToday.AddDate(0, 0, 1)
 
-	// A day whose midnight has left the retention window is not necessarily
-	// missing anything yet: it is flagged as AT RISK, not as pruned. A day
-	// gets its first usage_daily row long before midnight, while it is still
-	// "today", so presence of a row cannot tell a merely-stale day (still
-	// fully backed by requests) from one pruning has actually eaten into.
-	// The direct check is whether recomputing would shrink it: if the
-	// requests table still holds at least as many rows for the day as its
-	// last rollup recorded, nothing has been lost and the refresh is safe.
-	// Only an actual shrink means the guard's danger — replacing a finalized
-	// total with a smaller one — is real, and the day is frozen instead.
-	originalFrom := from
-	cutoff := utc.Add(-logRetention)
-	cutoffDay := time.Date(cutoff.Year(), cutoff.Month(), cutoff.Day(),
-		0, 0, 0, 0, time.UTC)
-	if safeFrom := cutoffDay.AddDate(0, 0, 1); safeFrom.After(from) {
-		var storedRequests int64
-		if err := d.Read.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(requests), 0) FROM usage_daily WHERE day = ?`,
-			from.Format("2006-01-02")).Scan(&storedRequests); err != nil {
-			return fmt.Errorf("rollup: %w", err)
-		}
-		var availableRequests int64
-		if err := d.Read.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM requests WHERE ts >= ? AND ts < ?`,
-			from.UnixMilli(), from.AddDate(0, 0, 1).UnixMilli()).Scan(&availableRequests); err != nil {
-			return fmt.Errorf("rollup: %w", err)
-		}
-		if availableRequests < storedRequests {
-			from = safeFrom
-		}
+	// Today only ever grows as requests land, so it is always recomputed.
+	// Yesterday is different: pruning may have removed some of its requests
+	// since its last rollup, and recomputing it blind could replace a
+	// finalized total with a smaller one. Rather than predict that from a
+	// proxy — a raw request count, say, mismatches usage_daily's tokens_in
+	// whenever the loss is entirely in failed attempts, which cost tokens
+	// but never counted toward "requests" — run yesterday's own aggregation
+	// and compare what it actually produces against what usage_daily already
+	// holds. Only a real drop freezes the day; a tie or a gain refreshes it.
+	var newTokens, oldTokens int64
+	if err := d.Read.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(t_in), 0) FROM (
+		   SELECT coalesce(a.tokens_in, 0) AS t_in
+		     FROM requests r
+		     JOIN request_attempts a ON a.request_id = r.id
+		    WHERE r.ts >= ? AND r.ts < ?
+		   UNION ALL
+		   SELECT coalesce(r.tokens_in, 0)
+		     FROM requests r
+		    WHERE r.ts >= ? AND r.ts < ?
+		      AND r.final_provider_id <> ''
+		      AND NOT EXISTS (
+		            SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
+		 )`,
+		from.UnixMilli(), startOfToday.UnixMilli(),
+		from.UnixMilli(), startOfToday.UnixMilli()).Scan(&newTokens); err != nil {
+		return fmt.Errorf("rollup: %w", err)
 	}
-	if !from.Before(to) {
-		// Retention is shorter than a day, so no day can be rolled up whole.
-		// Saying so once per run beats an empty usage table with no
-		// explanation.
-		log.Printf("rollup: log.retention %s leaves no complete day to roll up", logRetention)
-		return nil
+	if err := d.Read.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(tokens_in), 0) FROM usage_daily WHERE day = ?`,
+		from.Format("2006-01-02")).Scan(&oldTokens); err != nil {
+		return fmt.Errorf("rollup: %w", err)
 	}
-	if from.After(originalFrom) {
-		log.Printf("rollup: log.retention %s excludes %s; "+
-			"days older than the retention window are not recomputed",
-			logRetention, originalFrom.Format("2006-01-02"))
+	if newTokens < oldTokens {
+		log.Printf("rollup: %s would drop tokens_in from %d to %d; left unrecomputed",
+			from.Format("2006-01-02"), oldTokens, newTokens)
+		from = startOfToday
 	}
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
 	// key wrote: upserting alone would leave the old row behind and double the
 	// day permanently. But the clear only reaches days the requests table can
-	// still rebuild: retention prunes requests well before usage_daily's
-	// retention, so a finalized day can enter this window with nothing left
-	// to recompute it from, and clearing it unconditionally would erase it
-	// for good.
+	// still rebuild: a day with nothing left in requests simply never appears
+	// in the DELETE's day list, so a row with no current backing survives
+	// untouched instead of being erased for good.
 	tx, err := d.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("rollup: %w", err)

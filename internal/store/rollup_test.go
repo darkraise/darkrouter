@@ -468,6 +468,85 @@ func TestADayIsFinalizedBeforeItIsFrozen(t *testing.T) {
 	}
 }
 
+func TestRollupNeverDropsTokensLostToPrunedFailedAttempts(t *testing.T) {
+	// Comparing request COUNTS as the safety proxy misses this: is_served
+	// only credits the attempt that succeeded, so 8 fully-failed requests
+	// contribute nothing to "requests" either before or after they are
+	// pruned. The token loss is real and only tokens_in ever shows it.
+	db := migrated(t)
+	ctx := context.Background()
+	day := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	w := NewLogWriter(db, LogOptions{})
+
+	var failedIDs []string
+	var recs []*RequestRecord
+	for i := 0; i < 2; i++ {
+		id := fmt.Sprintf("served-%d", i)
+		recs = append(recs, &RequestRecord{
+			ID: id, TS: day.Add(time.Duration(i) * time.Hour), ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", TokensIn: 100,
+			}},
+		})
+	}
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("failed-%d", i)
+		failedIDs = append(failedIDs, id)
+		recs = append(recs, &RequestRecord{
+			ID: id, TS: day.Add(time.Duration(i) * time.Hour), ResolvedAlias: "fast",
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "retryable_provider", TokensIn: 1,
+			}},
+		})
+	}
+	if _, err := w.writeBatch(ctx, recs); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day='2026-08-24'`,
+	).Scan(&requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || tokensIn != 208 {
+		t.Fatalf("finalized requests=%d tokens_in=%d, want 2/208", requests, tokensIn)
+	}
+
+	// Pruning removes the 8 failed requests wholesale: attempts first, then
+	// the request rows, mirroring retention.go's own deletion order.
+	for _, id := range failedIDs {
+		if _, err := db.Write.ExecContext(ctx,
+			`DELETE FROM request_attempts WHERE request_id = ?`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Write.ExecContext(ctx,
+			`DELETE FROM requests WHERE id = ?`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := db.Rollup(ctx, now.Add(time.Hour), 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day='2026-08-24'`,
+	).Scan(&requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || tokensIn != 208 {
+		t.Fatalf("day shrank after pruning removed only unserved rows: "+
+			"requests=%d tokens_in=%d, want 2/208 (unchanged)", requests, tokensIn)
+	}
+}
+
 func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
 	// The guard must not change behaviour for anyone running a sane retention.
 	db := migrated(t)
