@@ -1,0 +1,186 @@
+/* Light proof (fragments/17-light-proof.html) — "Graticule Bench".
+ *
+ * The board is pinned light by .force-light from darkrouter-ui.css, so this
+ * partial declares layout and specimen geometry only. It never declares a
+ * colour that is not already a token: a proof screen that painted its own
+ * values would be proving something other than the shipped stylesheet.
+ */
+
+.lp-board {
+  padding: var(--gutter);
+  border-radius: var(--radius);
+}
+
+/* --- Region 1: well polarity ------------------------------------------ */
+
+/* The two modes get equal width and equal treatment. Anything that differs
+   between the halves below is the finding; anything that matches is layout. */
+.lp-split {
+  display: flex;
+  gap: var(--gutter);
+  align-items: stretch;
+}
+.lp-half {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--section-pad);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.lp-card { padding: var(--section-pad); }
+
+.lp-well {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+  margin-top: 8px;
+}
+
+/* A measured reading, not a caption: mono because it came off the render. */
+.lp-measure {
+  margin: 8px 0 0;
+  color: var(--legend);
+}
+
+/* The word the reading resolves to. Emphasis by value step rather than by
+   weight or size, because a 12.5px emphasis face inside an 11px micro line
+   would break the type scale to make one word louder. */
+.lp-verdict { color: var(--ink); }
+
+/* --- Region 3: the five repaired tokens -------------------------------- */
+
+/* Five columns rather than a .table row, because each token carries a
+   before and an after and both need a swatch beside their ratio. Fixed
+   column widths keep the two ratio columns aligned down the block, which
+   is the comparison the region exists to make. */
+.lp-repair-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 84px 1fr 84px;
+  align-items: center;
+  gap: var(--section-pad);
+  min-height: var(--row-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--hairline-subtle);
+}
+.lp-repair-row:last-child { border-bottom: none; }
+
+.lp-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Ratios right-align on the colon so the before and after columns can be
+   read as two stacks of numbers rather than ten separate labels. */
+.lp-ratio {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lp-ratio-fail { color: var(--state-failed); }
+.lp-ratio-pass { color: var(--state-healthy); }
+
+/* A token §7 names by palette step without giving a hex. Rendering a swatch
+   would mean inventing the value, so the slot stays empty and says so. */
+.lp-no-specimen {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius);
+}
+
+/* --- Region 4: input focus -------------------------------------------- */
+
+.lp-fields {
+  display: flex;
+  gap: var(--gutter);
+  align-items: flex-start;
+}
+.lp-field { flex: 1 1 0; min-width: 0; }
+
+/* The focused-field treatment from the preset browser, with the ring colour
+   left to a modifier: this region's whole point is that the ring is the one
+   thing that changes between the two specimens. */
+.lp-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 10px;
+  outline-offset: 1px;
+}
+.lp-input-shipped {
+  border-color: var(--shipped-primary);
+  outline: 1px solid var(--shipped-primary);
+}
+.lp-input-repaired {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+
+.lp-caret {
+  width: 1px;
+  height: 15px;
+  margin-left: -4px;
+}
+.lp-caret-shipped { background: var(--shipped-primary); }
+.lp-caret-repaired { background: var(--focus); }
+
+/* --- Region 5: cooling headroom --------------------------------------- */
+
+/* The scale(4) box is the state gallery's idiom from the ladder specimen,
+   kept identical so the two screens' enlargements are the same enlargement. */
+.lp-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  height: 64px;
+}
+
+.lp-headroom {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+  flex-wrap: wrap;
+}
+
+/* The 0.02 the cooling mark clears the floor by, drawn to scale: a 300px
+   bar spanning 3.00:1 to 3.20:1 with the measurement sitting near its left
+   edge. Printing "3.02:1" states the margin; drawing it shows how little
+   of the bar it is. */
+.lp-gauge {
+  position: relative;
+  width: 300px;
+  height: 20px;
+  background: var(--well);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.lp-gauge-floor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--state-failed);
+}
+.lp-gauge-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--state-cooling);
+}
+.lp-gauge-caption {
+  display: flex;
+  justify-content: space-between;
+  width: 300px;
+  margin-top: 4px;
+}
+
+/* --- Region 6: charts in light ---------------------------------------- */
+
+.lp-chart-panel { padding: var(--section-pad); }
