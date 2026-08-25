@@ -572,11 +572,13 @@ func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, commit
 	if a.TokensIn != 0 || a.TokensOut != 0 {
 		return
 	}
-	if rec.TokensIn == 0 && rec.TokensOut == 0 {
+	if rec.TokensIn == 0 && rec.TokensOut == 0 &&
+		rec.CacheReadTokens == 0 && rec.CacheWriteTokens == 0 &&
+		rec.ReasoningTokens == 0 {
 		return
 	}
-	// applyUsage accumulates onto the shared record as events arrive, so at
-	// this point it holds what this attempt burned before it failed. Moving it
+	// applyUsage assigns onto the shared record as events arrive, so at this
+	// point it holds what this attempt burned before it failed. Moving it
 	// onto the attempt's own row is what lets the burn be priced at the
 	// provider that incurred it, and what stops the next attempt inheriting it.
 	a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
@@ -786,8 +788,9 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			// The same model at the same rates on the same tokens. Re-pricing
 			// it separately drops the cache-read and cache-write components the
 			// attempt row has no columns for, and the two cost surfaces stop
-			// agreeing.
-			if rec.CostMicros != nil {
+			// agreeing. Guarded on actual tokens so a serving attempt that burned
+			// nothing keeps a nil cost rather than a confident zero.
+			if rec.CostMicros != nil && (a.TokensIn != 0 || a.TokensOut != 0) {
 				c := *rec.CostMicros
 				a.CostMicros = &c
 			}
