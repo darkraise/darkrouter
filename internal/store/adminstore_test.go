@@ -753,11 +753,43 @@ func TestRecentFailoversReturnsOnlyMultiAttemptRequests(t *testing.T) {
 	mk("one", 1)
 	mk("three", 3)
 
-	got, err := db.RecentFailovers(ctx, 5)
+	got, err := db.RecentFailovers(ctx, time.Hour, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].ID != "three" || got[0].Attempts != 3 {
 		t.Fatalf("want only the 3-attempt request, got %+v", got)
+	}
+}
+
+func TestRecentFailoversExcludesOnesOlderThanTheWindow(t *testing.T) {
+	// A quiet gateway must not show a month-old failover on the live overview
+	// as though it just happened.
+	db := migrated(t)
+	ctx := context.Background()
+	mk := func(id string, ts time.Time) {
+		rec := &RequestRecord{
+			ID: id, TS: ts, RequestedModel: "m",
+			FinalProviderID: "groq", FinalModel: "m",
+		}
+		for i := 1; i <= 3; i++ {
+			rec.Attempts = append(rec.Attempts, AttemptRecord{
+				Seq: i, ProviderID: "groq", Model: "m", Outcome: "success",
+			})
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("stale", time.Now().Add(-2*time.Hour))
+	mk("fresh", time.Now())
+
+	got, err := db.RecentFailovers(ctx, time.Hour, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "fresh" {
+		t.Fatalf("want only the failover inside the window, got %+v", got)
 	}
 }

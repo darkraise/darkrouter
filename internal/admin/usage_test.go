@@ -212,6 +212,73 @@ func TestOverviewCarriesLatencySeriesAndFailovers(t *testing.T) {
 	}
 }
 
+func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
+	// The console builds against these shapes next; a capitalised Go field
+	// name slipping into the same payload as "requests_per_min" would
+	// fossilize an inconsistency no consumer asked for.
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
+		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
+		 VALUES ('2026-08-25','groq','m',5,7,10,20)`); err != nil {
+		t.Fatal(err)
+	}
+	db.WriteBatchForTest(t, []*store.RequestRecord{{
+		ID: "01F", TS: time.Now(), RequestedModel: "m",
+		FinalProviderID: "groq", FinalModel: "m",
+		Attempts: []store.AttemptRecord{
+			{Seq: 1, ProviderID: "other", Model: "m", Outcome: "error"},
+			{Seq: 2, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}})
+
+	body := getOverview(t, s, cookie, token)
+	_ = body // sanity that the typed decode above still succeeds
+
+	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
+	var raw map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	series, ok := raw["series"].([]any)
+	if !ok || len(series) == 0 {
+		t.Fatalf("series = %v", raw["series"])
+	}
+	seriesRow, ok := series[0].(map[string]any)
+	if !ok {
+		t.Fatalf("series[0] = %v", series[0])
+	}
+	for _, k := range []string{"day", "requests", "attempts", "tokens_in", "tokens_out", "cost_micros"} {
+		if _, ok := seriesRow[k]; !ok {
+			t.Errorf("series row missing %q: %v", k, seriesRow)
+		}
+	}
+	for _, k := range []string{"Day", "Requests", "Attempts", "TokensIn", "TokensOut", "CostMicros", "Key"} {
+		if _, ok := seriesRow[k]; ok {
+			t.Errorf("series row carries capitalised key %q: %v", k, seriesRow)
+		}
+	}
+
+	failovers, ok := raw["failovers"].([]any)
+	if !ok || len(failovers) == 0 {
+		t.Fatalf("failovers = %v", raw["failovers"])
+	}
+	failoverRow, ok := failovers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("failovers[0] = %v", failovers[0])
+	}
+	for _, k := range []string{"id", "ts", "alias", "final_provider_id", "final_model", "attempts", "total_ms"} {
+		if _, ok := failoverRow[k]; !ok {
+			t.Errorf("failover row missing %q: %v", k, failoverRow)
+		}
+	}
+	for _, k := range []string{"ID", "TS", "Alias", "FinalProviderID", "FinalModel", "Attempts", "TotalMs"} {
+		if _, ok := failoverRow[k]; ok {
+			t.Errorf("failover row carries capitalised key %q: %v", k, failoverRow)
+		}
+	}
+}
+
 func TestUsageGroupByAlias(t *testing.T) {
 	s, db := testServerFull(t)
 	cookie, token := login(t, s)
@@ -240,6 +307,41 @@ func TestUsageGroupByAlias(t *testing.T) {
 	}
 	if len(got.Days) != 1 || got.Days[0].Key != "fast-coder" || got.Days[0].Requests != 7 {
 		t.Fatalf("want one fast-coder row of 7, got %+v", got.Days)
+	}
+}
+
+func TestUsageGroupByCarriesAttemptsAlongsideRequests(t *testing.T) {
+	// requests counts only the attempt that served, so a provider that failed
+	// every time reads as requests: 0. Without attempts in the payload it
+	// looks like the provider did nothing rather than having burned tokens on
+	// every failed try.
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
+		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
+		 VALUES ('2026-08-25','flaky','m',0,7,140,0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := do(t, s, cookie, token, "GET", "/api/usage?group_by=provider", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Days []struct {
+			Key      string `json:"key"`
+			Requests int64  `json:"requests"`
+			Attempts int64  `json:"attempts"`
+		} `json:"days"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Days) != 1 || got.Days[0].Key != "flaky" {
+		t.Fatalf("want one flaky row, got %+v", got.Days)
+	}
+	if got.Days[0].Requests != 0 || got.Days[0].Attempts != 7 {
+		t.Errorf("want requests=0 attempts=7, got %+v", got.Days[0])
 	}
 }
 
