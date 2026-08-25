@@ -531,3 +531,169 @@ Subject: `fix(admin): tag json and bound the failover scan`
 **What the schema supports and the adapters do not yet.** A failed attempt only carries tokens if the adapter surfaced usage before the failure. Most do not today, so in practice failed attempts will often contribute `0` tokens and a NULL cost. That is honest — the column is there, the attribution is right, and the number improves as adapters learn to report partial usage. Do not "fix" this by inventing an estimate.
 
 **Where the double-count hid.** Attempt usage no longer replaces request usage; the two sources are now mutually exclusive by construction — a request either has attempt rows (attributed per attempt) or does not (its own counts, one row). The `UNION ALL`'s `NOT EXISTS` is what keeps them exclusive, and removing it would double every legacy request.
+
+---
+
+### Task 6: Make the recorded attempt outcome truthful
+
+**Files:**
+- Modify: `internal/exec/exec.go` — the attempt-result switch
+- Test: `internal/exec/exec_test.go`
+
+**Interfaces:**
+- Produces: at most one attempt per request carries `Outcome == "success"`, and it is the attempt that actually served.
+
+`recordAttempt` (`exec.go:512`) stores the HTTP classification optimistically — a 2xx becomes `success` before the body is read or forwarded. Most pre-commit failures rewrite that: `reclassifyStream` (`exec.go:672`), `failedParse` (`embed.go:111`), `chatOp` (`surface.go:142`). Two paths do not: `forwardUnary` (`forward.go:239`) and `speechOp.Respond` (`speech.go:68`) both return `OutcomeRetryableProvider` after an upstream 200, and nothing writes that back onto the attempt row.
+
+The failure: a passthrough unary request gets a 200, the body read fails mid-transfer, the attempt row keeps `success`, the loop fails over, and the next provider serves — leaving TWO attempts marked `success`. `sum(is_served)` then counts one request as two, and `priceRecord`'s loop, which breaks at the first zero-token `success`, attributes the request's tokens and cost to the provider that failed.
+
+Fixing it at the switch site covers both paths and any future one, rather than patching each caller.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestAPreCommitForwardFailureDoesNotStaySuccess(t *testing.T) {
+	// The attempt row is recorded from the HTTP status before the body is
+	// read. A 200 whose body then fails is a failover, and a row still
+	// marked success makes the rollup count one request as two.
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if got := rec.Attempts[0].Outcome; got != string(adapter.OutcomeRetryableProvider) {
+		t.Fatalf("outcome = %q, want retryable_provider", got)
+	}
+}
+
+func TestACommittedAttemptKeepsItsSuccess(t *testing.T) {
+	// Once bytes have reached the client the chain ends and the attempt DID
+	// serve, whatever the op reports afterwards.
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, true)
+
+	if got := rec.Attempts[0].Outcome; got != string(adapter.OutcomeSuccess) {
+		t.Fatalf("a committed attempt must stay success, got %q", got)
+	}
+}
+```
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/exec/ -run 'TestAPreCommitForward|TestACommittedAttempt' -v`
+Expected: FAIL — `demoteLastAttempt` does not exist.
+
+- [ ] **Step 3: Implement**
+
+Add the helper and call it from the switch site in `attempt`, immediately after the switch and before the `cw.Committed()` check:
+
+```go
+// The attempt row is written from the HTTP status before the body is read,
+// so a 200 that fails while forwarding is recorded as a success it never
+// was. A committed attempt keeps its success: bytes reached the client and
+// the chain ends there regardless of what the op reports afterwards.
+func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, committed bool) {
+	if committed || outcome == adapter.OutcomeSuccess {
+		return
+	}
+	if n := len(rec.Attempts); n > 0 {
+		rec.Attempts[n-1].Outcome = string(outcome)
+	}
+}
+```
+
+Call it as `demoteLastAttempt(rec, outcome, cw.Committed())`.
+
+Leave the existing rewrites in `reclassifyStream`, `embed.go` and `surface.go` alone — they set an Error string too, and demoting an already-demoted attempt is a no-op.
+
+- [ ] **Step 4: Run the package**
+
+Run: `go test -race ./internal/exec/`
+
+- [ ] **Step 5: Commit**
+
+Subject: `fix(exec): demote an attempt that never served`
+
+---
+
+### Task 7: Stop the rollup wiping days it cannot recompute
+
+**Files:**
+- Modify: `internal/store/rollup.go`
+- Test: `internal/store/rollup_test.go`
+
+The rollup clears its two-day window before reinserting, which is what keeps a widened key from leaving stale rows behind. But it clears unconditionally and recomputes only from surviving `requests` rows. `Prune` (`internal/store/retention.go`) deletes requests older than `log.retention`, and `log.retention` is validated only as positive (`internal/config/load.go:162`) — `24h` is legal.
+
+The failure: with a 24h retention, yesterday's requests are pruned overnight; the next hourly rollup deletes yesterday's `usage_daily` rows and re-inserts nothing. The daily aggregate, whose entire purpose is to outlive the raw logs, is permanently gone. The old upsert left such rows untouched.
+
+Clear only the days the recompute can actually rebuild.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// A finalized day: its rollup exists, its raw requests are long gone.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
+		 VALUES (?,'groq','m','fast',42,4200)`, yesterday); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, tokensIn int64
+	err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day=?`, yesterday,
+	).Scan(&requests, &tokensIn)
+	if err != nil {
+		t.Fatalf("the day's rollup was destroyed: %v", err)
+	}
+	if requests != 42 || tokensIn != 4200 {
+		t.Fatalf("requests=%d tokens_in=%d, want 42/4200", requests, tokensIn)
+	}
+}
+```
+
+- [ ] **Step 2: Run it, watch it fail**
+
+Run: `go test ./internal/store/ -run TestRollupKeepsADay -v`
+Expected: FAIL with "the day's rollup was destroyed: sql: no rows in result set".
+
+- [ ] **Step 3: Narrow the delete**
+
+Restrict it to days the window still has requests for, so a day with nothing left to recompute keeps what it already holds:
+
+```sql
+DELETE FROM usage_daily
+ WHERE day IN (
+       SELECT DISTINCT strftime('%Y-%m-%d', ts / 1000, 'unixepoch')
+         FROM requests
+        WHERE ts >= ? AND ts < ?)
+```
+
+Keep the same `from`/`to` parameters the insert uses, and keep both statements in the one transaction.
+
+- [ ] **Step 4: Run the package**
+
+Run: `go test -race ./internal/store/`
+
+Every existing rollup test must still pass — in particular the one asserting a stale `alias=''` row does not survive a recompute, which is the behaviour this delete exists for and which a day WITH requests must still get.
+
+- [ ] **Step 5: Commit**
+
+Subject: `fix(store): keep rollups for pruned days`
