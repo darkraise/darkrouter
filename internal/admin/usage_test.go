@@ -205,7 +205,7 @@ func TestTodaySpendAgreesWithTheUsageChartAcrossAFailover(t *testing.T) {
 			{Seq: 2, ProviderID: "b", Model: "m", Outcome: "success", CostMicros: &servedCost},
 		},
 	}})
-	if err := db.Rollup(context.Background(), now, time.Hour); err != nil {
+	if err := db.Rollup(context.Background(), now); err != nil {
 		t.Fatal(err)
 	}
 

@@ -82,7 +82,7 @@ func TestRollupSeesTokensTheExecutorActuallyLogged(t *testing.T) {
 	cancel()
 	<-runDone
 
-	if err := db.Rollup(context.Background(), time.Now(), 720*time.Hour); err != nil {
+	if err := db.Rollup(context.Background(), time.Now()); err != nil {
 		t.Fatalf("rollup: %v", err)
 	}
 
