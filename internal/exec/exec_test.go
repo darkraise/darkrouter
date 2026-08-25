@@ -1591,6 +1591,81 @@ func TestACrossDialectCandidateTakesTheIRPath(t *testing.T) {
 	}
 }
 
+func TestAPreCommitForwardFailureDoesNotStaySuccess(t *testing.T) {
+	// The attempt row is recorded from the HTTP status before the body is
+	// read. A 200 whose body then fails is a failover, and a row still
+	// marked success makes the rollup count one request as two.
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if got := rec.Attempts[0].Outcome; got != string(adapter.OutcomeRetryableProvider) {
+		t.Fatalf("outcome = %q, want retryable_provider", got)
+	}
+}
+
+func TestACommittedAttemptKeepsItsSuccess(t *testing.T) {
+	// Once bytes have reached the client the chain ends and the attempt DID
+	// serve, whatever the op reports afterwards.
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, true)
+
+	if got := rec.Attempts[0].Outcome; got != string(adapter.OutcomeSuccess) {
+		t.Fatalf("a committed attempt must stay success, got %q", got)
+	}
+}
+
+func TestAPassthroughUnaryMidBodyFailureDemotesTheFirstAttempt(t *testing.T) {
+	// The first provider answers with a 200 whose declared Content-Length is
+	// never satisfied, so forwardUnary's io.ReadAll fails after the row was
+	// already recorded success from the status line alone. The chain must
+	// fail over to the second provider, and the first row must not be left
+	// claiming it served the request.
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"truncated`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"served"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer second.Close()
+
+	rec, w := runChatTwoProviders(t, first.URL, second.URL, "anthropic",
+		`{"model":"target-model","max_tokens":16,
+		  "messages":[{"role":"user","content":"hi"}]}`)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if !strings.Contains(w.Body.String(), "served") {
+		t.Errorf("the second provider did not serve it: %s", w.Body)
+	}
+	if len(rec.Attempts) != 2 {
+		t.Fatalf("attempts = %+v", rec.Attempts)
+	}
+	if rec.Attempts[0].Outcome == string(adapter.OutcomeSuccess) {
+		t.Errorf("first attempt kept success after a mid-body failure: %+v", rec.Attempts[0])
+	}
+	if rec.Attempts[1].Outcome != string(adapter.OutcomeSuccess) {
+		t.Errorf("second attempt = %q, want success", rec.Attempts[1].Outcome)
+	}
+}
+
 func TestAPreCommit400IsRetriedThroughTheIRPath(t *testing.T) {
 	// spec §9: a strict provider rejecting a field the IR path would have
 	// dropped must not become a hard failure with no failover.
