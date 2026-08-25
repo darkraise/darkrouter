@@ -144,6 +144,35 @@ func TestARetriedProviderAttributesUsageToTheAttemptThatServed(t *testing.T) {
 	}
 }
 
+func TestAFailedProvidersTokensAreNotStampedOnTheNextOne(t *testing.T) {
+	// A stream can report usage and then fail pre-commit. Those tokens stay
+	// on the shared record; they belong to the provider that burned them,
+	// never to whoever serves the retry.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 5000, TokensOut: 0, // carried over from the failed attempt
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "other", Model: "x",
+				Outcome: "retryable_provider", TokensIn: 5000},
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if got := rec.Attempts[1].TokensIn; got == 5000 {
+		t.Fatalf("the serving attempt was billed the failed provider's 5000 tokens")
+	}
+	if rec.Attempts[1].TokensIn != 0 || rec.Attempts[1].TokensOut != 0 {
+		t.Fatalf("the serving attempt must stay at zero when usage is unattributable, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[1].CostMicros != nil {
+		t.Fatalf("an attempt with no tokens must not inherit the request's cost, got %d",
+			*rec.Attempts[1].CostMicros)
+	}
+}
+
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
 // total leaves the default of 10m in place. It is a thin wrapper over
 // newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
