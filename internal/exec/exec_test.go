@@ -222,6 +222,59 @@ func TestADemotedAttemptKeepsItsOwnBurn(t *testing.T) {
 	}
 }
 
+func TestACacheOnlyBurnDoesNotFollowTheFailover(t *testing.T) {
+	// After the adapters subtract cached tokens from the input count, a fully
+	// cached prompt legitimately has in=0 with a large cache read. Treating
+	// "no in/out" as "nothing burned" leaves that on the shared record for
+	// whoever serves next.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{CacheReadTokens: 3000})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if rec.CacheReadTokens != 0 {
+		t.Fatalf("the record kept %d cache reads that belonged to the failed attempt",
+			rec.CacheReadTokens)
+	}
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.CostMicros != nil && *rec.CostMicros != 0 {
+		t.Fatalf("the serving provider was billed %d micros it did not burn",
+			*rec.CostMicros)
+	}
+}
+
+func TestAServingAttemptWithNoUsageStaysUnpriced(t *testing.T) {
+	// A non-NULL zero is authoritative downstream: the rollup reads it as
+	// "this cost nothing", not as "this is unknown".
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeRetryableProvider), TokensIn: 500,
+	})
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.Attempts[1].CostMicros != nil {
+		t.Fatalf("a serving attempt that burned nothing must stay unpriced, got %d",
+			*rec.Attempts[1].CostMicros)
+	}
+}
+
 func TestTheServingProviderIsNotBilledAnotherProvidersTokens(t *testing.T) {
 	// The production shape: recordAttempt never writes attempt tokens, so a
 	// guard that reads them cannot see anything.
