@@ -145,31 +145,58 @@ func TestARetriedProviderAttributesUsageToTheAttemptThatServed(t *testing.T) {
 }
 
 func TestAFailedProvidersTokensAreNotStampedOnTheNextOne(t *testing.T) {
-	// A stream can report usage and then fail pre-commit. Those tokens stay
-	// on the shared record; they belong to the provider that burned them,
-	// never to whoever serves the retry.
+	// demoteLastAttempt moves a failed attempt's burn onto its own row and
+	// zeroes the record before the retry starts, so by the time the retry
+	// reports its own usage nothing of the failed provider's is left on the
+	// record for it to inherit.
 	e := newPricedExecutor(t)
-	rec := &store.RequestRecord{
-		FinalProviderID: "groq", FinalModel: "m",
-		TokensIn: 5000, TokensOut: 0, // carried over from the failed attempt
-		Attempts: []store.AttemptRecord{
-			{Seq: 0, ProviderID: "other", Model: "x",
-				Outcome: "retryable_provider", TokensIn: 5000},
-			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
-		},
-	}
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 5000, OutputTokens: 0})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 400, OutputTokens: 200})
+
 	e.priceRecord(rec)
 
 	if got := rec.Attempts[1].TokensIn; got == 5000 {
 		t.Fatalf("the serving attempt was billed the failed provider's 5000 tokens")
 	}
-	if rec.Attempts[1].TokensIn != 0 || rec.Attempts[1].TokensOut != 0 {
-		t.Fatalf("the serving attempt must stay at zero when usage is unattributable, got %d/%d",
+	if rec.Attempts[1].TokensIn != 400 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt must carry only its own usage, got %d/%d",
 			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
 	}
-	if rec.Attempts[1].CostMicros != nil {
-		t.Fatalf("an attempt with no tokens must not inherit the request's cost, got %d",
-			*rec.Attempts[1].CostMicros)
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+}
+
+func TestDemoteLastAttemptSurvivesAMismatchedSecondOutcome(t *testing.T) {
+	// The idempotency guard must hold even when a second demote call for the
+	// same attempt surfaces a different outcome than the first one moved. A
+	// guard keyed on the outcome string would miss that and re-run the
+	// transfer against the now-zeroed record, wiping the usage it already
+	// moved.
+	rec := &store.RequestRecord{TokensIn: 5000, TokensOut: 120}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+	demoteLastAttempt(rec, adapter.OutcomeFatal, false)
+
+	if rec.Attempts[0].TokensIn != 5000 || rec.Attempts[0].TokensOut != 120 {
+		t.Fatalf("a second demote with a different outcome wiped the moved usage, got %d/%d",
+			rec.Attempts[0].TokensIn, rec.Attempts[0].TokensOut)
 	}
 }
 
@@ -219,6 +246,41 @@ func TestTheServingProviderIsNotBilledAnotherProvidersTokens(t *testing.T) {
 	}
 	if rec.Attempts[0].TokensIn != 5000 {
 		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+}
+
+func TestBothProvidersInAFailoverKeepTheirOwnBurn(t *testing.T) {
+	// The shape no test covered: the failed attempt reported usage AND the
+	// retry reported its own. Aggregates read attempt rows, so a serving
+	// attempt left at zero is spend that reaches no total anywhere.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 5000, OutputTokens: 120})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 800, OutputTokens: 200})
+
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+	if rec.Attempts[1].TokensIn != 800 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt reaches no aggregate: %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[1].CostMicros == nil {
+		t.Fatal("the serving attempt was left unpriced")
 	}
 }
 
