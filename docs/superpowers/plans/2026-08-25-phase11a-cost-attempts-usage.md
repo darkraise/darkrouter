@@ -782,6 +782,45 @@ func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
 		t.Fatalf("want 500 tokens including the failed attempt, got %d", total)
 	}
 }
+
+func TestRollupMixesAttemptBearingAndAttemptLessRequests(t *testing.T) {
+	// Both requests land in ONE (day, provider, model, alias) group: one has
+	// attempt rows, the other has none. This is the case a per-aggregate
+	// coalesce gets wrong -- SUM ignores NULL, so the attempt-bearing request
+	// alone decides the total and the other request's tokens disappear.
+	db := migrated(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
+	w := NewLogWriter(db, LogOptions{})
+
+	withAttempts := &RequestRecord{
+		ID: "r-att", TS: ts, RequestedModel: "m",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
+		Attempts: []AttemptRecord{
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success", TokensIn: 100},
+		},
+	}
+	withNone := &RequestRecord{
+		ID: "r-none", TS: ts, RequestedModel: "m",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 50,
+	}
+	if _, err := w.writeBatch(ctx, []*RequestRecord{withAttempts, withNone}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Rollup(ctx, ts); err != nil {
+		t.Fatal(err)
+	}
+
+	var total int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(tokens_in), 0) FROM usage_daily`).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	// 100 from the attempt-bearing request plus 50 from the attempt-less one.
+	if total != 150 {
+		t.Fatalf("want 150, got %d -- the attempt-less request's tokens were dropped", total)
+	}
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -816,8 +855,15 @@ row, not three:
 		        -- adding to them: the served attempt already carries what the
 		        -- request reports, so adding both would double it. A request
 		        -- with no attempt rows falls back to its own.
-		        coalesce(sum(au.a_in),  sum(r.tokens_in),  0),
-		        coalesce(sum(au.a_out), sum(r.tokens_out), 0),
+		        -- The inner coalesce runs PER ROW, before aggregation. Written
+		        -- as coalesce(sum(au.a_in), sum(r.tokens_in), 0) it would be
+		        -- two independent aggregates, and SUM ignores NULL rather than
+		        -- propagating it -- so one attempt-bearing request in the group
+		        -- makes sum(au.a_in) non-NULL and every attempt-less request's
+		        -- tokens are DROPPED, not added. Verified: 100 where 150 is
+		        -- right. The cost line below always had the per-row shape.
+		        coalesce(sum(coalesce(au.a_in,  r.tokens_in)),  0),
+		        coalesce(sum(coalesce(au.a_out, r.tokens_out)), 0),
 		        CASE WHEN count(coalesce(au.a_cost, r.cost_micros)) = 0 THEN NULL
 		             ELSE sum(coalesce(au.a_cost, r.cost_micros)) END
 		   FROM requests r
