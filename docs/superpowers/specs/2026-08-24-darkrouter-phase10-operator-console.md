@@ -40,171 +40,103 @@ nothing in the codebase ever writes `request_bodies`, and the trace drawer's Bod
 therefore permanently empty. Phase 10 makes the panel say so plainly rather than rendering an
 empty box that reads as a bug. Wiring the writer is its own decision about storing prompt content
 on disk.
+## 3. Design language — Warm Console
 
-## 3. Design language — Graticule Bench
+The identity is adopted from **9router** (`github.com/decolua/9router`), whose dashboard is the
+reference the owner named. A warm near-black chassis, coral brand, generously rounded surfaces
+that stack upward from the ground, Inter throughout the chrome, and a faint accent graticule
+behind the page. The console reads as a piece of software someone maintains rather than an
+instrument someone calibrated.
 
-The console is a benchtop instrument that has been switched on and left running. A milled graphite
-panel, silkscreened legends, and one cold blue trace that is the only thing in the frame allowed
-to glow. The operator is reading a fixed set of gauges whose positions never move; the interface
-earns trust by being boring exactly where a measuring device is boring — the panel never animates,
-the chrome never competes, the numbers never reflow.
+Values are taken from `src/app/globals.css` verbatim wherever they measured clean, and repaired
+where they did not. Nine did not: 9router's light mode ships a success green at 2.54:1 and an
+amber at 2.15:1 — both under the 3:1 floor that applies to a shape and not merely to text — and
+its brand at text size reaches 3.23:1. `fragments/17-light-proof.html` shows all nine beside the
+values that replace them, and the repair is part of the adoption, not a deviation from it.
 
-The structural idea is the **well**. Every data region is recessed into the panel, and it always
-sits at the extreme end of the value range while the panel sits mid-range: darker than the panel
-in dark mode, brighter in light. The consequence is that the readout always carries the highest
-text contrast in the frame and the containers carry the least. Over each well lies a faint
-graticule — the etched grid of a scope screen — which doubles as the gridline for every chart and
-the rhythm for every table, so charts and tables share one substrate instead of each inventing
-their own.
-
-This is right for Darkrouter because the product's whole claim is that a routing decision is
-reconstructible. A console that looks like a recording makes the implicit promise that what you
-are seeing *is* a recording, not a summary.
+The structural idea is **elevation**. The ground is the darkest surface in dark mode and the
+palest in light; a card sits on the ground, an inset region sits on the card, and every step is
+lighter than the one beneath it. Cards are separated by a gutter and carry a border, a radius and
+a soft shadow. This replaces the previous language's recessed **well**, and the consequence is
+deliberate and stated: light mode here is a palette swap rather than a polarity inversion, so the
+light proof measures whether the palette holds its floors rather than whether the ordering flips.
 
 ### 3.1 Colour
 
-Two colour systems that must never be confused, which is the one rule the whole palette exists to
-protect:
+Colour answers three different questions and never blurs them.
 
-- **State** — green, amber, red — describes what a provider *is*: healthy, cooling, failed.
-- **Accent** — sky — is what the *router decided*: the path taken, the selected row, the served
-  candidate.
+**Coral is BRAND.** `--accent` `#E56A4A` marks where you are in the navigation and which control
+is the primary action on a screen. It says nothing about the state of the system. It is kept out
+of the ladder gutter and off every status pip on purpose: coral sits between amber and red in hue,
+so a coral routing mark beside an amber cooling mark and a red failure would put three warm hues
+in one column doing three unrelated jobs.
 
-These are orthogonal. A healthy provider can be skipped and a degraded one can serve. The ladder's
-gutter therefore says what the router decided and a separate pip in the identity column says what
-the provider was, and neither borrows the other's colour.
+**`--trace` is the router's VERDICT.** A cool blue — `#60A5FA` dark, `#2563EB` light — for what
+the router *decided* among viable alternatives: the served row, the gutter mark, the failover
+chip.
 
-| Role | Dark | Light |
-|---|---|---|
-| Ground — page canvas | `#101214` | `#E5E8EB` |
-| Rail — sidebar | `#14171A` | `#EEF0F2` |
-| Panel — cards, tables, headers | `#191C1F` | `#F9FAFB` |
-| Overlay — dialogs, popovers | `#22262A` | `#FFFFFF` |
-| Well — charts, ladders, JSON, code | `#090A0C` | `#FFFFFF` |
-| Ink — body and data text | `#EBEDF0` | `#1A2128` |
-| Ink muted — reasons, timestamps | `#98A1A9` | `#5A636D` |
-| Legend — engraved caps | `#808A93` | `#68737D` |
-| Hairline subtle — row separators | `#272B2F` | `#DDE0E4` |
-| Hairline — panel seams | `#383D43` | `#C3C9D0` |
-| Bezel — control boundaries, ticks | `#6A737C` | `#818C98` |
-| Trace — accent as mark and stroke | `#3ABFF8` | `#0284C5` |
-| Trace fill — primary button | `#0777AB` | `#0DA2E7` |
-| Accent ink — accent as readable text | `#3ABFF8` | `#0369A0` |
-| Focus ring | `#7ED4FC` | `#0284C5` |
+**State colours are provider IDENTITY.** Green, amber and red for what a provider *is*: healthy,
+degraded, failed. A provider pip carries one of the four states `GET /api/overview` emits —
+healthy, degraded, disabled, unconfigured — and `degraded` is not a synonym for `cooling`: a
+credential cools, a provider degrades.
 
-Ground is deliberately neither black nor white. Black is the cyberpunk tell and white is the SaaS
-tell; hue 210 at very low saturation reads as anodised metal rather than navy. Every neutral
-carries the same 210 hue so the system sits on one axis.
+Three carve-outs exist and only three, each named on the design-language screen: the **destructive
+affordance** (`--state-failed` on a control that removes something), the **request outcome**
+(`--state-healthy` / `--state-failed` on a finished request or probe), and **attention**
+(`--state-cooling` on a condition that is neither a failure nor a provider state — a stale sweep,
+a warning chip, a dangling alias, a value not yet set). A state colour used for anything not on
+that list is a bug.
 
-Three splits in this table do real work. **Hairline subtle versus Bezel**: a table row is
-identified by its content, not its rule, so row separators stay at 1.56:1 where a louder rule
-would stripe the data — while anything that is the *sole* boundary of an interactive control steps
-up to Bezel at 3.27:1 worst case. That split is how the system stays WCAG-clean without shouting.
-**Trace versus Accent ink**: separating "accent that must be visible" from "accent that must be
-readable" is what lets light mode work, since sky-600 suffices as a mark and needs sky-700 as
-text. **Trace versus Trace fill**: the fill is the `calm` accentIntensity value, and that choice
-is load-bearing for accessibility rather than taste — see §7.
-
-Measured contrast, dark: ink on panel 14.59:1, ink on well 16.89:1, muted on panel 6.52:1, legend
-4.87:1, trace on panel 8.14:1, bezel 3.55:1, white on trace fill 4.96:1, focus 10.36:1. Light: ink
-on panel 15.55:1, ink on ground 13.21:1, muted on ground 4.96:1, legend 4.63:1, accent ink 5.69:1,
-trace as mark 4.11:1, bezel 3.27:1, focus on ground 3.34:1. All eighty-nine pairs were recomputed
-from the hex values by an independent reviewer; none were overstated.
-
-Colour-vision note, recorded because it was measured and argued: sky sits 39–41° from emerald and
-about 160° from amber and red, and holds its blue identity under protanopia and deuteranopia —
-roughly 99.5% of colour-vision deficiency — while all three state colours collapse toward the
-yellow axis. Under **tritanopia** sky separates from the healthy emerald by only dE 9.6 in light,
-where indigo would hold at 26.0. Sky was chosen anyway, on the grounds that indigo-500 is the most
-used accent in AI tooling and the anti-generic constraint is also real. The mitigation is
-structural, not chromatic: every ladder state is carried by silhouette first (§4), so the ladder
-reads correctly with no colour at all.
+Brand gets one further allowance: `--shadow-warm`, the coral-tinted shadow, is spent only on the
+brand mark in the sidebar. Nothing else in the product may use it.
 
 ### 3.2 Typography
 
-Two families, both IBM Plex, both SIL OFL, self-hosted via `@fontsource/ibm-plex-mono` and
-`@fontsource/ibm-plex-sans` rather than linked from `fonts.googleapis.com` — matching the
-precedent `darkraise-ui` set when it dropped its Orbitron import. Five faces.
-
-**Data face — IBM Plex Mono (400, 500, 600)** carries the overwhelming majority of the console:
-model ids, request ULIDs, provider slugs, latencies, token counts, costs, JSON, headers, ladder
-rows, every numeric readout. Chosen over JetBrains Mono for three concrete reasons: its slashed
-zero and serifed *l* are unambiguous at 11px; it is roughly 4% narrower per glyph, so a
-26-character ULID and an id like `anthropic/claude-opus-4-20250514` fit a column without
-truncation; and its drafting-pen terminals carry engineering provenance rather than IDE-default
-provenance. Tabular figures are the default and are never disabled.
-
-**Prose face — IBM Plex Sans (400, 600)** is restricted to running prose: settings descriptions,
-empty states, dialog copy, error explanations, onboarding. Not table content, not labels, not
-numbers.
-
-The boundary is stated as a semantic test rather than a negative rule, because "prose only" erodes
-under review pressure and this does not: **mono means this came off the wire; sans means a person
-is telling you something.** A reviewer can apply that to any specific string.
-
-Inter is rejected. It is the default-by-inertia UI face, and its presence signals that no
-typographic decision was made.
-
-Scale — labels are small and quiet, readings are large and loud, and nothing is larger than a
-reading:
+**Inter** carries the console and **IBM Plex Mono** carries the data. This is the one rule kept
+from the previous language, and it is kept because a gateway console is mostly machine output:
+mono means *this came off the wire*, Inter means *the console is telling you something*.
 
 | Role | Spec |
 |---|---|
-| Legend | 10px / Sans 600 / +0.09em / uppercase |
+| Legend | 10px / Inter 600 / +0.09em / uppercase |
 | Micro data | 11px / Mono 400 / tabular |
-| Table and body data | 12.5px / Mono 400 / 1.45 / tabular |
-| Emphasis data | 12.5px / Mono 500 |
-| Prose | 13.5px / Sans 400 / 1.55 |
-| Section title | 12px / Sans 600 / +0.06em / uppercase |
-| Page title | 15px / Sans 600 |
+| Nav item | 13px / Inter 500 |
+| Table and body data | 13px / Mono 400 / 1.5 / tabular |
+| Emphasis data | 13px / Mono 500 |
+| Prose | 14px / Inter 400 / 1.5 |
+| Section title | 16px / Inter 600 / −0.01em / sentence case |
+| Page title | 20px / Inter 600 / −0.015em |
 | Primary readout | 30px / Mono 600 / tabular / −0.015em |
 
-Nothing exceeds 30px anywhere in the product. No hero type, no display weights, no marketing
-scale — an instrument has no headlines. The page title is deliberately small because a page title
-is a label, not a headline, and it is set as the route itself in lowercase mono: `operate/requests`,
-`configure/routing`.
-
-Numerals are tabular everywhere, always. Units are set at 10px in Legend immediately after the
-value with no space — `142ms`, `1.2k`, `$0.0021` — so the number keeps its optical weight. Numeric
-columns right-align on the decimal; identifier columns left-align and truncate from the middle
-(`anthropic/cla…-20250514`) so both vendor prefix and version suffix survive.
+Nothing exceeds 30px anywhere. Numerals are tabular always. Units set at 10px in `--legend`
+immediately after the value with no space. Numeric columns right-align; identifier columns
+truncate from the middle. The uppercase small-caps role survives only as `.legend-caps`, on nav
+groups and column heads, where the label really is a legend and not a title.
 
 ### 3.3 Surface
 
-**Radius** is 2px on everything — buttons, inputs, chips, panels. A machined edge-break; 8px would
-import the paper metaphor this language rejects. Note that the library's `sharp` axis value binds
-`--radius: 0` and the next rung is 4px, so 2px is set by overriding the token directly rather than
-by picking an axis value.
+Radius runs **4 / 8 / 10 / 14px** by element size. A mark under 10px keeps a 2px corner so its
+silhouette still reads — a 10px radius on an 8px mark is a circle, and the ladder's square-versus-
+round distinction is load-bearing.
 
-**Elevation** is flat. `--shadow-card: none`. There is exactly one shadow in the product, on the
-overlay surface: a single hard offset, `0 8px 24px -8px rgba(0,0,0,0.7)` dark and
-`rgba(15,23,41,0.18)` light. Dropdowns and dialogs are panels lifted off the chassis; everything
-else is machined into it.
+Elevation is real and is spent in five places, and nowhere else: `--shadow-soft` on a card,
+`--shadow-elevated` under a menu or dialog, `--shadow-elev` for the one lifted panel that also
+carries an inset highlight, `--shadow-warm` on the brand mark, and `--shadow-focus` — a 3px coral
+ring at 18% alpha — on a focused control. The ring is a wash and carries no contrast; the solid
+1px coral border underneath it is what distinguishes focused from resting.
 
-**Separation** is a value step plus a hairline, never a shadow. Panel to ground is a 1.10:1 (dark)
-or 1.18:1 (light) luminance step plus a 1px seam.
-
-**Wells** get the sunken surface, a 1px rim, a 1px inset light at top and dark at bottom —
-inverted from the panel's engraving, which is what makes them read as cut in rather than sitting
-on — and the graticule background. `controlDepth: recessed` delivers the same treatment to inputs,
-selects and textareas from a shipped axis, so one metaphor covers both data regions and controls
-with no bespoke CSS.
-
-**Density** is compact: 30px table rows, 30px form controls, a 44px top bar, a 200px rail, 12px
-section padding. The gap between a panel and its neighbour is 1px — a shared seam — so panels tile
-into a continuous chassis instead of floating as separate cards. Gutters appear only between the
-three nav groups.
+Density is roomy: 36px table rows, 36px controls, a 64px header, a 288px sidebar with a
+`blur(20px)` vibrancy backdrop, 40px page padding, and a 1280px measure so tables do not run the
+full width of a wide monitor. Cards tile with a gutter, never a shared seam. A 40px accent
+graticule at 4% (dark) / 8% (light) sits behind each screen — scoped to the screen rather than the
+viewport, so it ends where the content ends.
 
 ### 3.4 Motion
 
-Essentially none. No page transitions, no card entrances, no skeleton shimmer, no spinners. Three
-permitted animations: a 120ms opacity fade on hover state layers, a 160ms height transition on
-disclosure, and a 90ms cross-fade on a live value swap so a changing latency figure does not
-flicker.
-
-Loading is a 2px determinate bar in the accent at the top of the well. An instrument shows
-acquisition progress, not a wait cursor. This also replaces the current `if (!data) return null`
-pattern, which paints a blank screen on every load of the overview.
+Four movements only: **150ms** opacity/colour on hover, **200ms** height on disclosure, **90ms**
+cross-fade on a live value swap, and a **press-scale** of 0.97 on a control being clicked. No page
+transitions, no entrances, no shimmer, no spinners. Loading is a 2px determinate bar in `--trace`
+at the top of a card.
 
 ### 3.5 Identity mark
 
@@ -223,9 +155,16 @@ strip and unmistakably not a rounded square with a letter in it. At 512px it is 
 routing ladder, so the logo and the product's central component are the same drawing.
 
 Monochrome fallback: the served path becomes a 2px solid rule, the skipped stubs become 1px dashed
-rules, the pip stays a filled square. Wordmark is the mark, a 12px gap, then `darkrouter` in Plex
-Mono 500 lowercase at +0.02em in Ink — never in the accent, because the accent is a reading and a
+rules, the pip stays a filled square. Wordmark is the mark, a 12px gap, then `darkrouter` in Inter
+600 lowercase at −0.01em in Ink — never in the accent, because the accent is a reading and a
 product name is not a reading.
+
+In the console the mark is presented the way 9router presents its own: centred in a 36px tile at
+`--radius`, filled with a coral gradient and carrying `--shadow-warm`, the mark itself drawn in
+white. The tile is the adopted treatment; the drawing inside it stays Darkrouter's, because a
+routing ladder is the one thing a generic hub glyph cannot say. The spine is drawn in three
+segments — a single rule from top to bottom fills the 1px cores of both hollow squares, and the
+two skip marks would render solid and read as served.
 
 ## 4. The routing ladder
 

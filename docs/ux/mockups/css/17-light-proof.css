@@ -49,22 +49,25 @@
    would break the type scale to make one word louder. */
 .lp-verdict { color: var(--ink); }
 
-/* --- Region 3: the five repaired tokens -------------------------------- */
+/* --- Region 1: the nine repairs ---------------------------------------
 
-/* Five columns rather than a .table row, because each token carries a
-   before and an after and both need a swatch beside their ratio. Fixed
-   column widths keep the two ratio columns aligned down the block, which
-   is the comparison the region exists to make. */
+   Five columns: the token, which mode it is in, the shipped value with its
+   ratio, the repaired value with its ratio, and one line saying why. Both
+   ratio columns are fixed-width so the before and after read as two stacks
+   of numbers rather than eighteen separate labels. */
 .lp-repair-row {
   display: grid;
-  grid-template-columns: 150px 1fr 84px 1fr 84px;
+  grid-template-columns: 150px 56px 116px 116px 1fr;
   align-items: center;
   gap: var(--section-pad);
   min-height: var(--row-h);
-  padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  padding: 8px var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .lp-repair-row:last-child { border-bottom: none; }
+
+.lp-mode { color: var(--legend); }
+.lp-verdict-note { color: var(--legend); }
 
 .lp-side {
   display: flex;
@@ -73,24 +76,16 @@
   min-width: 0;
 }
 
-/* Ratios right-align on the colon so the before and after columns can be
-   read as two stacks of numbers rather than ten separate labels. */
 .lp-ratio {
+  margin-left: auto;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .lp-ratio-fail { color: var(--state-failed); }
+/* Cleared its floor already and moved anyway, so it is neither a failure
+   nor a repair — the one case that needs a third colour. */
+.lp-ratio-warn { color: var(--state-cooling); }
 .lp-ratio-pass { color: var(--state-healthy); }
-
-/* A token §7 names by palette step without giving a hex. Rendering a swatch
-   would mean inventing the value, so the slot stays empty and says so. */
-.lp-no-specimen {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border: 1px dashed var(--hairline);
-  border-radius: var(--radius);
-}
 
 /* --- Region 4: input focus -------------------------------------------- */
 
@@ -152,13 +147,13 @@
    bar spanning 3.00:1 to 3.20:1 with the measurement sitting near its left
    edge. Printing "3.02:1" states the margin; drawing it shows how little
    of the bar it is. */
-.lp-gauge {
+.lp-gauge{
   position: relative;
   width: 300px;
   height: 20px;
   background: var(--well);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
 }
 .lp-gauge-floor {
   position: absolute;

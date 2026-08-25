@@ -22,13 +22,13 @@
   margin-bottom: var(--section-pad);
 }
 
-.view-chip {
+.view-chip{
   display: inline-flex;
   align-items: center;
   height: 22px;
   padding: 0 10px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--panel);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -81,11 +81,11 @@
   flex-wrap: wrap;
 }
 
-.time-range-preset {
+.time-range-preset{
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--panel);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -105,14 +105,14 @@
   border-top: 1px solid var(--hairline-subtle);
 }
 
-.time-range-input {
+.time-range-input{
   flex: 1 1 0;
   min-width: 128px;
   height: 24px;
   padding: 0 6px;
   background: var(--well);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink);
@@ -208,7 +208,7 @@
    Floats astride the table's top edge on purpose — that seam is where a
    queued-rows affordance belongs, not a layout accident. --accent-ink,
    not --trace: this reports a UI/polling event, not a routing verdict. */
-.newer-pill {
+.newer-pill{
   position: absolute;
   top: -11px;
   left: 50%;
@@ -220,7 +220,7 @@
   padding: 0 10px;
   background: var(--overlay);
   border: 1px solid var(--accent-ink);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   box-shadow: var(--shadow-overlay);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;

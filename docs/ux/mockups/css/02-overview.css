@@ -90,7 +90,7 @@
    own top inner edge. A track plus a narrower filled span rather than one
    element with a background-position trick, so the determinate width is
    a plain, inspectable percentage. */
-.load-bar {
+.load-bar{
   position: absolute;
   top: 0;
   left: 0;
@@ -98,7 +98,7 @@
   height: 2px;
   overflow: hidden;
   background: var(--hairline-subtle);
-  border-radius: var(--radius) var(--radius) 0 0;
+  border-radius: var(--radius-pill) var(--radius) 0 0;
 }
 .load-bar-fill {
   display: block;

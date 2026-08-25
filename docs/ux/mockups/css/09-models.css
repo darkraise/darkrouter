@@ -84,13 +84,13 @@
   color: var(--legend);
 }
 
-.range-input {
+.range-input{
   width: 76px;
   height: 20px;
   padding: 0 4px;
   background: var(--well);
   border: 1px solid var(--hairline-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -99,11 +99,11 @@
 }
 .range-input-wide { width: 84px; }
 
-.range-track {
+.range-track{
   position: relative;
   width: 56px;
   height: 3px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--hairline-subtle);
 }
 /* The selected span, in --accent-ink because it reports a control's own
@@ -131,14 +131,14 @@
   gap: 4px;
 }
 
-.cap-bit {
+.cap-bit{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   line-height: 1;
@@ -156,13 +156,13 @@
    treatment and ink level instead: dashed means guessed, full ink means an
    operator asserted it, and the two machine sources sit between. */
 
-.source-tag {
+.source-tag{
   display: inline-flex;
   align-items: center;
   height: 18px;
   padding: 0 5px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -186,11 +186,11 @@
   font-size: 11px;
   color: var(--ink-muted);
 }
-.lifecycle-mark {
+.lifecycle-mark{
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: var(--ink-muted);
 }
 .lifecycle[data-state="stale"] { color: var(--legend); }
@@ -436,14 +436,14 @@
   border-color: var(--bezel);
   color: var(--ink);
 }
-.cap-toggle-box {
+.cap-toggle-box{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 11px;
   height: 11px;
   border: 1px solid var(--bezel);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
   color: transparent;
