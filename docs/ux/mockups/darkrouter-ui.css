@@ -59,10 +59,15 @@
      fails the text floor a status label needs. 5.47:1. */
   --state-failed: #F87171;
 
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  /* darkraise-ui's radius axis at data-radius="rounded" sets --radius to
+     0.5rem and Tailwind derives md/sm from it as −2px/−4px. Matching that
+     scale exactly means the implementation sets one axis and writes no
+     radius rule at all; the 10/14px we drew first would have cost an
+     override on every card for a difference nobody can see. */
+  --radius-xs: 4px;   /* Tailwind rounded-sm  = --radius − 4 */
+  --radius-sm: 6px;   /* Tailwind rounded-md  = --radius − 2 */
+  --radius: 8px;      /* darkraise-ui --radius, data-radius="rounded" */
+  --radius-lg: 12px;  /* Tailwind rounded-xl  = --radius + 4 */
   --radius-pill: 999px;
 
   --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
@@ -80,7 +85,7 @@
   --control-h: 36px;
   --control-h-sm: 28px;
   --topbar-h: 64px;
-  --rail-w: 288px;
+  --rail-w: 256px;   /* darkraise-ui --sidebar-width-expanded default (16rem) */
   --section-pad: 16px;
   --page-pad: 40px;
   --gutter: 20px;
@@ -143,6 +148,62 @@ body.theme-light,
 
   --graticule: rgba(229, 106, 74, 0.08);
 }
+
+/* --- darkraise-ui mapping ----------------------------------------------
+   What each token above becomes when this is built on darkraise-ui 6.4.0,
+   so the implementation is a rename rather than a re-derivation. The axes
+   carry most of it: density="comfortable" already gives a 36px cell,
+   radius="rounded" already gives 8px, elevation="low" already gives this
+   shadow ramp's geometry, and --font-sans is already Inter.
+
+     --ground          --surface-base / --background
+     --ground-alt      --surface-tint
+     --surface         --surface-raised / --card
+     --surface-2       --surface-sunken
+     --surface-3       --muted
+     --sidebar         --surface-sidebar
+     --border          --border-default
+     --border-subtle   --border-subtle
+     --ink             --foreground / --card-foreground
+     --ink-muted       --muted-foreground
+     --legend          none — a third text tier the library does not emit
+     --accent          --primary            (OVERRIDE, see below)
+     --accent-ink      --primary as text    (OVERRIDE)
+     --accent-hover    --primary-fill       (OVERRIDE)
+     --trace           --info
+     --state-healthy   --success
+     --state-cooling   --warning
+     --state-failed    --destructive
+     --focus           --focus-ring / --ring
+     --shadow-soft     --elevation-low / --shadow-card
+     --shadow-elevated --elevation-high / --shadow-dropdown
+     --shadow-warm     none — custom, and spent only on the brand mark
+     --graticule       none — custom, one background-image on the screen
+
+   FOUR THINGS COST SOMETHING. Everything else is an axis setting.
+
+   1. Coral is not a themeable accent. ACCENT_COLORS is eighteen named hues
+      and coral (hsl 12 75% 59%) sits between `red` (hue 0) and `orange`
+      (hue 25), matching neither. The engine emits only --primary,
+      --primary-fill and --primary-foreground from the accent scale, so the
+      override is three declarations — cheap, but it is an override, and
+      adding a `coral` ColorScale upstream would remove it entirely.
+   2. The warm ground is unreachable. sepia (hue 36) is a near-exact match
+      for it and stone is a workable second, but SURFACE_COLORS is
+      ["slate", ...ACCENT_COLORS], so twelve neutral ramps ship and one is
+      selectable. Spec §7's widening is what unblocks this.
+   3. --chart-1..5 must be overridden. The generated ramp reaches for
+      orange and lime at positions 4 and 5, which collide with the reserved
+      cooling and healthy colours. .chart-scope already does this.
+   4. --legend has no counterpart. The library emits --foreground and
+      --muted-foreground and stops; this language reads a third, quieter
+      tier for column heads and captions. One token.
+
+   NOT A TOKEN PROBLEM, A COMPONENT ONE: the routing ladder, the routing
+   flow graph and the trace waterfall have no equivalent in the kit and are
+   built. Everything else on these eighteen screens maps onto a shipped
+   component — the shell included: layout/sidebar, layout-header,
+   page-header, brand-logo and user-menu are the console chrome. */
 
 /* MIGRATION ALIASES. The previous language named its surfaces panel/well/
    rail/overlay and its rules hairline/bezel. Every screen still uses those
