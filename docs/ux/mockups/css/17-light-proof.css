@@ -45,7 +45,7 @@
 }
 
 /* The word the reading resolves to. Emphasis by value step rather than by
-   weight or size, because a 12.5px emphasis face inside an 11px micro line
+   weight or size, because a 13px emphasis face inside an 11px micro line
    would break the type scale to make one word louder. */
 .lp-verdict { color: var(--ink); }
 

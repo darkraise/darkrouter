@@ -65,7 +65,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 
@@ -100,7 +100,7 @@
 .cn-note {
   margin: 6px 0 0;
   color: var(--legend);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 /* The same caption used as a lead-in above a block instead of below one. */
 .cn-note-lead { margin: 0 0 10px; }
@@ -299,7 +299,7 @@
   margin: 0;
   white-space: pre;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.7;
   font-variant-numeric: tabular-nums;
   color: var(--ink);

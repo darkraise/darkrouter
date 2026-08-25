@@ -70,8 +70,8 @@
 .pgc-prompt-body {
   padding: 8px 10px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--ink);
 }
 .pgc-prompt-body-sys { min-height: 38px; }
@@ -214,8 +214,8 @@
   padding: 10px;
   overflow: hidden;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--ink);
 }
 .pgc-out p { margin: 0 0 10px; }

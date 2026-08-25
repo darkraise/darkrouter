@@ -145,7 +145,7 @@
    198. --accent-ink because this is accent-coloured text. */
 .prov-add-link {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--accent-ink);
   text-decoration: underline;
   text-underline-offset: 3px;
