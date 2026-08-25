@@ -54,8 +54,9 @@ type RequestRecord struct {
 	CacheWriteTokens int64
 	ReasoningTokens  int64
 
-	// CostMicros is nil until pricing for the model exists, which is phase 6.
-	// Zero would read as "this request was free".
+	// CostMicros is nil when the served model has no catalog price, when no
+	// catalog is available, or when nothing served at all. Zero would read
+	// as "this request was free".
 	CostMicros *int64
 	TTFTMs     *int64
 	TotalMs    *int64
