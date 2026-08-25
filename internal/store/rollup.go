@@ -41,8 +41,15 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 		        -- adding to them: the served attempt already carries what the
 		        -- request reports, so adding both would double it. A request
 		        -- with no attempt rows falls back to its own.
-		        coalesce(sum(au.a_in),  sum(r.tokens_in),  0),
-		        coalesce(sum(au.a_out), sum(r.tokens_out), 0),
+		        --
+		        -- The coalesce must happen per row, before sum() runs: sum()
+		        -- ignores NULL inputs rather than propagating them, so
+		        -- coalesce(sum(au.a_in), sum(r.tokens_in), 0) would let one
+		        -- attempt-bearing request in a group make sum(au.a_in)
+		        -- non-NULL, discarding every attempt-less request's own
+		        -- tokens_in in that same group instead of adding it.
+		        coalesce(sum(coalesce(au.a_in,  r.tokens_in)),  0),
+		        coalesce(sum(coalesce(au.a_out, r.tokens_out)), 0),
 		        -- NULL rather than 0 when nothing in the group is priced:
 		        -- zero would report the day's spend as genuinely nothing.
 		        CASE WHEN count(coalesce(au.a_cost, r.cost_micros)) = 0 THEN NULL
