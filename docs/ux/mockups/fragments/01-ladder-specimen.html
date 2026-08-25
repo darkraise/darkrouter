@@ -84,11 +84,11 @@
         </div>
       </div>
       <p>
-        <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Termination rule &mdash; below the served row the spine drops to --hairline-subtle and marks go hollow-5px at 45% opacity. Spec &sect;4.</span>
+        <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Termination rule &mdash; below the served row the spine drops to --border-subtle and marks go hollow-6px at 45% opacity. Spec &sect;4.</span>
       </p>
       <p class="prose">
         Ranks 04&ndash;08 were never attempted &mdash; the router stopped at rank
-        03. Their marks shrink to a 5px hollow square in --hairline-subtle,
+        03. Their marks shrink to a 6px hollow square in --border-subtle,
         the spine beneath them drops to the same dim token, and their text
         sits at 45% opacity. The right margin carries a latency bar scaled
         to the ladder's own maximum (rank 02's 30,000ms timeout), which is
@@ -183,7 +183,7 @@
         Every mark here is hollow &mdash; a dry-run sends nothing, so nothing
         can be filled. Rank 02 and rank 06 carry the two skip reasons that
         would apply if this request ran right now; the other six are plain
-        --bezel hollow squares with no reason at all, since a dry run has
+        --legend hollow squares with no reason at all, since a dry run has
         no basis to predict past the top of the ladder. No stub, no
         latency bar &mdash; both describe an attempt, and none occurred.
       </p>
@@ -192,7 +192,7 @@
     <div class="region">
       <p class="section-title">Mode 3 &mdash; compressed (models catalog)</p>
       <p class="prose">
-        The same vocabulary at catalog density: rank, a 9px mark, provider
+        The same vocabulary at catalog density: rank, a 10px mark, provider
         id, nothing else. Eight rows read as a barcode of sigils &mdash; the
         shape of the fleet at a glance, without a single word. The router
         expands one candidate per (provider, credential, model), so a
@@ -270,7 +270,7 @@
           <div style="display:flex;align-items:center;justify-content:center;width:120px;height:64px">
             <span class="mark mark-skipped" style="transform:scale(4)"></span>
           </div>
-          <p class="spec-note" style="width:190px">skipped &mdash; hollow 7px, 1px --bezel, no fill, spine runs through undisturbed</p>
+          <p class="spec-note" style="width:190px">skipped &mdash; hollow 8px, 1px --legend, no fill, spine runs through undisturbed</p>
           <div class="ladder" style="width:190px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
               <span class="rank rank-tick">01</span>
@@ -286,7 +286,7 @@
           <div style="display:flex;align-items:center;justify-content:center;width:120px;height:64px">
             <span class="mark mark-cooling" style="transform:scale(4)"></span>
           </div>
-          <p class="spec-note" style="width:300px">skipped, cooling &mdash; hollow 7px stroked --state-cooling, no fill</p>
+          <p class="spec-note" style="width:300px">skipped, cooling &mdash; hollow 8px stroked --state-cooling, no fill</p>
           <div class="ladder" style="width:300px;margin-top:8px">
             <div class="ladder-row" style="gap:8px">
               <span class="rank rank-tick">02</span>

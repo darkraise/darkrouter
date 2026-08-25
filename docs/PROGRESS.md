@@ -992,7 +992,40 @@ Final gate: `qa: PASS — 18 fragment(s) clean`, 34 tests OK, 36 screenshots
 200–350 KB, which was written before the set existed; nothing improper is
 embedded, and each font blob was verified byte-identical to its file on disk.
 
-### Superseded 2026-08-25 — the set moved to "Warm Console"
+### Final state — "Warm Console", fitted to darkraise-ui
+
+The set is finished in **Warm Console**, adopted from 9router
+(`github.com/decolua/9router`, checked out at
+`/root/repositories-community/9router`) and sat on darkraise-ui's own theming
+axes so the implementation is a rename rather than a re-derivation.
+
+Most of the identity is an axis setting, not a rule: `density="comfortable"`
+already emits the 36px cell, `radius="rounded"` already emits 8px,
+`elevation="low"` already emits this shadow ramp's geometry, `--font-sans` is
+already Inter, and the whole console shell already exists in `layout/`.
+`darkrouter-ui.css` carries the token-for-token mapping. Four things cost
+something and spec §7 asks for them upstream: a `coral` accent (ACCENT_COLORS
+is eighteen hues with no escape hatch), a selectable warm neutral ramp (twelve
+ship, one is reachable), a third text tier, and the chart ramp.
+
+Nine token values are repaired against 9router's own — seven of its shipped
+values sit under the floor their role is held to, including a light success
+green at 2.54:1 and an amber at 2.15:1, both under the 3:1 floor a *shape*
+must clear. Screen 17 shows all nine.
+
+Three rules are Darkrouter's rather than 9router's: coral is **brand only**
+(position and primary action, never state) so it never joins amber and red in
+the ladder gutter; **Inter carries the chrome, IBM Plex Mono still carries
+data**; and the identity mark stays the §3.5 routing ladder, presented in
+9router's coral-gradient tile.
+
+The overview carries a **routing flow graph** in place of a health grid:
+aliases left, router centre, providers right in priority order, edge thickness
+as share, and dashed returns for traffic that arrived somewhere because
+somewhere else refused it. A provider that is not a candidate has no edge at
+all.
+
+### Superseded 2026-08-25 — the earlier "Graticule Bench" set
 
 The four decisions below describe **Graticule Bench**, the language the phase
 was executed in. The owner asked for 9router's identity instead

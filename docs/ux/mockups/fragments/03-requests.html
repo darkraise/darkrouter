@@ -51,14 +51,14 @@
       </header>
       <main class="content">
 
-        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
+        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Saved views &mdash; localStorage only. Not server state; no endpoint.</span></p>
         <div class="saved-views">
           <span class="view-chip">failovers only</span>
           <span class="view-chip">errors today</span>
           <span class="view-chip">passthrough misses</span>
         </div>
 
-        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Filter bar &mdash; GET /api/requests?provider=&amp;model=&amp;alias=&amp;status=&amp;surface=&amp;since_ms=&amp;until_ms=. alias/since_ms/until_ms are accepted today and unreachable from the current UI.</span></p>
+        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Filter bar &mdash; GET /api/requests?provider=&amp;model=&amp;alias=&amp;status=&amp;surface=&amp;since_ms=&amp;until_ms=. alias/since_ms/until_ms are accepted today and unreachable from the current UI.</span></p>
         <div class="filter-bar">
 
           <div class="combo" data-open="true" style="min-width:190px">
@@ -131,7 +131,7 @@
         </div>
 
         <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Table &mdash; darkraise-ui/data-table. requests[]{id,ts_ms,dialect,surface,model,alias,provider,status,tokens_in,tokens_out,total_ms,attempts}. Status stays state colour &mdash; an outcome, whether it's a provider's health or a request's result. The failover chip stays trace/accent-ink &mdash; a routing choice among alternatives, not an outcome.</span></p>
-        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
+        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Columns + CSV &mdash; DataTable ships both. Faceted filters need the 6.5.0 extension (spec &sect;7).</span></p>
         <div class="table-toolbar">
           <span class="micro">14 of 4,909 requests</span>
           <div class="table-toolbar-actions">
@@ -151,7 +151,7 @@
           </div>
         </div>
 
-        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
+        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Newer pill &mdash; the 3s poll queues rows rather than moving the reader's scroll position.</span></p>
         <div class="table-wrap">
           <span class="newer-pill">▲ 3 newer</span>
           <div class="table">

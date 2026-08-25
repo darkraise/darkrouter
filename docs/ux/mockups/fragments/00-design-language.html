@@ -161,7 +161,7 @@
       <p class="prose">
         Left: three provider identity pips &mdash; what each provider IS.
         Right: the router's verdict on the same request &mdash; what it
-        DECIDED, in --trace and --bezel. A healthy provider (groq) can
+        DECIDED, in --trace and --legend. A healthy provider (groq) can
         still be skipped; a degraded one (cerebras) can still serve. State
         colour never appears in the gutter; --trace never appears on a pip.
       </p>
@@ -179,9 +179,9 @@
       <p class="prose">
         Disabled and unconfigured take no state colour at all, because
         neither is a health reading &mdash; nobody has measured anything. They
-        split the way the ladder marks split: disabled is filled --bezel, a
+        split the way the ladder marks split: disabled is filled --legend, a
         thing that exists and is switched off; unconfigured is a hollow
-        --bezel ring, a thing with nothing in it yet.
+        --legend ring, a thing with nothing in it yet.
       </p>
       <p class="prose">
         And a fourth colour that is none of these three. CORAL is BRAND: it
@@ -233,7 +233,7 @@
 
     <div class="region">
       <p class="section-title">Type scale</p>
-      <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Type scale &mdash; IBM Plex Sans/Mono, self-hosted. 30px ceiling enforced by qa.py.</span></p>
+      <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Type scale &mdash; Inter and IBM Plex Mono, self-hosted. 30px ceiling enforced by qa.py.</span></p>
       <div class="table">
         <div class="row">
           <span class="legend-caps">OPERATE</span>
@@ -311,7 +311,7 @@
           <div style="padding:14px;background:var(--ground);border-radius:var(--radius)">
             <div class="panel" style="padding:10px 14px"><span class="micro">panel</span></div>
           </div>
-          <p class="spec-note">panel on ground &mdash; 1px --hairline-subtle seam</p>
+          <p class="spec-note">card on ground &mdash; border + radius + --shadow-soft</p>
         </div>
         <div>
           <div class="panel" style="padding:10px">
@@ -319,11 +319,11 @@
               <span class="readout">142</span><span class="unit">ms</span>
             </div>
           </div>
-          <p class="spec-note">well cut into panel &mdash; value step + hairline, no shadow</p>
+          <p class="spec-note">inset region inside a card &mdash; --surface-2, quieter, not recessed</p>
         </div>
         <div>
           <div class="surface-overlay"><span class="chip">⌘K</span></div>
-          <p class="spec-note">the one permitted shadow &mdash; --shadow-overlay, on --overlay only</p>
+          <p class="spec-note">an overlay &mdash; --shadow-elevated, the menu and dialog step</p>
         </div>
         <div>
           <div style="display:flex;gap:8px">
@@ -333,46 +333,36 @@
             </div>
             <div>
               <div class="radius-demo" style="border-radius:var(--radius)"></div>
-              <p class="spec-note">2px &mdash; spec</p>
+              <p class="spec-note">8px &mdash; --radius</p>
             </div>
             <div>
-              <div class="radius-demo" style="border-radius:4px"></div>
-              <p class="spec-note">4px</p>
+              <div class="radius-demo" style="border-radius:var(--radius-lg)"></div>
+              <p class="spec-note">12px &mdash; --radius-lg</p>
             </div>
           </div>
         </div>
       </div>
       <p class="prose">
-        In light mode, --overlay carries the same hex as --panel &mdash;
-        its lift comes entirely from --shadow-overlay and the 1px
-        --hairline border, not from sitting brighter than what is behind
-        it. Dark mode is unchanged: dark --overlay is already brighter
-        than --panel on its own. Either way, a well cut into an overlay
-        steps down to --well exactly as a well cut into a panel does, so
-        a dropdown's search box or a dialog's data region reads the same
-        recessed value everywhere in the product.
+        An overlay is a card lifted further, not a different kind of surface:
+        it takes --surface-2 and --shadow-elevated, and in light mode where
+        there is no room to go brighter than a white card, the shadow and the
+        border do the whole job. An inset region behaves the same wherever it
+        appears &mdash; a dropdown's search box and a dialog's data region read
+        the same value as one inside a card on the page.
       </p>
     </div>
 
     <div class="region">
       <p class="prose">
-        RULING &mdash; the well is a value step and a hairline, and nothing
-        else. Spec &sect;3.3 also describes a 1px inset light at the top and
-        dark at the bottom, and a graticule behind every well. Neither is
-        implemented: the inset is a bevel, which is elevation, and this
-        language spends its whole elevation budget on one shadow; the
-        graticule is drawn only where it means something, which is behind a
-        chart, and behind a table it would be decoration competing with the
-        rows. A recessed surface here is a value step plus a border, in both
-        modes, and the light proof shows what that costs.
-      </p>
-      <p class="prose">
-        RULING &mdash; radius is 2px on everything except two marks that are
-        circles: the cooling mark's centre dot and the stale-discovery ring.
-        Both are round because roundness is doing work &mdash; each has to
-        read as a different shape from the square pip beside it at 6 and 7
-        pixels, where a 2px radius and a circle are the only two silhouettes
-        that survive. A circle used as a corner treatment is still a bug.
+        RULING &mdash; radius is a scale, not a constant: 4px on a small box,
+        6px on a chip, 8px on a card, 12px on the chrome. It matches
+        darkraise-ui's --radius at data-radius="rounded" and Tailwind's
+        derived md/sm exactly, so the implementation sets one axis and writes
+        no radius rule. Two marks are true circles because roundness is doing
+        work &mdash; the cooling mark's centre dot and the stale-discovery ring
+        each have to read as a different shape from the square pip beside them
+        at 7 and 8 pixels. A circle used as a corner treatment is still a bug,
+        and so is --radius on a mark small enough that 8px makes it one.
       </p>
 
               <p class="prose">
