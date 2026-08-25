@@ -88,6 +88,34 @@ func TestAnAttemptWithNoTokensIsUnpricedNotFree(t *testing.T) {
 }
 ```
 
+Add a third test pinning the retry case, because it is the one a provider match gets wrong:
+
+```go
+func TestARetriedProviderAttributesUsageToTheAttemptThatServed(t *testing.T) {
+	// The pre-commit 400 retry re-attempts the same provider and model, so
+	// two attempt rows carry identical provider and model and only the
+	// second one served.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 400, TokensOut: 200,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "fatal"},
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].TokensIn != 0 {
+		t.Fatalf("the rejected attempt must stay at zero, got %d", rec.Attempts[0].TokensIn)
+	}
+	if rec.Attempts[1].TokensIn != 400 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt must carry the usage, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+}
+```
+
 Use whatever the package's existing helper for a priced executor is; if there is none, build the catalog the way the existing pricing tests in this package already do, and name the helper `newPricedExecutor`.
 
 - [ ] **Step 2: Run them and watch them fail**
@@ -105,8 +133,11 @@ In `priceRecord`, before the pricing loop, copy the request's usage onto the ser
 	// usage on the request, so this is the first point it can be attributed.
 	for i := range rec.Attempts {
 		a := &rec.Attempts[i]
-		if rec.FinalProviderID != "" && a.ProviderID == rec.FinalProviderID &&
-			a.Model == rec.FinalModel && a.TokensIn == 0 && a.TokensOut == 0 {
+		// Identified by outcome, not by matching the request's final provider:
+		// the pre-commit 400 retry re-attempts the same provider and model, so
+		// a provider match would find the rejected attempt first.
+		if a.Outcome == string(adapter.OutcomeSuccess) &&
+			a.TokensIn == 0 && a.TokensOut == 0 {
 			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
 			break
 		}
@@ -377,10 +408,11 @@ Delete the window's days first, then insert. Because the window is cleared, the 
 		            r.resolved_alias AS alias,
 		            -- Only the serving attempt counts as a request, so summing
 		            -- this column across providers still equals the real
-		            -- request count.
-		            CASE WHEN r.final_provider_id <> ''
-		                  AND a.provider_id = r.final_provider_id
-		                  AND a.model = r.final_model THEN 1 ELSE 0 END AS is_served,
+		            -- request count. Keyed on the outcome rather than on
+		            -- matching the request's final provider: the pre-commit 400
+		            -- retry re-attempts the SAME provider and model, so a
+		            -- provider match identifies two rows where one served.
+		            CASE WHEN a.outcome = 'success' THEN 1 ELSE 0 END AS is_served,
 		            1 AS is_attempt,
 		            coalesce(a.tokens_in, 0) AS t_in,
 		            coalesce(a.tokens_out, 0) AS t_out,
