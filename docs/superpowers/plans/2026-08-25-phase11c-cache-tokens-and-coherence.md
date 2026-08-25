@@ -450,3 +450,80 @@ Subject: `feat(admin): show per-attempt usage on the trace`
 **The wire is frozen.** No dialect's output may change by a byte. The IR convention change is internal; `PromptTokens()` is what keeps it internal. `internal/golden` is the tripwire — a golden failure means a render site was missed, never that a file needs re-recording.
 
 **Why no test caught the cache bug.** Nothing in the suite fed cache-read tokens through pricing, so two full review rounds passed over it. Task 1 and Task 2 both add tests that do.
+
+---
+
+### Task 6: Put a floor under log.retention
+
+**Files:**
+- Modify: `internal/config/load.go` — validation
+- Test: `internal/config/load_test.go`, `internal/store/rollup_test.go`
+
+Task 3's never-shrink guard covers yesterday. Today is deliberately exempt, because migration `0006`'s leftover `alias=''` rows land on whatever day the upgrade happens and MUST be cleared — a clear that is itself a shrink. So the guard cannot protect today without also preserving bogus rows.
+
+That exemption is safe only while today cannot be pruned. Today's earliest request is at today's midnight, and pruning removes anything older than `now - retention`, so today is untouchable exactly when `retention >= 24h`.
+
+Below that it is not. Demonstrated on this branch: six requests between 02:00 and 07:00, finalized at 600 tokens by the 08:00 rollup; with `retention = 6h` the four oldest are pruned by 14:00, the day is still in the delete's day list because two survive, and the 14:00 rollup rewrites it to **200**. Silent loss of two-thirds of the day.
+
+A floor closes the whole class rather than adding a seventh special case to a guard that has already been rewritten six times. `log.retention` is currently validated only as positive (`internal/config/load.go:162`).
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestRetentionShorterThanADayIsRejected(t *testing.T) {
+	// The daily rollup cannot finalize a day that pruning is eating while it
+	// is still being written. Rejecting the config is honest; accepting it
+	// and silently under-reporting the day is not.
+	c := validConfigForTest()
+	c.Log.Retention = 6 * time.Hour
+	err := validate(c)
+	if err == nil {
+		t.Fatal("a retention below 24h must be rejected")
+	}
+	if !strings.Contains(err.Error(), "log.retention") {
+		t.Fatalf("the error must name the setting, got %q", err)
+	}
+}
+
+func TestRetentionOfExactlyADayIsAccepted(t *testing.T) {
+	c := validConfigForTest()
+	c.Log.Retention = 24 * time.Hour
+	if err := validate(c); err != nil {
+		t.Fatalf("24h is the floor and must be accepted: %v", err)
+	}
+}
+```
+
+Use whatever helper the package's existing validation tests use to build a valid config and call the validator; if there is none, follow the shape those tests already use rather than inventing a helper.
+
+- [ ] **Step 2: Run them, watch them fail**
+
+Run: `go test ./internal/config/ -run TestRetention -v`
+
+- [ ] **Step 3: Implement**
+
+Replace the positive-only check:
+
+```go
+	// A day cannot be rolled up while pruning is still eating it. Today's
+	// oldest request sits at today's midnight, so anything below a day means
+	// the current day is being pruned as it is written, and its rollup
+	// silently under-reports.
+	if c.Log.Retention < 24*time.Hour {
+		return fmt.Errorf("log.retention must be at least 24h, got %s", c.Log.Retention)
+	}
+```
+
+Keep the existing default of 720h. Check whether any test fixture, example config, or docs file sets a shorter retention and would now fail to load — fix those, and list every one you changed in your report.
+
+- [ ] **Step 4: Pin the invariant where it matters**
+
+Add to `internal/store/rollup_test.go` a test that today is never pruned at the floor: requests spread across today, a rollup at the floor retention, and an assertion that the day's total does not drop. This is the property the exemption depends on, and it belongs next to the guard rather than only in config.
+
+- [ ] **Step 5: Run everything**
+
+Run: `go build ./... && go vet ./... && go test -race ./...`
+
+- [ ] **Step 6: Commit**
+
+Subject: `fix(config): require at least a day of retention`
