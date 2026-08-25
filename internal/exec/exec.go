@@ -788,9 +788,13 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			// The same model at the same rates on the same tokens. Re-pricing
 			// it separately drops the cache-read and cache-write components the
 			// attempt row has no columns for, and the two cost surfaces stop
-			// agreeing. Guarded on actual tokens so a serving attempt that burned
-			// nothing keeps a nil cost rather than a confident zero.
-			if rec.CostMicros != nil && (a.TokensIn != 0 || a.TokensOut != 0) {
+			// agreeing. Guarded on the record's own burn, not the attempt's
+			// copied in/out tokens, so a fully cached prompt still carries its
+			// cost even though the attempt row has nowhere to show it came from.
+			burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
+				rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
+				rec.ReasoningTokens != 0
+			if rec.CostMicros != nil && burned {
 				c := *rec.CostMicros
 				a.CostMicros = &c
 			}

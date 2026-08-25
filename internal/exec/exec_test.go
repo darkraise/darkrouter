@@ -275,6 +275,32 @@ func TestAServingAttemptWithNoUsageStaysUnpriced(t *testing.T) {
 	}
 }
 
+func TestACacheOnlySuccessStillReachesTheAggregates(t *testing.T) {
+	// A fully cached prompt has in=0 after the adapters subtract the cached
+	// subset, and an empty completion is a legitimate success. Neither token
+	// field moves, but real money was spent.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{CacheReadTokens: 3000})
+
+	e.priceRecord(rec)
+
+	if rec.CostMicros == nil {
+		t.Fatal("the request was not priced")
+	}
+	if rec.Attempts[0].CostMicros == nil {
+		t.Fatalf("%d micros of real spend reaches no aggregate", *rec.CostMicros)
+	}
+	if *rec.Attempts[0].CostMicros != *rec.CostMicros {
+		t.Fatalf("attempt cost %d, request cost %d: the surfaces disagree",
+			*rec.Attempts[0].CostMicros, *rec.CostMicros)
+	}
+}
+
 func TestTheServingProviderIsNotBilledAnotherProvidersTokens(t *testing.T) {
 	// The production shape: recordAttempt never writes attempt tokens, so a
 	// guard that reads them cannot see anything.
