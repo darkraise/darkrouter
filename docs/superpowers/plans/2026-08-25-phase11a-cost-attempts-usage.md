@@ -18,6 +18,8 @@ Copy these values verbatim. Every task's requirements implicitly include this se
 
 **Migrations are append-only.** Add `internal/store/migrations/000N_<name>.sql`; never edit a shipped migration. Migrations run in filename order at open. The next free number is `0006`. Tables are `STRICT`. A column added to an existing table needs a `DEFAULT` because rows already exist — this is what `0005_attempt_path.sql` does and is the pattern to follow.
 
+**`internal/store` cannot import `internal/catalog`.** `catalog` imports `provider` and `provider` imports `store`, so a store→catalog edge closes a cycle and the package will not build. Anything needing `catalog.Pricing` lives in `catalog` or in a package that already depends on it, such as `internal/exec`.
+
 **Unpriced is nil, never zero.** `CostMicros` is `*int64` throughout. A model with no catalog price stays `nil`; zero would report genuinely-free. The rollup already encodes this as `CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END` and that behaviour must survive every change here. Per-call image pricing has no catalog field and stays unpriced — §8.3 states this explicitly.
 
 **Pricing units.** `catalog.Pricing` is micro-dollars per **million** tokens: `InputMicrosPerMTok`, `OutputMicrosPerMTok`, `CacheReadMicrosPerMTok`, and `Known bool` which separates a free model from an unpriced one — both are zero.
@@ -38,8 +40,8 @@ because it is scanned straight out of SQL for a JSON response.
 | File | Responsibility |
 |---|---|
 | `internal/store/migrations/0006_usage_alias_and_attempt_usage.sql` | **Create.** Widens `usage_daily`'s key with `alias`; adds `tokens_in`/`tokens_out`/`cost_micros` to `request_attempts`. |
-| `internal/store/pricing.go` | **Create.** `CostMicros(p catalog.Pricing, in, out, cacheRead int64) *int64` — the one place the arithmetic lives, so exec and any later caller round identically. |
-| `internal/store/pricing_test.go` | **Create.** Unit tests for the arithmetic, the unpriced case and rounding. |
+| `internal/catalog/pricing.go` | **Create.** `func (p Pricing) CostMicros(in, out, cacheRead int64) *int64` — the arithmetic lives beside the prices it reads. It CANNOT live in `internal/store`: store→catalog→provider→store is an import cycle. |
+| `internal/catalog/pricing_test.go` | **Create.** Unit tests for the arithmetic, the unpriced case and rounding. |
 | `internal/exec/exec.go:702` | **Modify.** `(*Executor).log` computes cost before handing the record to the Logger. |
 | `internal/store/log.go` | **Modify.** `AttemptRecord` gains the three usage fields; the attempt insert writes them. |
 | `internal/store/rollup.go` | **Modify.** Group by alias, and add attempt usage to the day. |
@@ -56,36 +58,32 @@ Tasks 1–3 are the storage and arithmetic; 4–5 the commit path; 6–7 the rol
 Cost is arithmetic over three token counts and three prices. It goes in its own function before anything calls it, because the rounding rule is the part that will be got wrong and a unit test is the cheapest place to pin it.
 
 **Files:**
-- Create: `internal/store/pricing.go`
-- Test: `internal/store/pricing_test.go`
+- Create: `internal/catalog/pricing.go`
+- Test: `internal/catalog/pricing_test.go`
 
 **Interfaces:**
 - Consumes: `catalog.Pricing` (fields in Global Constraints).
-- Produces: `store.CostMicros(p catalog.Pricing, in, out, cacheRead int64) *int64` — nil when `!p.Known`, otherwise the total in micro-dollars, rounded half-up.
+- Produces: `func (p catalog.Pricing) CostMicros(in, out, cacheRead int64) *int64` — a METHOD on Pricing, in package `catalog`. Nil when `!p.Known`, otherwise the total in micro-dollars, rounded half-up.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `internal/store/pricing_test.go`:
+Create `internal/catalog/pricing_test.go`:
 
 ```go
-package store
+package catalog
 
-import (
-	"testing"
-
-	"github.com/darkraise/darkrouter/internal/catalog"
-)
+import "testing"
 
 func TestCostMicrosIsNilWhenPriceIsUnknown(t *testing.T) {
 	// Unpriced and free are both zero prices. Only Known separates them, and
 	// a nil result is what makes the UI render an em-dash instead of $0.00.
-	if got := CostMicros(catalog.Pricing{Known: false}, 1_000_000, 1_000_000, 0); got != nil {
+	if got := (Pricing{Known: false}).CostMicros(1_000_000, 1_000_000, 0); got != nil {
 		t.Fatalf("unpriced model: want nil, got %d", *got)
 	}
 }
 
 func TestCostMicrosIsZeroForAKnownFreeModel(t *testing.T) {
-	got := CostMicros(catalog.Pricing{Known: true}, 1_000_000, 1_000_000, 0)
+	got := (Pricing{Known: true}).CostMicros(1_000_000, 1_000_000, 0)
 	if got == nil {
 		t.Fatal("known free model: want 0, got nil")
 	}
@@ -95,14 +93,14 @@ func TestCostMicrosIsZeroForAKnownFreeModel(t *testing.T) {
 }
 
 func TestCostMicrosSumsTheThreeRates(t *testing.T) {
-	p := catalog.Pricing{
+	p := Pricing{
 		InputMicrosPerMTok:     3_000_000,
 		OutputMicrosPerMTok:    15_000_000,
 		CacheReadMicrosPerMTok: 300_000,
 		Known:                  true,
 	}
 	// 2M in, 1M out, 4M cache-read = 6_000_000 + 15_000_000 + 1_200_000
-	got := CostMicros(p, 2_000_000, 1_000_000, 4_000_000)
+	got := p.CostMicros(2_000_000, 1_000_000, 4_000_000)
 	if got == nil || *got != 22_200_000 {
 		t.Fatalf("want 22200000, got %v", got)
 	}
@@ -112,15 +110,15 @@ func TestCostMicrosRoundsHalfUp(t *testing.T) {
 	// 1 token at 1 micro/MTok is 0.000001 micros. Truncation would report
 	// every small request as free; half-up keeps a sub-micro request at 0
 	// but a half-micro one at 1.
-	p := catalog.Pricing{InputMicrosPerMTok: 1_000_000, Known: true}
-	if got := CostMicros(p, 1, 0, 0); got == nil || *got != 1 {
+	p := Pricing{InputMicrosPerMTok: 1_000_000, Known: true}
+	if got := p.CostMicros(1, 0, 0); got == nil || *got != 1 {
 		t.Fatalf("1 token at 1 micro/token: want 1, got %v", got)
 	}
-	half := catalog.Pricing{InputMicrosPerMTok: 1, Known: true}
-	if got := CostMicros(half, 500_000, 0, 0); got == nil || *got != 1 {
+	half := Pricing{InputMicrosPerMTok: 1, Known: true}
+	if got := half.CostMicros(500_000, 0, 0); got == nil || *got != 1 {
 		t.Fatalf("half a micro: want 1 (half-up), got %v", got)
 	}
-	if got := CostMicros(half, 499_999, 0, 0); got == nil || *got != 0 {
+	if got := half.CostMicros(499_999, 0, 0); got == nil || *got != 0 {
 		t.Fatalf("just under half a micro: want 0, got %v", got)
 	}
 }
@@ -129,8 +127,8 @@ func TestCostMicrosIgnoresNegativeCounts(t *testing.T) {
 	// A provider that reports a negative usage count is malformed, not a
 	// refund. Clamping keeps one bad response from making a day's spend
 	// smaller than it was.
-	p := catalog.Pricing{InputMicrosPerMTok: 1_000_000, Known: true}
-	if got := CostMicros(p, -5, 0, 0); got == nil || *got != 0 {
+	p := Pricing{InputMicrosPerMTok: 1_000_000, Known: true}
+	if got := p.CostMicros(-5, 0, 0); got == nil || *got != 0 {
 		t.Fatalf("negative tokens: want 0, got %v", got)
 	}
 }
@@ -138,26 +136,28 @@ func TestCostMicrosIgnoresNegativeCounts(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./internal/store/ -run TestCostMicros -v`
+Run: `go test ./internal/catalog/ -run TestCostMicros -v`
 Expected: FAIL — `undefined: CostMicros`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `internal/store/pricing.go`:
+Create `internal/catalog/pricing.go`:
 
 ```go
-package store
+package catalog
 
-import "github.com/darkraise/darkrouter/internal/catalog"
-
-// CostMicros is the micro-dollar cost of one request at a model's catalog
-// price, or nil when the model has no price.
+// CostMicros is the micro-dollar cost of one request at this price, or nil
+// when the model has no price.
+//
+// A method on Pricing, in package catalog, because the arithmetic needs the
+// prices and internal/store cannot import internal/catalog: catalog imports
+// provider and provider imports store, so store->catalog closes a cycle.
 //
 // Unpriced and free are both zero rates and only Pricing.Known separates
 // them. Returning nil for unpriced is what lets the trace and the spend tile
 // render an em-dash: reporting 0 would state that a request cost nothing,
 // which is a different and usually false claim.
-func CostMicros(p catalog.Pricing, in, out, cacheRead int64) *int64 {
+func (p Pricing) CostMicros(in, out, cacheRead int64) *int64 {
 	if !p.Known {
 		return nil
 	}
@@ -181,15 +181,15 @@ func rateMicros(perMTok, tokens int64) int64 {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `go test -race ./internal/store/ -run TestCostMicros -v`
+Run: `go test -race ./internal/catalog/ -run TestCostMicros -v`
 Expected: PASS, five tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-go vet ./internal/store/
-git add internal/store/pricing.go internal/store/pricing_test.go
-git commit -m "feat(store): add catalog-priced cost arithmetic"
+go vet ./internal/catalog/
+git add internal/catalog/pricing.go internal/catalog/pricing_test.go
+git commit -m "feat(catalog): add cost arithmetic to Pricing"
 ```
 
 ---
@@ -419,7 +419,7 @@ git commit -m "feat(store): persist per-attempt token usage"
 - Test: `internal/exec/cost_test.go` (create)
 
 **Interfaces:**
-- Consumes: `store.CostMicros` (Task 1); `catalog.Reader.Lookup(providerID, modelID) (catalog.Model, bool)`; `(*Executor).catalogFor(providers []provider.Provider) catalog.Reader` at `exec.go:214`.
+- Consumes: `catalog.Pricing.CostMicros` (Task 1); `catalog.Reader.Lookup(providerID, modelID) (catalog.Model, bool)`; `(*Executor).catalogFor(providers []provider.Provider) catalog.Reader` at `exec.go:214`.
 - Produces: a `store.RequestRecord` whose `CostMicros` is set whenever the served model has a known price.
 
 - [ ] **Step 1: Write the failing test**
@@ -567,7 +567,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	if !ok {
 		return
 	}
-	rec.CostMicros = store.CostMicros(m.Pricing,
+	rec.CostMicros = m.Pricing.CostMicros(
 		rec.TokensIn, rec.TokensOut, rec.CacheReadTokens)
 }
 ```
@@ -600,7 +600,7 @@ The served attempt is priced by Task 4 through the request. A *failed* attempt h
 - Test: `internal/exec/cost_test.go`
 
 **Interfaces:**
-- Consumes: Task 4's `priceRecord`; Task 3's `AttemptRecord` fields.
+- Consumes: Task 4's `priceRecord`; Task 3's `AttemptRecord` fields; `catalog.Pricing.CostMicros` (Task 1).
 - Produces: every `AttemptRecord` with a known price carries `CostMicros`.
 
 - [ ] **Step 1: Write the failing test**
@@ -657,7 +657,7 @@ Extend `priceRecord` in `internal/exec/exec.go`, after the request-level block:
 		if !ok {
 			continue
 		}
-		a.CostMicros = store.CostMicros(am.Pricing, a.TokensIn, a.TokensOut, 0)
+		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0)
 	}
 ```
 
