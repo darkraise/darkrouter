@@ -1,60 +1,91 @@
 /*
- * Darkrouter operator console — mockup design tokens ("Graticule Bench").
+ * Darkrouter operator console — mockup design tokens ("Warm Console").
  *
- * Five surfaces, darkest to lightest in dark mode: ground (canvas), rail
- * (nav), panel (cards, mid-range), overlay (popovers, the one elevated
- * surface), well (recessed data regions, the extreme end of the range).
- * Fonts are self-hosted via @font-face blocks that build.py injects ahead
- * of this file; nothing here references a font file directly.
+ * The identity is adopted from 9router (github.com/decolua/9router): coral
+ * brand, warm neutral surfaces that stack upward from the ground, generous
+ * radius, real elevation, Inter, and a faint accent graticule behind the
+ * page. Values are taken verbatim from its src/app/globals.css except where
+ * a measurement forced a repair — every such repair is marked REPAIRED and
+ * carries both ratios, and fragments/17-light-proof.html shows them.
+ *
+ * Two rules are ours, not 9router's, and both are deliberate:
+ *   1. Coral is BRAND only — navigation, active state, primary action. What
+ *      the router DECIDED takes a cool hue (--trace); what a provider IS
+ *      takes green/amber/red. Coral sits between amber and red in hue, so
+ *      letting it mean "decision" would put three warm hues in the ladder
+ *      gutter doing three different jobs.
+ *   2. Inter carries the chrome; IBM Plex Mono still carries DATA. A gateway
+ *      console is mostly machine output — ULIDs, model ids, latencies, token
+ *      counts — and mono is what says "this came off the wire".
  */
 
-/* .force-dark and .force-light pin a subtree to one mode whatever the T
-   toggle says, so a single document can set the two side by side. They name
-   the blocks below rather than copying them: a forced container that had
-   drifted from the mode it claims to depict would be a worse proof than
-   none. Only fragments/17-light-proof.html uses them. */
 :root,
 .force-dark {
   color-scheme: dark;
 
-  --ground: #101214;
-  --rail: #14171A;
-  --overlay: #22262A;
-  --ink: #EBEDF0;
-  --ink-muted: #98A1A9;
-  --legend: #808A93;
-  --hairline-subtle: #272B2F;
-  --hairline: #383D43;
-  --bezel: #6A737C;
-  --trace: #3ABFF8;
-  --trace-fill: #0777AB;
-  --accent-ink: #3ABFF8;
-  --focus: #7ED4FC;
-  --state-healthy: #36D399;
-  --state-cooling: #FBBD23;
-  --state-failed: #F87272;
+  /* Surfaces stack upward from the ground: each step is lighter than the one
+     it sits on. This is an elevation model, not the recessed-well model the
+     previous language used, and it is why light mode here is a palette swap
+     rather than a polarity inversion. */
+  --ground: #1A1A1A;
+  --ground-alt: #1F1F1E;
+  --surface: #262626;
+  --surface-2: #303030;
+  --surface-3: #3A3A3A;
+  --sidebar: rgba(38, 38, 38, 0.72);
 
-  /* The well sits at the extreme end of the value range while the panel sits
-     mid-range. Dark: the well is darker than the panel. Light: brighter. This
-     inversion is why light and dark are structurally different screens rather
-     than a palette swap, and it is what keeps the readout at the highest
-     contrast in the frame in both modes. */
-  --panel: #191C1F;
-  --well: #090A0C;
+  --border: #333333;
+  --border-subtle: #2A2A2A;
 
-  --radius: 2px;
-  --shadow-card: none;
-  --shadow-overlay: 0 8px 24px -8px rgba(0, 0, 0, 0.7);
+  --ink: #EDEDED;
+  --ink-muted: #9CA3AF;
+  /* REPAIRED — 9router ships #6B7280, which measures 3.13:1 on --surface and
+     fails the 4.5:1 text floor. 4.82:1. */
+  --legend: #8A929F;
 
-  --row-h: 30px;
-  --control-h: 30px;
-  --topbar-h: 44px;
-  --rail-w: 200px;
-  --section-pad: 12px;
+  /* Brand. --accent fills and marks; --accent-ink is the same brand as text. */
+  --accent: #E56A4A;
+  --accent-ink: #EA7855;
+  --accent-hover: #CC5236;
+
+  /* What the router decided. Cool, so it never reads as a health state. */
+  --trace: #60A5FA;
+  --trace-fill: rgba(96, 165, 250, 0.18);
+
+  /* What a provider is. */
+  --state-healthy: #22C55E;
+  --state-cooling: #FBBF24;
+  /* REPAIRED — 9router ships #EF4444, which measures 4.02:1 on --surface and
+     fails the text floor a status label needs. 5.47:1. */
+  --state-failed: #F87171;
+
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.25);
+  --shadow-elevated: 0 12px 28px -4px rgba(0, 0, 0, 0.45);
+  --shadow-elev:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 16px 48px -8px rgba(0, 0, 0, 0.55);
+  --shadow-focus: 0 0 0 3px rgba(229, 106, 74, 0.18);
+
+  --graticule: rgba(229, 106, 74, 0.04);
+
+  --row-h: 36px;
+  --control-h: 36px;
+  --control-h-sm: 28px;
+  --topbar-h: 64px;
+  --rail-w: 288px;
+  --section-pad: 16px;
+  --page-pad: 40px;
   --gutter: 20px;
+  --content-max: 1280px;
 
-  --dur-hover: 120ms;
-  --dur-disclosure: 160ms;
+  --dur-hover: 150ms;
+  --dur-disclosure: 200ms;
   --dur-swap: 90ms;
 }
 
@@ -62,56 +93,94 @@ body.theme-light,
 .force-light {
   color-scheme: light;
 
-  --ground: #E5E8EB;
-  --rail: #EEF0F2;
-  /* Ruling: panel-valued, not white. Light panel-to-well is only 1.045:1
-     total, so a well recessed into an overlay would be indistinguishable
-     from the overlay itself if --overlay stayed #FFFFFF. Overlay's lift in
-     light comes entirely from --shadow-overlay and the 1px --hairline
-     border — the "dropdowns and dialogs are panels lifted off the
-     chassis" claim above, stated in the token itself. Dark is unchanged:
-     dark overlay is already brighter than panel, so a well recessed into
-     it gets the same step every other well gets without this. */
-  --overlay: #F9FAFB;
-  --ink: #1A2128;
-  --ink-muted: #5A636D;
-  --legend: #68737D;
-  --hairline-subtle: #DDE0E4;
-  --hairline: #C3C9D0;
-  --bezel: #818C98;
-  --trace: #0284C5;
-  --trace-fill: #0DA2E7;
-  --accent-ink: #0369A0;
-  --focus: #0284C5;
+  --ground: #FDFAF6;
+  --ground-alt: #F7F3EE;
+  --surface: #FFFFFF;
+  --surface-2: #F4F4F5;
+  --surface-3: #E7E7E9;
+  --sidebar: rgba(255, 255, 255, 0.72);
+
+  --border: #E5E7EB;
+  --border-subtle: #F1F1F3;
+
+  --ink: #0A0A0A;
+  /* REPAIRED — 9router's muted #6B7280 measures 4.83:1 and is fine, but its
+     subtle tier #9CA3AF measures 2.54:1 and fails outright. Both tiers step
+     down one so two distinct greys survive and both clear 4.5:1. */
+  --ink-muted: #4B5563;
+  --legend: #6B7280;
+
+  --accent: #E56A4A;
+  /* REPAIRED — brand-500 as TEXT measures 3.23:1 on white. brand-700 is the
+     same ramp at 6.21:1. The fill above keeps brand-500, which clears the
+     3:1 non-text floor at 3.23:1. */
+  --accent-ink: #A64027;
+  --accent-hover: #CC5236;
+
+  /* REPAIRED — 9router ships #3B82F6 at 3.68:1, fine as a mark and short of
+     the text floor. blue-600 is 5.17:1. */
+  --trace: #2563EB;
+  --trace-fill: rgba(37, 99, 235, 0.12);
+
+  /* REPAIRED — #10B981 measures 2.54:1 and fails even the 3:1 non-text
+     floor. 5.48:1. */
   --state-healthy: #047857;
-  --state-cooling: #DB7706;
-  --state-failed: #DC2828;
+  /* REPAIRED — #F59E0B measures 2.15:1. #D97706 is 3.19:1: non-text only,
+     which is why a cooling reading never says its word in amber. Amber at
+     text grade on white turns brown. */
+  --state-cooling: #D97706;
+  --state-failed: #CF222E;
 
-  --panel: #F9FAFB;
-  --well: #FFFFFF;
+  --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.18);
+  --shadow-elevated: 0 12px 28px -4px rgba(60, 50, 45, 0.06);
+  --shadow-elev:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 36px -8px rgba(15, 23, 42, 0.10);
 
-  --shadow-overlay: 0 8px 24px -8px rgba(15, 23, 41, 0.18);
+  --graticule: rgba(229, 106, 74, 0.08);
 }
 
-/* A forced container is the page ground for everything inside it, so it
-   paints the two surface tokens body would otherwise have supplied. */
+/* MIGRATION ALIASES. The previous language named its surfaces panel/well/
+   rail/overlay and its rules hairline/bezel. Every screen still uses those
+   names, so they are kept pointing at the new ramp: the whole set renders in
+   the new palette immediately, and each screen drops its alias as it is
+   rebuilt. Delete this block when no fragment references it. */
+:root,
+.force-dark,
+body.theme-light,
+.force-light {
+  --panel: var(--surface);
+  --well: var(--surface-2);
+  --rail: var(--sidebar);
+  --overlay: var(--surface-2);
+  --hairline: var(--border);
+  --hairline-subtle: var(--border-subtle);
+  --bezel: var(--legend);
+  --focus: var(--accent);
+  --radius-legacy: var(--radius);
+  --shadow-card: none;
+  --shadow-overlay: var(--shadow-elevated);
+}
+
+/* A forced container pins a subtree to one mode whatever the T toggle says,
+   so one document can set the two side by side. */
 .force-dark,
 .force-light {
   background: var(--ground);
   color: var(--ink);
 }
 
-/* The light-mode values darkraise-ui 6.5.0 ships broken, per spec §7. They
-   live here because this is the one file allowed to hold a hex, and they are
-   shown in exactly one place — the light proof — measured against the tokens
-   that replace them. §7 gives a hex for these three and names only a palette
-   step for --focus-ring and --destructive, so those two are cited by measured
-   ratio on that screen and get no specimen: a swatch would mean guessing a
-   value the spec does not state. */
+/* The light-mode values 9router ships that a measurement rejected. They live
+   here because this is the one file allowed to hold a hex, and they appear in
+   exactly one place — the light proof — beside the tokens that replace them. */
 :root {
-  --shipped-primary: #0DA2E7;
-  --shipped-success: #10B77F;
-  --shipped-warning: #F59F0A;
+  --shipped-primary: #E56A4A;
+  --shipped-success: #10B981;
+  --shipped-warning: #F59E0B;
+  --shipped-info: #3B82F6;
+  --shipped-subtle: #9CA3AF;
 }
 
 /* --- Reset & base -------------------------------------------------- */
@@ -126,12 +195,31 @@ html, body {
 body {
   background: var(--ground);
   color: var(--ink);
-  font-family: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
-  font-size: 12.5px;
-  line-height: 1.45;
-  font-variant-numeric: tabular-nums;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* The faint accent grid 9router lays behind the dashboard. Scoped to the
+   screen rather than the viewport — which is what 9router does too, on its
+   main pane — so it ends where the screen ends. A viewport-fixed grid paints
+   every row of the render and check.py can no longer tell where the content
+   stopped. */
+.screen { position: relative; }
+.screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--graticule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--graticule) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.screen > * { position: relative; z-index: 1; }
 
 a { color: inherit; }
 
@@ -188,7 +276,7 @@ body.pins-on .pin {
 }
 
 .prose {
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 13.5px;
   line-height: 1.55;
 }
@@ -197,7 +285,7 @@ body.pins-on .pin {
    sentence, so it takes the prose face at legend weight, not small caps. */
 .legend {
   margin: 0 0 var(--section-pad);
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--legend);
@@ -207,7 +295,7 @@ body.pins-on .pin {
    labels, distinct from the .legend caption above. */
 .legend-caps {
   margin: 0 0 6px;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   font-size: 10px;
   letter-spacing: 0.09em;
@@ -221,7 +309,7 @@ body.pins-on .pin {
    scale erodes one screen at a time. */
 .section-title {
   margin: 0 0 8px;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -619,7 +707,7 @@ a.row { text-decoration: none; }
 }
 .reason-prose {
   min-width: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 13.5px;
   line-height: 1.55;
   color: var(--ink-muted);
@@ -658,78 +746,91 @@ a.row { text-decoration: none; }
 /* The evidence panel: the same retrospective ladder with every hue
    stripped, so the four mark states have to stand on silhouette alone. */
 .ladder-grayscale { filter: grayscale(1); }
-
-/* --- Console chrome --------------------------------------------------- */
+/* --- Console chrome ---------------------------------------------------
+   The 9router shell: a 288px vibrancy sidebar with an icon-led nav, a tall
+   header carrying the page name over its route, and a content pane that
+   caps its measure rather than filling the window. */
 
 .chrome {
   display: flex;
-  align-items: stretch;
   min-height: 720px;
   background: var(--ground);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
 .rail {
   flex: 0 0 var(--rail-w);
-  width: var(--rail-w);
   display: flex;
   flex-direction: column;
-  background: var(--rail);
-  border-right: 1px solid var(--hairline);
-  padding: var(--section-pad) 0;
+  gap: 4px;
+  padding: 20px 16px;
+  background: var(--sidebar);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid var(--border-subtle);
 }
 
 .rail-brand {
-  padding: 0 var(--section-pad) var(--section-pad);
-  border-bottom: 1px solid var(--hairline);
-  margin-bottom: var(--section-pad);
-  font-family: 'IBM Plex Mono', monospace;
-  font-weight: 500;
-  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 16px;
+  text-decoration: none;
+}
+/* The one gradient in the product, and the only place --shadow-warm is
+   spent: a brand mark is the single element allowed to look like a logo. */
+.rail-logo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: var(--shadow-warm);
+  color: #FFFFFF;
+}
+.rail-logo-mark { width: 20px; height: 20px; }
+.rail-brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.rail-brand-name {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
+.rail-brand-version { font-size: 11px; color: var(--legend); }
 
-.rail-group {
-  display: flex;
-  flex-direction: column;
-  padding: 0 var(--section-pad);
-}
-/* Gutters exist only between the three nav groups; everything else in the
-   rail tiles on a 1px seam. */
-.rail-group + .rail-group { margin-top: var(--gutter); }
+.rail-group { display: flex; flex-direction: column; gap: 2px; }
+.rail-group + .rail-group { margin-top: 16px; }
+.rail-group .legend-caps { margin: 0 0 6px; padding: 0 12px; }
 
 .rail-item {
   display: flex;
   align-items: center;
-  height: var(--control-h);
-  margin: 0 calc(var(--section-pad) * -1);
-  padding: 0 var(--section-pad);
-  border-top: 1px solid var(--hairline-subtle);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12.5px;
+  gap: 12px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
   color: var(--ink-muted);
   text-decoration: none;
-  opacity: 0.75;
-  transition: opacity var(--dur-hover) ease;
+  transition: background var(--dur-hover) ease, color var(--dur-hover) ease;
 }
-.rail-group .rail-item:first-of-type { border-top: none; }
-.rail-item:hover,
-.rail-item[data-active="true"] { opacity: 1; color: var(--ink); }
-.rail-item[data-active="true"] { color: var(--accent-ink); }
+.rail-item:hover { background: var(--surface-2); color: var(--ink); }
+/* Active is a coral wash plus coral text — brand marking position, which is
+   the only job coral has in this language. */
+.rail-item[data-active="true"] {
+  background: rgba(229, 106, 74, 0.10);
+  color: var(--accent-ink);
+}
+.rail-icon { flex: 0 0 auto; width: 18px; height: 18px; }
 
-/* Sits directly in .rail, not inside a .rail-group, and .rail carries no
-   horizontal padding — so the -12px left/right margin .rail-item uses to
-   cancel a group's padding has nothing to cancel here and would bleed past
-   both edges instead. Zero it out; .rail's own lack of padding already puts
-   this item flush with the rail edge, which is what the cancellation would
-   have produced anyway. */
-.rail-settings {
-  margin: auto 0 0;
-  padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline);
-}
+.rail-foot { margin-top: auto; padding-top: 16px; }
 
 .chrome-main {
   flex: 1 1 auto;
@@ -740,35 +841,58 @@ a.row { text-decoration: none; }
 }
 
 .topbar {
-  flex: 0 0 var(--topbar-h);
-  height: var(--topbar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--section-pad);
-  background: var(--panel);
-  border-bottom: 1px solid var(--hairline);
+  gap: var(--gutter);
+  min-height: var(--topbar-h);
+  padding: 14px var(--page-pad);
+  border-bottom: 1px solid var(--border-subtle);
 }
-
+.topbar-heading { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* The page name in sans, the route beneath it in mono. 9router stacks a
+   title over a sentence of description; this keeps the stack and spends the
+   second line on the route, which is the thing an operator can act on. */
 .topbar-title {
-  font-family: 'IBM Plex Mono', monospace;
-  font-weight: 500;
-  font-size: 12.5px;
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.015em;
   color: var(--ink);
 }
+.topbar-route { margin: 0; font-size: 12px; color: var(--legend); }
 
-.topbar-cmdk {
-  display: flex;
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
   color: var(--ink-muted);
+  cursor: pointer;
+  transition: background var(--dur-hover) ease, color var(--dur-hover) ease;
 }
+.topbar-btn:hover { background: var(--surface-2); color: var(--ink); }
+.topbar-btn-icon { padding: 0; width: var(--control-h); justify-content: center; }
+.topbar-icon { width: 18px; height: 18px; }
+.topbar-caret { font-size: 10px; color: var(--legend); }
 
 .content {
   flex: 1 1 auto;
-  padding: var(--section-pad);
-  background: var(--ground);
+  min-width: 0;
+  padding: var(--page-pad);
 }
+/* 9router caps its dashboard at 1280px rather than letting tables run the
+   full width of a wide monitor. */
+.content > * { max-width: var(--content-max); margin-inline: auto; }
 
 /* --- Document shell (outside the .chrome, describing the doc itself) -- */
 
@@ -785,14 +909,14 @@ a.row { text-decoration: none; }
 }
 .doc-title {
   margin: 0 0 4px;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   font-size: 15px;
   color: var(--ink);
 }
 .doc-keys {
   margin: 0;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 13.5px;
   line-height: 1.55;
   color: var(--ink-muted);
@@ -1212,7 +1336,7 @@ a.row { text-decoration: none; }
 .pin-note {
   display: none;
   margin-left: 6px;
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   line-height: 1.45;
   color: var(--legend);
@@ -1223,7 +1347,7 @@ body.pins-on .pin-note { display: inline; }
    specimen, e.g. "12.5px / Mono 500". Distinct from .legend (the one
    per-screen caption) and .legend-caps (the uppercase nav-group label). */
 .spec-note {
-  font-family: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   color: var(--legend);
 }
