@@ -59,9 +59,9 @@ func TestWriteResponseProducesTheCandidateShape(t *testing.T) {
 		t.Errorf("args = %#v; Gemini takes an object", fc["args"])
 	}
 	u := got["usageMetadata"].(map[string]any)
-	if u["promptTokenCount"].(float64) != 10 || u["candidatesTokenCount"].(float64) != 4 ||
+	if u["promptTokenCount"].(float64) != 13 || u["candidatesTokenCount"].(float64) != 4 ||
 		u["cachedContentTokenCount"].(float64) != 3 || u["thoughtsTokenCount"].(float64) != 6 ||
-		u["totalTokenCount"].(float64) != 14 {
+		u["totalTokenCount"].(float64) != 17 {
 		t.Errorf("usageMetadata = %v", u)
 	}
 	if got["modelVersion"] != "gemini-2.0-flash" || got["responseId"] != "r1" {

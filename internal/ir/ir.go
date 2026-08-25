@@ -240,6 +240,12 @@ type Usage struct {
 	Estimated        bool
 }
 
+// PromptTokens is the inclusive prompt count that OpenAI-compatible and
+// Gemini dialects report. InputTokens excludes cache reads so that pricing
+// can charge each at its own rate without overlap; a dialect that reports
+// one combined number adds them back here.
+func (u Usage) PromptTokens() int { return u.InputTokens + u.CacheReadTokens }
+
 type Warning struct {
 	Field  string
 	Target string

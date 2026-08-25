@@ -121,7 +121,7 @@ func TestRecognizeUsageReadsCachedAndReasoningDetails(t *testing.T) {
 	if u == nil {
 		t.Fatal("no usage")
 	}
-	if u.InputTokens != 40 || u.OutputTokens != 9 ||
+	if u.InputTokens != 28 || u.OutputTokens != 9 ||
 		u.CacheReadTokens != 12 || u.ReasoningTokens != 5 {
 		t.Errorf("usage = %+v", *u)
 	}

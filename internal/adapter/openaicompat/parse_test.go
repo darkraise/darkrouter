@@ -1,6 +1,7 @@
 package openaicompat
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -8,6 +9,42 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/ir"
 )
+
+func TestCachedTokensAreRemovedFromTheInputCount(t *testing.T) {
+	// OpenAI reports prompt_tokens INCLUDING the cached subset. Leaving it
+	// inclusive makes the cached tokens billable twice: once at the input
+	// rate and again at the cache-read rate.
+	var u wireUsage
+	if err := json.Unmarshal([]byte(`{
+		"prompt_tokens": 10000,
+		"completion_tokens": 500,
+		"prompt_tokens_details": {"cached_tokens": 8000}
+	}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	got := u.toIR()
+	if got.InputTokens != 2000 {
+		t.Fatalf("InputTokens = %d, want 2000 (10000 less the 8000 cached)", got.InputTokens)
+	}
+	if got.CacheReadTokens != 8000 {
+		t.Fatalf("CacheReadTokens = %d, want 8000", got.CacheReadTokens)
+	}
+}
+
+func TestAnInclusiveCountIsNeverDrivenNegative(t *testing.T) {
+	// A provider reporting cached greater than prompt is malformed, but a
+	// negative token count would reach pricing and produce a negative cost.
+	var u wireUsage
+	if err := json.Unmarshal([]byte(`{
+		"prompt_tokens": 100,
+		"prompt_tokens_details": {"cached_tokens": 500}
+	}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	if got := u.toIR().InputTokens; got != 0 {
+		t.Fatalf("InputTokens = %d, want 0", got)
+	}
+}
 
 func collect(t *testing.T, body string) []ir.StreamEvent {
 	t.Helper()
