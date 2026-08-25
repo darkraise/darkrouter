@@ -27,7 +27,7 @@ func TestRollupAggregatesByDayProviderAndModel(t *testing.T) {
 	insertRequest(t, db, "b", now.Add(-time.Hour), "groq", "m", 5, 7, nil)
 	insertRequest(t, db, "c", now.Add(-time.Hour), "groq", "other", 1, 2, nil)
 
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -53,7 +53,7 @@ func TestRollupIsIdempotent(t *testing.T) {
 	insertRequest(t, db, "a", now.Add(-time.Hour), "groq", "m", 10, 20, nil)
 
 	for i := 0; i < 3; i++ {
-		if err := db.Rollup(ctx, now); err != nil {
+		if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 			t.Fatalf("run %d: %v", i, err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestRollupKeysOnRequestStart(t *testing.T) {
 	insertRequest(t, db, "spanning", time.Date(2026, 8, 21, 23, 59, 0, 0, time.UTC),
 		"groq", "m", 10, 20, nil)
 
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	var day string
@@ -94,7 +94,7 @@ func TestRollupLeavesCostNullWhenNoRequestIsPriced(t *testing.T) {
 	now := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
 	insertRequest(t, db, "a", now.Add(-time.Hour), "groq", "m", 10, 20, nil)
 
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	var cost *int64
@@ -115,7 +115,7 @@ func TestRollupSumsCostWhenPricingExists(t *testing.T) {
 	insertRequest(t, db, "a", now.Add(-time.Hour), "groq", "m", 10, 20, &c1)
 	insertRequest(t, db, "b", now.Add(-time.Hour), "groq", "m", 10, 20, &c2)
 
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	var cost *int64
@@ -147,7 +147,7 @@ func TestRollupAttributesAttemptTokensEvenWhenNothingServed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -188,7 +188,7 @@ func TestRollupGroupsByAlias(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.Rollup(ctx, ts); err != nil {
+	if err := db.Rollup(ctx, ts, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -230,7 +230,7 @@ func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
 	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, ts); err != nil {
+	if err := db.Rollup(ctx, ts, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,7 +269,7 @@ func TestRollupMixesAttemptBearingAndAttemptLessRequests(t *testing.T) {
 	if _, err := w.writeBatch(ctx, []*RequestRecord{withAttempt, withoutAttempt}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, ts); err != nil {
+	if err := db.Rollup(ctx, ts, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -316,7 +316,7 @@ func TestRollupAttributesUsageToTheAttemptsOwnProvider(t *testing.T) {
 	if _, err := w.writeBatch(ctx, recs); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -368,7 +368,7 @@ func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -381,6 +381,90 @@ func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
 	}
 	if requests != 42 || tokensIn != 4200 {
 		t.Fatalf("requests=%d tokens_in=%d, want 42/4200", requests, tokensIn)
+	}
+}
+
+func TestRollupSkipsADayPruningHasAlreadyTouched(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// Yesterday, finalized when it was complete.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
+		 VALUES (?,'groq','m','fast',100,10000)`, yesterday); err != nil {
+		t.Fatal(err)
+	}
+
+	// A remnant of yesterday that pruning has not reached yet.
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "leftover", TS: now.AddDate(0, 0, -1), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 7,
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", TokensIn: 7,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A 24h retention means yesterday's midnight is already outside it.
+	if err := db.Rollup(ctx, now, 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day=?`, yesterday,
+	).Scan(&requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	// Recomputing from the remnant alone would have written 1 and 7.
+	if requests != 100 || tokensIn != 10000 {
+		t.Fatalf("a partly-pruned day was recomputed from its remnant: "+
+			"requests=%d tokens_in=%d, want 100/10000", requests, tokensIn)
+	}
+}
+
+func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
+	// The guard must not change behaviour for anyone running a sane retention.
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, tokens_in)
+		 VALUES (?,'groq','m','',9,900)`, today); err != nil {
+		t.Fatal(err)
+	}
+	w := NewLogWriter(db, LogOptions{})
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "live", TS: now, ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", TokensIn: 10,
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", TokensIn: 10,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows, requests int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*), coalesce(sum(requests),0) FROM usage_daily WHERE day=?`, today,
+	).Scan(&rows, &requests); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || requests != 1 {
+		t.Fatalf("stale row survived under a sane retention: rows=%d requests=%d",
+			rows, requests)
 	}
 }
 
@@ -407,7 +491,7 @@ func TestRollupClearsItsWindowBeforeReinserting(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Rollup(ctx, now); err != nil {
+	if err := db.Rollup(ctx, now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
