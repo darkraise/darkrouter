@@ -45,6 +45,15 @@ LOADING_HREF = re.compile(
 FONT_SIZE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px")
 MAX_FONT_PX = 30.0
 
+# A url(#id) naming an id the document does not contain paints nothing at all
+# — no fill, no console error, no visual cue beyond a shape that renders empty.
+# build.py namespaces every SVG id per screen, so a reference written in a
+# shared stylesheet names the pre-namespaced id and loses its paint the moment
+# the fragments are assembled. Neither check_fragment nor a per-screen
+# screenshot can see it, because before assembly the reference resolves.
+PAINT_REF = re.compile(r"url\(\s*#([A-Za-z][\w-]*)\s*\)")
+ANCHOR_REF = re.compile(r"""(?:\bhref|\bxlink:href)\s*=\s*["']#([A-Za-z][\w-]*)["']""")
+
 
 def class_token(name: str) -> re.Pattern:
     """Match one class among several.
@@ -158,6 +167,15 @@ def check_index(path: Path) -> list[str]:
     problems = parser.finish()
     if "fonts.googleapis.com" in text:
         problems.append("index: links fonts.googleapis.com — fonts must be self-hosted")
+
+    for pattern, kind in ((PAINT_REF, "paint"), (ANCHOR_REF, "anchor")):
+        for m in pattern.finditer(text):
+            if m.group(1) not in parser.ids:
+                line = text.count("\n", 0, m.start()) + 1
+                problems.append(
+                    f"index:{line}: dangling {kind} reference {m.group(0)} — "
+                    f"no element in the document carries that id"
+                )
     return problems
 
 

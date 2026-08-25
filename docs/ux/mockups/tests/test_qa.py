@@ -219,6 +219,57 @@ class TestIndexChecks(unittest.TestCase):
             problems = qa.check_index(doc)
             self.assertTrue(any("unbalanced" in p for p in problems), problems)
 
+    def test_dangling_paint_reference_is_rejected(self):
+        # The failure this exists for: build.py renames a screen's SVG ids,
+        # so a url(#…) left in a shared stylesheet points at the old name and
+        # the shape it paints renders empty in the assembled document only.
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "index.html"
+            doc.write_text(
+                "<html><head><style>.s{--chart-3:url(#hatch)}</style></head>"
+                "<body><svg><defs><pattern id='hatch--s-05'></pattern></defs>"
+                "<rect class='s'></rect></svg></body></html>",
+                encoding="utf-8",
+            )
+            problems = qa.check_index(doc)
+            self.assertTrue(
+                any("dangling paint reference" in p for p in problems), problems
+            )
+
+    def test_resolved_paint_reference_is_accepted(self):
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "index.html"
+            doc.write_text(
+                "<html><head><style>.s{--chart-3:url(#hatch)}</style></head>"
+                "<body><svg><defs><pattern id='hatch'></pattern></defs>"
+                "<rect class='s'></rect></svg></body></html>",
+                encoding="utf-8",
+            )
+            self.assertEqual(qa.check_index(doc), [])
+
+    def test_dangling_anchor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "index.html"
+            doc.write_text(
+                "<html><body><a href='#s-05-usage'>usage</a>"
+                "<section id='s-05-usage--s-05-usage'></section></body></html>",
+                encoding="utf-8",
+            )
+            problems = qa.check_index(doc)
+            self.assertTrue(
+                any("dangling anchor reference" in p for p in problems), problems
+            )
+
+    def test_bare_hash_href_is_not_a_dangling_anchor(self):
+        # <a href="#"> is the set's inert control affordance, not a link to an
+        # element called "".
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "index.html"
+            doc.write_text(
+                "<html><body><a href='#'>inert</a></body></html>", encoding="utf-8"
+            )
+            self.assertEqual(qa.check_index(doc), [])
+
 
 if __name__ == "__main__":
     unittest.main()
