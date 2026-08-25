@@ -117,12 +117,31 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// usageDimensions is the closed set of group_by values. An unknown one is a
+// 400 rather than a silent fall back to the day-only rollup: a caller that
+// misspells the dimension would otherwise render one series and never learn
+// it asked for the wrong thing.
+var usageDimensions = map[string]store.UsageDimension{
+	"":         store.UsageByDayOnly,
+	"provider": store.UsageByProvider,
+	"model":    store.UsageByModel,
+	"alias":    store.UsageByAlias,
+}
+
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	days := 30
 	if n, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil {
 		days = n
 	}
-	rows, err := s.deps.DB.UsageByDay(r.Context(), days)
+	groupBy := r.URL.Query().Get("group_by")
+	dim, ok := usageDimensions[groupBy]
+	if !ok {
+		writeError(w, http.StatusBadRequest,
+			"group_by must be one of provider, model, alias")
+		return
+	}
+
+	rows, err := s.deps.DB.UsageBy(r.Context(), days, dim)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -133,11 +152,21 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		if u.CostMicros != nil {
 			priced = true
 		}
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"day": u.Day, "requests": u.Requests,
 			"tokens_in": u.TokensIn, "tokens_out": u.TokensOut,
 			"cost_micros": u.CostMicros,
-		})
+		}
+		if groupBy != "" {
+			row["key"] = u.Key
+		}
+		out = append(out, row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"days": out, "priced": priced})
+	resp := map[string]any{"days": out, "priced": priced}
+	// Omitted only when there is no group_by: existing consumers parse this
+	// response today and must see the exact shape they always have.
+	if groupBy != "" {
+		resp["group_by"] = groupBy
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
