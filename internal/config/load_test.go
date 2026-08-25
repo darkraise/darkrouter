@@ -183,12 +183,13 @@ func TestParseRejectsNonPositiveRetention(t *testing.T) {
 
 func TestRetentionShorterThanTwoDaysIsRejected(t *testing.T) {
 	// The daily rollup rewrites yesterday and today wholesale, so pruning
-	// must never be able to reach either. Rejecting the config is honest;
-	// accepting it and silently under-reporting a day is not.
-	body := minimal + "\nlog:\n  retention: 6h\n"
+	// must never be able to reach either. 24h looks plausible and is exactly
+	// the value that would leave all of yesterday prunable, so it is the one
+	// worth pinning rather than an obviously-too-short value like 6h.
+	body := minimal + "\nlog:\n  retention: 24h\n"
 	_, err := Parse([]byte(body), env(map[string]string{"GROQ_KEY": "sk-x"}))
 	if err == nil {
-		t.Fatal("a retention below 48h must be rejected")
+		t.Fatal("24h must be rejected: it leaves all of yesterday prunable")
 	}
 	if !strings.Contains(err.Error(), "log.retention") {
 		t.Fatalf("the error must name the setting, got %q", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -256,6 +257,15 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 	}})
 
 	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
+
+	// The handler computes its own start-of-today a moment after this test
+	// did; a UTC midnight landing between the two would put the seeded row
+	// in what the handler now considers yesterday. That is a clock race, not
+	// a bug the assertion below should absorb, so detect it and skip.
+	if end := time.Now().UTC(); end.Year() != now.Year() || end.YearDay() != now.YearDay() {
+		t.Skip("UTC day boundary crossed during the test")
+	}
+
 	var got struct {
 		TodaySpend struct {
 			Micros *int64 `json:"micros"`
@@ -265,8 +275,11 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.TodaySpend.Micros == nil || *got.TodaySpend.Micros != 4200 {
-		t.Fatalf("today_spend = %v, want 4200 from an hour into the day",
-			got.TodaySpend.Micros)
+		val := "nil"
+		if got.TodaySpend.Micros != nil {
+			val = strconv.FormatInt(*got.TodaySpend.Micros, 10)
+		}
+		t.Fatalf("today_spend = %s, want 4200 from an hour into the day", val)
 	}
 }
 

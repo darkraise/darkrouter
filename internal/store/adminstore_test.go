@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -834,8 +835,12 @@ func TestSpendSinceCoversTheWholeDay(t *testing.T) {
 		t.Fatal("priced must be true when any row carries a cost")
 	}
 	if micros == nil || *micros != early+late {
-		t.Fatalf("spend = %v, want %d: a request from earlier today was dropped",
-			micros, early+late)
+		got := "nil"
+		if micros != nil {
+			got = strconv.FormatInt(*micros, 10)
+		}
+		t.Fatalf("spend = %s, want %d: a request from earlier today was dropped",
+			got, early+late)
 	}
 }
 
