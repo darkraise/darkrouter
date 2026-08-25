@@ -165,7 +165,7 @@
 .cn-surface-off .cn-surface-mark {
   flex: 0 0 auto;
   background: transparent;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
 }
 .cn-surface-off .mono { color: var(--ink-muted); }
 .cn-surface-off .cn-surface-path { color: var(--legend); }
@@ -180,7 +180,7 @@
   max-width: 1000px;
   margin-bottom: var(--section-pad);
   padding: var(--section-pad) var(--section-pad) var(--section-pad) 14px;
-  border-left: 2px solid var(--bezel);
+  border-left: 2px solid var(--legend);
 }
 .cn-notice-lead { margin: 0 0 6px; }
 .cn-notice-body {
@@ -278,7 +278,10 @@
 
 /* The destination is a path or a menu route, so it stays mono and
    case-exact — .legend-caps would uppercase it, and a file path that has
-   been uppercased is a file path that will not open. */
+   been uppercased is a file path that will not open. This is the same
+   problem .field-key now solves for config keys and API fields; this class
+   stays because it is only a colour on an already-mono element, not a
+   second type role. */
 .cn-pane-target { color: var(--legend); }
 
 /* The selected tab's pane. Capped rather than full-bleed: two exported
@@ -347,7 +350,7 @@
   align-items: baseline;
   gap: var(--section-pad);
   padding: 9px 0;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 .cn-hdr-row:first-child {
   padding-top: 0;

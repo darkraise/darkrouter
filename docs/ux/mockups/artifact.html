@@ -211,28 +211,6 @@ body.theme-light,
    component — the shell included: layout/sidebar, layout-header,
    page-header, brand-logo and user-menu are the console chrome. */
 
-/* MIGRATION ALIASES. The previous language named its surfaces panel/well/
-   rail/overlay and its rules hairline/bezel. Every screen still uses those
-   names, so they are kept pointing at the new ramp: the whole set renders in
-   the new palette immediately, and each screen drops its alias as it is
-   rebuilt. Delete this block when no fragment references it. */
-:root,
-.force-dark,
-body.theme-light,
-.force-light {
-  --panel: var(--surface);
-  --well: var(--surface-2);
-  --rail: var(--sidebar);
-  --overlay: var(--surface-2);
-  --hairline: var(--border);
-  --hairline-subtle: var(--border-subtle);
-  --bezel: var(--legend);
-  --focus: var(--accent);
-  --radius-legacy: var(--radius);
-  --shadow-card: none;
-  --shadow-overlay: var(--shadow-elevated);
-}
-
 /* A forced container pins a subtree to one mode whatever the T toggle says,
    so one document can set the two side by side. */
 .force-dark,
@@ -311,7 +289,7 @@ body.pins-on .pin {
   /* accent-ink/well clears 4.5:1 in both modes (dark ~9.4:1, light ~6:1);
      trace-fill/ground only managed ~2.2:1 in light mode. */
   background: var(--accent-ink);
-  color: var(--well);
+  color: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
   font-size: 10px;
@@ -362,6 +340,20 @@ body.pins-on .pin {
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 12.5px;
   line-height: 1.45;
+  color: var(--legend);
+}
+
+/* A label that IS an identifier — a config key, an API field, an env var.
+   It takes mono and no transform, because .legend-caps uppercases, and
+   `proxy_listen` uppercased is `PROXY_LISTEN`, which is not the key. The
+   type rule already says it: mono means this came off the wire, and a
+   config key is the most literal off-the-wire string on any screen. */
+.field-key {
+  margin: 0 0 6px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--legend);
 }
 
@@ -420,9 +412,9 @@ kbd {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--overlay);
+  background: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   color: var(--ink-muted);
@@ -487,7 +479,7 @@ kbd {
    more than one screen. */
 .control-ghost {
   background: transparent;
-  border-color: var(--hairline-subtle);
+  border-color: var(--border-subtle);
   color: var(--ink-muted);
   opacity: 0.8;
   transition: opacity var(--dur-hover) ease;
@@ -505,9 +497,9 @@ kbd {
   display: inline-flex;
   align-items: stretch;
   height: var(--control-h);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--surface);
   overflow: hidden;
 }
 
@@ -517,7 +509,7 @@ kbd {
   justify-content: center;
   min-width: 44px;
   padding: 0 10px;
-  border-right: 1px solid var(--hairline-subtle);
+  border-right: 1px solid var(--border-subtle);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
   color: var(--ink-muted);
@@ -529,7 +521,7 @@ kbd {
 .segmented-option:hover { opacity: 1; color: var(--ink); }
 .segmented-option[data-active="true"] {
   opacity: 1;
-  background: var(--well);
+  background: var(--surface-2);
   color: var(--accent-ink);
 }
 
@@ -569,7 +561,7 @@ a.row { text-decoration: none; }
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--overlay);
+  background: var(--surface-2);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-hover) ease;
@@ -604,10 +596,10 @@ a.row { text-decoration: none; }
    is a thing with nothing in it. */
 .state-pip[data-state="healthy"] { background: var(--state-healthy); }
 .state-pip[data-state="degraded"] { background: var(--state-cooling); }
-.state-pip[data-state="disabled"] { background: var(--bezel); }
+.state-pip[data-state="disabled"] { background: var(--legend); }
 .state-pip[data-state="unconfigured"] {
   background: transparent;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
 }
 /* Outcome, not health — a finished request or probe. Never on a provider. */
 .state-pip[data-state="failed"] { background: var(--state-failed); }
@@ -623,8 +615,8 @@ a.row { text-decoration: none; }
 .ladder {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -635,7 +627,7 @@ a.row { text-decoration: none; }
   gap: 8px;
   height: var(--row-h);
   padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .ladder-row:last-child { border-bottom: none; }
 
@@ -675,7 +667,7 @@ a.row { text-decoration: none; }
   width: 3px;
   height: 1px;
   transform: translateY(-50%);
-  background: var(--bezel);
+  background: var(--legend);
 }
 .rank-tick-major::after { width: 5px; }
 /* Below the served row a candidate's text is still printed, just at the
@@ -687,11 +679,11 @@ a.row { text-decoration: none; }
 .spine {
   align-self: stretch;
   width: 1px;
-  background: var(--hairline);
+  background: var(--border);
 }
 /* The termination rule: below the served row the run of ink itself gives
    out, not just the marks sitting on it. */
-.spine-terminated { background: var(--hairline-subtle); }
+.spine-terminated { background: var(--border-subtle); }
 
 /* All four states share one 7px silhouette footprint so the gutter column
    never jitters between rows, and split into two families: filled means an
@@ -709,7 +701,7 @@ a.row { text-decoration: none; }
    neither a routing decision nor a health report, so it carries no state
    colour, and its hollow silhouette matches "no attempt occurred" rather
    than the filled attempt outcomes below. */
-.mark-skipped { background: transparent; border: 1px solid var(--bezel); }
+.mark-skipped { background: transparent; border: 1px solid var(--legend); }
 /* The one other place amber is allowed, per the colour-discipline rule.
    A centre dot gives it a second, shape-based channel distinct from
    .mark-skipped's plain hollow ring, since stroke weight alone (1px vs
@@ -744,7 +736,7 @@ a.row { text-decoration: none; }
   width: 5px;
   height: 5px;
   background: transparent;
-  border: 1px solid var(--hairline-subtle);
+  border: 1px solid var(--border-subtle);
 }
 /* The compressed catalog reading: rank plus mark plus provider id only,
    at a size step up from the ladder's own 7px so a dense column of them
@@ -1016,8 +1008,8 @@ a.row { text-decoration: none; }
   max-width: 1440px;
   margin: 0 auto 32px;
   padding: var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 .toc ol {
@@ -1025,7 +1017,7 @@ a.row { text-decoration: none; }
   margin: 0;
   padding: 0;
 }
-.toc li { border-top: 1px solid var(--hairline-subtle); }
+.toc li { border-top: 1px solid var(--border-subtle); }
 .toc li:first-child { border-top: none; }
 .toc a {
   display: flex;
@@ -1070,9 +1062,9 @@ a.row { text-decoration: none; }
   flex: 0 0 auto;
   width: 26px;
   height: 14px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--well);
+  background: var(--surface-2);
 }
 .switch-knob{
   position: absolute;
@@ -1081,7 +1073,7 @@ a.row { text-decoration: none; }
   width: 10px;
   height: 10px;
   border-radius: var(--radius-pill);
-  background: var(--bezel);
+  background: var(--legend);
 }
 .switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
 .switch[data-on="true"] .switch-knob {
@@ -1126,8 +1118,9 @@ a.row { text-decoration: none; }
 /* A table header row: the hairline it sits on is one step darker than a
    body row's, and its .legend-caps labels lose their own bottom margin,
    which a 30px flex row does not collapse on its own. */
-.row-head { border-bottom-color: var(--hairline); }
-.row-head .legend-caps { margin: 0; }
+.row-head { border-bottom-color: var(--border); }
+.row-head .legend-caps,
+.row-head .field-key { margin: 0; }
 
 /* The grip for drag-to-reprioritise. Three 1px rules painted with a
    gradient rather than a glyph or an image: it stays crisp at any zoom,
@@ -1140,7 +1133,7 @@ a.row { text-decoration: none; }
   height: var(--control-h);
   background-image: repeating-linear-gradient(
     to bottom,
-    var(--bezel) 0 1px,
+    var(--legend) 0 1px,
     transparent 1px 4px
   );
   background-size: 10px 9px;
@@ -1183,7 +1176,7 @@ a.row { text-decoration: none; }
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: 50%;
   background: transparent;
 }
@@ -1234,10 +1227,10 @@ a.row { text-decoration: none; }
   gap: 1px;
   margin-top: 4px;
   padding: 4px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 .combo[data-open="true"] .combo-menu { display: flex; }
 
@@ -1263,7 +1256,7 @@ a.row { text-decoration: none; }
   justify-content: center;
   width: 12px;
   height: 12px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
@@ -1327,7 +1320,8 @@ a.row { text-decoration: none; }
   gap: 4px;
   min-width: 0;
 }
-.field .legend-caps { margin: 0; }
+.field .legend-caps,
+.field .field-key { margin: 0; }
 .field .spec-note { margin-top: 2px; }
 .field-span-2 { grid-column: span 2; }
 
@@ -1352,8 +1346,8 @@ a.row { text-decoration: none; }
 /* Read-only: still a fact worth a well's worth of weight, just not one
    this control can change right now. */
 .field-input[readonly] {
-  background: var(--panel);
-  border-color: var(--hairline-subtle);
+  background: var(--surface);
+  border-color: var(--border-subtle);
   color: var(--ink-muted);
 }
 /* Not applicable to the current selection, which is a different fact
@@ -1361,7 +1355,7 @@ a.row { text-decoration: none; }
    value at all. Dashed says "there is nothing to read here" where a
    solid border would say "there is, you just cannot change it". */
 .field-input-inert {
-  background: var(--panel);
+  background: var(--surface);
   border-style: dashed;
   color: var(--legend);
 }
@@ -1375,7 +1369,7 @@ a.row { text-decoration: none; }
   gap: 8px;
   height: var(--control-h);
   padding: 0 8px;
-  border: 1px solid var(--hairline-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
@@ -1428,7 +1422,7 @@ a.row { text-decoration: none; }
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
 }
 
@@ -1470,9 +1464,9 @@ body.pins-on .pin-note { display: inline; }
    outside real overlay chrome (menus, popovers). */
 .surface-overlay {
   padding: var(--section-pad);
-  background: var(--overlay);
+  background: var(--surface-2);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 /* Region 5 (surface): the radius comparison. border-radius is set per
@@ -1481,8 +1475,8 @@ body.pins-on .pin-note { display: inline; }
 .radius-demo {
   width: 48px;
   height: 32px;
-  background: var(--panel);
-  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
 /* Region 6 (density): a generic 30px control silhouette proving
@@ -1518,7 +1512,7 @@ body.pins-on .pin-note { display: inline; }
   content: "";
   width: 1px;
   height: 8px;
-  background: var(--bezel);
+  background: var(--legend);
 }
 
 /* Region 8 (motion): the 160ms height-disclosure specimen. Collapsed to
@@ -1533,8 +1527,8 @@ body.pins-on .pin-note { display: inline; }
   max-height: 43px;
   padding: var(--section-pad);
   overflow: hidden;
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   transition: max-height var(--dur-disclosure) ease;
 }
@@ -1568,7 +1562,7 @@ body.pins-on .pin-note { display: inline; }
 .region + .region {
   margin-top: var(--gutter);
   padding-top: var(--gutter);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /*
@@ -1670,7 +1664,7 @@ body.pins-on .pin-note { display: inline; }
   right: 0;
   height: 2px;
   overflow: hidden;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
   border-radius: var(--radius-pill) var(--radius) 0 0;
 }
 .load-bar-fill {
@@ -1766,7 +1760,7 @@ body.pins-on .pin-note { display: inline; }
 .ops-footer {
   margin: var(--gutter) 0 0;
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline);
+  border-top: 1px solid var(--border);
   color: var(--legend);
 }
 .ops-footer-dropped[data-alert="true"] {
@@ -1927,9 +1921,9 @@ body.pins-on .pin-note { display: inline; }
   align-items: center;
   height: 22px;
   padding: 0 10px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -1943,7 +1937,7 @@ body.pins-on .pin-note { display: inline; }
 .view-chip[data-active="true"] {
   color: var(--accent-ink);
   border-color: var(--accent-ink);
-  background: var(--overlay);
+  background: var(--surface-2);
   opacity: 1;
 }
 
@@ -1968,10 +1962,10 @@ body.pins-on .pin-note { display: inline; }
   margin-top: 4px;
   padding: 8px;
   width: 340px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 .time-range[data-open="true"] .time-range-menu { display: flex; }
 
@@ -1984,9 +1978,9 @@ body.pins-on .pin-note { display: inline; }
 .time-range-preset{
   height: 22px;
   padding: 0 8px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -1994,7 +1988,7 @@ body.pins-on .pin-note { display: inline; }
 .time-range-preset[data-active="true"] {
   color: var(--accent-ink);
   border-color: var(--accent-ink);
-  background: var(--well);
+  background: var(--surface-2);
 }
 
 .time-range-custom {
@@ -2002,7 +1996,7 @@ body.pins-on .pin-note { display: inline; }
   align-items: center;
   gap: 6px;
   padding-top: 8px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .time-range-input{
@@ -2010,8 +2004,8 @@ body.pins-on .pin-note { display: inline; }
   min-width: 128px;
   height: 24px;
   padding: 0 6px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -2036,10 +2030,10 @@ body.pins-on .pin-note { display: inline; }
   gap: 1px;
   width: 240px;
   padding: 4px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 .col-menu-item {
@@ -2061,7 +2055,7 @@ body.pins-on .pin-note { display: inline; }
 .col-menu-sep {
   height: 1px;
   margin: 4px 2px;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
 }
 
 /* Export is an action, not a toggle — its glyph would otherwise inherit
@@ -2118,10 +2112,10 @@ body.pins-on .pin-note { display: inline; }
   gap: 6px;
   height: 22px;
   padding: 0 10px;
-  background: var(--overlay);
+  background: var(--surface-2);
   border: 1px solid var(--accent-ink);
   border-radius: var(--radius-xs);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--accent-ink);
@@ -2238,7 +2232,7 @@ body.pins-on .pin-note { display: inline; }
   height: 16px;
   background-image: repeating-linear-gradient(
     to right,
-    var(--hairline-subtle) 0 1px,
+    var(--border-subtle) 0 1px,
     transparent 1px calc(100% / 3)
   );
 }
@@ -2255,7 +2249,7 @@ body.pins-on .pin-note { display: inline; }
   min-width: 2px;
   margin-top: -4px;
   border-radius: var(--radius-pill);
-  background: var(--bezel);
+  background: var(--legend);
 }
 .waterfall-seg-serve { background: var(--trace); }
 .waterfall-seg-failed { background: var(--state-failed); }
@@ -2272,7 +2266,7 @@ body.pins-on .pin-note { display: inline; }
    track's own background punches a boundary the same way a keyline
    would, giving the failed cap the same discrete-mark legibility the
    served cap gets from its fill. */
-.waterfall-end.mark-failed { border: 1px solid var(--well); }
+.waterfall-end.mark-failed { border: 1px solid var(--surface-2); }
 
 .waterfall-total {
   flex: 0 0 64px;
@@ -2310,8 +2304,8 @@ body.pins-on .pin-note { display: inline; }
 .warning-list {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -2341,7 +2335,7 @@ body.pins-on .pin-note { display: inline; }
   display: inline-block;
   width: 10px;
   font-size: 9px;
-  color: var(--bezel);
+  color: var(--legend);
 }
 .json-toggle-collapsed { color: var(--legend); }
 
@@ -2473,7 +2467,7 @@ body.pins-on .pin-note { display: inline; }
    rather than three independently gridded widgets. */
 .grat-line {
   fill: none;
-  stroke: var(--hairline-subtle);
+  stroke: var(--border-subtle);
   stroke-width: 1;
 }
 
@@ -2530,14 +2524,14 @@ body.pins-on .pin-note { display: inline; }
 .rank-table {
   display: flex;
   flex-direction: column;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
 .rank-table-head {
   color: var(--legend);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 /* Matches Requests' .row-head .legend-caps: zero the label's own 6px
    bottom margin, which the shared flex row does not collapse on its own. */
@@ -2564,14 +2558,14 @@ body.pins-on .pin-note { display: inline; }
 .share-track{
   flex: 1 1 auto;
   height: 5px;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
 .share-bar {
   display: block;
   height: 100%;
-  background: var(--bezel);
+  background: var(--legend);
 }
 .share-pct {
   flex: 0 0 auto;
@@ -2663,9 +2657,9 @@ body.pins-on .pin-note { display: inline; }
   position: relative;
   z-index: 1;
   transform: translateX(6px);
-  background: var(--overlay);
+  background: var(--surface-2);
   border-left: 1px solid var(--trace);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 /* The priority column while a drag is in flight: the value that is being
@@ -2814,7 +2808,7 @@ body.pins-on .pin-note { display: inline; }
   gap: 10px;
   padding-bottom: var(--section-pad);
   margin-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .pd-head-id {
@@ -2915,8 +2909,8 @@ body.pins-on .pin-note { display: inline; }
   flex-direction: column;
   gap: 6px;
   padding: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
-  background: var(--well);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-2);
 }
 .credential-replace .spec-note { margin: 0; }
 
@@ -3128,7 +3122,9 @@ body.pins-on .pin-note { display: inline; }
   position: absolute;
   grid-area: auto;
   inset: -9999px;
-  background: rgba(3, 5, 7, 0.66);
+  /* Warm near-black, not cold: rgb(3,5,7) was picked against the previous
+     language's blue-black well and reads blue over this warm ground. */
+  background: rgba(12, 10, 9, 0.66);
 }
 body.theme-light .preset-scrim,
 .force-light .preset-scrim { background: rgba(26, 33, 40, 0.30); }
@@ -3144,10 +3140,10 @@ body.theme-light .preset-scrim,
   width: 1040px;
   max-width: 100%;
   margin: 96px 0 28px;
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 .preset-modal-head {
@@ -3156,7 +3152,7 @@ body.theme-light .preset-scrim,
   justify-content: space-between;
   height: var(--topbar-h);
   padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 
 /* The console speaking to the operator, so sans — the dialog's title is
@@ -3175,9 +3171,9 @@ body.theme-light .preset-scrim,
   justify-content: center;
   width: 22px;
   height: 22px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
@@ -3196,7 +3192,7 @@ body.theme-light .preset-scrim,
   gap: var(--gutter);
   min-height: 36px;
   padding: 0 var(--section-pad);
-  border-top: 1px solid var(--hairline);
+  border-top: 1px solid var(--border);
 }
 
 /* --- Search -----------------------------------------------------------
@@ -3221,8 +3217,8 @@ body.theme-light .preset-scrim,
   gap: 8px;
   height: var(--control-h);
   padding: 0 10px;
-  border-color: var(--focus);
-  outline: 1px solid var(--focus);
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -3238,7 +3234,7 @@ body.theme-light .preset-scrim,
   width: 1px;
   height: 15px;
   margin-left: -4px;
-  background: var(--focus);
+  background: var(--accent);
 }
 
 .preset-search-count { margin-left: auto; }
@@ -3256,7 +3252,7 @@ body.theme-light .preset-scrim,
   gap: var(--section-pad);
   height: 24px;
   padding: 0 10px;
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   text-decoration: none;
   opacity: 0.9;
   transition: opacity var(--dur-hover) ease;
@@ -3438,7 +3434,7 @@ body.theme-light .preset-scrim,
   align-items: center;
   height: 16px;
   padding: 0 5px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
@@ -3453,7 +3449,7 @@ body.theme-light .preset-scrim,
   align-items: center;
   height: 16px;
   padding: 0 5px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
@@ -3492,7 +3488,7 @@ body.theme-light .preset-scrim,
 .preset-form .field-input {
   width: 100%;
   padding: 0 10px;
-  background: var(--panel);
+  background: var(--surface);
 }
 
 .preset-field-note {
@@ -3618,7 +3614,7 @@ body.theme-light .preset-scrim,
    an operator would type into this box in the real product, unlike a
    Provider-detail field .field-input[readonly] marks as not patchable —
    so it keeps the live input's own well/ink weight instead of dimming. */
-.q-input[readonly] { background: var(--well); color: var(--ink); }
+.q-input[readonly] { background: var(--surface-2); color: var(--ink); }
 
 /* A span, not one of N. The two ends are real numbers the operator types,
    and the track between them is the reading — how much of the catalog's
@@ -3629,8 +3625,8 @@ body.theme-light .preset-scrim,
   gap: 8px;
   height: var(--control-h);
   padding: 0 10px;
-  background: var(--panel);
-  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -3643,8 +3639,8 @@ body.theme-light .preset-scrim,
   width: 76px;
   height: 20px;
   padding: 0 4px;
-  background: var(--well);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -3659,7 +3655,7 @@ body.theme-light .preset-scrim,
   width: 56px;
   height: 3px;
   border-radius: var(--radius-pill);
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
 }
 /* The selected span, in --accent-ink because it reports a control's own
    state, the same register .view-chip[data-active] and .segmented-option
@@ -3692,7 +3688,7 @@ body.theme-light .preset-scrim,
   justify-content: center;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
@@ -3700,7 +3696,7 @@ body.theme-light .preset-scrim,
   color: var(--ink);
 }
 .cap-bit[data-on="false"] {
-  border-color: var(--hairline);
+  border-color: var(--border);
   color: var(--ink-muted);
   opacity: 0.3;
 }
@@ -3716,20 +3712,20 @@ body.theme-light .preset-scrim,
   align-items: center;
   height: 18px;
   padding: 0 5px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
   white-space: nowrap;
 }
-.source-tag[data-source="discovered"] { border-color: var(--hairline-subtle); }
+.source-tag[data-source="discovered"] { border-color: var(--border-subtle); }
 .source-tag[data-source="inferred"] {
   border-style: dashed;
-  border-color: var(--bezel);
+  border-color: var(--legend);
 }
 .source-tag[data-source="override"] {
-  border-color: var(--bezel);
+  border-color: var(--legend);
   color: var(--ink);
 }
 
@@ -3752,26 +3748,26 @@ body.theme-light .preset-scrim,
 .lifecycle[data-state="stale"] .lifecycle-mark {
   flex: 0 0 auto;
   background: transparent;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
 }
 .lifecycle[data-state="removed_upstream"] { color: var(--legend); }
 .lifecycle[data-state="removed_upstream"] .lifecycle-mark {
   height: 1px;
-  background: var(--bezel);
+  background: var(--legend);
 }
 
 /* A number inference produced rather than an API. The row already carries
    an "≈" in front of each such value; the dashed rule under it is the
    second, non-textual channel, so the guess survives a squint. */
 .value-guessed {
-  border-bottom: 1px dashed var(--bezel);
+  border-bottom: 1px dashed var(--legend);
   color: var(--ink-muted);
 }
 
 /* The row-level reading of the same fact: an inferred row routes with a
    warning, so its left edge breaks. --bezel, not amber — this is not a
    health reading. */
-.row-inferred { border-left: 1px dashed var(--bezel); }
+.row-inferred { border-left: 1px dashed var(--legend); }
 
 .row-retired { opacity: 0.6; }
 .row-retired > span { text-decoration: line-through; }
@@ -3824,11 +3820,11 @@ body.theme-light .preset-scrim,
    is — the one elevated surface open on the page, same as a popover. */
 
 .sheet {
-  background: var(--overlay);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-top: 1px solid var(--accent-ink);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 .sheet-head {
@@ -3836,7 +3832,7 @@ body.theme-light .preset-scrim,
   align-items: center;
   gap: 10px;
   padding: 10px var(--section-pad);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
 }
 
 .sheet-title {
@@ -3901,7 +3897,7 @@ body.theme-light .preset-scrim,
   color: var(--legend);
 }
 .precedence-step[data-winner="true"] {
-  border-color: var(--bezel);
+  border-color: var(--legend);
   color: var(--ink);
 }
 
@@ -3941,7 +3937,7 @@ body.theme-light .preset-scrim,
   flex-wrap: wrap;
   min-height: 44px;
   padding: 4px 0;
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .field-row:last-of-type { border-bottom: none; }
 
@@ -3961,7 +3957,7 @@ body.theme-light .preset-scrim,
    value here is one an operator could type over, so it stays on the live
    input's well/ink weight rather than the "not patchable" dimming. */
 .override-editor input.field-input[readonly] {
-  background: var(--well);
+  background: var(--surface-2);
   color: var(--ink);
 }
 /* An edited-but-unsaved field. Accent, not a state colour: nothing has
@@ -3981,15 +3977,15 @@ body.theme-light .preset-scrim,
   gap: 5px;
   height: var(--control-h);
   padding: 0 8px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--well);
+  background: var(--surface-2);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--ink-muted);
 }
 .cap-toggle[data-on="true"] {
-  border-color: var(--bezel);
+  border-color: var(--legend);
   color: var(--ink);
 }
 .cap-toggle-box{
@@ -3998,7 +3994,7 @@ body.theme-light .preset-scrim,
   justify-content: center;
   width: 11px;
   height: 11px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-size: 9px;
   line-height: 1;
@@ -4026,7 +4022,7 @@ body.theme-light .preset-scrim,
    stays a column, but it is plainly inert. */
 .field-revert[data-inert="true"] {
   opacity: 0.35;
-  border-color: var(--hairline-subtle);
+  border-color: var(--border-subtle);
 }
 
 .override-footer {
@@ -4035,7 +4031,7 @@ body.theme-light .preset-scrim,
   gap: 10px;
   margin-top: var(--section-pad);
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline);
+  border-top: 1px solid var(--border);
 }
 .override-footer .micro { margin-left: auto; text-align: right; }
 
@@ -4083,8 +4079,8 @@ body.theme-light .preset-scrim,
   gap: var(--section-pad);
   flex-wrap: wrap;
   padding: 8px var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   margin-bottom: 10px;
 }
@@ -4156,8 +4152,8 @@ body.theme-light .preset-scrim,
   width: 300px;
   height: var(--control-h);
   padding: 0 var(--section-pad);
-  background: var(--well);
-  border: 1px solid var(--focus);
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
   border-radius: var(--radius);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 12.5px;
@@ -4226,8 +4222,8 @@ body.theme-light .preset-scrim,
   gap: 10px;
   min-height: var(--row-h);
   padding: 0 var(--section-pad);
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   opacity: 0.9;
   transition: opacity var(--dur-hover) ease;
@@ -4294,7 +4290,7 @@ body.theme-light .preset-scrim,
   justify-content: center;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
@@ -4319,8 +4315,8 @@ body.theme-light .preset-scrim,
   gap: 6px;
   flex-wrap: wrap;
   padding: 6px var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 .rt-rule-eg .mono { min-width: 0; overflow-wrap: anywhere; }
@@ -4493,8 +4489,8 @@ body.theme-light .preset-scrim,
   width: 76px;
   height: 24px;
   padding: 2px 8px 0;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12.5px;
@@ -4510,7 +4506,7 @@ body.theme-light .preset-scrim,
    colour alone would not separate them. */
 .rt-effect {
   gap: 6px;
-  border-color: var(--hairline-subtle);
+  border-color: var(--border-subtle);
   color: var(--legend);
 }
 .rt-effect-mark{
@@ -4533,7 +4529,7 @@ body.theme-light .preset-scrim,
 /* The restart-only rows keep every value legible — the field is editable
    and the write succeeds; only the moment it starts mattering differs —
    so the row is marked with a dashed left rule rather than dimmed. */
-.rt-row-restart { border-left: 1px dashed var(--bezel); }
+.rt-row-restart { border-left: 1px dashed var(--legend); }
 
 .rt-policy-foot {
   display: flex;
@@ -4541,7 +4537,7 @@ body.theme-light .preset-scrim,
   gap: 8px;
   margin-top: var(--section-pad);
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 .rt-policy-foot .micro { margin-left: auto; text-align: right; }
 
@@ -4560,7 +4556,7 @@ body.theme-light .preset-scrim,
   gap: 2px;
   margin: var(--section-pad) 0;
   padding: 10px var(--section-pad);
-  border-left: 2px dashed var(--bezel);
+  border-left: 2px dashed var(--legend);
 }
 
 .rt-yaml-head {
@@ -4662,7 +4658,7 @@ body.theme-light .preset-scrim,
   flex-direction: column;
   gap: 6px;
   padding: 8px var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   border-left: 1px solid transparent;
 }
 .pg-turn:last-child { border-bottom: none; }
@@ -4790,7 +4786,7 @@ body.theme-light .preset-scrim,
 .pg-sep {
   height: 1px;
   margin: var(--section-pad) 0;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
 }
 
 .pg-stack {
@@ -4828,7 +4824,7 @@ body.theme-light .preset-scrim,
   gap: 8px;
   height: var(--control-h);
   padding: 0 var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   opacity: 0.9;
   transition: opacity var(--dur-hover) ease;
 }
@@ -4894,7 +4890,7 @@ body.theme-light .preset-scrim,
 .pg-bar {
   flex: 0 0 3px;
   border-radius: var(--radius);
-  background: var(--bezel);
+  background: var(--legend);
 }
 
 .pg-components {
@@ -4918,9 +4914,9 @@ body.theme-light .preset-scrim,
   justify-content: center;
   gap: 4px;
   height: 78px;
-  border: 1px dashed var(--hairline);
+  border: 1px dashed var(--border);
   border-radius: var(--radius);
-  background: var(--well);
+  background: var(--surface-2);
 }
 
 .pg-drop-glyph {
@@ -4928,7 +4924,7 @@ body.theme-light .preset-scrim,
   /* The page-title step. A glyph is still type, and 16px is on no role
      in the §3.2 scale. */
   font-size: 15px;
-  color: var(--bezel);
+  color: var(--legend);
 }
 
 .pg-file {
@@ -4974,7 +4970,7 @@ body.theme-light .preset-scrim,
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   font-size: 9px;
   color: var(--ink);
@@ -4987,7 +4983,7 @@ body.theme-light .preset-scrim,
   flex: 1 1 auto;
   height: 3px;
   border-radius: var(--radius-pill);
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
 }
 
 .pg-player-fill {
@@ -5151,7 +5147,7 @@ body.theme-light .preset-scrim,
   gap: 10px;
   flex-wrap: wrap;
   padding-top: 10px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 .pgc-prompt-bar-spacer { flex: 1 1 auto; }
 
@@ -5167,7 +5163,7 @@ body.theme-light .preset-scrim,
 }
 .pgc-fanout path {
   fill: none;
-  stroke: var(--hairline);
+  stroke: var(--border);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
@@ -5366,7 +5362,7 @@ body.theme-light .preset-scrim,
   gap: 10px;
   margin-top: auto;
   padding-top: 10px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 .pgc-tracelink-id {
   flex: 1 1 auto;
@@ -5400,7 +5396,7 @@ body.theme-light .preset-scrim,
 /* A parameter that no longer matches the other pane. Neither an outcome nor
    a routing choice — it is a configuration fact about this bench — so it
    takes --bezel and --legend and stays out of both colour families. */
-.pgc-param-diff { border-color: var(--bezel); }
+.pgc-param-diff { border-color: var(--legend); }
 .pgc-neq {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 11px;
@@ -5574,7 +5570,7 @@ body.theme-light .preset-scrim,
 .cn-surface-off .cn-surface-mark {
   flex: 0 0 auto;
   background: transparent;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
 }
 .cn-surface-off .mono { color: var(--ink-muted); }
 .cn-surface-off .cn-surface-path { color: var(--legend); }
@@ -5589,7 +5585,7 @@ body.theme-light .preset-scrim,
   max-width: 1000px;
   margin-bottom: var(--section-pad);
   padding: var(--section-pad) var(--section-pad) var(--section-pad) 14px;
-  border-left: 2px solid var(--bezel);
+  border-left: 2px solid var(--legend);
 }
 .cn-notice-lead { margin: 0 0 6px; }
 .cn-notice-body {
@@ -5687,7 +5683,10 @@ body.theme-light .preset-scrim,
 
 /* The destination is a path or a menu route, so it stays mono and
    case-exact — .legend-caps would uppercase it, and a file path that has
-   been uppercased is a file path that will not open. */
+   been uppercased is a file path that will not open. This is the same
+   problem .field-key now solves for config keys and API fields; this class
+   stays because it is only a colour on an already-mono element, not a
+   second type role. */
 .cn-pane-target { color: var(--legend); }
 
 /* The selected tab's pane. Capped rather than full-bleed: two exported
@@ -5756,7 +5755,7 @@ body.theme-light .preset-scrim,
   align-items: baseline;
   gap: var(--section-pad);
   padding: 9px 0;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 .cn-hdr-row:first-child {
   padding-top: 0;
@@ -5809,7 +5808,7 @@ body.theme-light .preset-scrim,
   gap: 10px;
   padding-bottom: var(--section-pad);
   margin-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .set-head-id {
   font-weight: 500;
@@ -5859,7 +5858,7 @@ body.theme-light .preset-scrim,
 .set-subgroup {
   margin-top: var(--gutter);
   padding-top: var(--gutter);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- The scope marker ---------------------------------------------------
@@ -5892,7 +5891,7 @@ body.theme-light .preset-scrim,
   width: 3px;
   height: 11px;
   border-radius: var(--radius-xs);
-  background: var(--bezel);
+  background: var(--legend);
 }
 /* Segmented, not dashed: a dashed 3px bar renders as two dots at this size.
    The gradient is the same technique .priority-handle uses to draw a rule
@@ -5900,7 +5899,7 @@ body.theme-light .preset-scrim,
 .set-scope[data-scope="restart"]::before {
   background: repeating-linear-gradient(
     to bottom,
-    var(--bezel) 0 3px,
+    var(--legend) 0 3px,
     transparent 3px 5px
   );
 }
@@ -5908,7 +5907,7 @@ body.theme-light .preset-scrim,
 /* Nothing reads it, so the bar is an outline around nothing. */
 .set-scope[data-scope="inert"]::before {
   background: transparent;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
 }
 
 /* The key strip that teaches the marker once, above the first panel, so no
@@ -5920,8 +5919,8 @@ body.theme-light .preset-scrim,
   gap: 8px var(--gutter);
   padding: 10px var(--section-pad);
   margin-bottom: var(--gutter);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 .set-key .legend-caps { margin: 0; }
@@ -6155,7 +6154,7 @@ body.theme-light .preset-scrim,
 .set-ruling {
   margin: var(--gutter) 0 0;
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
   color: var(--ink-muted);
 }
 .set-ruling .legend-caps {
@@ -6172,7 +6171,7 @@ body.theme-light .preset-scrim,
   margin: 0;
   padding: 8px var(--section-pad);
   border-left: 2px solid var(--state-cooling);
-  background: var(--panel);
+  background: var(--surface);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
   line-height: 1.45;
@@ -6246,7 +6245,7 @@ body.theme-light .preset-scrim,
   min-height: 420px;
   padding: var(--gutter);
   background: var(--ground);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -6273,7 +6272,7 @@ body.theme-light .preset-scrim,
   align-items: center;
   gap: 6px;
   padding-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* The product name set beside its mark. One step above table data and one
@@ -6327,7 +6326,7 @@ body.theme-light .preset-scrim,
   flex-direction: column;
   gap: 8px;
   padding-left: var(--section-pad);
-  border-left: 2px solid var(--hairline);
+  border-left: 2px solid var(--border);
 }
 .login-alert[data-tone="rejected"] { border-left-color: var(--state-failed); }
 .login-alert[data-tone="unconfigured"] { border-left-color: var(--state-cooling); }
@@ -6398,7 +6397,7 @@ body.theme-light .preset-scrim,
   flex-direction: column;
   gap: 6px;
   padding-top: 10px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- Identity mark board ----------------------------------------------- */
@@ -6477,7 +6476,7 @@ body.theme-light .preset-scrim,
   justify-content: space-between;
   gap: var(--gutter);
   padding: var(--gutter);
-  border-color: var(--hairline);
+  border-color: var(--border);
 }
 
 .fr-start-copy {
@@ -6537,8 +6536,8 @@ body.theme-light .preset-scrim,
   flex-direction: column;
   gap: 8px;
   padding: var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 /* The connector, aligned to the vertical centre of the index badge:
@@ -6550,7 +6549,7 @@ body.theme-light .preset-scrim,
   left: calc(var(--gutter) * -1);
   width: var(--gutter);
   height: 1px;
-  background: var(--hairline);
+  background: var(--border);
 }
 
 .fr-step-head {
@@ -6566,7 +6565,7 @@ body.theme-light .preset-scrim,
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
@@ -6587,7 +6586,7 @@ body.theme-light .preset-scrim,
 .fr-step-call {
   margin: auto 0 0;
   padding-top: 8px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
   font-size: 11px;
   color: var(--legend);
 }
@@ -6601,7 +6600,7 @@ body.theme-light .preset-scrim,
 .fr-step[data-state="active"] .fr-step-index {
   background: var(--accent-ink);
   border-color: var(--accent-ink);
-  color: var(--well);
+  color: var(--surface-2);
 }
 .fr-step[data-state="active"] .fr-step-title { color: var(--ink); }
 .fr-step[data-state="todo"] { opacity: 0.8; }
@@ -6615,8 +6614,8 @@ body.theme-light .preset-scrim,
 .fr-axes {
   height: 40px;
   margin-top: auto;
-  border-left: 1px dashed var(--hairline);
-  border-bottom: 1px dashed var(--hairline);
+  border-left: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
 }
 
 /* A value that does not exist yet, as distinct from a value that is zero.
@@ -6675,7 +6674,7 @@ body.theme-light .preset-scrim,
 .fr-specimen {
   position: relative;
   border-style: dashed;
-  border-color: var(--bezel);
+  border-color: var(--legend);
 }
 .fr-specimen::before {
   content: "";
@@ -6685,7 +6684,7 @@ body.theme-light .preset-scrim,
   border-radius: inherit;
   background-image: repeating-linear-gradient(
     45deg,
-    var(--bezel) 0 1px,
+    var(--legend) 0 1px,
     transparent 1px 9px
   );
   opacity: 0.14;
@@ -6702,7 +6701,7 @@ body.theme-light .preset-scrim,
 .fr-specimen-tag {
   position: relative;
   margin: 0;
-  color: var(--bezel);
+  color: var(--legend);
 }
 
 /* Hollow where .state-pip is filled, and never given a data-state: a
@@ -6712,7 +6711,7 @@ body.theme-light .preset-scrim,
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: 50%;
   background: transparent;
 }
@@ -6763,7 +6762,7 @@ body.theme-light .preset-scrim,
   justify-content: center;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
@@ -6788,7 +6787,7 @@ body.theme-light .preset-scrim,
   gap: var(--section-pad);
   height: 24px;
   padding: 0 8px;
-  border-bottom: 1px dashed var(--hairline);
+  border-bottom: 1px dashed var(--border);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--legend);
@@ -6816,7 +6815,7 @@ body.theme-light .preset-scrim,
   align-items: flex-start;
   gap: 8px;
   padding-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .fr-rule:last-child {
   padding-bottom: 0;
@@ -6865,7 +6864,7 @@ body.theme-light .preset-scrim,
   flex: 1 1 0;
   min-width: 0;
   padding: var(--section-pad);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -6953,8 +6952,8 @@ body.theme-light .preset-scrim,
   outline: 1px solid var(--shipped-primary);
 }
 .lp-input-repaired {
-  border-color: var(--focus);
-  outline: 1px solid var(--focus);
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
 }
 
 .lp-caret {
@@ -6963,7 +6962,7 @@ body.theme-light .preset-scrim,
   margin-left: -4px;
 }
 .lp-caret-shipped { background: var(--shipped-primary); }
-.lp-caret-repaired { background: var(--focus); }
+.lp-caret-repaired { background: var(--accent); }
 
 /* --- Region 5: cooling headroom --------------------------------------- */
 
@@ -6992,8 +6991,8 @@ body.theme-light .preset-scrim,
   position: relative;
   width: 300px;
   height: 20px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
 }
 .lp-gauge-floor {
@@ -9474,7 +9473,7 @@ body.theme-light .preset-scrim,
               <span class="legend-caps prov-col-prio">prio</span>
               <span class="legend-caps prov-col-name">provider</span>
               <span class="legend-caps prov-col-kind">kind</span>
-              <span class="legend-caps prov-col-url">base_url</span>
+              <span class="field-key prov-col-url">base_url</span>
               <span class="legend-caps prov-col-creds">credentials</span>
               <span class="legend-caps prov-col-switch">on</span>
               <span class="legend-caps prov-col-disc">discovery</span>
@@ -9891,13 +9890,13 @@ body.theme-light .preset-scrim,
               </label>
 
               <label class="field">
-                <span class="legend-caps">auth_style</span>
+                <span class="field-key">auth_style</span>
                 <input class="field-input" value="bearer" readonly>
                 <span class="spec-note">from the preset. Not patchable either.</span>
               </label>
 
               <label class="field field-span-2">
-                <span class="legend-caps">base_url</span>
+                <span class="field-key">base_url</span>
                 <input class="field-input" value="https://api.cerebras.ai/v1">
                 <span class="spec-note">patchable, and the one field an operator changes to point at a proxy or a regional endpoint</span>
               </label>
@@ -13467,7 +13466,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">proxy_listen</span>
+                  <span class="field-key">proxy_listen</span>
                   <span class="set-scope" data-scope="restart">restart</span>
                 </span>
                 <input class="field-input" value=":8080">
@@ -13476,7 +13475,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">admin_listen</span>
+                  <span class="field-key">admin_listen</span>
                   <span class="set-scope" data-scope="restart">restart</span>
                 </span>
                 <input class="field-input" value=":8081">
@@ -13485,7 +13484,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">max_body_bytes</span>
+                  <span class="field-key">max_body_bytes</span>
                   <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="33554432">
@@ -13494,7 +13493,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">shutdown_grace</span>
+                  <span class="field-key">shutdown_grace</span>
                   <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="30s">
@@ -13503,7 +13502,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">sse.max_line_bytes</span>
+                  <span class="field-key">sse.max_line_bytes</span>
                   <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="1048576">
@@ -13512,7 +13511,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">sse.max_precommit_bytes</span>
+                  <span class="field-key">sse.max_precommit_bytes</span>
                   <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="1048576">
@@ -13536,7 +13535,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
             <div class="set-form">
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">log.retention</span>
+                  <span class="field-key">log.retention</span>
                   <span class="set-scope" data-scope="live">live</span>
                 </span>
                 <input class="field-input" value="720h">
@@ -13563,7 +13562,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
                 <div class="field">
                   <span class="set-field-head">
-                    <span class="legend-caps">capture.bodies</span>
+                    <span class="field-key">capture.bodies</span>
                     <span class="set-scope" data-scope="inert">inert</span>
                   </span>
                   <span class="set-switch-row">
@@ -13575,7 +13574,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
                 <label class="field">
                   <span class="set-field-head">
-                    <span class="legend-caps">capture.max_bytes</span>
+                    <span class="field-key">capture.max_bytes</span>
                     <span class="set-scope" data-scope="inert">inert</span>
                   </span>
                   <input class="field-input" value="256000">
@@ -13584,7 +13583,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
                 <label class="field">
                   <span class="set-field-head">
-                    <span class="legend-caps">capture.retention</span>
+                    <span class="field-key">capture.retention</span>
                     <span class="set-scope" data-scope="inert">inert</span>
                   </span>
                   <input class="field-input" value="72h">
@@ -13611,7 +13610,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field field-span-2">
                 <span class="set-field-head">
-                  <span class="legend-caps">models_dev_url</span>
+                  <span class="field-key">models_dev_url</span>
                   <span class="set-scope" data-scope="restart">restart</span>
                 </span>
                 <input class="field-input" value="https://models.dev/api.json">
@@ -13620,7 +13619,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">sync_interval</span>
+                  <span class="field-key">sync_interval</span>
                   <span class="set-scope" data-scope="restart">restart</span>
                 </span>
                 <input class="field-input" value="12h">
@@ -13629,7 +13628,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <label class="field">
                 <span class="set-field-head">
-                  <span class="legend-caps">sync_timeout</span>
+                  <span class="field-key">sync_timeout</span>
                   <span class="set-scope" data-scope="restart">restart</span>
                 </span>
                 <input class="field-input" value="30s">
@@ -13665,7 +13664,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
                 <label class="field">
                   <span class="set-field-head">
-                    <span class="legend-caps">discovery.interval</span>
+                    <span class="field-key">discovery.interval</span>
                     <span class="set-scope" data-scope="restart">restart</span>
                   </span>
                   <input class="field-input" value="15m">
@@ -13674,7 +13673,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
                 <label class="field">
                   <span class="set-field-head">
-                    <span class="legend-caps">discovery.timeout</span>
+                    <span class="field-key">discovery.timeout</span>
                     <span class="set-scope" data-scope="restart">restart</span>
                   </span>
                   <input class="field-input" value="15s">
@@ -13683,7 +13682,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
                 <label class="field">
                   <span class="set-field-head">
-                    <span class="legend-caps">discovery.concurrency</span>
+                    <span class="field-key">discovery.concurrency</span>
                     <span class="set-scope" data-scope="restart">restart</span>
                   </span>
                   <input class="field-input" value="8">
@@ -13929,15 +13928,15 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <div class="login-brand">
                 <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
-                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
-                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
-                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
-                  <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
-                  <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
-                  <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
-                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
                   <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
                 </svg>
                 <p class="login-wordmark">darkrouter</p>
@@ -13969,15 +13968,15 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <div class="login-brand">
                 <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
-                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
-                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
-                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
-                  <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
-                  <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
-                  <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
-                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
                   <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
                 </svg>
                 <p class="login-wordmark">darkrouter</p>
@@ -14017,15 +14016,15 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <div class="login-brand">
                 <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
-                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
-                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
-                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
-                  <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
-                  <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
-                  <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
-                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
                   <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
                 </svg>
                 <p class="login-wordmark">darkrouter</p>
@@ -14051,7 +14050,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
                     <div class="login-step-body">
                       <p class="prose">Put the printed value in the environment.</p>
                       <div class="field">
-                        <span class="legend-caps">DARKROUTER_ADMIN_PASSWORD_HASH</span>
+                        <span class="field-key">DARKROUTER_ADMIN_PASSWORD_HASH</span>
                         <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
                       </div>
                     </div>
@@ -14107,15 +14106,15 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
         <div class="login-mark-row">
           <div class="well login-mark-cell">
             <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
-              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
-              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
-              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
-              <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
-              <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
-              <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
-              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
               <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
             </svg>
             <span class="spec-note">96px &mdash; sign-in</span>
@@ -14123,15 +14122,15 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
           <div class="well login-mark-cell">
             <svg class="login-mark login-mark-24" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
-              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
-              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
-              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
-              <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
-              <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
-              <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
-              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
               <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
             </svg>
             <span class="spec-note">24px &mdash; inline</span>
@@ -14139,15 +14138,15 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
           <div class="well login-mark-cell">
             <svg class="login-mark login-mark-16" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
-              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--bezel)"></rect>
-              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--bezel)"></rect>
-              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--bezel)"></rect>
-              <rect x="2" y="6.5" width="10" height="1" fill="var(--bezel)"></rect>
-              <rect x="2" y="11.5" width="17" height="1" fill="var(--bezel)"></rect>
-              <rect x="2" y="16.5" width="10" height="1" fill="var(--bezel)"></rect>
-              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
-              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--bezel)" stroke-width="1"></rect>
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
               <rect x="18" y="10" width="4" height="4" fill="var(--trace)"></rect>
             </svg>
             <span class="spec-note">16px &mdash; favicon</span>

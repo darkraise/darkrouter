@@ -82,9 +82,9 @@
   position: relative;
   z-index: 1;
   transform: translateX(6px);
-  background: var(--overlay);
+  background: var(--surface-2);
   border-left: 1px solid var(--trace);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-elevated);
 }
 
 /* The priority column while a drag is in flight: the value that is being

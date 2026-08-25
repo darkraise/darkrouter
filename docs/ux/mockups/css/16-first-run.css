@@ -35,7 +35,7 @@
   justify-content: space-between;
   gap: var(--gutter);
   padding: var(--gutter);
-  border-color: var(--hairline);
+  border-color: var(--border);
 }
 
 .fr-start-copy {
@@ -95,8 +95,8 @@
   flex-direction: column;
   gap: 8px;
   padding: var(--section-pad);
-  background: var(--panel);
-  border: 1px solid var(--hairline-subtle);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
 }
 /* The connector, aligned to the vertical centre of the index badge:
@@ -108,7 +108,7 @@
   left: calc(var(--gutter) * -1);
   width: var(--gutter);
   height: 1px;
-  background: var(--hairline);
+  background: var(--border);
 }
 
 .fr-step-head {
@@ -124,7 +124,7 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
@@ -145,7 +145,7 @@
 .fr-step-call {
   margin: auto 0 0;
   padding-top: 8px;
-  border-top: 1px solid var(--hairline-subtle);
+  border-top: 1px solid var(--border-subtle);
   font-size: 11px;
   color: var(--legend);
 }
@@ -159,7 +159,7 @@
 .fr-step[data-state="active"] .fr-step-index {
   background: var(--accent-ink);
   border-color: var(--accent-ink);
-  color: var(--well);
+  color: var(--surface-2);
 }
 .fr-step[data-state="active"] .fr-step-title { color: var(--ink); }
 .fr-step[data-state="todo"] { opacity: 0.8; }
@@ -173,8 +173,8 @@
 .fr-axes {
   height: 40px;
   margin-top: auto;
-  border-left: 1px dashed var(--hairline);
-  border-bottom: 1px dashed var(--hairline);
+  border-left: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
 }
 
 /* A value that does not exist yet, as distinct from a value that is zero.
@@ -233,7 +233,7 @@
 .fr-specimen {
   position: relative;
   border-style: dashed;
-  border-color: var(--bezel);
+  border-color: var(--legend);
 }
 .fr-specimen::before {
   content: "";
@@ -243,7 +243,7 @@
   border-radius: inherit;
   background-image: repeating-linear-gradient(
     45deg,
-    var(--bezel) 0 1px,
+    var(--legend) 0 1px,
     transparent 1px 9px
   );
   opacity: 0.14;
@@ -260,7 +260,7 @@
 .fr-specimen-tag {
   position: relative;
   margin: 0;
-  color: var(--bezel);
+  color: var(--legend);
 }
 
 /* Hollow where .state-pip is filled, and never given a data-state: a
@@ -270,7 +270,7 @@
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: 50%;
   background: transparent;
 }
@@ -321,7 +321,7 @@
   justify-content: center;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--bezel);
+  border: 1px solid var(--legend);
   border-radius: var(--radius-xs);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
@@ -346,7 +346,7 @@
   gap: var(--section-pad);
   height: 24px;
   padding: 0 8px;
-  border-bottom: 1px dashed var(--hairline);
+  border-bottom: 1px dashed var(--border);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
   color: var(--legend);
@@ -374,7 +374,7 @@
   align-items: flex-start;
   gap: 8px;
   padding-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .fr-rule:last-child {
   padding-bottom: 0;

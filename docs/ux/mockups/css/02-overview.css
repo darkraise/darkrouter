@@ -97,7 +97,7 @@
   right: 0;
   height: 2px;
   overflow: hidden;
-  background: var(--hairline-subtle);
+  background: var(--border-subtle);
   border-radius: var(--radius-pill) var(--radius) 0 0;
 }
 .load-bar-fill {
@@ -193,7 +193,7 @@
 .ops-footer {
   margin: var(--gutter) 0 0;
   padding-top: var(--section-pad);
-  border-top: 1px solid var(--hairline);
+  border-top: 1px solid var(--border);
   color: var(--legend);
 }
 .ops-footer-dropped[data-alert="true"] {

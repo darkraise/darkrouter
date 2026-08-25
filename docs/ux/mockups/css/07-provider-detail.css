@@ -31,7 +31,7 @@
   gap: 10px;
   padding-bottom: var(--section-pad);
   margin-bottom: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .pd-head-id {
@@ -132,8 +132,8 @@
   flex-direction: column;
   gap: 6px;
   padding: var(--section-pad);
-  border-bottom: 1px solid var(--hairline-subtle);
-  background: var(--well);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-2);
 }
 .credential-replace .spec-note { margin: 0; }
 

@@ -24,7 +24,7 @@
   flex: 1 1 0;
   min-width: 0;
   padding: var(--section-pad);
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -112,8 +112,8 @@
   outline: 1px solid var(--shipped-primary);
 }
 .lp-input-repaired {
-  border-color: var(--focus);
-  outline: 1px solid var(--focus);
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
 }
 
 .lp-caret {
@@ -122,7 +122,7 @@
   margin-left: -4px;
 }
 .lp-caret-shipped { background: var(--shipped-primary); }
-.lp-caret-repaired { background: var(--focus); }
+.lp-caret-repaired { background: var(--accent); }
 
 /* --- Region 5: cooling headroom --------------------------------------- */
 
@@ -151,8 +151,8 @@
   position: relative;
   width: 300px;
   height: 20px;
-  background: var(--well);
-  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
 }
 .lp-gauge-floor {
