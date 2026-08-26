@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Darkrouter — operator console mockups</title>
+    <!--STYLE-->
+  </head>
+  <body>
+    <header class="doc-head">
+      <h1 class="doc-title">darkrouter / operator console</h1>
+      <p class="doc-keys">
+        <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
+      </p>
+    </header>
+    <!--CONTENT-->
+    <script>
+      document.addEventListener("keydown", function (e) {
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        var t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+        var k = e.key.toLowerCase();
+        if (k === "a") document.body.classList.toggle("pins-on");
+        if (k === "t") document.body.classList.toggle("theme-light");
+      });
+    </script>
+  </body>
+</html>

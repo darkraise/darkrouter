@@ -4,3 +4,6 @@
 /data/
 darkrouter.yaml
 .env
+__pycache__/
+*.pyc
+docs/ux/mockups/.check/

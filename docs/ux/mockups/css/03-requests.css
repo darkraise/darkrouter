@@ -1,0 +1,239 @@
+/*
+ * Task 6 — the Requests log ("operate/requests").
+ *
+ * New vocabulary this screen introduces: .time-range, .view-chip,
+ * .newer-pill, .col-menu, and the .col-* column-width helpers the request
+ * table's header and rows share. .segmented, .chip-failover, .chip-path
+ * and .control-ghost were promoted to darkrouter-ui.css once Overview and
+ * Usage needed the same controls; .filter-bar, .combo (+ trigger/menu/
+ * option/check/count), .table-toolbar (+ -actions), .table-wrap,
+ * .col-right, .text-muted and .row-head were promoted there in the
+ * consolidation pass once Providers, Models and Playground needed them
+ * too. Everything else (.table, .row, .chip, .control, .well, .panel,
+ * .legend-caps, .micro, .prose) is reused as-is from darkrouter-ui.css.
+ */
+
+/* --- Saved views --------------------------------------------------- */
+
+.saved-views {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--section-pad);
+}
+
+.view-chip{
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.view-chip:hover { opacity: 1; }
+/* Selection state, not provider identity or a routing verdict — the same
+   token the rail's own active item uses, so "selected" reads the same
+   everywhere in the chrome. */
+.view-chip[data-active="true"] {
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  background: var(--surface-2);
+  opacity: 1;
+}
+
+/* A column-menu tick reuses .combo-check for the same reason a facet
+   checkbox does: one 12px tick box, not a second one per menu type. */
+.col-menu-item[data-checked="true"] .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* --- Time-range picker ------------------------------------------------- */
+
+.time-range {
+  display: flex;
+  flex-direction: column;
+}
+
+.time-range-menu {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px;
+  width: 340px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-elevated);
+}
+.time-range[data-open="true"] .time-range-menu { display: flex; }
+
+.time-range-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.time-range-preset{
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.time-range-preset[data-active="true"] {
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+  background: var(--surface-2);
+}
+
+.time-range-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.time-range-input{
+  flex: 1 1 0;
+  min-width: 128px;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* --- Column-visibility menu --------------------------------------------
+   .table-toolbar (+ -actions) is the shared toolbar shell; only the
+   column menu it opens is this screen's own. */
+
+/* The second overlay in this screen (after .combo-menu/.time-range-menu):
+   floats over the table on the same --surface-2 + --shadow-elevated surface
+   rather than sitting in normal flow, which would push the table down and
+   leave a dead band the width of the menu behind it. */
+.col-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 240px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-elevated);
+}
+
+.col-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.col-menu-item:hover { opacity: 1; }
+.col-menu-item[data-checked="false"] { color: var(--ink-muted); }
+
+.col-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-subtle);
+}
+
+/* Export is an action, not a toggle — its glyph would otherwise inherit
+   .combo-check's color: transparent and read as an unchecked box. */
+.col-menu-export { color: var(--accent-ink); }
+.col-menu-export .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* --- Request table -----------------------------------------------------
+   .table/.row/.table-wrap/.row-head are shared (darkrouter-ui.css);
+   everything below is the column geometry this screen's header and rows
+   share. */
+
+.col-time { flex: 0 0 84px; }
+.col-surface { flex: 0 0 84px; }
+.col-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.col-model-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-provider { flex: 0 0 88px; }
+.col-status { flex: 0 0 70px; }
+.col-attempts { flex: 0 0 64px; }
+.col-tokens { flex: 0 0 118px; }
+.col-latency { flex: 0 0 72px; }
+
+.status-success { color: var(--state-healthy); }
+.status-error { color: var(--state-failed); }
+
+/* .chip-failover and .chip-path are shared with Overview's failover log,
+   so both live in darkrouter-ui.css now. */
+
+/* --- Newer pill ----------------------------------------------------------
+   Floats astride the table's top edge on purpose — that seam is where a
+   queued-rows affordance belongs, not a layout accident. --accent-ink,
+   not --trace: this reports a UI/polling event, not a routing verdict. */
+.newer-pill{
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-elevated);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--accent-ink);
+  z-index: 1;
+}
+
+/* --- Empty state ----------------------------------------------------- */
+
+.empty-well {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: var(--gutter);
+}

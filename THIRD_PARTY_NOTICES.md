@@ -24,3 +24,26 @@ same fields every twelve hours.
 - Project: models.dev
 - Source: https://models.dev/api.json
 - Snapshot taken: 2026-08-22
+
+## IBM Plex Sans
+
+`docs/ux/mockups/fonts/ibm-plex-sans-400.woff2` and `ibm-plex-sans-600.woff2`
+are self-hosted subset builds of IBM Plex Sans, embedded as base64 data URIs
+in the built mockup pages so the operator console mockups render with no
+outbound font requests.
+
+- Project: IBM Plex
+- Licence: SIL Open Font License 1.1
+- Copyright (c) 2017 IBM Corp., with Reserved Font Name "Plex"
+- Source: https://github.com/IBM/plex
+
+## IBM Plex Mono
+
+`docs/ux/mockups/fonts/ibm-plex-mono-400.woff2` and `ibm-plex-mono-500.woff2`
+are self-hosted subset builds of IBM Plex Mono, embedded the same way as IBM
+Plex Sans above.
+
+- Project: IBM Plex
+- Licence: SIL Open Font License 1.1
+- Copyright (c) 2017 IBM Corp., with Reserved Font Name "Plex"
+- Source: https://github.com/IBM/plex

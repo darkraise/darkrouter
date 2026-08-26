@@ -1,0 +1,269 @@
+<section class="screen" id="s-15-login" data-screen-title="sign in">
+  <p class="legend">
+    The sign-in screen in the three states it actually has. It carries no
+    rail and no top bar, because neither exists before a session does, so
+    the card sits alone on the chassis colour. The third state is the one
+    the product gets wrong today: an unset
+    <span class="mono">DARKROUTER_ADMIN_PASSWORD_HASH</span> refuses every
+    password and explains nothing, and the only trace is a startup warning on
+    <span class="mono">/healthz</span> that an operator staring at a login box
+    will never read. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light
+    mode.
+  </p>
+
+  <div class="login-board">
+
+    <div class="region">
+      <p class="section-title">Sign in &mdash; the three states</p>
+
+      <div class="login-stages">
+
+        <!-- ── 1. Resting ────────────────────────────────────────────── -->
+        <div class="login-stage">
+          <p class="login-state-head">
+            <b class="pin" data-pin="1">1</b>
+            <span class="legend-caps">resting</span>
+            <span class="pin-note">1 &middot; Resting &mdash; GET /api/auth/status decides whether this screen renders at all. Sign in is POST /api/auth/login {"password"}, behind a same-origin check that answers 403 "cross-site request refused" before the password is read. Success rotates the session id, then sets darkrouter_session &mdash; HttpOnly, SameSite=Lax, Secure only under TLS, 30-day sliding expiry.</span>
+          </p>
+          <div class="login-viewport">
+            <div class="panel login-card">
+
+              <div class="login-brand">
+                <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
+                </svg>
+                <p class="login-wordmark">darkrouter</p>
+                <p class="micro">192.168.0.10:8081</p>
+              </div>
+
+              <label class="field">
+                <span class="legend-caps">admin password</span>
+                <input class="field-input" type="password" autocomplete="current-password">
+              </label>
+
+              <button class="control control-primary login-submit" type="button">Sign in</button>
+
+              <p class="spec-note">One operator, one password. There is no account list, no reset link and no second factor &mdash; the only credential this console has is the hash in the environment.</p>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 2. Rejected ───────────────────────────────────────────── -->
+        <div class="login-stage">
+          <p class="login-state-head">
+            <b class="pin" data-pin="2">2</b>
+            <span class="legend-caps">rejected</span>
+            <span class="pin-note">2 &middot; Rejected &mdash; 401 {"error":"invalid password"}. One string for a wrong password AND for an unconfigured hash. VerifyPassword fails closed on an empty or malformed hash, so bcrypt (cost 12) is never even reached in the second case and the two answers are indistinguishable from outside.</span>
+          </p>
+          <div class="login-viewport">
+            <div class="panel login-card">
+
+              <div class="login-brand">
+                <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
+                </svg>
+                <p class="login-wordmark">darkrouter</p>
+                <p class="micro">192.168.0.10:8081</p>
+              </div>
+
+              <div class="login-alert" data-tone="rejected">
+                <p class="login-alert-line">
+                  <span class="chip status-badge" data-status="error">401</span>
+                  <span class="prose">Sign-in failed. Check the password and try again.</span>
+                </p>
+                <p class="spec-note">The same sentence answers a wrong password and a gateway with no hash configured at all. Which of the two it was is deliberately absent: an operator who read that no password is set would have learned the port is open, and so would anyone else who reached this box.</p>
+              </div>
+
+              <label class="field">
+                <span class="legend-caps">admin password</span>
+                <input class="field-input login-input-bad" type="password" value="trombone-marmalade" autocomplete="current-password">
+              </label>
+
+              <button class="control control-primary login-submit" type="button">Sign in</button>
+
+              <p class="spec-note">No lockout and no attempt counter today. The cost of a guess is one bcrypt verification at cost 12, which is the only rate limit there is.</p>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 3. No password configured ─────────────────────────────── -->
+        <div class="login-stage">
+          <p class="login-state-head">
+            <b class="pin" data-pin="3">3</b>
+            <span class="legend-caps">no password configured</span>
+            <span class="pin-note">3 &middot; Unconfigured &mdash; NEW, and the one state the product fails at. Today the unset variable only appends a line to the startup warnings /healthz reports, admin.New is handed an empty PasswordHash, and the login box answers 401 forever with no way to tell why. This banner needs GET /api/auth/status to report configured:false, and the server serves it only to a request arriving on the loopback interface, so the 401 in state 2 stays the only answer a remote browser ever gets.</span>
+          </p>
+          <div class="login-viewport">
+            <div class="panel login-card">
+
+              <div class="login-brand">
+                <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+                  <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+                  <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+                  <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+                  <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+                  <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+                  <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
+                </svg>
+                <p class="login-wordmark">darkrouter</p>
+                <p class="micro">192.168.0.10:8081</p>
+              </div>
+
+              <div class="login-alert" data-tone="unconfigured">
+                <p class="legend-caps">sign-in is closed</p>
+                <p class="prose">No admin password hash is configured on this gateway, so every password is refused &mdash; including the right one. The proxy keeps serving; only the dashboard is shut. Three steps on the machine running it:</p>
+
+                <div class="login-remedy">
+
+                  <div class="login-step">
+                    <span class="login-step-n">1</span>
+                    <div class="login-step-body">
+                      <p class="prose">Generate a hash with the binary you already have. bcrypt, cost 12. With no <span class="mono">-password</span> it reads from stdin, so the password stays out of shell history.</p>
+                      <code class="well login-cmd">darkrouter hash-password</code>
+                    </div>
+                  </div>
+
+                  <div class="login-step">
+                    <span class="login-step-n">2</span>
+                    <div class="login-step-body">
+                      <p class="prose">Put the printed value in the environment.</p>
+                      <div class="field">
+                        <span class="field-key">DARKROUTER_ADMIN_PASSWORD_HASH</span>
+                        <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="login-step">
+                    <span class="login-step-n">3</span>
+                    <div class="login-step-body">
+                      <p class="prose">Restart. The variable is read once at startup; a config reload does not pick it up.</p>
+                      <code class="well login-cmd">docker compose restart darkrouter</code>
+                    </div>
+                  </div>
+
+                </div>
+
+                <div class="login-gotcha">
+                  <p class="legend-caps">if the value goes through compose</p>
+                  <p class="prose">A bcrypt hash always contains <span class="mono login-esc">$</span>, and docker compose reads each one as the start of a variable while it loads <span class="mono">.env</span>. Double every one of them, or the value silently arrives truncated and the correct password still fails with the message in the middle column.</p>
+                  <div class="field">
+                    <span class="legend-caps">as hash-password prints it</span>
+                    <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
+                  </div>
+                  <div class="field">
+                    <span class="legend-caps">as compose must receive it</span>
+                    <code class="well login-cmd"><span class="login-esc">$$</span>2a<span class="login-esc">$$</span>12<span class="login-esc">$$</span>K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
+                  </div>
+                </div>
+
+              </div>
+
+              <div class="field">
+                <span class="legend-caps">admin password</span>
+                <input class="field-input field-input-inert" type="password" placeholder="nothing to sign in against" disabled>
+              </div>
+
+              <button class="control login-submit login-submit-off" type="button" disabled>Sign in</button>
+
+              <p class="spec-note">The form stays on screen rather than being replaced, so the fix and the thing it fixes are in one frame. Shown only to a request from the loopback interface; a browser reaching this gateway across the LAN gets state 2 unchanged.</p>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Identity mark</p>
+      <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Identity mark &mdash; inline SVG built from rects on a 24 grid, two tokens only: a --legend hairline and one --trace pip. No curve, no gradient, no fetched file, so the favicon, the rail brand and the 96px sign-in mark are one figure at three scales rather than three assets to keep in step.</span></p>
+
+      <div class="panel login-mark-board">
+
+        <div class="login-mark-row">
+          <div class="well login-mark-cell">
+            <svg class="login-mark login-mark-96" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
+            </svg>
+            <span class="spec-note">96px &mdash; sign-in</span>
+          </div>
+
+          <div class="well login-mark-cell">
+            <svg class="login-mark login-mark-24" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
+            </svg>
+            <span class="spec-note">24px &mdash; inline</span>
+          </div>
+
+          <div class="well login-mark-cell">
+            <svg class="login-mark login-mark-16" viewBox="0 0 24 24" role="img" aria-label="darkrouter" shape-rendering="crispEdges">
+              <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11.5" y="2" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="11.5" y="8.5" width="1" height="7" fill="var(--legend)"></rect>
+              <rect x="11.5" y="18.5" width="1" height="3.5" fill="var(--legend)"></rect>
+              <rect x="2" y="6.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="11.5" width="17" height="1" fill="var(--legend)"></rect>
+              <rect x="2" y="16.5" width="10" height="1" fill="var(--legend)"></rect>
+              <rect x="11" y="6" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="11" y="16" width="2" height="2" fill="none" stroke="var(--legend)" stroke-width="1"></rect>
+              <rect x="18" y="10" width="4" height="4" fill="var(--accent)"></rect>
+            </svg>
+            <span class="spec-note">16px &mdash; favicon</span>
+          </div>
+        </div>
+
+        <div class="login-mark-text">
+          <p class="prose">The routing ladder and the logo drawn as the same figure: a bezel around a spine, three candidates entering from the left, two of them stopping at a hollow skip mark on the spine, and the third crossing it and running out to a single bright pip that breaks the frame. That is one request walking a failover chain, and it is also the instrument itself &mdash; a screen with something on it.</p>
+          <p class="prose">At 16px the interior detail drops out and what survives is a bracket, a crosshair and one dot pushed right, which is enough to find the tab by. It is the only place in the product where <span class="mono">--trace</span> appears without a routing decision behind it, and it is doing the same job: marking the one candidate that came out.</p>
+          <p class="spec-note">24 grid, rects only, no curve and no gradient. Bezel square (2,2)&ndash;(22,22) &middot; spine 1px at x=12 &middot; stubs 1px at y=7, y=12 and y=17, the outer two stopping at x=12 and the middle one crossing to x=19 &middot; skip marks 3&times;3 hollow, centred on the spine at (12,7) and (12,17) &middot; pip 4&times;4 filled, centred at (20,12), the one element in var(--accent).</p>
+          <p class="spec-note">One deviation from the written geometry, and it is visible above: the spine breaks either side of each skip mark instead of running unbroken from y=2 to y=22. A 3&times;3 outline drawn with a 1px stroke has a 1px core, which a 1px rule through it fills exactly &mdash; the two marks would render solid at every size and read as served rather than skipped, inverting the figure's meaning.</p>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</section>

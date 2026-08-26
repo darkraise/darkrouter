@@ -533,6 +533,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	default:
 		outcome, aerr = op.Respond(cw, resp, ac)
 	}
+	demoteLastAttempt(rec, outcome, cw.Committed())
 	// The loop asks the writer, not the op. An op that reports a retryable
 	// outcome after bytes have gone out is describing a post-commit failure,
 	// and phase 3's rule says the chain ends there regardless — a second
@@ -544,6 +545,45 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	}
 	return attemptResult{Outcome: outcome, Status: statusCode, Err: aerr,
 		Path: path, Committed: cw.Committed()}
+}
+
+// The attempt row is written from the HTTP status before the body is read,
+// so a 200 that fails while forwarding is recorded as a success it never
+// was. A committed attempt keeps its success: bytes reached the client and
+// the chain ends there regardless of what the op reports afterwards.
+func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, committed bool) {
+	if committed || outcome == adapter.OutcomeSuccess {
+		return
+	}
+	n := len(rec.Attempts)
+	if n == 0 {
+		return
+	}
+	a := &rec.Attempts[n-1]
+	a.Outcome = string(outcome)
+	// The transfer is safe to run exactly once per attempt: true only while
+	// the attempt has not yet claimed anything and the record still holds
+	// what it burned. A pre-commit path (reclassifyStream) may already have
+	// demoted this attempt and moved its usage; a second demote call for the
+	// same fault, even one surfacing a different outcome, then finds the
+	// attempt already holding its tokens and skips, rather than re-running
+	// the transfer against the now-zeroed record and overwriting the moved
+	// usage with the zeroes it left behind.
+	if a.TokensIn != 0 || a.TokensOut != 0 {
+		return
+	}
+	if rec.TokensIn == 0 && rec.TokensOut == 0 &&
+		rec.CacheReadTokens == 0 && rec.CacheWriteTokens == 0 &&
+		rec.ReasoningTokens == 0 {
+		return
+	}
+	// applyUsage assigns onto the shared record as events arrive, so at this
+	// point it holds what this attempt burned before it failed. Moving it
+	// onto the attempt's own row is what lets the burn be priced at the
+	// provider that incurred it, and what stops the next attempt inheriting it.
+	a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+	rec.TokensIn, rec.TokensOut = 0, 0
+	rec.CacheReadTokens, rec.CacheWriteTokens, rec.ReasoningTokens = 0, 0, 0
 }
 
 // attemptStream buffers the upstream's events until one of them commits the
@@ -669,8 +709,8 @@ func (e *Executor) reclassifyStream(c router.Candidate, resp *http.Response,
 	rec *store.RequestRecord, msg string) *ir.Error {
 
 	e.recordHealthFor(c, adapter.OutcomeRetryableProvider, resp)
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
 	if n := len(rec.Attempts); n > 0 {
-		rec.Attempts[n-1].Outcome = string(adapter.OutcomeRetryableProvider)
 		rec.Attempts[n-1].Error = msg
 	}
 	return &ir.Error{Type: ir.ErrAPI, Message: msg}
@@ -704,7 +744,83 @@ func (e *Executor) log(rec *store.RequestRecord) {
 	if e.deps.Log == nil {
 		return
 	}
+	e.priceRecord(rec)
 	e.deps.Log.Log(rec)
+}
+
+// priceRecord fills in CostMicros from the catalog price of the model that
+// actually served, then does the same for every attempt against the model
+// IT tried.
+//
+// Here rather than in applyUsage because applyUsage has eleven call sites and
+// this has one: cost is a property of the finished request, not of each usage
+// event that arrived on the way. A record with nothing served, no catalog, or
+// an unpriced model keeps a nil cost -- the em-dash the trace already renders.
+func (e *Executor) priceRecord(rec *store.RequestRecord) {
+	if rec == nil || e.deps.Catalog == nil {
+		return
+	}
+	snap := e.deps.Catalog.Snapshot()
+	if snap == nil {
+		return
+	}
+	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
+		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
+			rec.CostMicros = m.Pricing.CostMicros(
+				rec.TokensIn, rec.TokensOut, rec.CacheReadTokens, rec.CacheWriteTokens)
+		}
+	}
+
+	// recordAttempt runs while the attempt is still in flight, before its
+	// usage is known. By log time applyUsage has put the served attempt's
+	// usage on the request, so this is the first point it can be attributed.
+	for i := range rec.Attempts {
+		a := &rec.Attempts[i]
+		// Identified by outcome, not by matching the request's final provider:
+		// the pre-commit 400 retry re-attempts the same provider and model, so
+		// a provider match would find the rejected attempt first. Zero tokens
+		// on a success row is not ambiguous: demoteLastAttempt moves a failed
+		// attempt's burn onto its own row and zeroes the record, so the record's
+		// usage at this point can only belong to the attempt that served.
+		if a.Outcome == string(adapter.OutcomeSuccess) &&
+			a.TokensIn == 0 && a.TokensOut == 0 {
+			a.TokensIn, a.TokensOut = rec.TokensIn, rec.TokensOut
+			// The same model at the same rates on the same tokens. Re-pricing
+			// it separately drops the cache-read and cache-write components the
+			// attempt row has no columns for, and the two cost surfaces stop
+			// agreeing. Guarded on the record's own burn, not the attempt's
+			// copied in/out tokens, so a fully cached prompt still carries its
+			// cost even though the attempt row has nowhere to show it came from.
+			burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
+				rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
+				rec.ReasoningTokens != 0
+			if rec.CostMicros != nil && burned {
+				c := *rec.CostMicros
+				a.CostMicros = &c
+			}
+			break
+		}
+	}
+
+	// Each attempt is priced against the model IT tried, not the one that
+	// served: a failover's discarded tokens were burned at the failed
+	// provider's rate.
+	for i := range rec.Attempts {
+		a := &rec.Attempts[i]
+		if a.CostMicros != nil || a.ProviderID == "" || a.Model == "" {
+			continue
+		}
+		// No tokens recorded is not the same as nothing spent: a NULL cost
+		// keeps the rollup from reporting a priced day of zero.
+		if a.TokensIn == 0 && a.TokensOut == 0 {
+			continue
+		}
+		am, ok := snap.Lookup(a.ProviderID, a.Model)
+		if !ok {
+			continue
+		}
+		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0, 0)
+	}
 }
 
 func (e *Executor) recordHealth(k health.Key, s health.Signal) {
@@ -938,7 +1054,9 @@ func applyUsage(rec *store.RequestRecord, u *ir.Usage) {
 	rec.CacheReadTokens = int64(u.CacheReadTokens)
 	rec.CacheWriteTokens = int64(u.CacheWriteTokens)
 	rec.ReasoningTokens = int64(u.ReasoningTokens)
-	// CostMicros stays nil. Phase 6 supplies pricing; zero would read as free.
+	// CostMicros stays nil here: it is priced once in priceRecord, at log
+	// time, from the model that actually served -- not from each usage event
+	// that arrived on the way.
 }
 
 // tapStream observes events on their way to the edge writer without buffering

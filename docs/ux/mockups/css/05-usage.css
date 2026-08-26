@@ -1,0 +1,213 @@
+/* Usage screen (fragments/05-usage.html) — "Graticule Bench".
+ *
+ * Series take --trace, not the coral brand. Coral marks position and primary
+ * action and stays scarce so it keeps meaning that; --trace is the colour of a
+ * routing decision, and every request in a usage chart is one. The five series
+ * are separated by FILL TREATMENT against that single hue, never by adding
+ * hues, so no series can collide with a state colour.
+ *
+ * .chart-scope is the mandatory ramp override: darkraise-ui's generated
+ * five-colour categorical ramp emits orange-400 and lime-400 at positions 4
+ * and 5 with a sky accent, colliding with the reserved cooling/healthy
+ * colours. Every series here differentiates by FILL TREATMENT against one
+ * hue (--accent-ink) instead: solid, a 60% tint, a 45° hatch, a dot
+ * texture, and a stroked outline with no fill. Declared on an ancestor of
+ * every chart so it wins over any :root ramp by specificity of scope, not
+ * of selector.
+ */
+.chart-scope {
+  --chart-1: var(--trace);
+  --chart-2: color-mix(in srgb, var(--trace) 60%, transparent);
+  /* --chart-3 and --chart-4 are paint-server references and are set on the
+     .chart-scope element itself, beside the <defs> they point at, not here.
+     build.py namespaces every SVG id per screen so two screens cannot
+     collide, which means a pattern reference written in this shared sheet
+     names the pre-namespaced id and resolves to nothing once the fragments
+     are assembled — a series that renders with no fill at all. */
+  --chart-5: transparent;
+}
+
+/* --- Page layout ------------------------------------------------------ */
+
+.usage-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+
+.usage-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+}
+
+.usage-charts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+
+.usage-tables {
+  display: flex;
+  gap: var(--gutter);
+  align-items: flex-start;
+}
+.usage-tables > div { flex: 1 1 0; min-width: 0; }
+
+/* The per-screen caption already claims .legend, so the footnote — sans,
+   --legend colour, per spec §6.4/§8.3 — gets its own class rather than a
+   second .legend instance, which qa.py's exactly-one rule would reject. */
+.usage-footnote {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--legend);
+}
+
+/* --- Chart regions ------------------------------------------------------
+   The range picker reuses .segmented/.segmented-option from
+   darkrouter-ui.css — Requests' filter-bar pickers and this range picker
+   are the same "pick exactly one of N" control, no longer reinvented per
+   screen. */
+
+.usage-chart-panel { padding: var(--section-pad); }
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--section-pad);
+  margin-bottom: 6px;
+}
+
+.chart-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.chart-readout .micro { color: var(--legend); }
+
+.chart-well {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+.chart-svg.chart-svg-short { height: 140px; }
+
+/* The graticule tile: faint etched lines over the well, shared by url(#…)
+   across all three charts on this screen so they read as one substrate
+   rather than three independently gridded widgets. */
+.grat-line {
+  fill: none;
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+}
+
+.hatch-line {
+  stroke: var(--trace);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+.dot-mark { fill: var(--trace); opacity: 0.6; }
+
+/* Every stacked band shares one accent-toned edge stroke; on chart-fill-5
+   (fill: transparent) that edge is the entire visible mark — the "outline"
+   member of the five-way fill ramp. */
+.chart-area {
+  stroke: var(--trace);
+  stroke-width: 1;
+  opacity: 0.94;
+}
+.chart-fill-1 { fill: var(--chart-1); }
+.chart-fill-2 { fill: var(--chart-2); }
+.chart-fill-3 { fill: var(--chart-3); }
+.chart-fill-4 { fill: var(--chart-4); }
+.chart-fill-5 { fill: var(--chart-5); }
+
+.chart-bar { fill: var(--trace-fill); stroke: var(--trace); stroke-width: 1; }
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+/* A chart's series key: distinct from .legend (the one per-screen caption
+   qa.py counts) and from .legend-caps (nav-group labels), since a chart
+   legend needs a name of its own. */
+.chart-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
+}
+.chart-key-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.chart-key-swatch { flex: 0 0 auto; display: block; }
+
+/* --- Ranked tables ------------------------------------------------------ */
+
+.rank-table {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.rank-table-head {
+  color: var(--legend);
+  border-bottom: 1px solid var(--border);
+}
+/* Matches Requests' .row-head .legend-caps: zero the label's own 6px
+   bottom margin, which the shared flex row does not collapse on its own. */
+.rank-table-head .legend-caps { margin: 0; }
+
+/* a.row's underline reset lives in darkrouter-ui.css, shared with
+   Overview's failover log. */
+.rank-table a.row { cursor: pointer; }
+
+.rank-col-id { flex: 1 1 auto; min-width: 0; }
+.rank-col-num {
+  flex: 0 0 auto;
+  width: 64px;
+  text-align: right;
+}
+.rank-col-share {
+  flex: 0 0 auto;
+  width: 108px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-track{
+  flex: 1 1 auto;
+  height: 5px;
+  background: var(--border-subtle);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.share-bar {
+  display: block;
+  height: 100%;
+  background: var(--legend);
+}
+.share-pct {
+  flex: 0 0 auto;
+  width: 34px;
+  text-align: right;
+}

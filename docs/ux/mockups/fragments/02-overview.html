@@ -1,0 +1,323 @@
+<section class="screen" id="s-02-overview" data-screen-title="operate/overview">
+  <p class="legend">
+    The screen an operator leaves open: live throughput, error rate,
+    latency and spend over the last five minutes, the health of all eight
+    configured providers, and the failovers routing quietly absorbed.
+    Shown here with the config-invalid banner in its alarmed state and one
+    readout mid-refresh, so both are proven rather than assumed. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Overview</h2>
+          <p class="topbar-route mono">operate/overview</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <div class="config-banner" role="alert">
+            <p class="legend-caps">Config invalid</p>
+            <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Config banner &mdash; GET /api/config {valid,error,serving}. Shown only when valid=false. Error in mono, reassurance in sans.</span></p>
+            <p class="mono config-banner-error">routing.yaml:18 &mdash; alias "smart" targets provider "bedrock" model "claude-opus-4-20250514" but no credential is configured for that provider</p>
+            <p class="prose config-banner-note">The previous configuration is still serving.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Live</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Live strip &mdash; GET /api/overview {requests_per_min,error_rate,window_sec,today_spend{micros,priced}} + &sect;8.2 percentile and series extensions. 30px readout is the type ceiling.</span></p>
+          <div class="live-strip">
+
+            <div class="well live-tile">
+              <p class="live-tile-caption"><span class="mono">requests_per_min</span> &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">14.2</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,22 10,18 20,24 30,16 40,20 50,14 60,19 70,23 80,17 90,21 100,15 100,40 0,40"></polygon>
+                <polyline points="0,22 10,18 20,24 30,16 40,20 50,14 60,19 70,23 80,17 90,21 100,15"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <p class="live-tile-caption"><span class="mono">error_rate</span> &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="readout">2.4</span><span class="unit">%</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,34 10,35 20,33 30,36 40,10 50,34 60,35 70,33 80,36 90,34 100,35 100,40 0,40"></polygon>
+                <polyline points="0,34 10,35 20,33 30,36 40,10 50,34 60,35 70,33 80,36 90,34 100,35"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <p class="live-tile-caption">latency &middot; over the last 5 min</p>
+              <div class="live-tile-value">
+                <span class="live-tile-metric"><span class="micro">p50</span><span class="readout">890</span><span class="unit">ms</span></span>
+                <span class="live-tile-metric"><span class="micro">p95</span><span class="readout">4.1</span><span class="unit">s</span></span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,30 10,28 20,26 30,24 40,27 50,20 60,15 70,18 80,10 90,14 100,8 100,40 0,40"></polygon>
+                <polyline points="0,30 10,28 20,26 30,24 40,27 50,20 60,15 70,18 80,10 90,14 100,8"></polyline>
+              </svg>
+            </div>
+
+            <div class="well live-tile">
+              <div class="load-bar" role="progressbar" aria-valuenow="58" aria-valuemin="0" aria-valuemax="100" aria-label="refreshing today_spend">
+                <span class="load-bar-fill" style="width:58%"></span>
+              </div>
+              <p class="live-tile-caption"><span class="mono">today_spend</span></p>
+              <div class="live-tile-value">
+                <span class="readout">$3.47</span>
+              </div>
+              <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="0,38 10,36 20,33 30,31 40,28 50,25 60,22 70,18 80,14 90,9 100,4 100,40 0,40"></polygon>
+                <polyline points="0,38 10,36 20,33 30,31 40,28 50,25 60,22 70,18 80,14 90,9 100,4"></polyline>
+              </svg>
+            </div>
+
+          </div>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Loading &mdash; 2px determinate bar in --trace at the top of the well. Replaces today's "if (!data) return null" blank screen.</span></p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Routing flow &middot; last 24h</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Routing flow &mdash; GET /api/overview providers[]{id,state,cooling,credentials,needs_reauth} joined to a group_by=alias usage extension. NEW: &sect;8.2 defines group_by=provider|model only, so the alias dimension this graph needs is a spec gap, not a shipped call. One picture for what the router chose and what each provider is; the health grid it replaces showed the second without the first.</span></p>
+          <p class="prose rf-lede">
+            Left, the aliases traffic arrived under. Right, the eight configured
+            providers in the order the router walks them, top to bottom by
+            priority. Edge thickness is share of the 4,909 requests routed in
+            the window; a provider with no edge is not a candidate at all, which
+            is the fastest way to see that a disabled or unconfigured provider is
+            not quietly absorbing work.
+          </p>
+        <div class="rf-wrap">
+          <div class="rf-graph" style="width:1040px;height:520px">
+            <svg class="rf-edges" width="1040" height="520" viewBox="0 0 1040 520" fill="none" aria-hidden="true">
+      <path class="rf-edge rf-edge-in" d="M164 106 C 204 106, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 154 C 204 154, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 202 C 204 202, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 250 C 204 250, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 298 C 204 298, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 346 C 204 346, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-in" d="M164 394 C 204 394, 192 250, 232 250"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:10.0" d="M336 250 C 388 250, 346 47, 398 47"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:5.1" d="M336 250 C 388 250, 346 105, 398 105"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:3.5" d="M336 250 C 388 250, 346 163, 398 163"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:2.3" d="M336 250 C 388 250, 346 221, 398 221"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:2.2" d="M336 250 C 388 250, 346 279, 398 279"/>
+      <path class="rf-edge rf-edge-out" style="stroke-width:1.5" d="M336 250 C 388 250, 346 453, 398 453"/>
+      <path class="rf-edge rf-edge-fail" d="M794 47 C 808 47, 808 105, 794 105"/>
+      <text class="rf-fo-label" x="858" y="80">41 from groq</text>
+      <path class="rf-edge rf-edge-fail" d="M794 47 C 823 47, 823 279, 794 279"/>
+      <text class="rf-fo-label" x="858" y="167">96 from groq</text>
+      <path class="rf-edge rf-edge-fail" d="M794 221 C 838 221, 838 453, 794 453"/>
+      <text class="rf-fo-label" x="858" y="341">58 from openrouter</text>
+            </svg>
+      <div class="rf-node rf-router" style="left:232px;top:180px;width:104px;height:140px">
+        <span class="legend-caps rf-router-label">router</span>
+        <span class="mono rf-router-total">4,909</span>
+        <span class="micro rf-router-unit">requests</span>
+        <span class="micro rf-router-fo">4.0% failed over</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:89px;width:152px;height:34px">
+        <span class="mono rf-name">fast-coder</span>
+        <span class="micro rf-vol">2,481</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:137px;width:152px;height:34px">
+        <span class="mono rf-name">cheap</span>
+        <span class="micro rf-vol">1,096</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:185px;width:152px;height:34px">
+        <span class="mono rf-name">smart</span>
+        <span class="micro rf-vol">640</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:233px;width:152px;height:34px">
+        <span class="mono rf-name">long-context</span>
+        <span class="micro rf-vol">312</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:281px;width:152px;height:34px">
+        <span class="mono rf-name">cheap-embed</span>
+        <span class="micro rf-vol">188</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:329px;width:152px;height:34px">
+        <span class="mono rf-name">vision</span>
+        <span class="micro rf-vol">96</span>
+      </div>
+      <div class="rf-node rf-alias" style="left:12px;top:377px;width:152px;height:34px">
+        <span class="mono rf-name">rerank-default</span>
+        <span class="micro rf-vol">96</span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:24px;width:396px;height:46px">
+        <span class="micro rf-prio">100</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">groq</span>
+        <span class="micro rf-note">2 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">2,481</span><span class="micro rf-pct">50.5%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:82px;width:396px;height:46px">
+        <span class="micro rf-prio">90</span>
+        <span class="state-pip" data-state="degraded"></span>
+        <span class="mono rf-name">cerebras</span>
+        <span class="micro rf-note">3 credentials &middot; 1 cooling</span>
+        <span class="rf-right"><span class="mono rf-count">1,096</span><span class="micro rf-pct">22.3%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:140px;width:396px;height:46px">
+        <span class="micro rf-prio">80</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">anthropic</span>
+        <span class="micro rf-note">1 credential</span>
+        <span class="rf-right"><span class="mono rf-count">640</span><span class="micro rf-pct">13.0%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:198px;width:396px;height:46px">
+        <span class="micro rf-prio">70</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">openrouter</span>
+        <span class="micro rf-note">3 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">312</span><span class="micro rf-pct">6.4%</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:256px;width:396px;height:46px">
+        <span class="micro rf-prio">60</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">together</span>
+        <span class="micro rf-note">2 credentials</span>
+        <span class="rf-right"><span class="mono rf-count">284</span><span class="micro rf-pct">5.8%</span></span>
+      </div>
+      <div class="rf-node rf-provider rf-provider-idle" style="left:398px;top:314px;width:396px;height:46px">
+        <span class="micro rf-prio">50</span>
+        <span class="state-pip" data-state="disabled"></span>
+        <span class="mono rf-name">deepinfra</span>
+        <span class="micro rf-note">disabled</span>
+        
+        <span class="rf-right"><span class="micro rf-out">no traffic</span></span>
+      </div>
+      <div class="rf-node rf-provider rf-provider-idle" style="left:398px;top:372px;width:396px;height:46px">
+        <span class="micro rf-prio">40</span>
+        <span class="state-pip" data-state="unconfigured"></span>
+        <span class="mono rf-name">bedrock</span>
+        <span class="micro rf-note">0 credentials</span>
+        
+        <span class="rf-right"><span class="micro rf-out">no traffic</span></span>
+      </div>
+      <div class="rf-node rf-provider" style="left:398px;top:430px;width:396px;height:46px">
+        <span class="micro rf-prio">30</span>
+        <span class="state-pip" data-state="healthy"></span>
+        <span class="mono rf-name">vertex</span>
+        <span class="micro rf-note">needs reconnection</span>
+        <span class="rf-right"><span class="mono rf-count">96</span><span class="micro rf-pct">2.0%</span></span>
+      </div>
+          </div>
+        </div>
+          <p class="prose">
+            The three dashed returns are the part a status grid cannot show:
+            traffic that arrived somewhere because somewhere else refused it.
+            41 requests reached cerebras and 96 reached together after groq
+            rate-limited, and 58 reached vertex after openrouter did. They sum
+            to 195 &mdash; the 4.0% printed on the router, and the reason
+            together and vertex carry more than their priority alone would
+            earn them.
+          </p>
+          <p class="prose">
+            Cerebras is the row worth reading twice. It is degraded, not failed:
+            one of its three credentials is cooling, and it still carried 1,096
+            requests. A grid that renders it amber says something is wrong with
+            it; this says something is wrong with one of its keys and the other
+            two are working.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Recent failovers</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Recent failovers &mdash; GET /api/requests?limit=5 filtered attempts&gt;1. New region; a fleet error rate hides one provider degrading.</span></p>
+          <div class="table">
+
+            <a class="row" href="#01M0T2CSMRANE2FTX7RS3JV8CB">
+              <span class="mono" style="min-width:64px">14:22:07</span>
+              <span class="mono" style="flex:1 1 auto">fast-coder &rarr; together/openai-gpt-oss-120b</span>
+              <span class="chip chip-failover">failover &times;3</span>
+              <span class="data-emph" style="margin-left:auto">3,284ms</span>
+            </a>
+
+            <a class="row" href="#01M0T28NT0NA3D9RTX2FC6MJQ8">
+              <span class="mono" style="min-width:64px">14:19:52</span>
+              <span class="mono" style="flex:1 1 auto">cheap &rarr; groq/openai-gpt-oss-20b</span>
+              <span class="chip chip-failover">failover &times;2</span>
+              <span class="data-emph" style="margin-left:auto">1,932ms</span>
+            </a>
+
+            <a class="row" href="#01M0T1SBJGCEMA9NF3XJ7VQ5WB">
+              <span class="mono" style="min-width:64px">14:11:30</span>
+              <span class="mono" style="flex:1 1 auto">vision &rarr; vertex/gemini-2.5-pro</span>
+              <span class="chip chip-failover">failover &times;2</span>
+              <span class="data-emph" style="margin-left:auto">3,516ms</span>
+            </a>
+
+            <a class="row" href="#01M0T11ZH0BNF2CQ9RXM3E6JAP">
+              <span class="mono" style="min-width:64px">13:58:44</span>
+              <span class="mono" style="flex:1 1 auto">long-context &rarr; vertex/gemini-2.5-pro</span>
+              <span class="chip chip-failover">failover &times;4</span>
+              <span class="data-emph" style="margin-left:auto">8,940ms</span>
+            </a>
+
+            <a class="row" href="#01M0T0D2JRCAM9FQ2TXJ5WNE3B">
+              <span class="mono" style="min-width:64px">13:47:19</span>
+              <span class="mono" style="flex:1 1 auto">fast-coder &rarr; openrouter/openai-gpt-oss-120b</span>
+              <span class="chip chip-failover">failover &times;2</span>
+              <span class="data-emph" style="margin-left:auto">2,110ms</span>
+            </a>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Ops footer &mdash; GET /healthz {version,uptime,log_records_written,log_records_dropped}. Dropped&gt;0 turns amber: usage is then a lower bound.</span></p>
+          <p class="ops-footer">
+            <span class="mono">v0.10.0</span> &middot;
+            <span class="mono">up 6d 14h</span> &middot;
+            <span class="mono">1,204,881 log records written</span> &middot;
+            <span class="mono ops-footer-dropped" data-alert="false" title="A non-zero value means the usage figures on this screen are a lower bound.">0 dropped</span>
+          </p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

@@ -48,8 +48,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 5 {
-			t.Errorf("run %d: version = %d, want 5", i, v)
+		if v != 7 {
+			t.Errorf("run %d: version = %d, want 7", i, v)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -221,7 +221,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	}
 }
 
-func TestMigrationsReachVersionFive(t *testing.T) {
+func TestMigrationsReachVersionSeven(t *testing.T) {
 	// The loader asserts contiguity from 1, so a mis-numbered file fails here
 	// rather than at a customer's first start. One assertion rather than one
 	// per phase: the count is a fact about this build, not about a phase.
@@ -229,8 +229,135 @@ func TestMigrationsReachVersionFive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 5 {
-		t.Fatalf("loaded %d migrations, want 5", len(ms))
+	if len(ms) != 7 {
+		t.Fatalf("loaded %d migrations, want 7", len(ms))
+	}
+}
+
+func TestMigration0006AddsAliasAndAttemptUsage(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	// usage_daily carries alias and keys on it
+	var pk string
+	err := db.Read.QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='usage_daily'`).Scan(&pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pk, "alias") {
+		t.Fatalf("usage_daily has no alias column:\n%s", pk)
+	}
+	if !strings.Contains(pk, "PRIMARY KEY (day, provider_id, model, alias)") {
+		t.Fatalf("usage_daily key was not widened:\n%s", pk)
+	}
+
+	// two rows differing only by alias must coexist
+	for _, alias := range []string{"", "fast-coder"} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+			 VALUES ('2026-08-25','groq','gpt-oss-120b',?,1)`, alias); err != nil {
+			t.Fatalf("insert alias=%q: %v", alias, err)
+		}
+	}
+
+	// request_attempts carries usage
+	for _, col := range []string{"tokens_in", "tokens_out", "cost_micros"} {
+		var n int
+		if err := db.Read.QueryRowContext(ctx,
+			`SELECT count(*) FROM pragma_table_info('request_attempts') WHERE name=?`,
+			col).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("request_attempts is missing %s", col)
+		}
+	}
+}
+
+func TestMigration0006PreservesExistingUsageRows(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version > 5 {
+			continue
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("apply %04d: %v", m.version, err)
+		}
+	}
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out)
+		 VALUES ('2026-08-01','groq','a',5,100,200),
+		        ('2026-08-02','openai','b',7,300,400)`); err != nil {
+		t.Fatalf("pre-0006 insert: %v", err)
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to 0006: %v", err)
+	}
+
+	var rows, requests, tokensIn int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*), sum(requests), sum(tokens_in) FROM usage_daily`,
+	).Scan(&rows, &requests, &tokensIn); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || requests != 12 || tokensIn != 400 {
+		t.Fatalf("rows lost across the rebuild: rows=%d requests=%d tokens_in=%d, want 2/12/400",
+			rows, requests, tokensIn)
+	}
+
+	var alias string
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT alias FROM usage_daily WHERE provider_id='groq'`).Scan(&alias); err != nil {
+		t.Fatal(err)
+	}
+	if alias != "" {
+		t.Fatalf("a row that predates aliases must carry the empty alias, got %q", alias)
+	}
+}
+
+func TestMigration0007AddsAttemptsAndKeepsRows(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	var n int
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT count(*) FROM pragma_table_info('usage_daily') WHERE name='attempts'`,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatal("usage_daily is missing the attempts column")
+	}
+
+	// A row written before the column existed must read as zero, not NULL.
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+		 VALUES ('2026-08-25','groq','m','',3)`); err != nil {
+		t.Fatal(err)
+	}
+	var attempts int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT attempts FROM usage_daily`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 {
+		t.Fatalf("attempts must default to 0, got %d", attempts)
 	}
 }
 

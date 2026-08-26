@@ -1,0 +1,476 @@
+<section class="screen" id="s-00-design-language" data-screen-title="design language">
+  <p class="legend">
+    A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
+    sentence beside each pin stating the component it annotates, the tokens
+    it uses, and the rule itself. This screen is the reference every other
+    screen is checked against — a divergence from a specimen here is a bug
+    in that screen, not a variant.
+  </p>
+
+  <div class="panel" style="padding:0 var(--gutter)">
+
+    <div class="region">
+      <p class="section-title">Palette</p>
+      <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Palette &mdash; tokens declared in darkrouter-ui.css :root and body.theme-light. Fragments reference var(--token) only; qa.py rejects raw hex.</span></p>
+      <div class="table">
+        <div class="row">
+          <span class="swatch" style="background:var(--ground)"></span>
+          <span class="mono" style="min-width:150px">--ground</span>
+          <span class="micro">vs --ink &mdash; dark 14.87:1 &middot; light 19.03:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--ground-alt)"></span>
+          <span class="mono" style="min-width:150px">--ground-alt</span>
+          <span class="micro">vs --ink &mdash; dark 14.09:1 &middot; light 17.92:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--surface)"></span>
+          <span class="mono" style="min-width:150px">--surface</span>
+          <span class="micro">vs --ink &mdash; dark 12.93:1 &middot; light 19.80:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--surface-2)"></span>
+          <span class="mono" style="min-width:150px">--surface-2</span>
+          <span class="micro">vs --ink &mdash; dark 11.27:1 &middot; light 18.01:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--surface-3)"></span>
+          <span class="mono" style="min-width:150px">--surface-3</span>
+          <span class="micro">vs --ink &mdash; dark 9.72:1 &middot; light 16.03:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--border)"></span>
+          <span class="mono" style="min-width:150px">--border</span>
+          <span class="micro">vs --surface &mdash; dark 1.20:1 &middot; light 1.24:1 (structural, not text)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--border-subtle)"></span>
+          <span class="mono" style="min-width:150px">--border-subtle</span>
+          <span class="micro">vs --surface &mdash; dark 1.05:1 &middot; light 1.13:1 (structural, not text)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--ink)"></span>
+          <span class="mono" style="min-width:150px">--ink</span>
+          <span class="micro">vs --surface &mdash; dark 12.93:1 &middot; light 19.80:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--ink-muted)"></span>
+          <span class="mono" style="min-width:150px">--ink-muted</span>
+          <span class="micro">vs --surface &mdash; dark 5.96:1 &middot; light 7.56:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--legend)"></span>
+          <span class="mono" style="min-width:150px">--legend</span>
+          <span class="micro">vs --surface &mdash; dark 4.82:1 &middot; light 4.83:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--accent)"></span>
+          <span class="mono" style="min-width:150px">--accent</span>
+          <span class="micro">vs --surface &mdash; dark 4.68:1 &middot; light 3.23:1 (mark only)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--accent-ink)"></span>
+          <span class="mono" style="min-width:150px">--accent-ink</span>
+          <span class="micro">vs --surface &mdash; dark 5.27:1 &middot; light 6.21:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--accent-hover)"></span>
+          <span class="mono" style="min-width:150px">--accent-hover</span>
+          <span class="micro">vs --surface &mdash; dark 3.48:1 &middot; light 4.35:1 (mark only)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--trace)"></span>
+          <span class="mono" style="min-width:150px">--trace</span>
+          <span class="micro">vs --surface &mdash; dark 5.95:1 &middot; light 5.17:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--state-healthy)"></span>
+          <span class="mono" style="min-width:150px">--state-healthy</span>
+          <span class="micro">vs --surface &mdash; dark 6.64:1 &middot; light 5.48:1</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--state-cooling)"></span>
+          <span class="mono" style="min-width:150px">--state-cooling</span>
+          <span class="micro">vs --surface &mdash; dark 9.07:1 &middot; light 3.19:1 (mark only)</span>
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:var(--state-failed)"></span>
+          <span class="mono" style="min-width:150px">--state-failed</span>
+          <span class="micro">vs --surface &mdash; dark 5.47:1 &middot; light 5.36:1</span>
+        </div>
+      </div>
+      <p class="prose">
+        Every ratio above is computed from the hexes the shipped stylesheet
+        declares, against the surface it actually composites the token on.
+        Nine of these values are REPAIRED &mdash; 9router's own light mode
+        ships a success green at 2.54:1 and an amber at 2.15:1, both under
+        the 3:1 floor a mark has to clear, and its brand at text size reaches
+        only 3.23:1. The light proof shows each repair beside the value it
+        replaces.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Brand / decision / health</p>
+      <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Three-way colour split &mdash; coral is BRAND, --trace is the router's VERDICT, state colours are provider IDENTITY. Three carve-outs are named below; a state colour used for anything not on that list is a bug.</span></p>
+      <div style="display:flex;gap:var(--gutter)">
+        <div style="flex:1 1 0">
+          <p class="spec-note">what the provider is</p>
+          <div class="table">
+            <div class="row">
+              <span class="state-pip" data-state="healthy"></span>
+              <span class="mono">groq</span>
+              <span class="micro">healthy</span>
+            </div>
+            <div class="row">
+              <span class="state-pip" data-state="degraded"></span>
+              <span class="mono">cerebras</span>
+              <span class="micro">cooling until 14:22</span>
+            </div>
+            <div class="row">
+              <span class="state-pip" data-state="failed"></span>
+              <span class="mono">bedrock</span>
+              <span class="micro">failed</span>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1 1 0">
+          <p class="spec-note">what the router decided</p>
+          <div class="ladder">
+            <div class="ladder-row">
+              <span class="rank rank-tick">01</span>
+              <span class="spine"></span>
+              <span class="mark mark-skipped"></span>
+              <span class="target">groq</span>
+              <span class="reason">
+                <span class="reason-prose">skipped &mdash; healthy, router preferred cerebras' latency</span>
+              </span>
+            </div>
+            <div class="ladder-row ladder-row-served">
+              <span class="rank rank-tick">02</span>
+              <span class="spine"></span>
+              <span class="mark mark-served"></span>
+              <span class="target">cerebras</span>
+              <span class="reason">
+                <span class="reason-prose">served openai/gpt-oss-120b &mdash; cooling, still completed</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="prose">
+        Left: three provider identity pips &mdash; what each provider IS.
+        Right: the router's verdict on the same request &mdash; what it
+        DECIDED, in --trace and --legend. A healthy provider (groq) can
+        still be skipped; a degraded one (cerebras) can still serve. State
+        colour never appears in the gutter; --trace never appears on a pip.
+      </p>
+      <p class="prose">
+        A pip carries one of the four states GET /api/overview emits, and
+        the wording is the API's rather than the language's: healthy,
+        DEGRADED, disabled, unconfigured. Degraded and cooling are not
+        synonyms and the row above shows why &mdash; cerebras reads degraded
+        because one of its credentials is cooling until 14:22. The
+        credential is the thing that cools; the provider is the thing that
+        degrades. That is also why the ladder mark for a passed-over
+        candidate stays --state-cooling: down there the subject really is
+        one credential.
+      </p>
+      <p class="prose">
+        Disabled and unconfigured take no state colour at all, because
+        neither is a health reading &mdash; nobody has measured anything. They
+        split the way the ladder marks split: disabled is filled --legend, a
+        thing that exists and is switched off; unconfigured is a hollow
+        --legend ring, a thing with nothing in it yet.
+      </p>
+      <p class="prose">
+        And a fourth colour that is none of these three. CORAL is BRAND: it
+        marks where you are in the nav and which control is the primary
+        action on a screen, and it means nothing about the system's state.
+        It is kept out of the ladder gutter and off every pip deliberately
+        &mdash; coral sits between amber and red in hue, so a coral routing
+        mark beside an amber cooling mark and a red failure would be three
+        warm hues doing three unrelated jobs in one column.
+      </p>
+      <p class="prose">
+        Three carve-outs are named, and only three. Each is a use of a state
+        colour that is not a provider's health, and each is listed here
+        because a rule with unlisted exceptions is not a rule.
+      </p>
+      <p class="prose">
+        DESTRUCTIVE AFFORDANCE &mdash; --state-failed on a control whose
+        action removes something: a delete button's border and hover text.
+        Defensible precisely because a destructive click produces a
+        failed-shaped result &mdash; the row is gone &mdash; but it is a
+        named thing, not a variant reading of health, and it never appears
+        on a pip or a ladder mark.
+      </p>
+      <p class="prose">
+        REQUEST OUTCOME &mdash; --state-healthy and --state-failed on a
+        finished request's or probe's status, in the log and on a badge. A
+        provider's health is a rolling judgement about a thing that
+        persists; an outcome is a verdict on one event that is over. They
+        are different facts wearing the same two colours, which is legible
+        only because an outcome never appears on a pip and a health reading
+        never appears in a status column.
+      </p>
+      <p class="prose">
+        ATTENTION &mdash; --state-cooling on a condition that is neither a
+        failure nor a provider state: a stale discovery sweep, a warning
+        chip, an alias that resolves to nothing, a value the operator has
+        not set yet. Amber is the language's "look at this, nothing has
+        broken" colour, and cooling is the provider-shaped member of that
+        family rather than its whole meaning. It is the widest of the three
+        carve-outs and the one worth policing: amber on anything that has
+        actually failed is a bug, and so is amber used decoratively.
+      </p>
+      <p class="prose">
+        What none of the three permit: a state colour in the ladder gutter
+        reporting a routing decision, or --trace on a provider pip. That
+        boundary has no exceptions.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Type scale</p>
+      <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Type scale &mdash; Inter and IBM Plex Mono, self-hosted. 30px ceiling enforced by qa.py.</span></p>
+      <div class="table">
+        <div class="row">
+          <span class="legend-caps">OPERATE</span>
+          <span class="spec-note">10px / Inter 600 / +0.09em / uppercase &mdash; Legend</span>
+        </div>
+        <div class="row">
+          <span class="micro">26.4k</span>
+          <span class="spec-note">11px / Mono 400 / tabular &mdash; Micro data</span>
+        </div>
+        <div class="row">
+          <span class="mono">groq/openai-gpt-oss-120b</span>
+          <span class="spec-note">13px / Mono 400 / 1.5 / tabular &mdash; Table and body data</span>
+        </div>
+        <div class="row">
+          <span class="data-emph">$142.07</span>
+          <span class="spec-note">13px / Mono 500 &mdash; Emphasis data</span>
+        </div>
+        <div class="row">
+          <span class="prose">The previous configuration is still serving.</span>
+          <span class="spec-note">14px / Inter 400 / 1.5 &mdash; Prose</span>
+        </div>
+        <div class="row">
+          <span class="section-title" style="margin:0">ROUTING</span>
+          <span class="spec-note">16px / Inter 600 / &minus;0.01em / sentence case &mdash; Section title</span>
+        </div>
+        <div class="row">
+          <p class="doc-title" style="margin:0">operate/requests</p>
+          <span class="spec-note">20px / Inter 600 / &minus;0.015em &mdash; Page title</span>
+        </div>
+        <div class="row">
+          <span class="readout">142</span><span class="unit">ms</span>
+          <span class="spec-note">30px / Mono 600 / tabular / &minus;0.015em &mdash; Primary readout</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:var(--gutter);margin-top:var(--section-pad)">
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <span class="readout">1,481.20</span>
+          <span class="readout">9,003.75</span>
+        </div>
+        <span class="spec-note">tabular numerals &mdash; the decimal points align without a decoration to force it</span>
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Unit rule</p>
+      <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Unit rule &mdash; 10px --legend, no space, so the value keeps its optical weight.</span></p>
+      <div style="display:flex;gap:calc(var(--gutter) * 2)">
+        <div>
+          <p class="spec-note">value + var(--legend) unit, no space</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span><span class="readout">142</span><span class="unit">ms</span></span>
+            <span><span class="readout">1.2</span><span class="unit">k</span></span>
+            <span><span class="readout">$0.0021</span></span>
+            <span><span class="readout">26.4</span><span class="unit">k</span><span class="readout">/</span><span class="readout">1.9</span><span class="unit">k</span></span>
+          </div>
+        </div>
+        <div>
+          <p class="spec-note">same values, unit undifferentiated (wrong)</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span class="naive">142ms</span>
+            <span class="naive">1.2k</span>
+            <span class="naive">$0.0021</span>
+            <span class="naive">26.4k/1.9k</span>
+          </div>
+        </div>
+      </div>
+      <p class="prose">A trailing unit gets the 10px --legend treatment, shrunk so it does not steal optical weight from the digits. A leading currency symbol does not shrink &mdash; it is part of the number, set at the value's own size and weight, because a prefix does not compete with the digits the way a suffix does.</p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Surface</p>
+      <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Surface &mdash; cards sit ON the ground and stack upward. Border + radius + --shadow-soft; separation is a gutter, not a seam.</span></p>
+      <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <div style="padding:14px;background:var(--ground);border-radius:var(--radius)">
+            <div class="panel" style="padding:10px 14px"><span class="micro">panel</span></div>
+          </div>
+          <p class="spec-note">card on ground &mdash; border + radius + --shadow-soft</p>
+        </div>
+        <div>
+          <div class="panel" style="padding:10px">
+            <div class="well" style="padding:10px 14px">
+              <span class="readout">142</span><span class="unit">ms</span>
+            </div>
+          </div>
+          <p class="spec-note">inset region inside a card &mdash; --surface-2, quieter, not recessed</p>
+        </div>
+        <div>
+          <div class="surface-overlay"><span class="chip">⌘K</span></div>
+          <p class="spec-note">an overlay &mdash; --shadow-elevated, the menu and dialog step</p>
+        </div>
+        <div>
+          <div style="display:flex;gap:8px">
+            <div>
+              <div class="radius-demo" style="border-radius:0"></div>
+              <p class="spec-note">0px</p>
+            </div>
+            <div>
+              <div class="radius-demo" style="border-radius:var(--radius)"></div>
+              <p class="spec-note">8px &mdash; --radius</p>
+            </div>
+            <div>
+              <div class="radius-demo" style="border-radius:var(--radius-lg)"></div>
+              <p class="spec-note">12px &mdash; --radius-lg</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="prose">
+        An overlay is a card lifted further, not a different kind of surface:
+        it takes --surface-2 and --shadow-elevated, and in light mode where
+        there is no room to go brighter than a white card, the shadow and the
+        border do the whole job. An inset region behaves the same wherever it
+        appears &mdash; a dropdown's search box and a dialog's data region read
+        the same value as one inside a card on the page.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="prose">
+        RULING &mdash; radius is a scale, not a constant: 4px on a small box,
+        6px on a chip, 8px on a card, 12px on the chrome. It matches
+        darkraise-ui's --radius at data-radius="rounded" and Tailwind's
+        derived md/sm exactly, so the implementation sets one axis and writes
+        no radius rule. Round is reserved for a STATUS DOT and for nothing else: the state pip,
+        the cooling mark's centre dot and the stale-discovery ring. Everything
+        that carries a silhouette reading stays square-cornered &mdash; the four
+        ladder marks depend on filled-versus-hollow and square-versus-round to
+        say what happened, and a circular ladder mark would collide with the
+        pip vocabulary. A circle used as a corner treatment is still a bug, and
+        so is --radius on a mark small enough that 8px makes it one.
+      </p>
+
+              <p class="prose">
+          Surfaces STACK UPWARD. A card is lighter than the ground it sits on,
+          in both modes. The INSET inside a card is where that stops in light:
+          nothing sits above white, so it steps down to --surface-2 instead and
+          is read from its border rather than its fill. The previous language
+          cut wells DOWN into the panel and inverted that ordering between
+          modes; this one does not, which is why light here is a palette swap
+          and not a polarity flip, and why the light proof measures contrast
+          rather than direction.
+        </p>
+        <p class="prose">
+          Elevation is real and is spent in four places: --shadow-soft on a
+          card, --shadow-elevated under a menu or dialog, --shadow-elev for
+          the one lifted panel that also carries an inset highlight, and
+          --shadow-warm, the coral-tinted one, reserved for the brand mark.
+          A fifth, --shadow-focus, is the 3px coral ring a focused control
+          takes. Radius runs 4 / 6 / 8 / 12px by element size</p>
+
+<p class="section-title">Density</p>
+      <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Density &mdash; roomy: 36px rows, 36px controls, 64px header, 256px rail, 40px page padding, 1280px measure.</span></p>
+      <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <div class="table" style="width:220px">
+            <div class="row">
+              <span class="state-pip" data-state="healthy"></span>
+              <span class="mono">cerebras</span>
+              <span class="micro">healthy</span>
+            </div>
+          </div>
+          <p class="spec-note">36px row &mdash; var(--row-h)</p>
+        </div>
+        <div>
+          <span class="control">Apply changes</span>
+          <p class="spec-note">36px control &mdash; var(--control-h)</p>
+        </div>
+        <div>
+          <div style="display:flex">
+            <div class="panel" style="width:70px;height:40px"></div>
+            <div class="panel" style="width:70px;height:40px;margin-left:-1px"></div>
+          </div>
+          <p class="spec-note"><span class="measure"><span class="micro">1px</span></span> panel seam, measured</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Mono vs sans</p>
+      <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Type lanes &mdash; Inter is the console speaking; IBM Plex Mono means this came off the wire. The one rule kept from the previous language.</span></p>
+      <div class="table">
+        <div class="row">
+          <span class="mono">claude-opus-4-20250514</span>
+          <span class="chip">MONO &mdash; off the wire</span>
+        </div>
+        <div class="row">
+          <span class="mono">01M0W4Q0S0N8R4M6P0S9T3VWYZ</span>
+          <span class="chip">MONO &mdash; off the wire</span>
+        </div>
+        <div class="row">
+          <span class="prose">The previous configuration is still serving.</span>
+          <span class="chip">SANS &mdash; a person telling you</span>
+        </div>
+        <div class="row">
+          <span class="prose">Cooling until <span class="mono">14:22</span></span>
+          <span class="chip">SANS + MONO</span>
+        </div>
+      </div>
+      <p class="prose">
+        Mono is the wire lane: model ids, request ids, timestamps, anything
+        a system emitted. Sans is the person lane: status prose, empty
+        states, help text &mdash; anything the console is telling the operator
+        in its own words.
+      </p>
+    </div>
+
+    <div class="region">
+      <p class="section-title">Motion</p>
+      <p><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; Motion &mdash; 150ms hover, 200ms disclosure, 90ms value swap, and a press-scale on a control. Nothing else moves.</span></p>
+      <div style="display:flex;gap:var(--gutter);align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <div class="table" style="width:220px">
+            <div class="row">
+              <span class="mono">groq</span>
+              <span class="micro">hover this row</span>
+            </div>
+          </div>
+          <p class="spec-note">150ms opacity on hover</p>
+        </div>
+        <div>
+          <div class="disclosure" style="width:220px">
+            <p class="mono" style="margin:0">groq &mdash; healthy</p>
+            <p class="prose" style="margin:6px 0 0">Hover to reveal the rest &mdash; latency, model list, last checked.</p>
+          </div>
+          <p class="spec-note">200ms height on disclosure</p>
+        </div>
+        <div>
+          <span class="value-swap">
+            <span class="v-a"><span class="readout">142</span><span class="unit">ms</span></span>
+            <span class="v-b"><span class="readout">98</span><span class="unit">ms</span></span>
+          </span>
+          <p class="spec-note">90ms cross-fade on hover &mdash; a live value swap</p>
+        </div>
+      </div>
+      <p class="prose">Hover each specimen. Nothing else in this product animates &mdash; no page transitions, no entrances, no shimmer, no spinners.</p>
+    </div>
+
+  </div>
+</section>

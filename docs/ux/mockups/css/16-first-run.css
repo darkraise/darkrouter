@@ -1,0 +1,398 @@
+/*
+ * Task 18 — First run ("operate/overview", zero providers, zero requests).
+ *
+ * This screen is the Overview with nothing in it, so it borrows the
+ * Overview's own layout wholesale rather than inventing an empty variant of
+ * it: .live-strip/.live-tile/.live-tile-caption/.live-tile-metric,
+ * Overview's .health-tile/.health-tile-head and .ops-footer (+ -dropped)
+ * all come from css/02-overview.css unchanged, and .empty-well comes from
+ * css/03-requests.css. From darkrouter-ui.css: .panel/.well/.region/.chip,
+ * .control (+ -primary/-ghost), .readout/.unit/.mono/.micro/.prose/
+ * .spec-note/.legend/.legend-caps/.section-title/.pin/.pin-note, and the
+ * console chrome verbatim.
+ *
+ * Colour discipline. Nothing on this screen is a health reading and nothing
+ * is a routing verdict, so almost nothing here is allowed a hue: an idle
+ * router has no state to report. The single accent is --accent-ink on the
+ * one call to action and on the active step's index, both of them UI
+ * selection, the same register the rail's active item uses. Every "there is
+ * no value here" mark is drawn in --legend, --legend or a dash — never in
+ * --state-cooling, which would say something is wrong when nothing is.
+ *
+ * The classes below all carry the fr- slug so the screens being built
+ * alongside this one cannot collide with them.
+ */
+
+/* --- Region 1: the one call to action ---------------------------------
+   The only committing control on the screen, so the panel it sits in gets
+   the full --border border rather than .panel's default --border-
+   subtle: a structural step up in weight, not a colour one, since a
+   coloured rule here would have to borrow --trace and claim a routing
+   decision that has not happened. */
+.fr-start {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gutter);
+  padding: var(--gutter);
+  border-color: var(--border);
+}
+
+.fr-start-copy {
+  min-width: 0;
+  max-width: 760px;
+}
+
+/* A panel headline. .section-title is uppercase small caps and .legend is
+   the one per-screen caption, so neither can carry a sentence at heading
+   weight; this is the sans equivalent of .doc-title inside the chrome. */
+.fr-start-title {
+  margin: 0 0 6px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.fr-start-sub {
+  margin: 0 0 10px;
+  color: var(--ink-muted);
+}
+
+/* The reassurance line, and the reason this screen does not read as broken
+   equipment: five facts off the wire, in mono, every one of them a real
+   reading rather than a placeholder. */
+.fr-start-facts {
+  margin: 0;
+  color: var(--legend);
+}
+
+.fr-start-action {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.fr-start-action .spec-note { margin: 0; }
+
+/* --- Region 2: the three-step path ------------------------------------
+   Three panels on one row with the connector drawn in the gutter between
+   them, so the path is a sequence rather than three cards that happen to
+   be adjacent. Rendered as a control, not as prose: the operator is meant
+   to see how many steps are left, which a paragraph cannot show. */
+.fr-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gutter);
+  align-items: stretch;
+}
+
+.fr-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+/* The connector, aligned to the vertical centre of the index badge:
+   var(--section-pad) of padding plus half of the badge's 20px. */
+.fr-step + .fr-step::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--section-pad) + 10px);
+  left: calc(var(--gutter) * -1);
+  width: var(--gutter);
+  height: 1px;
+  background: var(--border);
+}
+
+.fr-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fr-step-index{
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--legend);
+  border-radius: var(--radius-xs);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--legend);
+}
+
+.fr-step-title {
+  color: var(--ink-muted);
+}
+
+.fr-step-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.fr-step-call {
+  margin: auto 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* Where the operator is now. Selection, not a verdict, so --accent-ink,
+   filled against --surface-2 for the same contrast pairing .pin uses (clears
+   4.5:1 in both modes; --trace on --surface does not). */
+.fr-step[data-state="active"] {
+  border-color: var(--accent-ink);
+}
+.fr-step[data-state="active"] .fr-step-index {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--surface-2);
+}
+.fr-step[data-state="active"] .fr-step-title { color: var(--ink); }
+.fr-step[data-state="todo"] { opacity: 0.8; }
+
+/* --- Region 3: the Overview, empty ------------------------------------
+   The axis a sparkline will be drawn on, standing in for it at the same
+   40px and the same margin-top:auto so the four tiles keep the Overview's
+   exact silhouette. Two dashed borders rather than an SVG: a dash pattern
+   survives the tile's arbitrary width, where a stretched <svg> with
+   preserveAspectRatio="none" would smear its dashes horizontally. */
+.fr-axes {
+  height: 40px;
+  margin-top: auto;
+  border-left: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+}
+
+/* A value that does not exist yet, as distinct from a value that is zero.
+   Both are printed at readout size, because both are readings; only this
+   one drops to --legend and to regular weight — an em dash at the
+   readout's own 600 is a slab wide enough to read as a redaction bar
+   rather than as an absent value. */
+.fr-nil {
+  font-weight: 400;
+  color: var(--legend);
+}
+
+.fr-note {
+  max-width: 940px;
+  margin: var(--section-pad) 0 0;
+  color: var(--ink-muted);
+}
+.fr-note-lead {
+  font-weight: 600;
+  color: var(--ink);
+}
+.fr-note-sub {
+  max-width: 940px;
+  margin: 4px 0 0;
+  color: var(--legend);
+}
+.fr-note-sub .mono { font-size: 11px; }
+
+.fr-subhead { margin-top: var(--gutter); }
+
+/* One specimen tile in the first cell, the legend spanning the other
+   three: a four-column grid keeps the specimen exactly the width a real
+   health tile would be, which is the whole point of showing it. */
+.fr-health {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+  align-items: start;
+}
+.fr-health-note {
+  grid-column: span 3;
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+/* --- The inert specimen ------------------------------------------------
+   The one treatment that says "this is a drawing of the content, not the
+   content". Four independent channels, so no single failure of attention
+   can turn a specimen into a reading: the border goes dashed where every
+   live surface in the product is solid (the same "there is nothing to
+   read here" the shared .field-input-inert already means by it), a
+   diagonal hatch crosses the whole box, the contents drop to half opacity,
+   and — in the markup, not here — every value slot prints a field name or
+   a dash instead of a value. Colour is deliberately not one of the four:
+   it would have to be a state colour, and a specimen has no state. */
+.fr-specimen {
+  position: relative;
+  border-style: dashed;
+  border-color: var(--legend);
+}
+.fr-specimen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--legend) 0 1px,
+    transparent 1px 9px
+  );
+  opacity: 0.14;
+}
+.fr-specimen-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0.5;
+}
+/* The label stays at full strength while everything under it is dimmed —
+   it is the one part of the specimen that is not a drawing of anything. */
+.fr-specimen-tag {
+  position: relative;
+  margin: 0;
+  color: var(--legend);
+}
+
+/* Hollow where .state-pip is filled, and never given a data-state: a
+   specimen reports no health, and the absence of any pip colour is the
+   fastest of the four inert channels to read at tile size. */
+.fr-ghost-pip{
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--legend);
+  border-radius: 50%;
+  background: transparent;
+}
+
+/* The identity slot prints the wire field's name, not a provider id, so
+   there is no id on screen that could be counted as configured. */
+.fr-ghost-name { color: var(--legend); }
+
+/* .empty-well leaves its children's own margins alone; scoped here rather
+   than added to .empty-well itself, which two finished screens already
+   render with the margins they have. */
+.fr-empty p { margin: 0; max-width: 940px; }
+.fr-muted { color: var(--ink-muted); }
+
+/* --- Region 4: the pattern, stated once -------------------------------
+   A live specimen of the pattern on the left, the three rules that make
+   it on the right, keyed to each other by number. */
+.fr-pattern {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.fr-pattern-demo {
+  padding: var(--section-pad);
+}
+.fr-pattern-demo .empty-well { width: 100%; }
+
+.fr-part {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.fr-part-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Keyed to the rule list, and deliberately hollow: a filled 16px numbered
+   square is .pin, which means "specification annotation" everywhere else
+   in this set and must not be echoed by page content. */
+.fr-part-n{
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--legend);
+  border-radius: var(--radius-xs);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--legend);
+}
+
+/* The dimmed specimen inside the specimen: a header row of column names
+   and two rows of dashes. Sub-row height (24px), because these stand in
+   for content rather than being content. .fr-specimen supplies the dashed
+   border style and the hatch; only the width is set here so it does not
+   reset the style back to solid. */
+.fr-ghost-rows{
+  border-width: 1px;
+  border-radius: var(--radius-pill);
+}
+.fr-ghost-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: 24px;
+  padding: 0 8px;
+  border-bottom: 1px dashed var(--border);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+  opacity: 0.7;
+}
+.fr-ghost-row:last-child { border-bottom: none; }
+.fr-ghost-row span {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fr-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-pad);
+}
+.fr-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fr-rule:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.fr-rule-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fr-rule-title {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.fr-rule-note {
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+}

@@ -1,0 +1,685 @@
+<section class="screen" id="s-10-routing" data-screen-title="configure/routing">
+  <p class="legend">
+    The route preview &mdash; type an alias or a model string and read the
+    ladder the router would walk right now, before anything is sent &mdash;
+    then the three resolution rules it applies in order, the four alias
+    chains as editable ordered lists, and the seven policy knobs with the
+    two that cannot take effect before a restart marked as such. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Routing</h2>
+          <p class="topbar-route mono">configure/routing</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p class="section-title">Route preview</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Route preview &mdash; POST /api/route/preview {model}. New. The resolver is already a pure function of a frozen snapshot, so this is a thin endpoint over existing machinery.</span></p>
+
+          <div class="panel rt-preview">
+
+            <div class="rt-preview-bar">
+              <p class="legend-caps rt-preview-cap">alias or model</p>
+              <input class="rt-input" value="fast-coder" readonly>
+              <button class="control control-primary" type="button">Preview route</button>
+              <span class="rt-shape">
+                <span class="chip">surface llm</span>
+                <span class="chip">stream true</span>
+                <span class="chip">demands vision</span>
+                <span class="chip">4,120 prompt tokens</span>
+              </span>
+            </div>
+            <p class="prose rt-dry">
+              Nothing is sent. The preview calls the same resolver the request
+              path calls, against the frozen snapshot named below, and the
+              body pasted into it carries an image part &mdash; which is why
+              vision is demanded and why rank 06 drops out.
+            </p>
+
+            <div class="rt-rule-line">
+              <span class="rt-rule-tag">rule 1 &middot; exact alias</span>
+              <span class="mono">fast-coder</span>
+              <span class="rt-arrow">&rarr;</span>
+              <span class="mono rt-yield">8 targets</span>
+              <span class="micro">8 candidates &middot; 2 would be skipped &middot; rank 01 would be attempted first</span>
+            </div>
+            <p class="micro">predicted against snapshot 01M0W31NR0CNRP4V8TG6W3F7ZM &middot; nothing below has been sent</p>
+
+            <div class="ladder">
+              <div class="ladder-row">
+                <span class="rank rank-tick">01</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">groq/openai-gpt-oss-120b</span>
+                <span class="reason">
+                  <span class="reason-prose">would attempt if reached</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick">02</span>
+                <span class="spine"></span>
+                <span class="mark mark-cooling"></span>
+                <span class="target">cerebras/gpt-oss-120b</span>
+                <span class="reason">
+                  <span class="reason-code">cooling</span>
+                  <span class="reason-prose">4m 12s remaining</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick">03</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">together/openai-gpt-oss-120b</span>
+                <span class="reason">
+                  <span class="reason-prose">would attempt if reached</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick">04</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">deepinfra/gpt-oss-120b</span>
+                <span class="reason">
+                  <span class="reason-prose">would attempt if reached</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick rank-tick-major">05</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">openrouter/openai/gpt-oss-120b</span>
+                <span class="reason">
+                  <span class="reason-prose">would attempt if reached</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick">06</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">anthropic/claude-opus-4-20250514</span>
+                <span class="reason">
+                  <span class="reason-code">no_capability</span>
+                  <span class="reason-prose">vision demanded, model is text-only</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick">07</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">bedrock/us.anthropic.claude-opus-4</span>
+                <span class="reason">
+                  <span class="reason-prose">would attempt if reached</span>
+                </span>
+              </div>
+              <div class="ladder-row">
+                <span class="rank rank-tick">08</span>
+                <span class="spine"></span>
+                <span class="mark mark-skipped"></span>
+                <span class="target">vertex/gemini-2.5-pro</span>
+                <span class="reason">
+                  <span class="reason-prose">would attempt if reached</span>
+                </span>
+              </div>
+            </div>
+
+            <p class="prose rt-preview-note">
+              Every mark is hollow and no row is served, because a dry run
+              sends nothing and nothing can be filled. Rank 02 and rank 06
+              carry the two skip reasons that apply against this snapshot
+              right now; the other six say only that they would be attempted
+              if the walk reached them, since a dry run has no basis to
+              predict past the top of the ladder. No stub and no latency bar
+              &mdash; both describe an attempt, and none occurred.
+            </p>
+
+            <p class="section-title rt-sub">Two more resolutions, collapsed</p>
+
+            <div class="rt-example">
+              <span class="rt-caret">&#9656;</span>
+              <span class="mono rt-example-in">gemini-2.5-pro</span>
+              <span class="rt-rule-tag">rule 3 &middot; bare model name</span>
+              <p class="prose rt-example-note">
+                No alias by that name and no configured provider before a
+                slash, so it expands across every provider that offers it,
+                in provider priority order.
+              </p>
+              <span class="micro rt-example-count">3 candidates &middot; vertex, openrouter &times; 2 keys</span>
+            </div>
+
+            <div class="rt-example">
+              <span class="rt-caret">&#9656;</span>
+              <span class="mono rt-example-in">anthropic/claude-opus-4-20250514</span>
+              <span class="rt-rule-tag">rule 2 &middot; provider/model</span>
+              <p class="prose rt-example-note">
+                Split on the first slash; the prefix names a configured
+                provider, so the walk is pinned to it and never widens.
+              </p>
+              <span class="micro rt-example-count">1 candidate &middot; anthropic, key 1</span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Resolution &mdash; first match wins</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Resolution &mdash; first match wins: alias, then provider/model (split on the FIRST slash, only when the prefix names a configured provider, so meta-llama/Llama-3.3-70B survives), then bare name in priority order.</span></p>
+
+          <div class="rt-rules">
+
+            <div class="well rt-rule-card">
+              <div class="rt-rule-card-head">
+                <span class="rt-rule-n">1</span>
+                <span class="rt-rule-title">exact alias name</span>
+              </div>
+              <p class="prose">
+                The whole string is matched against the alias table exactly.
+                A hit expands to that alias's ordered chain of targets and
+                the walk stops here &mdash; rules 2 and 3 are never tried.
+              </p>
+              <div class="rt-rule-eg">
+                <span class="mono">fast-coder</span>
+                <span class="rt-arrow">&rarr;</span>
+                <span class="mono">8 targets</span>
+              </div>
+              <p class="spec-note">in the operator's order &middot; no prefix match, no case folding, no trimming</p>
+            </div>
+
+            <div class="well rt-rule-card">
+              <div class="rt-rule-card-head">
+                <span class="rt-rule-n">2</span>
+                <span class="rt-rule-title">provider/model</span>
+              </div>
+              <p class="prose">
+                Split on the <span class="mono">FIRST</span> slash, and only
+                when the prefix names a configured provider. Everything after
+                that slash is the model id, slashes included, so a publisher
+                path inside the model id survives.
+              </p>
+              <div class="rt-rule-eg">
+                <span class="mono">openrouter/openai/gpt-oss-120b</span>
+                <span class="rt-arrow">&rarr;</span>
+                <span class="mono">openrouter</span>
+                <span class="rt-arrow">+</span>
+                <span class="mono">openai/gpt-oss-120b</span>
+              </div>
+              <div class="rt-rule-eg rt-rule-eg-nosplit">
+                <span class="mono">meta-llama/Llama-3.3-70B</span>
+                <span class="rt-arrow">&rarr;</span>
+                <span class="mono">no split</span>
+              </div>
+              <p class="spec-note">meta-llama is not a configured provider, so the string survives intact and falls through to rule 3</p>
+            </div>
+
+            <div class="well rt-rule-card">
+              <div class="rt-rule-card-head">
+                <span class="rt-rule-n">3</span>
+                <span class="rt-rule-title">bare model name</span>
+              </div>
+              <p class="prose">
+                Expanded across every configured provider that offers the
+                model, in provider priority order &mdash; one candidate per
+                provider, credential and model, so a provider holding two
+                keys contributes two candidates.
+              </p>
+              <div class="rt-rule-eg">
+                <span class="mono">gemini-2.5-pro</span>
+                <span class="rt-arrow">&rarr;</span>
+                <span class="mono">openrouter 70</span>
+                <span class="rt-arrow">&rsaquo;</span>
+                <span class="mono">openrouter 70, key 2</span>
+                <span class="rt-arrow">&rsaquo;</span>
+                <span class="mono">vertex 30</span>
+              </div>
+              <p class="spec-note">nothing offers it &rarr; the request is rejected before any provider is called</p>
+            </div>
+
+          </div>
+
+          <div class="well rt-onelevel">
+            <p class="prose">
+              <span class="rt-strong">Alias targets resolve one level only.</span>
+              A target that happens to name another alias is not followed. It
+              is treated as a literal model string and handed to rules 2 and
+              3, which for an alias name almost always means it matches
+              nothing at all and the chain simply carries on to the next
+              target.
+            </p>
+            <p class="prose">
+              So <span class="mono">vision</span> holding a target
+              <span class="mono">fast-coder</span> does not inherit
+              fast-coder's eight candidates; it contributes zero, and the
+              editor below flags it the same way it flags any other target
+              that resolves to nothing.
+            </p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Alias editor</p>
+          <p><b class="pin" data-pin="3-4">3-4</b><span class="pin-note">3-4 &middot; Aliases &mdash; GET/PUT /api/aliases. New. Chains are yaml-only today and rendered as a JSON dump.</span></p>
+
+          <div class="rt-aliases">
+
+            <div class="rt-alias">
+              <div class="rt-alias-head">
+                <span class="rt-alias-name">fast-coder</span>
+                <span class="chip">llm</span>
+                <span class="micro">8 targets &middot; 8 candidates &middot; 2,481 requests 24h</span>
+                <span class="rt-alias-actions">
+                  <button class="control control-ghost" type="button">Add target</button>
+                </span>
+              </div>
+              <div class="table">
+
+                <div class="row row-head">
+                  <span class="legend-caps rt-tcol-handle"></span>
+                  <span class="legend-caps rt-tcol-ord">#</span>
+                  <span class="legend-caps rt-tcol-target">target, as the operator wrote it</span>
+                  <span class="legend-caps rt-tcol-res">resolves</span>
+                  <span class="legend-caps rt-tcol-note">note</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">01</span>
+                  <span class="mono rt-tcol-target">groq/openai-gpt-oss-120b</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">groq, priority 100 &middot; healthy</span>
+                </div>
+
+                <div class="drop-indicator" aria-hidden="true"></div>
+
+                <div class="row prov-row-dragging">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord"><span class="prov-prio-was">03</span><span class="prov-prio-arrow">&rarr;</span><span class="prov-prio-now">02</span></span>
+                  <span class="mono rt-tcol-target">together/openai-gpt-oss-120b</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">held &mdash; drop here</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord"><span class="prov-prio-was">02</span><span class="prov-prio-arrow">&rarr;</span><span class="prov-prio-now">03</span></span>
+                  <span class="mono rt-tcol-target">cerebras/gpt-oss-120b</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">renumbered &middot; cooling, 4m 12s remaining</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">04</span>
+                  <span class="mono rt-tcol-target">deepinfra/gpt-oss-120b</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; disabled &mdash; skipped, never a candidate</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">05</span>
+                  <span class="mono rt-tcol-target">openrouter/openai/gpt-oss-120b</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">split on the first slash only &mdash; openai/gpt-oss-120b is the model id</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">06</span>
+                  <span class="mono rt-tcol-target">anthropic/claude-opus-4-20250514</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">resolves &mdash; skipped only when a request demands vision</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">07</span>
+                  <span class="mono rt-tcol-target">bedrock/us.anthropic.claude-opus-4</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; no credential &mdash; skipped, never a candidate</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">08</span>
+                  <span class="mono rt-tcol-target">vertex/gemini-2.5-pro</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">last resort &mdash; a different family, kept deliberately</span>
+                </div>
+
+              </div>
+              <span class="micro rt-alias-note">
+                on release &mdash; PUT /api/aliases/fast-coder with the whole
+                chain, in order. Until then the preview above is still
+                resolving the saved order, which is why its rank 02 is
+                cerebras and not together.
+              </span>
+            </div>
+
+            <div class="rt-alias">
+              <div class="rt-alias-head">
+                <span class="rt-alias-name">cheap-embed</span>
+                <span class="chip">embedding</span>
+                <span class="micro">3 targets &middot; 2 candidates &middot; 188 requests 24h</span>
+                <span class="rt-alias-actions">
+                  <button class="control control-ghost" type="button">Add target</button>
+                </span>
+              </div>
+              <div class="table">
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">01</span>
+                  <span class="mono rt-tcol-target">together/text-embedding-3-large</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">together, priority 60 &middot; healthy</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">02</span>
+                  <span class="mono rt-tcol-target">deepinfra/text-embedding-3-large</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">deepinfra, priority 50 &middot; disabled &mdash; skipped, never a candidate</span>
+                </div>
+
+                <div class="row rt-row-dangling">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">03</span>
+                  <span class="mono rt-tcol-target">cerebras/text-embedding-3-large</span>
+                  <span class="rt-tcol-res"><span class="rt-warn-mark">&#9653;</span><span class="micro rt-res-none">no candidate</span></span>
+                  <span class="micro rt-tcol-note">cerebras serves no embedding surface &mdash; the chain steps past this target</span>
+                </div>
+
+              </div>
+              <span class="micro rt-alias-note">
+                A dangling target is a warning, not an error: the chain saves,
+                the config reloads, and the request still routes through the
+                two targets that do resolve.
+              </span>
+            </div>
+
+            <div class="rt-alias">
+              <div class="rt-alias-head">
+                <span class="rt-alias-name">vision</span>
+                <span class="chip">llm</span>
+                <span class="micro">2 targets &middot; 3 candidates &middot; 96 requests 24h</span>
+                <span class="rt-alias-actions">
+                  <button class="control control-ghost" type="button">Add target</button>
+                </span>
+              </div>
+              <div class="table">
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">01</span>
+                  <span class="mono rt-tcol-target">vertex/gemini-2.5-pro</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">vertex, priority 30 &middot; the only candidate offering this model that also passes the vision demand</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">02</span>
+                  <span class="mono rt-tcol-target">openrouter/gemini-2.5-pro</span>
+                  <span class="rt-tcol-res"><span class="micro">2 candidates</span></span>
+                  <span class="micro rt-tcol-note">openrouter holds two keys &mdash; one candidate each</span>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="rt-alias">
+              <div class="rt-alias-head">
+                <span class="rt-alias-name">long-context</span>
+                <span class="chip">llm</span>
+                <span class="micro">4 targets &middot; 5 candidates &middot; 312 requests 24h</span>
+                <span class="rt-alias-actions">
+                  <button class="control control-ghost" type="button">Add target</button>
+                </span>
+              </div>
+              <div class="table">
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">01</span>
+                  <span class="mono rt-tcol-target">vertex/gemini-2.5-pro</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">1,048,576 context &middot; the reason this alias exists</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">02</span>
+                  <span class="mono rt-tcol-target">openrouter/gemini-2.5-pro</span>
+                  <span class="rt-tcol-res"><span class="micro">2 candidates</span></span>
+                  <span class="micro rt-tcol-note">same model, second route to it &middot; two keys</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">03</span>
+                  <span class="mono rt-tcol-target">anthropic/claude-opus-4-20250514</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">200,000 context &mdash; a request over that skips with context</span>
+                </div>
+
+                <div class="row">
+                  <span class="priority-handle rt-tcol-handle" aria-hidden="true"></span>
+                  <span class="micro rt-tcol-ord">04</span>
+                  <span class="mono rt-tcol-target">bedrock/us.anthropic.claude-opus-4</span>
+                  <span class="rt-tcol-res"><span class="micro">1 candidate</span></span>
+                  <span class="micro rt-tcol-note">bedrock, priority 40 &middot; no credential &mdash; skipped, never a candidate</span>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Alias validation &mdash; cheap-embed</p>
+
+          <div class="rt-warn">
+            <p class="rt-warn-head">
+              <span class="rt-warn-mark">&#9653;</span>
+              This chain falls back across providers for one embedding model
+            </p>
+            <p class="prose">
+              <span class="mono">text-embedding-3-large</span> is served here
+              by together and by deepinfra. Two providers hosting the same
+              embedding model do not have to return the same vector: the
+              scaling, and sometimes the normalisation, is the host's choice.
+              A failover from together to deepinfra therefore writes vectors
+              into the store that are not comparable with the ones already
+              in it, and nothing downstream reports it &mdash; cosine
+              similarity keeps returning a number either way.
+            </p>
+            <p class="prose">
+              This is a warning, not an error. The chain saves and routes;
+              what it changes is what gets stored. If the vectors are
+              persisted, pin the alias to one provider and let the request
+              fail over to nothing rather than to a second scale. If they
+              are compared only within one request, the fallback is safe.
+            </p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Policy</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Policy &mdash; GET/PUT /api/policy. NEW per &sect;8.2 &mdash; the PUT does not exist today. GET /api/config already returns the whole policy block and the SPA's Config type does not declare it.</span></p>
+
+          <div class="panel rt-policy">
+
+            <div class="rt-policy-group">
+              <p class="legend-caps">retry</p>
+              <div class="table">
+                <div class="row row-head">
+                  <span class="legend-caps rt-pcol-field">field</span>
+                  <span class="legend-caps rt-pcol-value">value</span>
+                  <span class="legend-caps rt-pcol-effect">takes effect</span>
+                  <span class="legend-caps rt-pcol-why">why</span>
+                </div>
+                <div class="row">
+                  <span class="mono rt-pcol-field">retry.max_attempts</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">4</span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="live"><span class="rt-effect-mark"></span>hot-reloadable</span></span>
+                  <span class="micro rt-pcol-why">read per request while the ladder is walked &mdash; the next request sees it</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rt-policy-group">
+              <p class="legend-caps">cooldown</p>
+              <div class="table">
+                <div class="row">
+                  <span class="mono rt-pcol-field">cooldown.trip_after</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">3</span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="live"><span class="rt-effect-mark"></span>hot-reloadable</span></span>
+                  <span class="micro rt-pcol-why">consecutive failures before a provider is taken out of rotation</span>
+                </div>
+                <div class="row">
+                  <span class="mono rt-pcol-field">cooldown.max</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">15<span class="unit">m</span></span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="live"><span class="rt-effect-mark"></span>hot-reloadable</span></span>
+                  <span class="micro rt-pcol-why">ceiling on the backoff a tripped breaker walks up &middot; applies at the next trip</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rt-policy-group">
+              <p class="legend-caps">timeouts</p>
+              <div class="table">
+                <div class="row rt-row-restart">
+                  <span class="mono rt-pcol-field">timeout.connect</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">10<span class="unit">s</span></span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="restart"><span class="rt-effect-mark"></span>restart required</span></span>
+                  <span class="micro rt-pcol-why">a dialer field on the one shared HTTP transport, built once at startup</span>
+                </div>
+                <div class="row rt-row-restart">
+                  <span class="mono rt-pcol-field">timeout.first_byte</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">60<span class="unit">s</span></span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="restart"><span class="rt-effect-mark"></span>restart required</span></span>
+                  <span class="micro rt-pcol-why">the same transport's response-header timeout, not a per-request value</span>
+                </div>
+                <div class="row">
+                  <span class="mono rt-pcol-field">timeout.total</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">10<span class="unit">m</span></span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="live"><span class="rt-effect-mark"></span>hot-reloadable</span></span>
+                  <span class="micro rt-pcol-why">applied per request as a context deadline, read when the request starts</span>
+                </div>
+                <div class="row">
+                  <span class="mono rt-pcol-field">timeout.idle</span>
+                  <span class="rt-pcol-value"><span class="rt-pvalue">120<span class="unit">s</span></span></span>
+                  <span class="rt-pcol-effect"><span class="chip rt-effect" data-effect="live"><span class="rt-effect-mark"></span>hot-reloadable</span></span>
+                  <span class="micro rt-pcol-why">applied per request to the stream reader, between chunks</span>
+                </div>
+              </div>
+            </div>
+
+            <p class="prose">
+              Two of the seven fields configure the single shared transport
+              this process built when it started, so a reload writes them and
+              nothing changes until the process is restarted. The other five
+              are read per request and take effect on the next one. That
+              difference is real today and the product does not say it
+              anywhere, which is how an operator ends up convinced a timeout
+              edit did not save.
+            </p>
+
+            <div class="rt-policy-foot">
+              <button class="control control-primary" type="button">Save policy</button>
+              <button class="control control-ghost" type="button">Reset</button>
+              <span class="micro">PUT /api/policy &middot; 2 of 7 fields will be written now and applied at next start</span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Where this lives</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Storage &mdash; spec &sect;8.1: imported once on first run, SQLite authoritative after. Same rule as providers:.</span></p>
+
+          <div class="panel rt-lives">
+            <p class="prose">
+              Aliases and policy are read out of <span class="mono">darkrouter.yaml</span>
+              once, on first run, and live in SQLite from then on. After that
+              import, editing <span class="mono">aliases:</span> or
+              <span class="mono">policy:</span> in the file has no effect
+              &mdash; exactly as editing <span class="mono">providers:</span>
+              already has none. This screen writes the database; the file
+              records how the database was first seeded.
+            </p>
+
+            <div class="rt-yaml">
+              <div class="rt-yaml-head">
+                <span class="chip">darkrouter.yaml</span>
+                <span class="micro">imported 2026-08-11 09:02 &middot; 4 aliases, 7 policy fields &middot; not read since</span>
+              </div>
+              <span class="rt-yaml-line rt-yaml-comment"># Imported once, on first run. Edit these in configure/routing.</span>
+              <span class="rt-yaml-line rt-yaml-comment"># Changes made here are not read again.</span>
+              <span class="rt-yaml-line">aliases:</span>
+              <span class="rt-yaml-line">  fast-coder:</span>
+              <span class="rt-yaml-line">    - groq/openai-gpt-oss-120b</span>
+              <span class="rt-yaml-line">    - cerebras/gpt-oss-120b</span>
+              <span class="rt-yaml-line">    - together/openai-gpt-oss-120b</span>
+              <span class="rt-yaml-line">policy:</span>
+              <span class="rt-yaml-line">  retry: { max_attempts: 4 }</span>
+              <span class="rt-yaml-line">  timeout: { connect: 10s, first_byte: 60s, total: 10m, idle: 120s }</span>
+            </div>
+
+            <p class="prose">
+              The alternative was an overlay where the file is the base and
+              the database wins, which gives one value two sources of truth
+              and no way to see which is in effect. So the import logs what
+              it took, the file carries a comment block saying it will not be
+              read again, and <span class="mono">GET /api/config</span> has to
+              start distinguishing a value that came from the file from a
+              value that is live &mdash; which today it cannot.
+            </p>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

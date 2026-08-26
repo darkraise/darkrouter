@@ -15,7 +15,7 @@
     "usage": {
       "cache_creation_input_tokens": 0,
       "cache_read_input_tokens": 8,
-      "input_tokens": 11,
+      "input_tokens": 3,
       "output_tokens": 4
     }
   },

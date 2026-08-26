@@ -1,0 +1,371 @@
+/*
+ * Task 16 — Connect ("use/connect").
+ *
+ * Everything structural is reused: .panel/.well (so the recessed-data
+ * the ramp stacks upward with the theme for free), .table/.row/.row-head,
+ * .chip/.chip-path/.chip-failover, .control, .segmented (+ -option),
+ * .combo/.combo-trigger/.combo-chevron, .mono/.micro/.data-emph/.prose/
+ * .legend-caps/.section-title/.region/.pin/.pin-note, and the console
+ * chrome verbatim. The classes below exist only where no shared class
+ * already did the job, and all carry the screen's cn- slug so the three
+ * screens being built alongside this one cannot collide with them.
+ *
+ * Colour discipline on this screen: nothing here is a health reading and
+ * nothing is a routing verdict, so almost none of it is allowed a hue. A
+ * surface being live is a configuration fact, so it is drawn with a
+ * filled/hollow mark and an ink-level step rather than green/grey; the
+ * "one shared secret" notice is an explanation, not a fault, so it takes
+ * a --legend rule rather than --state-failed. The only hues on the screen
+ * are --accent-ink on a hovered copy control and on the active tab (both
+ * selection/interaction, matching the rail), --state-failed on a hovered
+ * Revoke (destructive, the treatment .pd-row-action-danger already
+ * established), and the shared .chip-failover, which is a routing choice.
+ */
+
+/* --- Region 1: endpoints ---------------------------------------------
+   Three dialect cards side by side. A card is a .panel with the base URL
+   in a .well cut into it — the one place on this screen where the
+   panel/well value step is stated at full strength, since the URL is the
+   single value a stranger came here to read. */
+
+.cn-endpoints {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.cn-endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+  min-width: 0;
+}
+
+.cn-endpoint-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cn-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 8px 0 10px;
+}
+
+.cn-url-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* The copy affordance, on .chip's 20px silhouette. Quiet until hovered,
+   then --accent-ink: this is an interaction state, the same register the
+   rail's active item and the segmented control's active option use. It is
+   not .trace-copy-btn from the request-trace partial — that one is a leaf
+   screen's private class and nothing later is meant to depend on it. */
+.cn-copy {
+  flex: 0 0 auto;
+  cursor: default;
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.cn-copy:hover {
+  opacity: 1;
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.cn-serves { margin: 2px 0 0; }
+
+.cn-routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* A caption that sits under the block it annotates, at --legend rather
+   than .micro's --ink-muted: these are footnotes about the block above,
+   quieter than the data in it. */
+.cn-note {
+  margin: 6px 0 0;
+  color: var(--legend);
+  line-height: 1.5;
+}
+/* The same caption used as a lead-in above a block instead of below one. */
+.cn-note-lead { margin: 0 0 10px; }
+
+/* A second .section-title inside one region, separated by the same gutter
+   .region uses between regions but without the rule — regions 1 and 2
+   share a pin, so a full seam between them would read as two regions. */
+.cn-subhead { margin-top: var(--gutter); }
+
+/* --- Region 2: surfaces live ------------------------------------------
+   Seven wells, four across. Four rather than seven because the widest
+   path (POST /v1/audio/transcriptions) does not fit a seventh of the
+   content width without truncating, and a truncated path is useless. */
+
+.cn-surfaces {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.cn-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px var(--section-pad);
+  min-width: 0;
+}
+
+.cn-surface-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Filled means the router can serve this surface today; hollow means no
+   enabled provider declares a model for it. Silhouette carries it in
+   greyscale, exactly as the ladder's marks do, and no hue is spent —
+   availability is neither a health reading nor a routing verdict. */
+.cn-surface-mark{
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.cn-surface-flag {
+  margin-left: auto;
+  color: var(--legend);
+}
+
+.cn-surface-path { margin: 0; }
+
+.cn-surface-by {
+  margin: 0;
+  color: var(--legend);
+}
+
+/* --legend, not --border: this is the ladder's own .mark-skipped ring,
+   and --border is a structural seam colour that measures under 1.6:1
+   against a well in both modes — invisible at 7px. */
+.cn-surface-off .cn-surface-mark {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--legend);
+}
+.cn-surface-off .mono { color: var(--ink-muted); }
+.cn-surface-off .cn-surface-path { color: var(--legend); }
+
+/* --- Region 3: proxy tokens -------------------------------------------- */
+
+/* States what the router does today, next to a table that shows what it
+   would do once per-client tokens exist. A --legend rule rather than
+   --state-failed: nothing has failed here, and red would read as an
+   incident rather than as a design limit. */
+.cn-notice {
+  max-width: 1000px;
+  margin-bottom: var(--section-pad);
+  padding: var(--section-pad) var(--section-pad) var(--section-pad) 14px;
+  border-left: 2px solid var(--legend);
+}
+.cn-notice-lead { margin: 0 0 6px; }
+.cn-notice-body {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.cn-token-table { max-width: 1000px; }
+
+.cn-tok-label { flex: 0 0 170px; }
+.cn-tok-value { flex: 0 0 230px; }
+.cn-tok-created { flex: 0 0 130px; }
+.cn-tok-used { flex: 0 0 170px; }
+.cn-tok-action {
+  flex: 1 1 auto;
+  text-align: right;
+}
+
+/* The mask is not the token — it is the absence of one, so it sits at
+   --legend while the four real characters after it stay at the row's own
+   ink. Extra tracking stops twelve bullets reading as a solid bar. */
+.cn-mask {
+  margin-right: 3px;
+  letter-spacing: 0.08em;
+  color: var(--legend);
+}
+
+/* Destructive, so --state-failed, but only on hover — the same restraint
+   .pd-row-action-danger uses, which keeps a column of three Revokes from
+   reading as three errors. */
+.cn-revoke {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+  cursor: default;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.cn-revoke:hover {
+  opacity: 1;
+  color: var(--state-failed);
+}
+
+.cn-token-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  max-width: 1140px;
+  margin-top: var(--section-pad);
+}
+/* The caption takes the slack; the control keeps its 30px silhouette
+   instead of being squeezed into a two-line box by it. */
+.cn-token-foot .control {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.cn-token-foot .micro {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* --- Region 4: client snippets ----------------------------------------- */
+
+.cn-tabbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gutter);
+  flex-wrap: wrap;
+  margin-bottom: var(--section-pad);
+}
+
+.cn-token-pick { min-width: 200px; }
+
+.cn-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Title, then the file or panel the snippet goes into, then the copy
+   control pushed to the far edge. The last child is what moves, so a
+   pane with no target still puts its control on the right. */
+.cn-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cn-pane-head > :not(:first-child):last-child { margin-left: auto; }
+
+.cn-pane-title { margin: 0; }
+
+/* The destination is a path or a menu route, so it stays mono and
+   case-exact — .legend-caps would uppercase it, and a file path that has
+   been uppercased is a file path that will not open. This is the same
+   problem .field-key now solves for config keys and API fields; this class
+   stays because it is only a colour on an already-mono element, not a
+   second type role. */
+.cn-pane-target { color: var(--legend); }
+
+/* The selected tab's pane. Capped rather than full-bleed: two exported
+   variables do not need 1200px of well behind them. */
+.cn-pane-active { max-width: 900px; }
+
+/* The code well. Horizontal overflow scrolls inside the well rather than
+   wrapping — a wrapped shell continuation reads as a second command. */
+.cn-snippet {
+  padding: 10px var(--section-pad);
+  overflow-x: auto;
+}
+
+.cn-code {
+  margin: 0;
+  white-space: pre;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* The sentence under a snippet explaining the one thing about it that is
+   not obvious from reading it — sans, because this is the console talking,
+   not the wire. */
+.cn-pane-note {
+  margin: 0;
+  color: var(--legend);
+}
+
+/* Stretched, not start-aligned: the panes are read in tab order, so they
+   cannot be reordered to even out their heights, and a row of wells that
+   ends level reads as a panel while a ragged one reads as a mistake. The
+   well takes the slack so the captions under each row still line up. */
+.cn-panes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--gutter);
+  align-items: stretch;
+}
+.cn-panes .cn-snippet { flex: 1 1 auto; }
+/* curl's -d line is wider than half the content area, and truncating a
+   request body would defeat the point of printing it. */
+.cn-pane-wide { grid-column: 1 / -1; }
+
+/* --- Region 5: response headers ---------------------------------------
+   Wire on the left, person on the right: the raw header block in a mono
+   well beside a sans gloss of each header, which is the type-lane rule
+   from the design language stated as a layout. */
+
+.cn-headers {
+  display: grid;
+  grid-template-columns: minmax(0, 460px) minmax(0, 1fr);
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.cn-hdr-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.cn-hdr-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--section-pad);
+  padding: 9px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.cn-hdr-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.cn-hdr-name {
+  flex: 0 0 200px;
+  color: var(--ink);
+}
+
+.cn-hdr-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-muted);
+}
+.cn-hdr-what .chip { margin-left: 2px; }

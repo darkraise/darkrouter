@@ -15,7 +15,7 @@
   ],
   "StopReason": "end_turn",
   "Usage": {
-    "InputTokens": 11,
+    "InputTokens": 3,
     "OutputTokens": 4,
     "CacheReadTokens": 8,
     "CacheWriteTokens": 0,

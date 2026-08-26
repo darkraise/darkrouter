@@ -93,7 +93,7 @@ func TestRecognizeEventReportsUsageMetadata(t *testing.T) {
 	if got.Usage == nil {
 		t.Fatal("no usage")
 	}
-	if got.Usage.InputTokens != 8 || got.Usage.OutputTokens != 2 ||
+	if got.Usage.InputTokens != 5 || got.Usage.OutputTokens != 2 ||
 		got.Usage.CacheReadTokens != 3 || got.Usage.ReasoningTokens != 4 {
 		t.Errorf("usage = %+v", *got.Usage)
 	}

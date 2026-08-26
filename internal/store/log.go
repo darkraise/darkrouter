@@ -23,6 +23,13 @@ type AttemptRecord struct {
 	// Path is "passthrough" or "ir". Empty means "ir": a caller that predates
 	// the fast path is describing the only rendering there was.
 	Path string
+
+	// Usage burned by this attempt, including one that failed before commit.
+	// Without these, a failover's discarded tokens never reach usage_daily and
+	// spend understates reality exactly when failover fires.
+	TokensIn   int64
+	TokensOut  int64
+	CostMicros *int64
 }
 
 // RequestRecord is a complete request, built in memory by the handler and
@@ -47,8 +54,9 @@ type RequestRecord struct {
 	CacheWriteTokens int64
 	ReasoningTokens  int64
 
-	// CostMicros is nil until pricing for the model exists, which is phase 6.
-	// Zero would read as "this request was free".
+	// CostMicros is nil when the served model has no catalog price, when no
+	// catalog is available, or when nothing served at all. Zero would read
+	// as "this request was free".
 	CostMicros *int64
 	TTFTMs     *int64
 	TotalMs    *int64
@@ -217,8 +225,8 @@ func (w *LogWriter) writeBatch(ctx context.Context, batch []*RequestRecord) (int
 
 	attStmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO request_attempts
-		    (request_id, seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`)
+		    (request_id, seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path, tokens_in, tokens_out, cost_micros)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -280,7 +288,7 @@ func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord
 		}
 		if _, err := attStmt.ExecContext(ctx,
 			r.ID, a.Seq, a.ProviderID, a.KeyID, a.Model, a.Outcome,
-			a.StatusCode, a.LatencyMs, a.Error, path,
+			a.StatusCode, a.LatencyMs, a.Error, path, a.TokensIn, a.TokensOut, a.CostMicros,
 		); err != nil {
 			return err
 		}

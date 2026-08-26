@@ -12,6 +12,13 @@
 
 ## Global Constraints
 
+> **SUPERSEDED — 2026-08-25.** The palette, type, surface and motion rules below describe
+> "Graticule Bench", the language this phase was built in. The set has since been moved to
+> "Warm Console", adopted from 9router. **Spec §3 is the contract; this section is kept only as
+> the record of what the phase originally executed against.** Do not copy these values.
+> What still holds: the file structure, the fragment/gate/assembler architecture, the data-realism
+> rules (real preset ids, 26-character ULIDs, no placeholders), and the qa.py invariants.
+
 Copy these values verbatim. Every task's requirements implicitly include this section.
 
 **Palette — declared once in `docs/ux/mockups/darkrouter-ui.css`, referenced everywhere as `var(--token)`:**
@@ -170,6 +177,58 @@ class TestFragmentChecks(unittest.TestCase):
         problems = qa.check_fragment(FIX / "bad_hex.html")
         self.assertTrue(any("font-size" in p for p in problems), problems)
 
+    def test_protocol_relative_src_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "proto_rel.html"
+            f.write_text(
+                '<section class="screen" id="s-1-pr" data-screen-title="pr">'
+                '<p class="legend">proto rel</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<img src="//cdn.example.com/x.png" alt=""></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("external resource" in p for p in problems), problems)
+
+    def test_svg_xlink_href_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "svg_xlink.html"
+            f.write_text(
+                '<section class="screen" id="s-1-sx" data-screen-title="sx">'
+                '<p class="legend">svg xlink</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<svg><use xlink:href="https://example.com/s.svg#i"/></svg></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("external resource" in p for p in problems), problems)
+
+    def test_svg_image_href_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "svg_image.html"
+            f.write_text(
+                '<section class="screen" id="s-1-si" data-screen-title="si">'
+                '<p class="legend">svg image</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<svg><image href="https://example.com/p.png"/></svg></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertTrue(any("external resource" in p for p in problems), problems)
+
+    def test_anchor_href_is_still_allowed(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "anchor_href.html"
+            f.write_text(
+                '<section class="screen" id="s-1-ah" data-screen-title="ah">'
+                '<p class="legend">anchor href</p>'
+                '<b class="pin" data-pin="1">1</b>'
+                '<a href="https://groq.com" rel="noreferrer">groq.com</a></section>',
+                encoding="utf-8",
+            )
+            problems = qa.check_fragment(f)
+            self.assertEqual(problems, [])
+
 
 class TestIndexChecks(unittest.TestCase):
     def test_duplicate_ids_are_rejected(self):
@@ -265,16 +324,27 @@ FRAGMENTS = HERE / "fragments"
 
 # Colour lives in darkrouter-ui.css. A hex in a fragment is a value that
 # escaped the token system and will not follow the light-mode swap.
-HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+# A raw colour hex is any # literal that is not an in-page reference. Excluding
+# url(#…) and href="#…" keeps hex-letter SVG ids and anchors — fade, beef,
+# cafe — out, without exempting fill="#FF0000", which is the real sin.
+HEX = re.compile(r"""(?<!url\()(?<!href=")(?<!href=')#[0-9a-fA-F]{3,8}\b""")
 
-# Loaded resources only. An <a href> to a provider's website is content the
-# screen is depicting, not an asset the page fetches.
-EXTERNAL_RESOURCE = re.compile(
-    r"""(?:\bsrc\s*=\s*["']https?://)"""
-    r"""|(?:@import\s+["']?https?://)"""
-    r"""|(?:url\(\s*["']?https?://)"""
-    r"""|(?:<link\b[^>]*\bhref\s*=\s*["']https?://)""",
+# Attributes that fetch, wherever they appear. The optional scheme catches
+# protocol-relative URLs, which fetch just as happily as an absolute one.
+FETCHING_ATTR = re.compile(
+    r"""\b(?:src|srcset|xlink:href|poster)\s*=\s*["'](?:https?:)?//""",
     re.IGNORECASE,
+)
+
+# Stylesheet fetches.
+CSS_FETCH = re.compile(r"""(?:@import\s+|url\(\s*)["']?(?:https?:)?//""", re.IGNORECASE)
+
+# href only fetches on elements that LOAD what it points at. On an anchor it is
+# navigation, which is why <a href="https://groq.com"> stays legal.
+LOADING_HREF = re.compile(
+    r"""<\s*(?:link|use|image|iframe|embed|object|track|source)\b[^>]*?"""
+    r"""\bhref\s*=\s*["'](?:https?:)?//""",
+    re.IGNORECASE | re.DOTALL,
 )
 
 FONT_SIZE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px")
@@ -282,8 +352,15 @@ MAX_FONT_PX = 30.0
 
 
 def class_token(name: str) -> re.Pattern:
-    """Match one class among several. `class="legend prose"` still counts."""
-    return re.compile(rf'class\s*=\s*["\'][^"\']*\b{name}\b[^"\']*["\']')
+    """Match one class among several.
+
+    The delimiter must exclude the hyphen as well as word characters: a plain
+    \b sits at a hyphen, so "legend" would match "legend-caps" and a screen
+    with three group labels reads as having four legends.
+    """
+    return re.compile(
+        rf'class\s*=\s*["\'][^"\']*(?<![\w-]){name}(?![\w-])[^"\']*["\']'
+    )
 
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -339,9 +416,10 @@ def check_fragment(path: Path) -> list[str]:
         line = text.count("\n", 0, m.start()) + 1
         problems.append(f"{path.name}:{line}: raw hex {m.group(0)} — use var(--token) or rgba()")
 
-    for m in EXTERNAL_RESOURCE.finditer(text):
-        line = text.count("\n", 0, m.start()) + 1
-        problems.append(f"{path.name}:{line}: external resource load — the page must be self-contained")
+    for pattern in (FETCHING_ATTR, CSS_FETCH, LOADING_HREF):
+        for m in pattern.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            problems.append(f"{path.name}:{line}: external resource load — the page must be self-contained")
 
     for m in FONT_SIZE.finditer(text):
         if float(m.group(1)) > MAX_FONT_PX:
@@ -360,9 +438,9 @@ def check_fragment(path: Path) -> list[str]:
     if 'data-screen-title=' not in text:
         problems.append(f"{path.name}: missing data-screen-title")
 
-    for forbidden in ("<html", "<head", "<body", "<style"):
-        if forbidden in text.lower():
-            problems.append(f"{path.name}: fragment contains {forbidden}> — fragments are sections only")
+    for forbidden in ("html", "head", "body", "style"):
+        if re.search(rf"<{forbidden}\b", text, re.IGNORECASE):
+            problems.append(f"{path.name}: fragment contains <{forbidden}> — fragments are sections only")
 
     return problems
 
@@ -409,7 +487,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd docs/ux/mockups && python3 -m unittest discover -s tests -p 'test_qa.py' -v`
-Expected: OK, 8 tests.
+Expected: OK. Record the count you see; the suite grows as tasks add tests.
 
 - [ ] **Step 5: Commit**
 
@@ -456,6 +534,7 @@ Add `THIRD_PARTY_NOTICES.md` entries for both families.
 Create `docs/ux/mockups/tests/test_build.py`:
 
 ```python
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -464,10 +543,45 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build
 import qa
 
+HERE = Path(__file__).resolve().parents[1]
+FRAGMENTS = HERE / "fragments"
+
+# Two fragments that deliberately define the SAME gradient id. Unsuffixed they
+# collide in the assembled document and the second paints with the first one's
+# gradient, which is the failure suffix_svg_ids exists to prevent. The id must
+# not look like a hex colour or the gate flags it.
+_FIXTURE = """<section class="screen" id="s-9{n}-{slug}" data-screen-title="{slug}">
+  <p class="legend">{slug}</p>
+  <b class="pin" data-pin="1">1</b>
+  <svg width="10" height="10" aria-hidden="true">
+    <defs><linearGradient id="graticule"><stop offset="0"/></linearGradient></defs>
+    <rect width="10" height="10" fill="url(#graticule)"/>
+  </svg>
+</section>
+"""
+
 
 class TestBuild(unittest.TestCase):
     def setUp(self):
+        FRAGMENTS.mkdir(exist_ok=True)
+        self.written = []
+        for n, slug in ((0, "alpha"), (1, "beta")):
+            path = FRAGMENTS / f"9{n}-{slug}.html"
+            self.assertFalse(path.exists(), f"{path.name} would clobber a real fragment")
+            path.write_text(_FIXTURE.format(n=n, slug=slug), encoding="utf-8")
+            self.written.append(path)
         self.index, self.artifact = build.build()
+
+    def tearDown(self):
+        for path in self.written:
+            path.unlink(missing_ok=True)
+        # Leave the built files matching the real fragment set rather than
+        # carrying this test's scratch screens into a committed index.
+        if any(FRAGMENTS.glob("*.html")):
+            build.build()
+        else:
+            (HERE / "index.html").unlink(missing_ok=True)
+            (HERE / "artifact.html").unlink(missing_ok=True)
 
     def test_build_produces_both_outputs(self):
         self.assertTrue(self.index.exists())
@@ -477,8 +591,20 @@ class TestBuild(unittest.TestCase):
         head = self.index.read_text(encoding="utf-8").lstrip().lower()
         self.assertTrue(head.startswith("<!doctype html>"))
         body = self.artifact.read_text(encoding="utf-8").lower()
-        for wrapper in ("<!doctype", "<html", "<head", "<body"):
-            self.assertNotIn(wrapper, body, f"artifact.html must not contain {wrapper}")
+        # \b keeps <header> out of this: "head" followed by "e" is not a word
+        # boundary, so only a real <head> tag matches.
+        for wrapper in (r"<!doctype", r"<html\b", r"<head\b", r"<body\b"):
+            self.assertIsNone(
+                re.search(wrapper, body),
+                f"artifact.html must not contain a {wrapper} tag",
+            )
+
+    def test_header_element_is_not_mistaken_for_document_head(self):
+        # The shell's page banner is a <header>. A substring check for "<head"
+        # matches it and would fail the build for no reason.
+        body = self.artifact.read_text(encoding="utf-8").lower()
+        self.assertIn("<header", body, "shell should carry a <header> banner")
+        self.assertIsNone(re.search(r"<head\b", body))
 
     def test_css_is_inlined_not_linked(self):
         text = self.index.read_text(encoding="utf-8")
@@ -492,10 +618,20 @@ class TestBuild(unittest.TestCase):
         self.assertNotIn("fonts.googleapis.com", text)
 
     def test_svg_ids_are_suffixed_per_screen(self):
-        # Two screens may each define a gradient called "fade"; unsuffixed they
-        # collide in one document and the second silently renders the first.
-        problems = [p for p in qa.check_index(self.index) if "duplicate id" in p]
-        self.assertEqual(problems, [])
+        text = self.index.read_text(encoding="utf-8")
+        self.assertIn('id="graticule--s-90-alpha"', text)
+        self.assertIn('id="graticule--s-91-beta"', text)
+        self.assertIn("url(#graticule--s-90-alpha)", text)
+        self.assertIn("url(#graticule--s-91-beta)", text)
+        self.assertEqual(
+            [], [p for p in qa.check_index(self.index) if "duplicate id" in p]
+        )
+
+    def test_every_fragment_reaches_the_built_index(self):
+        text = self.index.read_text(encoding="utf-8")
+        self.assertEqual(2, text.count('class="screen"'))
+        self.assertIn("alpha", text)
+        self.assertIn("beta", text)
 
     def test_built_index_passes_qa(self):
         self.assertEqual(qa.check_index(self.index), [])
@@ -625,7 +761,7 @@ Create `docs/ux/mockups/_shell.html`. The two toggles live here and nowhere else
 
 ```html
 <!doctype html>
-<html lang="en" data-mode="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -647,10 +783,7 @@ Create `docs/ux/mockups/_shell.html`. The two toggles live here and nowhere else
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
         var k = e.key.toLowerCase();
         if (k === "a") document.body.classList.toggle("pins-on");
-        if (k === "t") {
-          var light = document.body.classList.toggle("theme-light");
-          document.documentElement.setAttribute("data-mode", light ? "light" : "dark");
-        }
+        if (k === "t") document.body.classList.toggle("theme-light");
       });
     </script>
   </body>
@@ -696,19 +829,24 @@ Expected: `build: 1 screen(s) -> index.html (…), artifact.html (…)` then `qa
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `cd docs/ux/mockups && python3 -m unittest discover -s tests -v`
-Expected: OK, 14 tests (8 qa + 6 build).
+Expected: OK. The suite grows as tasks add tests, so record the count you see rather than matching a number written here.
 
 - [ ] **Step 9: Delete the smoke fragment, rebuild, commit**
 
 ```bash
 cd docs/ux/mockups
 rm fragments/99-smoke.html
-# build.py exits non-zero on an empty fragment set, which is correct; the
-# first real screen arrives in Task 3. Commit the pipeline without an index.
+# index.html and artifact.html still hold the smoke screen that was just
+# deleted. build.py does not refuse an empty fragment set — it would write an
+# index with no screens — so remove the built files rather than rebuilding.
+# The first real index arrives in Task 3.
+rm -f index.html artifact.html
 cd /root/repositories/darkrouter
-git add docs/ux/mockups THIRD_PARTY_NOTICES.md
+git add -A docs/ux/mockups THIRD_PARTY_NOTICES.md
 git commit -m "build(ux): assemble mockup fragments into a self-contained page"
 ```
+
+The committed tree therefore has `build.py`, `qa.py`, `_shell.html`, `_chrome.html`, `darkrouter-ui.css`, `fonts/` and `tests/`, and no fragments and no built output. That is the intended state at the end of this task.
 
 ---
 
@@ -737,8 +875,10 @@ Chrome's --screenshot does not honour a #fragment anchor, so a per-screen
 image has to come from a per-screen document rather than from index.html.
 """
 import argparse
+import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -749,13 +889,42 @@ OUT = HERE / ".check"
 CHROME = "/usr/bin/google-chrome"
 
 
+# A PNG scanline identical to the one above encodes as filter 2 (Up) with
+# all-zero deltas, which is precisely what trailing page background looks
+# like. Finding the last non-zero row therefore needs no unfiltering, and a
+# full pixel decode of this image size takes tens of seconds in pure Python.
+def content_extent(png: Path) -> tuple[int, int]:
+    """Return (last row carrying content, image height)."""
+    data = png.read_bytes()
+    pos, idat, width, height, ctype = 8, b"", 0, 0, 0
+    while pos < len(data):
+        length = struct.unpack(">I", data[pos:pos + 4])[0]
+        kind = data[pos + 4:pos + 8]
+        if kind == b"IHDR":
+            width, height = struct.unpack(">II", data[pos + 8:pos + 16])
+            ctype = data[pos + 17]
+        elif kind == b"IDAT":
+            idat += data[pos + 8:pos + 8 + length]
+        elif kind == b"IEND":
+            break
+        pos += 12 + length
+    raw = zlib.decompress(idat)
+    stride = width * (4 if ctype == 6 else 3)
+    blank = bytes(stride)
+    for y in range(height - 1, -1, -1):
+        off = y * (stride + 1)
+        if raw[off] != 2 or raw[off + 1:off + 1 + stride] != blank:
+            return y + 1, height
+    return 0, height
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("stem", help="fragment filename without .html, e.g. 02-overview")
     ap.add_argument("--light", action="store_true")
     ap.add_argument("--no-pins", action="store_true")
     ap.add_argument("--width", type=int, default=1440)
-    ap.add_argument("--height", type=int, default=1100)
+    ap.add_argument("--height", type=int, default=6000)
     args = ap.parse_args()
 
     fragment = HERE / "fragments" / f"{args.stem}.html"
@@ -793,7 +962,21 @@ def main() -> int:
     if r.returncode != 0 or not png.exists():
         print(r.stderr[-2000:], file=sys.stderr)
         return 1
-    print(f"check: {png} ({png.stat().st_size // 1024} KB)")
+
+    content, height = content_extent(png)
+    # A clip landing inside a band of flat colour reads as "content ended
+    # here", so allow a small margin before trusting the reading.
+    if content >= height - 8:
+        print(
+            f"check: CLIPPED — content reaches the bottom edge of {png}. "
+            f"Re-run with --height {height * 2} and look at the whole screen.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"check: {png} ({png.stat().st_size // 1024} KB), "
+        f"content to {content}px of {height}px"
+    )
     return 0
 
 
@@ -1116,7 +1299,7 @@ git commit -m "feat(ux): design the requests log"
 
 **Interfaces:**
 - Consumes: the `.ladder` contract from Task 4 — copy its markup shape exactly.
-- Produces: `.waterfall`, `.warning-list` — reused by Task 13.
+- Produces: `.waterfall`, `.warning-list` — no later consumer; this is a leaf.
 
 Spec §6.3. This screen is the payoff for the whole design; it is where the ladder earns the spine claim.
 
@@ -1172,7 +1355,7 @@ git commit -m "feat(ux): design the request trace around the ladder"
 
 **Interfaces:**
 - Consumes: Task 3 vocabulary, `.well` in particular — every chart sits in a well and the graticule is its gridline.
-- Produces: `.chart-scope`, `.rank-table` — `.chart-scope` is the class that overrides the colliding chart ramp and Task 13 reuses it.
+- Produces: `.chart-scope`, `.rank-table` — `.chart-scope` overrides the colliding chart ramp and Task 19 re-renders it in light. Declare it in darkrouter-ui.css, not inline, so Task 19 does not redefine it.
 
 Spec §6.4. Page title `operate/usage`. This screen does not exist today.
 
@@ -1846,7 +2029,7 @@ cd docs/ux/mockups
 python3 build.py && python3 qa.py && python3 -m unittest discover -s tests -v
 ```
 
-Expected: 18 fragments, qa PASS, 14 tests OK. Record `index.html`'s size — it should land in the 200–350 KB range; materially larger means an asset was embedded that should not have been.
+Expected: 18 fragments, qa PASS, and the full suite OK. Record `index.html`'s size — it should land in the 200–350 KB range; materially larger means an asset was embedded that should not have been.
 
 - [ ] **Step 2: Screenshot every screen in both modes**
 

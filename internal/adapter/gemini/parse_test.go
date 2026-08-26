@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -16,6 +17,42 @@ func parseBody(t *testing.T, body string) (*ir.Response, error) {
 	return ParseResponse(&http.Response{
 		StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)),
 	})
+}
+
+func TestCachedTokensAreRemovedFromTheInputCount(t *testing.T) {
+	// Gemini reports promptTokenCount INCLUDING the cached subset. Leaving it
+	// inclusive makes the cached tokens billable twice: once at the input
+	// rate and again at the cache-read rate.
+	var u wireUsage
+	if err := json.Unmarshal([]byte(`{
+		"promptTokenCount": 10000,
+		"candidatesTokenCount": 500,
+		"cachedContentTokenCount": 8000
+	}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	got := u.toIR()
+	if got.InputTokens != 2000 {
+		t.Fatalf("InputTokens = %d, want 2000 (10000 less the 8000 cached)", got.InputTokens)
+	}
+	if got.CacheReadTokens != 8000 {
+		t.Fatalf("CacheReadTokens = %d, want 8000", got.CacheReadTokens)
+	}
+}
+
+func TestAnInclusiveCountIsNeverDrivenNegative(t *testing.T) {
+	// A provider reporting cached greater than prompt is malformed, but a
+	// negative token count would reach pricing and produce a negative cost.
+	var u wireUsage
+	if err := json.Unmarshal([]byte(`{
+		"promptTokenCount": 100,
+		"cachedContentTokenCount": 500
+	}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	if got := u.toIR().InputTokens; got != 0 {
+		t.Fatalf("InputTokens = %d, want 0", got)
+	}
 }
 
 func TestParseResponseReadsPartsAndUsage(t *testing.T) {
@@ -45,7 +82,7 @@ func TestParseResponseReadsPartsAndUsage(t *testing.T) {
 	if got.Model != "gemini-2.0-flash" {
 		t.Errorf("model = %q", got.Model)
 	}
-	if got.Usage.InputTokens != 10 || got.Usage.OutputTokens != 4 ||
+	if got.Usage.InputTokens != 7 || got.Usage.OutputTokens != 4 ||
 		got.Usage.CacheReadTokens != 3 || got.Usage.ReasoningTokens != 6 {
 		t.Errorf("usage = %+v", got.Usage)
 	}

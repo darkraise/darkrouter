@@ -1,0 +1,393 @@
+<section class="screen" id="s-06-providers" data-screen-title="configure/providers">
+  <p class="legend">
+    The eight configured providers in the order the router walks them, the
+    drag-and-switch controls that finally give <span class="mono">PATCH
+    /api/providers/{id}</span> a caller, the discovery-health column that
+    makes a six-hour-stale model listing look different from a fresh one,
+    and the raw create form behind the preset browser. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Providers</h2>
+          <p class="topbar-route mono">configure/providers</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p class="section-title">Providers</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; List &mdash; GET /api/providers providers[]{id,name,preset,kind,base_url,priority,enabled,auth_style,credentials[]}.</span></p>
+          <div class="table prov-table">
+
+            <div class="row row-head">
+              <span class="prov-col-handle" aria-hidden="true"></span>
+              <span class="legend-caps prov-col-prio">prio</span>
+              <span class="legend-caps prov-col-name">provider</span>
+              <span class="legend-caps prov-col-kind">kind</span>
+              <span class="field-key prov-col-url">base_url</span>
+              <span class="legend-caps prov-col-creds">credentials</span>
+              <span class="legend-caps prov-col-switch">on</span>
+              <span class="legend-caps prov-col-disc">discovery</span>
+              <span class="legend-caps prov-col-flag">flag</span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">100</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">groq</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.groq.com/openai/v1</span>
+              <span class="micro prov-col-creds">2 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">3m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">90</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="degraded"></span><span class="mono">cerebras</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.cerebras.ai/v1</span>
+              <span class="micro prov-col-creds">3 credentials &middot; 1 cooling</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc" title="last success 08:11:40 &mdash; 14 consecutive failures, 401 Unauthorized"><span class="discovery-status" data-discovery="stale"></span><span class="micro">6h stale</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">80</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">anthropic</span></span>
+              <span class="mono prov-col-kind">anthropic</span>
+              <span class="micro prov-col-url">https://api.anthropic.com/v1</span>
+              <span class="micro prov-col-creds">1 credential</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">3m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">70</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">openrouter</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://openrouter.ai/api/v1</span>
+              <span class="micro prov-col-creds">3 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">5m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">60</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">together</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.together.xyz/v1</span>
+              <span class="micro prov-col-creds">2 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">5m ago</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="false" title="disabled, not deleted — the row keeps its id, its credentials and its place in the order">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">50</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="disabled"></span><span class="mono">deepinfra</span></span>
+              <span class="mono prov-col-kind">openaicompat</span>
+              <span class="micro prov-col-url">https://api.deepinfra.com/v1/openai</span>
+              <span class="micro prov-col-creds">2 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="false"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="idle"></span><span class="micro">not polled</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="false" title="no credential yet — nothing to authenticate a probe or a request with">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">40</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="unconfigured"></span><span class="mono">bedrock</span></span>
+              <span class="mono prov-col-kind">bedrock</span>
+              <span class="micro prov-col-url">https://bedrock-runtime.us-east-1.amazonaws.com</span>
+              <span class="micro prov-col-creds">0 credentials</span>
+              <span class="prov-col-switch"><span class="switch" data-on="false"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="idle"></span><span class="micro">never run</span></span>
+              <span class="prov-col-flag"></span>
+            </div>
+
+            <div class="row prov-row" data-enabled="true">
+              <span class="priority-handle" aria-hidden="true"></span>
+              <span class="mono prov-col-prio">30</span>
+              <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">vertex</span></span>
+              <span class="mono prov-col-kind">vertex</span>
+              <span class="micro prov-col-url">https://us-central1-aiplatform.googleapis.com</span>
+              <span class="micro prov-col-creds">1 credential</span>
+              <span class="prov-col-switch"><span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span></span>
+              <span class="prov-col-disc"><span class="discovery-status" data-discovery="fresh"></span><span class="micro">4m ago</span></span>
+              <span class="prov-col-flag"><span class="health-tile-alert"><span class="health-tile-alert-text">needs reconnection</span></span></span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Reordering</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Reorder/enable &mdash; PATCH /api/providers/{id} {name,base_url,priority,enabled,region,project}. Implemented, wired, and called by nothing today.</span></p>
+          <div class="prov-reorder">
+            <div class="table">
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">100</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">groq</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">90</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="degraded"></span><span class="mono">cerebras</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">80</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">anthropic</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+              <div class="drop-indicator" aria-hidden="true"></div>
+
+              <div class="row prov-row prov-row-dragging" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit"><span class="prov-prio-was">60</span><span class="prov-prio-arrow">&rarr;</span><span class="prov-prio-now">70</span></span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">together</span></span>
+                <span class="micro">held &mdash; drop here</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="true">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit"><span class="prov-prio-was">70</span><span class="prov-prio-arrow">&rarr;</span><span class="prov-prio-now">60</span></span>
+                <span class="prov-col-name"><span class="state-pip" data-state="healthy"></span><span class="mono">openrouter</span></span>
+                <span class="micro">renumbered</span>
+              </div>
+
+              <div class="row prov-row" data-enabled="false">
+                <span class="priority-handle" aria-hidden="true"></span>
+                <span class="mono prov-col-prio-edit">50</span>
+                <span class="prov-col-name"><span class="state-pip" data-state="disabled"></span><span class="mono">deepinfra</span></span>
+                <span class="micro">unchanged</span>
+              </div>
+
+            </div>
+            <span class="micro prov-reorder-note">
+              on release &mdash; PATCH /api/providers/together {"priority":70} then
+              PATCH /api/providers/openrouter {"priority":60}. Only the rows whose
+              number actually moved are written.
+            </span>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Discovery health</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Discovery health &mdash; provider_discovery{consecutive_failures,last_attempt_at,last_success_at,last_error} via the &sect;8.2 extension. DB.DiscoveryStates is never called by the admin package today.</span></p>
+          <div class="discovery-grid">
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="discovery-status" data-discovery="fresh"></span>
+                <span class="mono health-tile-name">groq</span>
+                <span class="chip">fresh</span>
+              </div>
+              <div class="discovery-lines">
+                <span class="micro"><span class="discovery-field">last success</span> 3m ago</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> 3m ago</span>
+                <span class="micro"><span class="discovery-field">consecutive failures</span> 0</span>
+                <span class="micro"><span class="discovery-field">last error</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> 6 models</span>
+              </div>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="discovery-status" data-discovery="stale"></span>
+                <span class="mono health-tile-name">cerebras</span>
+                <span class="chip">stale</span>
+              </div>
+              <div class="discovery-lines">
+                <span class="micro"><span class="discovery-field">last success</span> 08:11:40</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> 2m 43s ago</span>
+                <span class="micro"><span class="discovery-field">consecutive failures</span> 14</span>
+                <span class="micro"><span class="discovery-field">last error</span> 401 Unauthorized</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> 41 models, 6h old</span>
+              </div>
+              <span class="health-tile-alert"><span class="health-tile-alert-text">Cooling on its primary credential, still serving on burst. Its model listing has not refreshed since 08:11:40 &mdash; new models will not appear and retired ones still route.</span></span>
+            </div>
+
+            <div class="well health-tile">
+              <div class="health-tile-head">
+                <span class="discovery-status" data-discovery="idle"></span>
+                <span class="mono health-tile-name">bedrock</span>
+                <span class="chip">never run</span>
+              </div>
+              <div class="discovery-lines">
+                <span class="micro"><span class="discovery-field">last success</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">last attempt</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">consecutive failures</span> 0</span>
+                <span class="micro"><span class="discovery-field">last error</span> &mdash;</span>
+                <span class="micro"><span class="discovery-field">catalogued</span> no models yet</span>
+              </div>
+            </div>
+
+          </div>
+          <p class="prose">
+            The middle case is the one the product cannot show today. A
+            listing that has failed for six hours renders exactly like one
+            refreshed three minutes ago, because nothing in the admin
+            package reads the discovery table &mdash; so the operator finds
+            out when a model that was retired this morning is still being
+            routed to this afternoon.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Add a provider</p>
+          <p><b class="pin" data-pin="4">4</b><b class="pin" data-pin="5">5</b><span class="pin-note">4-5 &middot; Create &mdash; POST /api/providers {id,name,preset,kind,base_url,auth_style,priority,enabled,region,project,location}. location is create-only, not patchable.</span></p>
+          <div class="prov-add">
+            <button class="control control-primary">Add from a preset&hellip;</button>
+            <a class="prov-add-link" href="#">Add without a preset</a>
+            <span class="micro">197 shipped presets &mdash; a preset supplies kind, base_url, auth_style and the quirk set, so the operator supplies an id and a key</span>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Raw provider form</p>
+          <div class="panel">
+            <div class="prov-form">
+
+              <div class="field">
+                <p class="legend-caps">id</p>
+                <span class="field-input">bedrock-frankfurt</span>
+                <span class="spec-note">primary key, immutable after creation</span>
+              </div>
+
+              <div class="field field-span-2">
+                <p class="legend-caps">kind</p>
+                <div class="segmented">
+                  <span class="segmented-option">openaicompat</span>
+                  <span class="segmented-option">anthropic</span>
+                  <span class="segmented-option">gemini</span>
+                  <span class="segmented-option" data-active="true">bedrock</span>
+                  <span class="segmented-option">vertex</span>
+                </div>
+                <span class="spec-note">the adapter family &mdash; decides which of region / project / location below apply</span>
+              </div>
+
+              <div class="field field-span-2">
+                <p class="legend-caps">base_url</p>
+                <span class="field-input">https://bedrock-runtime.eu-central-1.amazonaws.com</span>
+                <span class="spec-note">required unless a preset supplies it</span>
+              </div>
+
+              <div class="field">
+                <p class="legend-caps">auth_style</p>
+                <button class="control combo-trigger prov-select">
+                  <span>sigv4</span>
+                  <span class="combo-chevron">▾</span>
+                </button>
+                <span class="spec-note">bearer &middot; x-api-key &middot; api-key &middot; query-param &middot; none &middot; sigv4 &middot; gcp-sa &middot; oauth</span>
+              </div>
+
+              <div class="field">
+                <p class="legend-caps">priority</p>
+                <span class="field-input">20</span>
+                <span class="spec-note">walked high to low; lands under vertex at 30</span>
+              </div>
+
+              <div class="field">
+                <p class="legend-caps">enabled</p>
+                <span class="switch" data-on="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                <span class="spec-note">created enabled unless the body says otherwise</span>
+              </div>
+
+              <div class="field">
+                <p class="legend-caps">region</p>
+                <span class="field-input">eu-central-1</span>
+                <span class="spec-note">signs every sigv4 request; bedrock only</span>
+              </div>
+
+              <div class="field">
+                <p class="legend-caps">project</p>
+                <span class="field-input field-input-inert">vertex only</span>
+                <span class="spec-note">patchable, unlike location</span>
+              </div>
+
+              <div class="field">
+                <p class="legend-caps">location</p>
+                <span class="field-input field-input-inert">vertex only</span>
+                <span class="spec-note">create-only &mdash; changing it moves every catalogued model to a different endpoint, which is a new provider</span>
+              </div>
+
+            </div>
+            <div class="prov-form-actions">
+              <button class="control control-primary">Create provider</button>
+              <button class="control control-ghost">Cancel</button>
+              <span class="micro">no preset selected &mdash; kind and base_url are supplied by hand, so nothing is inherited</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="prov-counts">
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Counts &mdash; derived client-side from the list; no endpoint.</span></p>
+          <p class="ops-footer">
+            <span class="mono">8 providers</span> &middot;
+            <span class="mono">6 enabled</span> &middot;
+            <span class="mono">1 cooling</span> &middot;
+            <span class="mono">1 needs reconnection</span> &middot;
+            <span class="mono">197 presets available</span>
+          </p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

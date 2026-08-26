@@ -24,9 +24,9 @@
     "usageMetadata": {
       "cachedContentTokenCount": 4,
       "candidatesTokenCount": 64,
-      "promptTokenCount": 9,
+      "promptTokenCount": 13,
       "thoughtsTokenCount": 0,
-      "totalTokenCount": 73
+      "totalTokenCount": 77
     }
   },
   "status": 200

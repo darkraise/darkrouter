@@ -1,0 +1,294 @@
+/*
+ * Task 10 — Provider detail ("configure/providers", one provider open).
+ *
+ * A leaf screen: nothing later consumes what is declared here except the two
+ * names the task's own Interfaces contract reserves for it, .credential-row
+ * and .breaker-panel. Everything else is prefixed pd- so that Tasks 9, 11
+ * and 12, which are written in the same wave and concatenated into the same
+ * stylesheet, cannot collide with it.
+ *
+ * Reused unchanged and therefore absent below: .panel, .well, .table, .row,
+ * .chip, .control, .control-ghost, .mono, .micro, .prose, .readout, .unit,
+ * .data-emph, .legend-caps, .section-title, .spec-note, .region, .state-pip,
+ * .ladder, .ladder-row, .target, .reason, .reason-code, .reason-prose,
+ * .mark, .mark-cooling, .control-primary, .status-badge, .switch (+ parts),
+ * .field (+ -span-2), .field-input, .field-static, .kv-grid, .kv (+ -key/
+ * -value), .discovery-status (darkrouter-ui.css) — the probe's two outcomes
+ * are the same success/error badge a request trace already prints, and
+ * inventing a second pill for the same idea is how a vocabulary splits.
+ */
+
+/* --- Shared panel scaffolding ----------------------------------------- */
+
+.pd-panel { padding: var(--section-pad); }
+
+/* Header strip of a panel: identity first, then the quiet facts about it.
+   Not .trace-header — that one stacks two lines for a request's id and
+   route; this is one line of mixed pips, chips and micro text. */
+.pd-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: var(--section-pad);
+  margin-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pd-head-id {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* A panel's action row: the button that acts on the panel, and the sentence
+   that says what the button will and will not do. */
+.pd-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  margin-top: var(--section-pad);
+}
+.pd-foot .prose {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ink-muted);
+}
+/* The sentence beside a button is allowed to wrap; the button is not. Without
+   this the flex row shrinks "Run discovery now" to three stacked words and it
+   bursts the 30px control height. */
+.pd-foot .control {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.pd-link { color: var(--accent-ink); }
+
+/* --- Region 1: identity form ------------------------------------------
+   .field (+ -span-2) and .field-input are the shared vocabulary; only the
+   4-column count is this screen's own. */
+
+.pd-form {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter) var(--section-pad);
+}
+
+/* The switch always carries its own word beside it, so the state survives
+   greyscale and colour stays the second channel. */
+.pd-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+
+/* --- Region 2: credentials -------------------------------------------- */
+
+/* Composes .row for its 30px height, padding and seam, then replaces the
+   flex flow with a grid so three rows and the header line up as columns
+   even though the cooling cell is empty on two of them. */
+.credential-row {
+  display: grid;
+  grid-template-columns: 34px 108px 74px 150px 1fr auto;
+  align-items: center;
+}
+
+.credential-row .legend-caps { margin: 0; }
+
+.credential-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  justify-content: flex-end;
+}
+
+/* A row-level text action. .control is a 30px button and would burst a
+   30px row; .chip is a bordered pill and three of them per row read as
+   chrome competing with the data. */
+.pd-row-action {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.pd-row-action:hover { opacity: 1; color: var(--accent-ink); }
+.pd-row-action-danger:hover { color: var(--state-failed); }
+
+/* Amber as a mark, never as text: the ring is the ladder's own cooling mark
+   and the border is a rule, both permitted uses; the words stay --ink-muted,
+   which is what keeps this legible in light mode where --state-cooling
+   measures 3.19:1 against --surface (a 2px rule on --surface-2 measures 2.90:1 and misses the floor, so it never sits there) behind it. */
+.pd-cooling-chip { border-color: var(--state-cooling); }
+
+/* The mid-replace disclosure. Not a .row: it is taller than 30px by
+   necessity, and it belongs to the credential above it rather than being a
+   peer of it, so it drops the row height and keeps the seam. */
+.credential-replace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+}
+.credential-replace .spec-note { margin: 0; }
+
+.credential-replace-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.credential-replace-line .field-input { flex: 1 1 auto; max-width: 320px; }
+
+/* --- Region 3: OAuth account ------------------------------------------- */
+
+/* --- Region 4: breaker -------------------------------------------------- */
+
+.breaker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-pad);
+  padding: var(--section-pad);
+}
+
+.pd-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--section-pad);
+}
+
+/* The three numbers this region exists to expose, each in its own well so
+   the readout sits at the highest contrast in the frame in both modes. */
+.pd-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px var(--section-pad);
+}
+.pd-stat-key { color: var(--legend); }
+/* The note under the triple list belongs to the list, not to the button row
+   below it; a browser default <p> margin would space it as if it were a
+   third block. */
+.breaker-panel .spec-note { margin: 6px 0 0; }
+.pd-stat-sub { color: var(--ink-muted); }
+
+/* .target sizes itself to its content, so four triples of different lengths
+   start their reason column at four different x positions. A fixed basis
+   makes the list a column again; 300px is the longest triple plus a
+   character, measured against the render. */
+.pd-triple { flex: 0 0 300px; }
+
+/* The empty Model of a credential-level breaker entry. It is a real absence
+   rather than a value, so it prints in the legend register instead of ink. */
+.pd-empty-model { color: var(--legend); }
+
+/* --- Regions 5 and 6: probe result and discovery error ------------------ */
+
+/* A block heading that has to carry data — which credential a result came
+   from, when it ran. .legend-caps alone cannot: it uppercases, and a masked
+   suffix is case-bearing data that must not be rewritten to read …A4F2. */
+.pd-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: var(--section-pad) 0 6px;
+}
+.pd-subhead .legend-caps { margin: 0; }
+
+/* One probe outcome: the badge, then the response fields in wire order. A
+   well, because this is data that came back, not chrome. */
+.pd-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--section-pad);
+  padding: 0 var(--section-pad);
+  min-height: var(--row-h);
+}
+.pd-result + .pd-result { margin-top: 8px; }
+
+.pd-result-fields {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--section-pad);
+  min-width: 0;
+}
+
+/* An inline field:value pair on one line, for a response body read left to
+   right. The stacked .kv is for a column of them. */
+.pd-inline-kv {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pd-error-text {
+  color: var(--state-failed);
+  overflow-wrap: anywhere;
+}
+
+.pd-error-well {
+  display: flex;
+  align-items: baseline;
+  gap: var(--section-pad);
+  padding: 8px var(--section-pad);
+}
+
+.pd-bad { color: var(--state-failed); }
+
+.pd-probe-note { margin: 8px 0 0; color: var(--ink-muted); }
+
+/* --- Region 7: danger zone ---------------------------------------------- */
+
+/* Same construction Overview's .config-banner uses — a --state-failed edge
+   and a low-opacity wash from a pseudo-element, never a transitioning
+   background — under its own name, because that class reports one specific
+   system state (the config failed to validate) and this one is a zone that
+   contains a destructive control. */
+.pd-danger {
+  position: relative;
+  padding: var(--section-pad);
+  border-color: var(--state-failed);
+}
+.pd-danger::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.06;
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+.pd-danger > * { position: relative; }
+
+.pd-control-danger {
+  border-color: var(--state-failed);
+  color: var(--state-failed);
+}
+
+.pd-dangling {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px var(--section-pad);
+  margin-top: var(--section-pad);
+}
+.pd-dangling .prose { margin: 0; }
+
+.pd-alias-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px calc(var(--gutter) * 2);
+}
+.pd-alias {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pd-alias-name { color: var(--ink); }

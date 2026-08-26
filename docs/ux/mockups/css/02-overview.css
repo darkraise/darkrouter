@@ -1,0 +1,329 @@
+/*
+ * Task 5 — Overview screen partial.
+ *
+ * New component classes this screen introduces: .config-banner (alarm
+ * strip), .live-strip/.live-tile/.live-tile-caption (readout-over-sparkline
+ * tiles), .sparkline (svg trend line, reused by Task 9), .load-bar (per-tile
+ * refresh indicator), .health-tile (provider tiles, .health-tile
+ * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
+ * this screen composes .well/.table/.row/a.row/.chip/.chip-failover/.mono/
+ * .readout/.unit/.micro/.data-emph/.section-title/.legend-caps/.region from
+ * darkrouter-ui.css unchanged.
+ */
+
+/* --- Region 1: config-invalid banner ----------------------------------
+   Same "value step + opacity wash" construction .row::after and
+   .ladder-row-served::after already use: a positioned pseudo-element
+   painting over in-flow text at low opacity, not a transitioning
+   background-color. --state-failed reports the system's own failure to
+   validate its config, not a provider or a routing decision, so it is a
+   legitimate third use of that token alongside pips and the ladder's
+   failed mark. */
+.config-banner {
+  position: relative;
+  padding: var(--section-pad);
+  border-bottom: 1px solid var(--state-failed);
+  border-radius: var(--radius);
+}
+.config-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-failed);
+  opacity: 0.08;
+  pointer-events: none;
+}
+.config-banner-error {
+  margin: 4px 0;
+}
+.config-banner-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+/* --- Region 2: live strip ----------------------------------------------
+   Four equal wells; each stacks a window caption, the readout(s), and a
+   40px trend line. Grid rather than flex so all four sparklines share one
+   baseline regardless of how tall the readout line above them grows. */
+.live-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gutter);
+}
+.live-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+.live-tile-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-height: 1.2em;
+}
+/* A tile caption names the wire field it reads (mono, off the wire) plus,
+   where the readout has one, the window it was aggregated over (sans, a
+   person's gloss) — .spec-note is the design-language specimen's own
+   scoped label, not a general-purpose caption class. */
+.live-tile-caption {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+.live-tile-caption .mono {
+  font-size: 11px;
+  color: var(--legend);
+}
+/* The latency tile's compound p50/p95 pair — two readouts sharing one
+   tile without either one claiming the tile's single primary value slot. */
+.live-tile-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+/* Region 6: the per-tile refresh indicator, sitting flush on the well's
+   own top inner edge. A track plus a narrower filled span rather than one
+   element with a background-position trick, so the determinate width is
+   a plain, inspectable percentage. */
+.load-bar{
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--border-subtle);
+  border-radius: var(--radius-pill) var(--radius) 0 0;
+}
+.load-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--trace);
+}
+
+/* svg.sparkline is sized by its box (40px tall, full tile width) and
+   stretched with preserveAspectRatio="none" on the element itself, so the
+   coordinate space of every polyline below can stay a fixed 0..100/0..40
+   regardless of the tile's actual rendered width. */
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin-top: auto;
+}
+.sparkline polyline {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+/* The area under the line, closed back to the baseline in the markup
+   (…,100,40 0,40) rather than filled via CSS, so the same points array
+   draws both the stroke and its wash. Neutral --ink-muted, not --trace —
+   a metric trend is neither a provider state nor a router verdict. */
+.sparkline polygon {
+  stroke: none;
+  fill: var(--ink-muted);
+  opacity: 0.08;
+}
+
+/* --- Provider tiles ----------------------------------------------------
+   The four-up .health-grid this screen used is gone — the routing flow shows
+   provider state now, with the routing that a grid of tiles could not. The
+   TILE survives because Providers and First run both build their own layouts
+   out of it, so it is shared vocabulary that happens to live here. */
+.health-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+.health-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health-tile-name {
+  color: var(--ink);
+}
+
+/* The one state on this screen only the operator can resolve — not a
+   failure, so it takes --state-cooling (the cooling/attention colour),
+   not --state-failed. Same wash construction as .config-banner, at tile
+   scale, but the amber keeps it from reading as an outage next to the
+   tile's own healthy pip. */
+.health-tile-alert {
+  position: relative;
+  padding: 4px 6px;
+  border: 1px solid var(--state-cooling);
+  border-radius: var(--radius);
+}
+.health-tile-alert::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--state-cooling);
+  opacity: 0.08;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.health-tile-alert-text {
+  position: relative;
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+/* --- Region 4: recent failovers -----------------------------------------
+   .row is reused verbatim from Task 3/4's .table; a.row's underline reset
+   lives in darkrouter-ui.css, shared with Usage's rank tables. */
+
+/* --- Region 5: ops footer -----------------------------------------------
+   Children set their own .mono face; this class only supplies the
+   hairline that separates the footer from the page above it and the
+   --legend colour every figure inherits unless it's the dropped counter
+   going amber. */
+.ops-footer {
+  margin: var(--gutter) 0 0;
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--border);
+  color: var(--legend);
+}
+.ops-footer-dropped[data-alert="true"] {
+  color: var(--state-cooling);
+}
+
+/* --- Routing flow graph -------------------------------------------------
+   A left-to-right flow rather than the radial hub OmniRoute draws. A ring
+   cannot encode order, and order is the whole point here: the router walks
+   candidates by priority, so priority is the vertical axis and a reader can
+   see what was tried before what. Edge thickness carries volume, and a
+   provider that is not a candidate simply has no edge — absence is the
+   clearest way to say "this one is not in the path".
+
+   Nodes are HTML positioned over an SVG edge layer, so text is real text at
+   real weights instead of <text> that ignores the type scale. Coordinates
+   are fixed px and the SVG viewBox matches them 1:1, which is why the whole
+   graph scrolls rather than scales: a scaled graph distorts stroke widths,
+   and stroke width is data here. */
+
+.rf-wrap { overflow-x: auto; }
+
+.rf-graph { position: relative; }
+
+.rf-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rf-edge { fill: none; stroke-linecap: round; }
+/* Inbound is plumbing, not a decision: the thinnest structural stroke. */
+.rf-edge-in { stroke: var(--border); stroke-width: 1; }
+/* Outbound is the router's verdict, so it takes --trace and its width is
+   share of the window. */
+.rf-edge-out { stroke: var(--trace); opacity: 0.55; }
+/* Traffic that landed here because somewhere else refused it. Dashed for the
+   same reason the ladder dashes an attempted-and-failed stub. */
+.rf-edge-fail {
+  stroke: var(--trace);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+.rf-fo-label {
+  fill: var(--legend);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.rf-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  /* A node is a fixed box: nothing inside it may escape to the right, or a
+     count lands on top of the failover arcs drawn beside the column. */
+  overflow: hidden;
+}
+
+.rf-alias { justify-content: space-between; }
+.rf-alias .rf-vol { color: var(--legend); }
+
+/* The one node that is the product rather than a participant, so it is the
+   one node allowed to carry the accent border. It does NOT take
+   --shadow-warm: that is spent on the brand mark in the sidebar and nowhere
+   else, and a second warm shadow would make the rule a preference. */
+.rf-router {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+.rf-router-label { margin: 0; color: var(--accent-ink); }
+/* The readout role, not a new size: a router total is a primary reading. */
+.rf-router-total { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; }
+.rf-router-unit,
+.rf-router-fo { color: var(--legend); }
+.rf-router-fo { margin-top: 4px; }
+
+.rf-prio {
+  min-width: 22px;
+  text-align: right;
+  color: var(--legend);
+  font-variant-numeric: tabular-nums;
+}
+.rf-name { flex: 0 0 auto; }
+.rf-note {
+  /* The note takes the slack and the bar is fixed, not the other way round:
+     "1 cooling" is the reason a row is degraded and must not be the thing
+     an ellipsis eats. */
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--legend);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* No share bar. Edge thickness already encodes share, and far more
+   legibly than a 56px bar repeating it — the space is better spent on the
+   credential note, which nothing else on the screen carries. */
+
+.rf-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+.rf-count { font-variant-numeric: tabular-nums; }
+.rf-pct, .rf-out { color: var(--legend); }
+.rf-fo { color: var(--trace); }
+
+/* Not a candidate. The node stays legible — it is still configured — but it
+   reads as out of the path, which is exactly what it is. */
+.rf-provider-idle {
+  background: var(--ground-alt);
+  border-style: dashed;
+  box-shadow: none;
+}
+.rf-provider-idle .rf-name { color: var(--ink-muted); }
+
+.rf-lede { margin-bottom: var(--gutter); }

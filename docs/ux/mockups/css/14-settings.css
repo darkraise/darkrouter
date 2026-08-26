@@ -1,0 +1,402 @@
+/*
+ * Task 17 — Settings ("settings"), six panels grouped by concern.
+ *
+ * Every class is prefixed set- because two other screens are written in the
+ * same wave and concatenated into the same stylesheet.
+ *
+ * Reused unchanged and therefore absent below: .panel, .well, .table, .row,
+ * .row-head, .chip, .status-badge, .control, .control-primary, .switch (+
+ * -track/-knob/-label), .segmented, .segmented-option, .discovery-status,
+ * .field (+ -span-2), .field-input, .field-static, .mono, .micro, .prose,
+ * .data-emph, .legend-caps, .section-title, .spec-note, .text-muted,
+ * .region, and the whole chrome (darkrouter-ui.css). Appearance's two axes
+ * are the shared .segmented verbatim; the sessions table is .table/.row/
+ * .row-head with a grid applied, exactly as Provider detail's credential
+ * list is.
+ */
+
+/* --- Panel scaffolding -------------------------------------------------- */
+
+.set-panel { padding: var(--section-pad); }
+
+/* A panel's header strip: which config block this is, how many values it
+   holds, when a change to it lands, then the quiet facts. Same job as
+   Provider detail's .pd-head, which is scoped to that screen and was not
+   promoted in the consolidation pass; a settings panel head also has to
+   carry a scope marker, which that one does not. */
+.set-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: var(--section-pad);
+  margin-bottom: var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.set-head-id {
+  font-weight: 500;
+  color: var(--ink);
+}
+.set-head .micro { flex: 1 1 240px; }
+
+/* A nested block's head sits inside a panel that already has one, so it
+   drops the seam and the bottom margin the outer strip needs. */
+.set-head-sub {
+  padding-bottom: 0;
+  margin-bottom: 10px;
+  border-bottom: none;
+}
+
+/* A panel's action row: the button, and the sentence saying what it will and
+   will not do. The sentence wraps; the button never does. */
+.set-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  margin-top: var(--section-pad);
+}
+.set-foot .prose {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ink-muted);
+}
+.set-foot .control {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* A heading inside a panel that carries data beside it. .legend-caps alone
+   uppercases, which is wrong for a path or a count. */
+.set-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: var(--gutter) 0 8px;
+}
+.set-subhead .legend-caps { margin: 0; }
+
+/* A second config block living inside the same panel as the first —
+   capture under log, discovery under catalog. It is a nested concern, not a
+   peer panel, so it gets a seam and a gutter rather than its own border. */
+.set-subgroup {
+  margin-top: var(--gutter);
+  padding-top: var(--gutter);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* --- The scope marker ---------------------------------------------------
+   The one thing this screen adds to the product's vocabulary: when does a
+   change to this value actually take effect. It is not a health reading and
+   not a routing decision, so it takes NEITHER the state colours nor
+   --trace — a value's activation lifetime is a third kind of fact and
+   colouring it from either family would make "restart required" look like a
+   provider outcome. Both channels are therefore achromatic: the word itself,
+   which survives greyscale and a screenshot, and a 3px bar that is solid for
+   a value a running process re-reads, segmented for one it does not, and
+   absent for one nothing reads at all. The bar repeats the word rather than
+   replacing it, so the marker is legible before it is learned. */
+.set-scope {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  height: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--legend);
+  white-space: nowrap;
+}
+.set-scope::before{
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 11px;
+  border-radius: var(--radius-xs);
+  background: var(--legend);
+}
+/* Segmented, not dashed: a dashed 3px bar renders as two dots at this size.
+   The gradient is the same technique .priority-handle uses to draw a rule
+   without a glyph or a fetched asset. */
+.set-scope[data-scope="restart"]::before {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--legend) 0 3px,
+    transparent 3px 5px
+  );
+}
+.set-scope[data-scope="restart"] { color: var(--ink-muted); }
+/* Nothing reads it, so the bar is an outline around nothing. */
+.set-scope[data-scope="inert"]::before {
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+/* The key strip that teaches the marker once, above the first panel, so no
+   panel has to explain it in prose. */
+.set-key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px var(--gutter);
+  padding: 10px var(--section-pad);
+  margin-bottom: var(--gutter);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+.set-key .legend-caps { margin: 0; }
+.set-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.set-key-tail {
+  flex: 1 1 100%;
+  color: var(--legend);
+}
+
+/* --- Form grid ----------------------------------------------------------
+   .field and .field-input are the shared vocabulary; only the column count
+   is this screen's, and it follows the field count of the widest group. */
+.set-form {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gutter) var(--section-pad);
+}
+
+/* Label left, scope marker right, on one line above the input — the same
+   place on every field in all six panels, which is what makes the marker
+   scannable down a column instead of read one row at a time. */
+.set-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 14px;
+}
+
+/* A switch standing where a .field-input would, so the grid keeps one
+   baseline down the row. */
+.set-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+
+/* --- Region 2: log and capture ------------------------------------------ */
+
+/* A sentence the operator needs to read before touching the group under it:
+   ink-coloured words against an amber rule. Amber measures 3.19:1 against --surface in light
+   mode and can never be set as text, so the colour lives entirely in the
+   2px rule and the words stay legible in both themes. */
+.set-note-warn {
+  margin: 0 0 var(--section-pad);
+  padding-left: 10px;
+  border-left: 2px solid var(--state-cooling);
+  color: var(--ink-muted);
+}
+
+/* The retention field's companion reads a consequence rather than accepting
+   a value, so it takes .field-static's box and no input. */
+.set-retention-note .field-static { justify-content: flex-start; }
+
+/* A warning attached to the table above it rather than floated under it: the
+   table's own border supplies no gutter, so the rule would touch the seam. */
+.table + .set-note-warn { margin-top: var(--section-pad); }
+
+/* --- Region 3: discovery master switch ---------------------------------- */
+
+/* The one control on this screen whose scope is the whole product's
+   outbound behaviour. A well, because what it governs is a live reading of
+   the system and not chrome, and full width because the sentence beside it
+   is the point of the control. */
+.set-master {
+  padding: 10px var(--section-pad);
+  margin-bottom: var(--gutter);
+}
+.set-master .prose {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+}
+.set-master .spec-note { margin-top: 6px; }
+
+/* --- Region 4: account and sessions ------------------------------------- */
+
+/* Composes .row for its 30px height, padding and seam, then replaces the
+   flex flow with a grid so the three sessions and the header line up as
+   columns even though the fourth cell holds a chip on one row and a date on
+   the others. */
+.set-session-row {
+  display: grid;
+  grid-template-columns: 168px 168px 1fr 148px 72px;
+  align-items: center;
+}
+.set-session-row .legend-caps { margin: 0; }
+
+.set-session-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* A row-level text action. .control is a 30px button and would burst a 30px
+   row; .chip is a bordered pill and reads as chrome competing with the data.
+   Provider detail's .pd-row-action is the same shape and is scoped to that
+   screen — promoting one shared row action is a consolidation decision, not
+   a screen's. */
+.set-row-action {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.set-row-action:hover { opacity: 1; color: var(--accent-ink); }
+/* Destructive affordance: red because the click produces the failed-shaped
+   outcome — the session is gone. */
+.set-row-action-danger:hover { color: var(--state-failed); }
+
+/* "You are here", the same thing the rail's active item and a saved view
+   already say, so it takes --accent-ink rather than a state colour: which
+   session is yours is a selection, not an outcome. */
+.set-chip-current {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+/* A grid cell blockifies an inline-flex child, so the chip would otherwise
+   stretch across its whole 148px column and stop reading as a pill. */
+.set-session-row .chip { justify-self: end; }
+
+/* --- Region 5: appearance ----------------------------------------------- */
+
+/* Two axes get two columns, sized to their segmented bars rather than
+   stretched across the panel — a two-option control blown to half a page
+   reads as a more important choice than it is. */
+.set-appearance {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gutter);
+  max-width: 720px;
+}
+.set-appearance .segmented { align-self: flex-start; }
+
+/* --- Region 6: configuration file --------------------------------------- */
+
+.set-config {
+  padding: 8px 0;
+  overflow-x: auto;
+}
+
+/* 24px rather than the 30px row height: this is a sub-row of a printed
+   document, the density the spec gives sub-rows, and 29 lines at 30px would
+   make the file view taller than the five panels above it put together. */
+.set-config-line {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  height: 24px;
+  padding: 0 var(--section-pad);
+  white-space: nowrap;
+}
+
+/* The source marker in the gutter — which of the two authorities owns this
+   value. Fixed width so every line of YAML starts at one x position. */
+.set-config-src {
+  flex: 0 0 32px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: right;
+  color: var(--legend);
+}
+/* Imported once and governed by SQLite since. --accent-ink, not a state
+   colour: "which authority owns this" is a fact about the system, not an
+   outcome, and accent-ink is the token that stays readable as text in both
+   themes. */
+.set-config-src[data-src="db"] { color: var(--accent-ink); }
+
+/* The file text for a block the file no longer governs. It prints in the
+   legend register for the same reason .field-input-inert does: it is still
+   there, still readable, and read by nothing. */
+.set-config-inert { color: var(--legend); }
+.set-config-more { color: var(--legend); }
+
+/* The two-marker key under the file view, close enough to the gutter it
+   explains that it needs no heading. */
+.set-srckey {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px var(--section-pad);
+  margin-top: 8px;
+}
+.set-srckey .set-config-src { flex: 0 0 auto; }
+.set-srckey .micro { margin-right: var(--gutter); }
+
+/* A count that is not yet a failure. Amber measures 3.19:1 against --surface in light and can
+   never be set as words, so it lives in the chip's border while the count
+   itself stays --ink-muted, the same split .pd-cooling-chip already makes. */
+.set-chip-warn { border-color: var(--state-cooling); }
+
+.set-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Same amber-rule-plus-ink-words construction as .set-note-warn, with a
+   location column in front: a warning the operator can act on has to say
+   which line to open. */
+.set-warning {
+  display: flex;
+  align-items: baseline;
+  gap: var(--section-pad);
+  padding-left: 10px;
+  border-left: 2px solid var(--state-cooling);
+}
+.set-warning .prose {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ink-muted);
+}
+.set-warning-loc {
+  flex: 0 0 56px;
+  color: var(--legend);
+}
+
+/* The §8.1 ruling, printed where the two authorities are visible side by
+   side rather than in a document nobody reading this screen has open. */
+.set-ruling {
+  margin: var(--gutter) 0 0;
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--ink-muted);
+}
+.set-ruling .legend-caps {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* A note that qualifies the group marker above it rather than a field below
+   it: the catalog workers are restart-only in behaviour while config's own
+   RestartOnly list says otherwise, and the screen's subject is exactly that
+   distinction. Attention, not failure — nothing is broken, but the reload
+   path will not tell you. */
+.set-note-warn {
+  margin: 0;
+  padding: 8px var(--section-pad);
+  border-left: 2px solid var(--state-cooling);
+  background: var(--surface);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}

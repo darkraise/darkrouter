@@ -1,0 +1,405 @@
+<section class="screen" id="s-17-light-proof" data-screen-title="contrast proof">
+  <p class="legend">
+    Light mode is first-class, so it gets a proof rather than a gesture. This
+    board renders light whatever the <kbd>T</kbd> toggle says, so the two modes
+    can be read against each other inside one document. Under this language
+    surfaces stack upward in both modes, so light is a palette swap by design
+    and there is no polarity to verify &mdash; what needs verifying instead is
+    that the palette holds its floors, because the one it was adopted from does
+    not. Press <kbd>A</kbd> to reveal pins.
+  </p>
+
+  <div class="force-light lp-board">
+    <div class="panel" style="padding:0 var(--gutter)">
+
+      <div class="region">
+        <p class="section-title">1 &mdash; The nine changes</p>
+        <p>
+          <b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Repairs &mdash; nine token values differ from 9router's src/app/globals.css. Seven were under a floor; two were strengthened to keep two tiers apart.</span>
+        </p>
+        <div class="table">
+          <div class="lp-repair-row row-head">
+            <span class="legend-caps">token</span>
+            <span class="legend-caps">mode</span>
+            <span class="legend-caps">shipped</span>
+            <span class="legend-caps">repaired</span>
+            <span class="legend-caps">why</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--legend</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-legend)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.13:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--legend)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">4.82:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-failed</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-state-failed)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">4.02:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-failed)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.47:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--accent-ink</span>
+            <span class="micro lp-mode">dark</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-dark-accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-warn">4.68:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.27:1</span>
+            </span>
+            <span class="micro lp-verdict-note">held the floor already; strengthened so brand-as-text stays clear of brand-as-fill</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--ink-muted</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-ink-muted)"></span>
+              <span class="mono lp-ratio lp-ratio-warn">4.83:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--ink-muted)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">7.56:1</span>
+            </span>
+            <span class="micro lp-verdict-note">held the floor already; strengthened so two grey tiers stay apart</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--legend</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-legend)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.54:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--legend)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">4.83:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--accent-ink</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.23:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--accent-ink)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">6.21:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--trace</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-trace)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">3.68:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--trace)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.17:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-healthy</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-state-healthy)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.54:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-healthy)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">5.48:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 4.5:1 floor it is held to</span>
+          </div>
+          <div class="lp-repair-row">
+            <span class="mono">--state-cooling</span>
+            <span class="micro lp-mode">light</span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--shipped-light-state-cooling)"></span>
+              <span class="mono lp-ratio lp-ratio-fail">2.15:1</span>
+            </span>
+            <span class="lp-side">
+              <span class="swatch" style="background:var(--state-cooling)"></span>
+              <span class="mono lp-ratio lp-ratio-pass">3.19:1</span>
+            </span>
+            <span class="micro lp-verdict-note">under the 3:1 floor it is held to</span>
+          </div>
+        </div>
+        <p class="prose">
+          Every ratio is computed from the hexes each stylesheet declares,
+          against --surface in that mode &mdash; white in light, the card grey
+          in dark. Seven of the nine sat under the floor their role is held to:
+          a mark needs 3:1 and text needs 4.5:1. Two already cleared it and
+          moved anyway, because the tier below them had to move and two greys
+          a quarter of a step apart are one grey.
+        </p>
+        <p class="prose">
+          The worst of them is worth naming. 9router's light success green
+          measures 2.54:1 and its amber 2.15:1 &mdash; both under the 3:1 floor
+          that applies to a shape, not just to text. A provider list that says
+          "connected" in that green on a white card is stating the most
+          load-bearing fact on the screen in a colour a third of readers cannot
+          separate from the background.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">2 &mdash; Elevation, both modes</p>
+        <p>
+          <b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Elevation &mdash; a card is lighter than its ground in both modes. The inset is where that stops in light: nothing sits above white, so it steps down and is read from its border.</span>
+        </p>
+        <div class="lp-split">
+          <div class="force-dark lp-half">
+            <p class="legend-caps">dark</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0 0 8px">Requests</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">ground 26 &rarr; card 38 &rarr; inset 48 of 255 &middot; each step up</p>
+          </div>
+          <div class="force-light lp-half">
+            <p class="legend-caps">light</p>
+            <div class="panel lp-card">
+              <p class="section-title" style="margin:0 0 8px">Requests</p>
+              <div class="well lp-well">
+                <span class="readout">1,284<span class="unit">req</span></span>
+              </div>
+            </div>
+            <p class="micro lp-measure">ground 250 &rarr; card 255 &rarr; inset 244 of 255 &middot; the inset dips</p>
+          </div>
+        </div>
+        <p class="prose">
+          The card lifts off the ground in both modes and carries a border, a
+          radius and --shadow-soft. The inset region behaves differently in the
+          two: in dark it continues upward, in light it has nowhere left to go
+          above white and steps down to --surface-2 instead. That is the honest
+          consequence of a white card, and it is why an inset in light is read
+          from its border rather than its fill.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">3 &mdash; The cooling mark's headroom</p>
+        <p>
+          <b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Cooling headroom &mdash; 3.19:1 against a white card, the tightest margin in the palette. Non-text only; a cooling reading never says its word in amber.</span>
+        </p>
+        <div class="lp-headroom">
+          <div>
+            <div class="lp-zoom"><span class="mark mark-cooling"></span></div>
+            <p class="spec-note" style="width:120px">actual size &mdash; 8px</p>
+          </div>
+          <div>
+            <div class="lp-zoom"><span class="mark mark-cooling" style="transform:scale(4)"></span></div>
+            <p class="spec-note" style="width:120px">4&times;</p>
+          </div>
+          <div>
+            <div class="lp-gauge">
+              <span class="lp-gauge-floor" style="left:0"></span>
+              <span class="lp-gauge-mark" style="left:57px"></span>
+            </div>
+            <div class="lp-gauge-caption">
+              <span class="micro">3.00:1 floor</span>
+              <span class="micro">4.00:1</span>
+            </div>
+            <p class="spec-note" style="width:300px">
+              3.19:1. The gauge spans one full point of ratio; the margin is the
+              gap between the two rules. 9router ships this at 2.15:1, which
+              would sit left of the floor line entirely.
+            </p>
+          </div>
+        </div>
+        <p class="prose">
+          Amber is the hardest hue to bring over the floor against a near-white
+          surface without turning brown, and 3.19:1 is what this one manages
+          &mdash; better than the 3.02:1 the previous language accepted, and
+          still the tightest value in the set. The mark keeps a hollow ring and
+          a centre dot so colour is its second channel and never its only one.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">4 &mdash; Focus in light</p>
+        <p>
+          <b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Focus &mdash; 9router's --shadow-focus, a 3px coral ring at 18% alpha, plus a solid coral border. The ring is a wash; the border is what carries the 3:1.</span>
+        </p>
+        <div class="lp-fields">
+          <div class="lp-field">
+            <p class="legend-caps">focused</p>
+            <div class="field-input lp-input lp-input-repaired">
+              <span class="mono">sk-dr-v1-9f2c</span><span class="lp-caret lp-caret-repaired"></span>
+            </div>
+            <p class="spec-note">
+              border --accent 3.23:1 against the card &middot; the 18% ring is
+              decoration and is not counted.
+            </p>
+          </div>
+          <div class="lp-field">
+            <p class="legend-caps">resting</p>
+            <div class="field-input lp-input">
+              <span class="mono">sk-dr-v1-9f2c</span>
+            </div>
+            <p class="spec-note">border --border 1.24:1 &middot; structural, not an indicator.</p>
+          </div>
+        </div>
+        <p class="prose">
+          A soft ring is the part of this treatment that reads first and the
+          part that carries no contrast at all. The solid 1px coral border
+          underneath it is what actually distinguishes a focused field from a
+          resting one, which is why the ring is allowed to be as faint as it is.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">5 &mdash; The ladder in light</p>
+        <p>
+          <b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Ladder in light &mdash; the terminated mark is the faintest deliberate thing in the product: --border-subtle on --surface-2.</span>
+        </p>
+        <p class="micro">request 01M0W4NWMRZQCN2VMD9F6K3H7P &middot; target model openai/gpt-oss-120b</p>
+      <div class="ladder">
+        <div class="ladder-row">
+          <span class="rank rank-tick">01</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">groq/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">http</span>
+            <span class="reason-prose">429 rate limited</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:2px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick">02</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">cerebras/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">timeout</span>
+            <span class="reason-prose">30000ms elapsed before first byte</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:64px"></span>
+        </div>
+        <div class="ladder-row ladder-row-served">
+          <span class="rank rank-tick">03</span>
+          <span class="spine"></span>
+          <span class="mark mark-served"></span>
+          <span class="stub"></span>
+          <span class="target">together/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">200</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
+          </span>
+          <span class="latency-bar" style="width:4px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">04</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick rank-tick-major text-terminated">05</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">06</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">07</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">08</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">vertex/gemini-2.5-pro</span>
+        </div>
+      </div>
+        <p class="prose">
+          The four marks and the termination rule survive the move to a lighter
+          ground and a larger radius. The terminated mark is not held to the 3:1
+          floor and does not clear it: it reports the absence of a decision, the
+          spine beneath it says the same thing at the same weight, and the row's
+          text carries the rest.
+        </p>
+      </div>
+
+      <div class="region">
+        <p class="section-title">6 &mdash; Charts in light</p>
+        <p>
+          <b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Charts in light &mdash; .chart-scope. Five series separated by fill treatment against one hue, so no series reaches for the state colours.</span>
+        </p>
+        <div class="chart-scope lp-chart-panel panel"
+             style="--chart-3:url(#proof-hatch);--chart-4:url(#proof-dot)">
+          <div class="chart-head">
+            <p class="section-title" style="margin:0">Requests over time</p>
+          </div>
+          <div class="well chart-well">
+            <svg class="chart-svg" viewBox="0 0 900 200" preserveAspectRatio="none" role="img" aria-label="requests per day by provider, last 30 days, rendered in light mode">
+              <defs>
+                <pattern id="proof-grat" width="90" height="40" patternUnits="userSpaceOnUse">
+                  <path class="grat-line" d="M0 0H90M0 0V40"/>
+                </pattern>
+                <pattern id="proof-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <line class="hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+                </pattern>
+                <pattern id="proof-dot" width="7" height="7" patternUnits="userSpaceOnUse">
+                  <circle class="dot-mark" cx="2" cy="2" r="1"/>
+                </pattern>
+              </defs>
+              <rect x="0" y="0" width="900" height="200" fill="url(#proof-grat)"/>
+<path class="chart-area chart-fill-1" d="M10.0,153.3 L40.3,150.7 L70.7,145.2 L101.0,151.5 L131.4,142.8 L161.7,140.0 L192.1,147.4 L222.4,158.3 L252.8,148.4 L283.1,150.9 L313.4,146.0 L343.8,146.4 L374.1,153.9 L404.5,159.7 L434.8,159.1 L465.2,138.8 L495.5,140.4 L525.9,134.2 L556.2,132.0 L586.6,150.1 L616.9,153.1 L647.2,152.1 L677.6,142.6 L707.9,148.8 L738.3,123.8 L768.6,145.6 L799.0,150.9 L829.3,161.7 L859.7,143.6 L890.0,141.6 L890.0,190.0 L859.7,190.0 L829.3,190.0 L799.0,190.0 L768.6,190.0 L738.3,190.0 L707.9,190.0 L677.6,190.0 L647.2,190.0 L616.9,190.0 L586.6,190.0 L556.2,190.0 L525.9,190.0 L495.5,190.0 L465.2,190.0 L434.8,190.0 L404.5,190.0 L374.1,190.0 L343.8,190.0 L313.4,190.0 L283.1,190.0 L252.8,190.0 L222.4,190.0 L192.1,190.0 L161.7,190.0 L131.4,190.0 L101.0,190.0 L70.7,190.0 L40.3,190.0 L10.0,190.0 Z"/>
+<path class="chart-area chart-fill-2" d="M10.0,130.6 L40.3,123.8 L70.7,122.1 L101.0,128.2 L131.4,114.5 L161.7,112.5 L192.1,122.9 L222.4,141.4 L252.8,115.7 L283.1,122.3 L313.4,120.7 L343.8,111.9 L374.1,127.0 L404.5,137.0 L434.8,134.6 L465.2,111.3 L495.5,114.3 L525.9,104.3 L556.2,97.7 L586.6,127.4 L616.9,131.8 L647.2,131.2 L677.6,111.9 L707.9,119.9 L738.3,85.8 L768.6,116.5 L799.0,121.5 L829.3,142.8 L859.7,117.1 L890.0,111.9 L890.0,141.6 L859.7,143.6 L829.3,161.7 L799.0,150.9 L768.6,145.6 L738.3,123.8 L707.9,148.8 L677.6,142.6 L647.2,152.1 L616.9,153.1 L586.6,150.1 L556.2,132.0 L525.9,134.2 L495.5,140.4 L465.2,138.8 L434.8,159.1 L404.5,159.7 L374.1,153.9 L343.8,146.4 L313.4,146.0 L283.1,150.9 L252.8,148.4 L222.4,158.3 L192.1,147.4 L161.7,140.0 L131.4,142.8 L101.0,151.5 L70.7,145.2 L40.3,150.7 L10.0,153.3 Z"/>
+<path class="chart-area chart-fill-3" d="M10.0,116.3 L40.3,106.9 L70.7,105.7 L101.0,111.9 L131.4,95.4 L161.7,90.8 L192.1,106.9 L222.4,130.8 L252.8,94.4 L283.1,105.5 L313.4,101.9 L343.8,91.8 L374.1,108.3 L404.5,123.6 L434.8,118.5 L465.2,91.0 L495.5,95.6 L525.9,82.2 L556.2,73.2 L586.6,107.5 L616.9,113.5 L647.2,113.9 L677.6,93.2 L707.9,99.5 L738.3,62.1 L768.6,95.6 L799.0,104.1 L829.3,128.4 L859.7,99.9 L890.0,89.8 L890.0,111.9 L859.7,117.1 L829.3,142.8 L799.0,121.5 L768.6,116.5 L738.3,85.8 L707.9,119.9 L677.6,111.9 L647.2,131.2 L616.9,131.8 L586.6,127.4 L556.2,97.7 L525.9,104.3 L495.5,114.3 L465.2,111.3 L434.8,134.6 L404.5,137.0 L374.1,127.0 L343.8,111.9 L313.4,120.7 L283.1,122.3 L252.8,115.7 L222.4,141.4 L192.1,122.9 L161.7,112.5 L131.4,114.5 L101.0,128.2 L70.7,122.1 L40.3,123.8 L10.0,130.6 Z"/>
+<path class="chart-area chart-fill-4" d="M10.0,102.1 L40.3,91.2 L70.7,91.2 L101.0,96.0 L131.4,74.8 L161.7,74.6 L192.1,92.4 L222.4,120.7 L252.8,78.4 L283.1,91.8 L313.4,84.0 L343.8,76.4 L374.1,93.6 L404.5,110.5 L434.8,104.9 L465.2,73.0 L495.5,80.6 L525.9,63.1 L556.2,53.3 L586.6,90.2 L616.9,97.1 L647.2,98.7 L677.6,73.6 L707.9,84.4 L738.3,40.8 L768.6,79.2 L799.0,85.6 L829.3,117.5 L859.7,83.6 L890.0,70.4 L890.0,89.8 L859.7,99.9 L829.3,128.4 L799.0,104.1 L768.6,95.6 L738.3,62.1 L707.9,99.5 L677.6,93.2 L647.2,113.9 L616.9,113.5 L586.6,107.5 L556.2,73.2 L525.9,82.2 L495.5,95.6 L465.2,91.0 L434.8,118.5 L404.5,123.6 L374.1,108.3 L343.8,91.8 L313.4,101.9 L283.1,105.5 L252.8,94.4 L222.4,130.8 L192.1,106.9 L161.7,90.8 L131.4,95.4 L101.0,111.9 L70.7,105.7 L40.3,106.9 L10.0,116.3 Z"/>
+<path class="chart-area chart-fill-5" d="M10.0,95.4 L40.3,82.8 L70.7,83.4 L101.0,87.6 L131.4,64.1 L161.7,64.9 L192.1,83.8 L222.4,114.9 L252.8,68.3 L283.1,84.0 L313.4,75.2 L343.8,67.9 L374.1,86.0 L404.5,103.1 L434.8,97.7 L465.2,61.3 L495.5,70.0 L525.9,53.5 L556.2,43.7 L586.6,80.4 L616.9,90.0 L647.2,91.6 L677.6,63.9 L707.9,75.4 L738.3,30.0 L768.6,69.9 L799.0,75.0 L829.3,111.3 L859.7,74.2 L890.0,59.3 L890.0,70.4 L859.7,83.6 L829.3,117.5 L799.0,85.6 L768.6,79.2 L738.3,40.8 L707.9,84.4 L677.6,73.6 L647.2,98.7 L616.9,97.1 L586.6,90.2 L556.2,53.3 L525.9,63.1 L495.5,80.6 L465.2,73.0 L434.8,104.9 L404.5,110.5 L374.1,93.6 L343.8,76.4 L313.4,84.0 L283.1,91.8 L252.8,78.4 L222.4,120.7 L192.1,92.4 L161.7,74.6 L131.4,74.8 L101.0,96.0 L70.7,91.2 L40.3,91.2 L10.0,102.1 Z"/>
+            </svg>
+          </div>
+          <div class="chart-key">
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-1"/></svg>groq</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-2"/></svg>cerebras</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-3"/></svg>together</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-4"/></svg>openrouter</span>
+            <span class="chart-key-item"><svg class="chart-key-swatch" width="14" height="14"><rect width="14" height="14" class="chart-area chart-fill-5"/></svg>anthropic</span>
+          </div>
+        </div>
+        <p class="prose">
+          The usage screen's first chart, path for path, in light. Five series
+          differentiated by fill rather than by hue: solid, a 60% tint, a
+          45&deg; hatch, a dot texture, and a stroked outline with no fill. The
+          hue is --accent-ink, the readable member of the brand ramp at 6.21:1,
+          not the brand fill at 3.23:1.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>

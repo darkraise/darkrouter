@@ -167,8 +167,8 @@ func WriteEmbedding(w http.ResponseWriter, resp *ir.EmbeddingResponse) error {
 		// provider volunteered an output count. Adding them rather than
 		// hardcoding equality keeps an honest total when one does.
 		"usage": map[string]any{
-			"prompt_tokens": resp.Usage.InputTokens,
-			"total_tokens":  resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			"prompt_tokens": resp.Usage.PromptTokens(),
+			"total_tokens":  resp.Usage.PromptTokens() + resp.Usage.OutputTokens,
 		},
 	})
 }
@@ -460,9 +460,9 @@ func WriteImage(w http.ResponseWriter, resp *ir.ImageResponse) error {
 	// models return no usage object and a zeroed one says the call was free.
 	if resp.UsageReported {
 		out["usage"] = map[string]any{
-			"input_tokens":  resp.Usage.InputTokens,
+			"input_tokens":  resp.Usage.PromptTokens(),
 			"output_tokens": resp.Usage.OutputTokens,
-			"total_tokens":  resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			"total_tokens":  resp.Usage.PromptTokens() + resp.Usage.OutputTokens,
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

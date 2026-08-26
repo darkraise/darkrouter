@@ -41,6 +41,328 @@ func newExecutor(t *testing.T, upstreamURL string) *Executor {
 	return newExecutorWith(t, upstreamURL, Deps{}, 0)
 }
 
+// newPricedExecutor returns an Executor whose catalog knows the pricing for
+// ("groq", "m"), for tests that call priceRecord directly rather than
+// driving a request through Handle.
+func newPricedExecutor(t *testing.T) *Executor {
+	t.Helper()
+	return &Executor{deps: Deps{Catalog: catalogOf(catalog.Model{
+		ProviderID: "groq", ModelID: "m",
+		Pricing: catalog.Pricing{
+			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000,
+			CacheReadMicrosPerMTok: 100_000, Known: true,
+		},
+	})}}
+}
+
+func TestServedAttemptCarriesTheRequestUsage(t *testing.T) {
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 1000, TokensOut: 500,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "openai", Model: "x", Outcome: "error"},
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[1].TokensIn != 1000 || rec.Attempts[1].TokensOut != 500 {
+		t.Fatalf("served attempt must carry the request's usage, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[0].TokensIn != 0 {
+		t.Fatalf("a failed attempt must not inherit the served attempt's usage")
+	}
+}
+
+func TestAnAttemptWithNoTokensIsUnpricedNotFree(t *testing.T) {
+	// A confident zero is indistinguishable from a real zero downstream, and
+	// the rollup treats a non-NULL cost as authoritative.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "error"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].CostMicros != nil {
+		t.Fatalf("an attempt that recorded no tokens must stay unpriced, got %d",
+			*rec.Attempts[0].CostMicros)
+	}
+}
+
+func TestTheServedAttemptCostsWhatTheRequestCosts(t *testing.T) {
+	// usage_daily sums attempt cost while today_spend sums request cost.
+	// If they are computed differently the console contradicts itself.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 1000, TokensOut: 500, CacheReadTokens: 100000,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.CostMicros == nil {
+		t.Fatal("the request was not priced")
+	}
+	if rec.Attempts[0].CostMicros == nil {
+		t.Fatal("the served attempt was not priced")
+	}
+	if *rec.Attempts[0].CostMicros != *rec.CostMicros {
+		t.Fatalf("served attempt cost %d, request cost %d: the usage chart and "+
+			"the spend tile would disagree",
+			*rec.Attempts[0].CostMicros, *rec.CostMicros)
+	}
+}
+
+func TestARetriedProviderAttributesUsageToTheAttemptThatServed(t *testing.T) {
+	// The pre-commit 400 retry re-attempts the same provider and model, so
+	// two attempt rows carry identical provider and model and only the
+	// second one served.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{
+		FinalProviderID: "groq", FinalModel: "m",
+		TokensIn: 400, TokensOut: 200,
+		Attempts: []store.AttemptRecord{
+			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "fatal"},
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+		},
+	}
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].TokensIn != 0 {
+		t.Fatalf("the rejected attempt must stay at zero, got %d", rec.Attempts[0].TokensIn)
+	}
+	if rec.Attempts[1].TokensIn != 400 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt must carry the usage, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+}
+
+func TestAFailedProvidersTokensAreNotStampedOnTheNextOne(t *testing.T) {
+	// demoteLastAttempt moves a failed attempt's burn onto its own row and
+	// zeroes the record before the retry starts, so by the time the retry
+	// reports its own usage nothing of the failed provider's is left on the
+	// record for it to inherit.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 5000, OutputTokens: 0})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 400, OutputTokens: 200})
+
+	e.priceRecord(rec)
+
+	if got := rec.Attempts[1].TokensIn; got == 5000 {
+		t.Fatalf("the serving attempt was billed the failed provider's 5000 tokens")
+	}
+	if rec.Attempts[1].TokensIn != 400 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt must carry only its own usage, got %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+}
+
+func TestDemoteLastAttemptSurvivesAMismatchedSecondOutcome(t *testing.T) {
+	// The idempotency guard must hold even when a second demote call for the
+	// same attempt surfaces a different outcome than the first one moved. A
+	// guard keyed on the outcome string would miss that and re-run the
+	// transfer against the now-zeroed record, wiping the usage it already
+	// moved.
+	rec := &store.RequestRecord{TokensIn: 5000, TokensOut: 120}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+	demoteLastAttempt(rec, adapter.OutcomeFatal, false)
+
+	if rec.Attempts[0].TokensIn != 5000 || rec.Attempts[0].TokensOut != 120 {
+		t.Fatalf("a second demote with a different outcome wiped the moved usage, got %d/%d",
+			rec.Attempts[0].TokensIn, rec.Attempts[0].TokensOut)
+	}
+}
+
+func TestADemotedAttemptKeepsItsOwnBurn(t *testing.T) {
+	// applyUsage writes onto the shared record as events arrive, so at demote
+	// time the record holds what THIS attempt burned. Leaving it there hands
+	// it to whoever serves next.
+	rec := &store.RequestRecord{TokensIn: 5000, TokensOut: 120}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if rec.Attempts[0].TokensIn != 5000 || rec.Attempts[0].TokensOut != 120 {
+		t.Fatalf("the demoted attempt must carry its own burn, got %d/%d",
+			rec.Attempts[0].TokensIn, rec.Attempts[0].TokensOut)
+	}
+	if rec.TokensIn != 0 || rec.TokensOut != 0 {
+		t.Fatalf("the shared record must be reset for the next attempt, got %d/%d",
+			rec.TokensIn, rec.TokensOut)
+	}
+}
+
+func TestACacheOnlyBurnDoesNotFollowTheFailover(t *testing.T) {
+	// After the adapters subtract cached tokens from the input count, a fully
+	// cached prompt legitimately has in=0 with a large cache read. Treating
+	// "no in/out" as "nothing burned" leaves that on the shared record for
+	// whoever serves next.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{CacheReadTokens: 3000})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if rec.CacheReadTokens != 0 {
+		t.Fatalf("the record kept %d cache reads that belonged to the failed attempt",
+			rec.CacheReadTokens)
+	}
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.CostMicros != nil && *rec.CostMicros != 0 {
+		t.Fatalf("the serving provider was billed %d micros it did not burn",
+			*rec.CostMicros)
+	}
+}
+
+func TestAServingAttemptWithNoUsageStaysUnpriced(t *testing.T) {
+	// A non-NULL zero is authoritative downstream: the rollup reads it as
+	// "this cost nothing", not as "this is unknown".
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeRetryableProvider), TokensIn: 500,
+	})
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.Attempts[1].CostMicros != nil {
+		t.Fatalf("a serving attempt that burned nothing must stay unpriced, got %d",
+			*rec.Attempts[1].CostMicros)
+	}
+}
+
+func TestACacheOnlySuccessStillReachesTheAggregates(t *testing.T) {
+	// A fully cached prompt has in=0 after the adapters subtract the cached
+	// subset, and an empty completion is a legitimate success. Neither token
+	// field moves, but real money was spent.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{CacheReadTokens: 3000})
+
+	e.priceRecord(rec)
+
+	if rec.CostMicros == nil {
+		t.Fatal("the request was not priced")
+	}
+	if rec.Attempts[0].CostMicros == nil {
+		t.Fatalf("%d micros of real spend reaches no aggregate", *rec.CostMicros)
+	}
+	if *rec.Attempts[0].CostMicros != *rec.CostMicros {
+		t.Fatalf("attempt cost %d, request cost %d: the surfaces disagree",
+			*rec.Attempts[0].CostMicros, *rec.CostMicros)
+	}
+}
+
+func TestTheServingProviderIsNotBilledAnotherProvidersTokens(t *testing.T) {
+	// The production shape: recordAttempt never writes attempt tokens, so a
+	// guard that reads them cannot see anything.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{TokensIn: 5000}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	// The retry serves and reports no usage of its own.
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if got := rec.Attempts[1].TokensIn; got != 0 {
+		t.Fatalf("the serving attempt was billed %d tokens it never burned", got)
+	}
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+}
+
+func TestBothProvidersInAFailoverKeepTheirOwnBurn(t *testing.T) {
+	// The shape no test covered: the failed attempt reported usage AND the
+	// retry reported its own. Aggregates read attempt rows, so a serving
+	// attempt left at zero is spend that reaches no total anywhere.
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{}
+
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "other", Model: "x",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 5000, OutputTokens: 120})
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	rec.FinalProviderID, rec.FinalModel = "groq", "m"
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 1, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	applyUsage(rec, &ir.Usage{InputTokens: 800, OutputTokens: 200})
+
+	e.priceRecord(rec)
+
+	if rec.Attempts[0].TokensIn != 5000 {
+		t.Fatalf("the failed attempt lost its burn: %d", rec.Attempts[0].TokensIn)
+	}
+	if rec.Attempts[1].TokensIn != 800 || rec.Attempts[1].TokensOut != 200 {
+		t.Fatalf("the serving attempt reaches no aggregate: %d/%d",
+			rec.Attempts[1].TokensIn, rec.Attempts[1].TokensOut)
+	}
+	if rec.Attempts[1].CostMicros == nil {
+		t.Fatal("the serving attempt was left unpriced")
+	}
+}
+
 // newExecutorWith is newExecutor with the knobs the phase 2 tests need. A zero
 // total leaves the default of 10m in place. It is a thin wrapper over
 // newExecutorRaw, the one place that writes the fixture's YAML — newExecutorFor
@@ -1512,6 +1834,81 @@ func TestACrossDialectCandidateTakesTheIRPath(t *testing.T) {
 	}
 	if rec.Attempts[0].Path != PathIR {
 		t.Errorf("path = %q, want ir", rec.Attempts[0].Path)
+	}
+}
+
+func TestAPreCommitForwardFailureDoesNotStaySuccess(t *testing.T) {
+	// The attempt row is recorded from the HTTP status before the body is
+	// read. A 200 whose body then fails is a failover, and a row still
+	// marked success makes the rollup count one request as two.
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
+
+	if got := rec.Attempts[0].Outcome; got != string(adapter.OutcomeRetryableProvider) {
+		t.Fatalf("outcome = %q, want retryable_provider", got)
+	}
+}
+
+func TestACommittedAttemptKeepsItsSuccess(t *testing.T) {
+	// Once bytes have reached the client the chain ends and the attempt DID
+	// serve, whatever the op reports afterwards.
+	rec := &store.RequestRecord{}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+
+	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, true)
+
+	if got := rec.Attempts[0].Outcome; got != string(adapter.OutcomeSuccess) {
+		t.Fatalf("a committed attempt must stay success, got %q", got)
+	}
+}
+
+func TestAPassthroughUnaryMidBodyFailureDemotesTheFirstAttempt(t *testing.T) {
+	// The first provider answers with a 200 whose declared Content-Length is
+	// never satisfied, so forwardUnary's io.ReadAll fails after the row was
+	// already recorded success from the status line alone. The chain must
+	// fail over to the second provider, and the first row must not be left
+	// claiming it served the request.
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"truncated`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"served"}],"model":"target-model",
+			"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer second.Close()
+
+	rec, w := runChatTwoProviders(t, first.URL, second.URL, "anthropic",
+		`{"model":"target-model","max_tokens":16,
+		  "messages":[{"role":"user","content":"hi"}]}`)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if !strings.Contains(w.Body.String(), "served") {
+		t.Errorf("the second provider did not serve it: %s", w.Body)
+	}
+	if len(rec.Attempts) != 2 {
+		t.Fatalf("attempts = %+v", rec.Attempts)
+	}
+	if rec.Attempts[0].Outcome == string(adapter.OutcomeSuccess) {
+		t.Errorf("first attempt kept success after a mid-body failure: %+v", rec.Attempts[0])
+	}
+	if rec.Attempts[1].Outcome != string(adapter.OutcomeSuccess) {
+		t.Errorf("second attempt = %q, want success", rec.Attempts[1].Outcome)
 	}
 }
 

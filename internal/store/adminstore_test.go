@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -589,5 +590,312 @@ func TestCapturedBodiesAreReadWhenPresent(t *testing.T) {
 	}
 	if tr.Bodies[0].Kind != "request" || tr.Bodies[1].Kind != "response" {
 		t.Errorf("bodies = %+v", tr.Bodies)
+	}
+}
+
+func TestUsageByAliasSplitsTheDay(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	for _, r := range []struct {
+		alias string
+		n     int64
+	}{{"fast-coder", 7}, {"cheap", 3}} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+			 VALUES ('2026-08-25','groq','m',?,?)`, r.alias, r.n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.UsageBy(ctx, 30, UsageByAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Key] = r.Requests
+	}
+	if got["fast-coder"] != 7 || got["cheap"] != 3 {
+		t.Fatalf("want fast-coder=7 cheap=3, got %v", got)
+	}
+
+	// The day-only rollup still aggregates across aliases.
+	flat, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(flat) != 1 || flat[0].Requests != 10 {
+		t.Fatalf("want one day totalling 10, got %+v", flat)
+	}
+}
+
+// TestUsageByLimitsDaysNotRows is the fixture that tells a day-bounded LIMIT
+// apart from a row-bounded one. Three days x two providers is six rows.
+// Asking UsageBy for 2 days must return every row from the two newest days:
+// four rows spanning exactly two distinct days. A row-bounded `LIMIT 2`
+// instead returns the first two rows the query happens to emit, which cover
+// only one day -- so this test fails against that bug and passes against a
+// correct day-scoped LIMIT.
+func TestUsageByLimitsDaysNotRows(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	for _, day := range []string{"2026-08-23", "2026-08-24", "2026-08-25"} {
+		for _, provider := range []string{"groq", "openai"} {
+			if _, err := db.Write.ExecContext(ctx,
+				`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+				 VALUES (?, ?, 'm', '', 1)`, day, provider); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	rows, err := db.UsageBy(ctx, 2, UsageByProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows (2 days x 2 providers), got %d: %+v", len(rows), rows)
+	}
+	days := map[string]bool{}
+	for _, r := range rows {
+		days[r.Day] = true
+	}
+	if len(days) != 2 {
+		t.Fatalf("want 2 distinct days, got %d: %v", len(days), days)
+	}
+	if days["2026-08-23"] {
+		t.Errorf("the oldest day should have been dropped by the 2-day limit: %v", days)
+	}
+	if !days["2026-08-24"] || !days["2026-08-25"] {
+		t.Errorf("want the two newest days, got %v", days)
+	}
+}
+
+// TestUsageByClampsDays pins the 1..365 clamp: days=0, a negative value and
+// an oversized value must all read as if days=30 had been asked for. Without
+// the clamp, days=0 would query LIMIT 0 (zero days back) and days=10000
+// would place no bound at all, so an unclamped implementation returns a
+// different row count than a clamped one on this fixture -- this test fails
+// if the clamp is removed.
+func TestUsageByClampsDays(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+		 VALUES ('2026-08-25','groq','m','',1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	base, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base) != 1 {
+		t.Fatalf("fixture setup: want 1 row at days=30, got %d", len(base))
+	}
+
+	for _, days := range []int{0, -5, 10000} {
+		got, err := db.UsageBy(ctx, days, UsageByDayOnly)
+		if err != nil {
+			t.Fatalf("days=%d: %v", days, err)
+		}
+		if len(got) != len(base) {
+			t.Errorf("days=%d: want %d rows (clamped to 30), got %d",
+				days, len(base), len(got))
+		}
+	}
+}
+
+func TestLatencyPercentiles(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now()
+	// 1..100ms; p50 is the 50th value and p95 the 95th.
+	for i := 1; i <= 100; i++ {
+		total := int64(i)
+		rec := &RequestRecord{
+			ID: fmt.Sprintf("r%03d", i), TS: now,
+			RequestedModel: "m", FinalProviderID: "groq", FinalModel: "m",
+			TotalMs: &total,
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p50, p95, err := db.LatencyPercentiles(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p50 != 50 || p95 != 95 {
+		t.Fatalf("want p50=50 p95=95, got %d/%d", p50, p95)
+	}
+}
+
+func TestRecentFailoversReturnsOnlyMultiAttemptRequests(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Now()
+	mk := func(id string, attempts int) {
+		rec := &RequestRecord{
+			ID: id, TS: now, RequestedModel: "m",
+			FinalProviderID: "groq", FinalModel: "m",
+		}
+		for i := 1; i <= attempts; i++ {
+			rec.Attempts = append(rec.Attempts, AttemptRecord{
+				Seq: i, ProviderID: "groq", Model: "m", Outcome: "success",
+			})
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("one", 1)
+	mk("three", 3)
+
+	got, err := db.RecentFailovers(ctx, time.Hour, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "three" || got[0].Attempts != 3 {
+		t.Fatalf("want only the 3-attempt request, got %+v", got)
+	}
+}
+
+func TestRecentFailoversExcludesOnesOlderThanTheWindow(t *testing.T) {
+	// A quiet gateway must not show a month-old failover on the live overview
+	// as though it just happened.
+	db := migrated(t)
+	ctx := context.Background()
+	mk := func(id string, ts time.Time) {
+		rec := &RequestRecord{
+			ID: id, TS: ts, RequestedModel: "m",
+			FinalProviderID: "groq", FinalModel: "m",
+		}
+		for i := 1; i <= 3; i++ {
+			rec.Attempts = append(rec.Attempts, AttemptRecord{
+				Seq: i, ProviderID: "groq", Model: "m", Outcome: "success",
+			})
+		}
+		w := NewLogWriter(db, LogOptions{})
+		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("stale", time.Now().Add(-2*time.Hour))
+	mk("fresh", time.Now())
+
+	got, err := db.RecentFailovers(ctx, time.Hour, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "fresh" {
+		t.Fatalf("want only the failover inside the window, got %+v", got)
+	}
+}
+
+func TestSpendSinceCoversTheWholeDay(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Both rows are placed relative to startOfDay rather than to time.Now():
+	// a row placed relative to "now" (e.g. "an hour ago") can land before
+	// midnight and flip days when the test happens to run in the small hours,
+	// which would make this flaky rather than a fixed fixture.
+	early, late := int64(1000), int64(250)
+	for i, r := range []struct {
+		ts   time.Time
+		cost int64
+	}{
+		{startOfDay.Add(30 * time.Minute), early},
+		{startOfDay.Add(20 * time.Hour), late},
+	} {
+		c := r.cost
+		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("s%d", i), TS: r.ts, ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", CostMicros: &c,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !priced {
+		t.Fatal("priced must be true when any row carries a cost")
+	}
+	if micros == nil || *micros != early+late {
+		got := "nil"
+		if micros != nil {
+			got = strconv.FormatInt(*micros, 10)
+		}
+		t.Fatalf("spend = %s, want %d: a request from earlier today was dropped",
+			got, early+late)
+	}
+}
+
+func TestSpendSinceExcludesRowsBeforeSince(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	yesterday := int64(9999)
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "before", TS: startOfDay.Add(-time.Hour), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m", CostMicros: &yesterday,
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m",
+			Outcome: "success", CostMicros: &yesterday,
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if priced || micros != nil {
+		t.Fatalf("spend = %v priced=%v, want nil/false: only a row from before "+
+			"since exists", micros, priced)
+	}
+}
+
+func TestSpendSinceIsNilWhenNothingIsPriced(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		ID: "unpriced", TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
+		FinalProviderID: "groq", FinalModel: "m",
+		Attempts: []AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m", Outcome: "success",
+		}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if priced || micros != nil {
+		t.Fatalf("spend = %v priced=%v, want nil/false: an unpriced model must "+
+			"not read as a confident zero", micros, priced)
 	}
 }

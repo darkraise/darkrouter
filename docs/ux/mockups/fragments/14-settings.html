@@ -1,0 +1,513 @@
+<section class="screen" id="s-14-settings" data-screen-title="settings">
+  <p class="legend">
+    Every knob the operator has, grouped by the concern it belongs to rather
+    than by the shape of the YAML file it came from, and each one marked with
+    when a change to it actually takes effect. Three of the six groups have no
+    writer behind them today. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd>
+    for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Settings</h2>
+          <p class="topbar-route mono">settings</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="set-key">
+          <span class="legend-caps">takes effect</span>
+          <span class="set-key-item">
+            <span class="set-scope" data-scope="live">live</span>
+            <span class="micro">on save &mdash; a running worker re-reads it</span>
+          </span>
+          <span class="set-key-item">
+            <span class="set-scope" data-scope="restart">restart</span>
+            <span class="micro">on the next process start, and not before</span>
+          </span>
+          <span class="set-key-item">
+            <span class="set-scope" data-scope="inert">inert</span>
+            <span class="micro">never &mdash; nothing in the product reads it yet</span>
+          </span>
+          <span class="micro set-key-tail">One marker per value, in the same place on every row. Today this distinction exists in the code and nowhere in the interface, so an operator changes a listen address, sees the field accept it, and finds out at the next deploy.</span>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Server</p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1-3 &middot; GET /api/config returns valid, warnings, aliases, policy and server today &mdash; NOT log, capture or catalog, which have no read endpoint shipped and none in &sect;8.2 either. Both the reads and the writes for those three blocks are new.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">server</span>
+              <span class="chip">6 values</span>
+              <span class="set-scope" data-scope="live">mixed</span>
+              <span class="micro">two of these are read once at process start; the rest reload. config.RestartOnly names the whole product's restart set and it has four entries, two of them here.</span>
+            </div>
+            <div class="set-form">
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">proxy_listen</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value=":8080">
+                <span class="spec-note">where all three inbound dialects are served. Moving it moves the endpoint every configured client points at.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">admin_listen</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value=":8081">
+                <span class="spec-note">the console and /api. A separate port on purpose: a leaked proxy token reaches no admin route.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">max_body_bytes</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <input class="field-input" value="33554432">
+                <span class="spec-note">32 MiB. An inbound body above it is refused before any provider is chosen, so it never costs an upstream call. Live because the executor reads it from a fresh per-request snapshot &mdash; config.go names it as the field most often assumed to need a restart.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">shutdown_grace</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <input class="field-input" value="30s">
+                <span class="spec-note">how long an in-flight stream has to finish after SIGTERM before the process exits regardless.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">sse.max_line_bytes</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <input class="field-input" value="1048576">
+                <span class="spec-note">1 MiB per SSE line. One oversized provider event terminates the stream; it is not a ceiling on the whole response.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">sse.max_precommit_bytes</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <input class="field-input" value="1048576">
+                <span class="spec-note">how much of a stream is buffered before the router commits to the provider it picked. Past this point failover is no longer possible.</span>
+              </label>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Log and capture</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; capture.bodies is inert: nothing writes request_bodies, though the retention sweep dutifully prunes the table.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">log</span>
+              <span class="chip">1 value</span>
+              <span class="set-scope" data-scope="live">live</span>
+              <span class="micro">the retention worker re-reads this on its next sweep</span>
+            </div>
+            <div class="set-form">
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">log.retention</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <input class="field-input" value="720h">
+                <span class="spec-note">30 days of request rows. The sweep runs hourly and takes the value it finds, so a change here applies without a restart &mdash; the only setting on this screen that does.</span>
+              </label>
+              <div class="field field-span-2 set-retention-note">
+                <span class="legend-caps">effect</span>
+                <span class="field-static">
+                  <span class="mono">17,561</span>
+                  <span class="micro">rows retained &middot; oldest 2026-07-26 09:41 &middot; next sweep 15:00:00</span>
+                </span>
+                <span class="spec-note">the count the current value keeps. Shortening the window deletes rows on the next sweep and there is no undo.</span>
+              </div>
+            </div>
+
+            <div class="set-subgroup">
+              <div class="set-head set-head-sub">
+                <span class="mono set-head-id">capture</span>
+                <span class="chip">3 values</span>
+                <span class="set-scope" data-scope="inert">inert</span>
+              </div>
+              <p class="prose set-note-warn">Body capture has no writer anywhere in the product. Nothing inserts a row into <span class="mono">request_bodies</span>, so all three values below are recorded, validated and then read by nothing &mdash; while the retention sweep dutifully prunes an empty table on schedule. The group is shown because an operator who finds these keys in the file will reasonably assume bodies are being stored, and today the interface does nothing to correct that.</p>
+              <div class="set-form">
+
+                <div class="field">
+                  <span class="set-field-head">
+                    <span class="field-key">capture.bodies</span>
+                    <span class="set-scope" data-scope="inert">inert</span>
+                  </span>
+                  <span class="set-switch-row">
+                    <span class="switch" data-on="false" role="switch" aria-checked="false"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                    <span class="mono switch-label">off</span>
+                  </span>
+                  <span class="spec-note">turning it on changes nothing today. It is the flag the writer would read, if the writer existed.</span>
+                </div>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="field-key">capture.max_bytes</span>
+                    <span class="set-scope" data-scope="inert">inert</span>
+                  </span>
+                  <input class="field-input" value="256000">
+                  <span class="spec-note">the per-body truncation point a writer would apply.</span>
+                </label>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="field-key">capture.retention</span>
+                    <span class="set-scope" data-scope="inert">inert</span>
+                  </span>
+                  <input class="field-input" value="72h">
+                  <span class="spec-note">72 hours, deliberately far shorter than the log window above: bodies carry prompts, and prompts are the sensitive half.</span>
+                </label>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Catalog</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync now &rarr; POST /api/catalog/sync (NEW, &sect;8.2 &mdash; Sync Now does not work today). Discovery enabled is a pointer in the schema so an explicit false is distinguishable from absent.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">catalog</span>
+              <span class="chip">models.dev</span>
+              <span class="set-scope" data-scope="restart">restart</span>
+              <span class="micro">last sync 2026-08-24 02:11:07 &middot; 8 configured providers matched &middot; 1,412 catalogue entries rebuilt</span>
+            </div>
+            <p class="set-note-warn">Restart by behaviour, not by declaration. Both workers capture their interval into an options struct when they are constructed, so a reload that changes one is accepted, warns about nothing, and takes effect at the next process start. config.RestartOnly does not list them, which is the gap: the marker below is what the code does, not what the reload path claims.</p>
+            <div class="set-form">
+
+              <label class="field field-span-2">
+                <span class="set-field-head">
+                  <span class="field-key">models_dev_url</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="https://models.dev/api.json">
+                <span class="spec-note">one JSON document carrying every published provider and its model list. The 197 shipped presets are built from it.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">sync_interval</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="12h">
+                <span class="spec-note">the timer is built at start-up from this value.</span>
+              </label>
+
+              <label class="field">
+                <span class="set-field-head">
+                  <span class="field-key">sync_timeout</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <input class="field-input" value="30s">
+                <span class="spec-note">a sync that overruns is abandoned; the previous snapshot keeps serving.</span>
+              </label>
+
+            </div>
+            <div class="set-foot">
+              <button class="control control-primary" type="button">Sync now</button>
+              <p class="prose">Fetches models.dev immediately and rebuilds the snapshot without waiting for the interval. It is the button an operator wants after adding a provider whose models the catalog has never seen, and it does not exist today.</p>
+            </div>
+
+            <div class="set-subgroup">
+              <div class="set-head set-head-sub">
+                <span class="mono set-head-id">discovery</span>
+                <span class="chip">4 values</span>
+                <span class="set-scope" data-scope="restart">restart</span>
+                <span class="discovery-status" data-discovery="fresh"></span>
+                <span class="micro">8 of 8 providers listed within their interval</span>
+              </div>
+
+              <div class="well set-master">
+                <span class="set-switch-row">
+                  <span class="switch" data-on="true" role="switch" aria-checked="true"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                  <span class="mono switch-label">enabled</span>
+                  <span class="set-scope" data-scope="restart">restart</span>
+                </span>
+                <p class="prose">This switch governs the only outbound traffic the gateway starts on the operator's behalf: a listing call to every enabled provider, on every enabled credential, on a timer, whether or not a request is in flight. Turning it off today means editing <span class="mono">darkrouter.yaml</span> and restarting the process &mdash; there is no endpoint behind this control, and an operator on a metered or audited network has no way to stop those calls from the console.</p>
+                <p class="spec-note">The field is a pointer in the schema rather than a bool, so an explicit <span class="mono">false</span> in the file is distinguishable from a key that was never written &mdash; which is what lets the default stay on without silently overriding an operator who turned it off.</p>
+              </div>
+
+              <div class="set-form">
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="field-key">discovery.interval</span>
+                    <span class="set-scope" data-scope="restart">restart</span>
+                  </span>
+                  <input class="field-input" value="15m">
+                  <span class="spec-note">how often a full sweep starts. Jittered per provider so eight listings do not leave at the same instant.</span>
+                </label>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="field-key">discovery.timeout</span>
+                    <span class="set-scope" data-scope="restart">restart</span>
+                  </span>
+                  <input class="field-input" value="15s">
+                  <span class="spec-note">per provider, not per sweep. A slow provider delays its own listing and nobody else's.</span>
+                </label>
+
+                <label class="field">
+                  <span class="set-field-head">
+                    <span class="field-key">discovery.concurrency</span>
+                    <span class="set-scope" data-scope="restart">restart</span>
+                  </span>
+                  <input class="field-input" value="8">
+                  <span class="spec-note">providers listed at once. Enough to finish a sweep inside its interval, low enough that a sweep does not read as a burst to a rate limiter.</span>
+                </label>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Account</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/auth/password, GET/DELETE /api/sessions. Both new. Sessions have a sliding 30-day TTL and there is no way to list or revoke one today.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">admin</span>
+              <span class="chip">1 account</span>
+              <span class="micro">single operator account &middot; signed in since 09:12:44</span>
+            </div>
+
+            <p class="set-subhead"><span class="legend-caps">change password</span></p>
+            <div class="set-form">
+              <label class="field">
+                <span class="set-field-head"><span class="legend-caps">current password</span></span>
+                <input class="field-input" type="password" placeholder="current password" autocomplete="off">
+              </label>
+              <label class="field">
+                <span class="set-field-head"><span class="legend-caps">new password</span></span>
+                <input class="field-input" type="password" placeholder="at least 12 characters" autocomplete="off">
+              </label>
+              <label class="field">
+                <span class="set-field-head"><span class="legend-caps">confirm</span></span>
+                <input class="field-input" type="password" placeholder="repeat it" autocomplete="off">
+              </label>
+            </div>
+            <div class="set-foot">
+              <button class="control control-primary" type="button">Change password</button>
+              <p class="prose">Changing the password does not end the sessions below. That is a deliberate split and it has to be visible, because the reason an operator changes a password is usually that they believe someone else has it &mdash; and the password alone does not evict them.</p>
+            </div>
+
+            <p class="set-subhead">
+              <span class="legend-caps">active sessions</span>
+              <span class="micro">3 &middot; sliding 30-day TTL</span>
+            </p>
+            <div class="table">
+
+              <div class="row row-head set-session-row">
+                <span class="legend-caps">created</span>
+                <span class="legend-caps">last seen</span>
+                <span class="legend-caps">user agent</span>
+                <span class="legend-caps">&nbsp;</span>
+                <span class="legend-caps">&nbsp;</span>
+              </div>
+
+              <div class="row set-session-row">
+                <span class="mono">2026-08-24 09:12:44</span>
+                <span class="mono">14:18:04</span>
+                <span class="micro">Firefox 141 &middot; Linux x86_64 &middot; 192.168.0.24</span>
+                <span class="chip set-chip-current">this session</span>
+                <span class="set-session-actions"><button class="set-row-action" type="button">Sign out</button></span>
+              </div>
+
+              <div class="row set-session-row">
+                <span class="mono">2026-08-21 22:47:10</span>
+                <span class="mono">2026-08-23 08:30:19</span>
+                <span class="micro">Chrome 139 &middot; macOS 15.6 &middot; 192.168.0.31</span>
+                <span class="micro text-muted col-right">expires 2026-09-22</span>
+                <span class="set-session-actions"><button class="set-row-action set-row-action-danger" type="button">Revoke</button></span>
+              </div>
+
+              <div class="row set-session-row">
+                <span class="mono">2026-08-11 07:05:33</span>
+                <span class="mono">2026-08-11 07:41:02</span>
+                <span class="micro">Safari 18.6 &middot; iPhone OS 18.6 &middot; 84.17.202.9</span>
+                <span class="micro text-muted col-right">expires 2026-09-10</span>
+                <span class="set-session-actions"><button class="set-row-action set-row-action-danger" type="button">Revoke</button></span>
+              </div>
+
+            </div>
+            <p class="prose set-note-warn">The TTL slides: every authenticated request pushes the expiry out another 30 days, so the tab left open on a laptop three weeks ago is still a live session and stays live for as long as that tab keeps polling. Nothing in the product lists them and nothing revokes one &mdash; the only way to invalidate a session today is to restart the process. The third row is a phone on a public address that has not been touched in a fortnight, which is exactly the row this region exists to make visible.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Appearance</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Two axes. The seventeen-axis switcher is removed: an ops console reading live health must not let a gradient picker change what amber means.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">appearance</span>
+              <span class="chip">2 axes</span>
+              <span class="set-scope" data-scope="live">live</span>
+              <span class="micro">stored in this browser, not on the server &mdash; two operators can hold two different answers</span>
+            </div>
+            <div class="set-appearance">
+
+              <div class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">mode</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <div class="segmented">
+                  <span class="segmented-option" data-active="true">system</span>
+                  <span class="segmented-option">light</span>
+                  <span class="segmented-option">dark</span>
+                </div>
+                <span class="spec-note">follows the operating system until an operator picks one. Light is not a palette swap of dark: the recessed well inverts from darker-than-panel to brighter-than-panel, so the reading stays the highest-contrast thing in the frame either way.</span>
+              </div>
+
+              <div class="field">
+                <span class="set-field-head">
+                  <span class="legend-caps">density</span>
+                  <span class="set-scope" data-scope="live">live</span>
+                </span>
+                <div class="segmented">
+                  <span class="segmented-option" data-active="true">compact</span>
+                  <span class="segmented-option">cozy</span>
+                </div>
+                <span class="spec-note">compact is the 30px row this console is drawn at. Cozy relaxes rows and controls to 36px and changes nothing else &mdash; no type scale, no colour, no spacing rhythm.</span>
+              </div>
+
+            </div>
+            <p class="prose">Two axes, and no third. A settings screen that offers an accent picker, a font choice and seven density steps is negotiable chrome; this console is an instrument reading live provider health, and an operator must not be able to change what amber means on the screen where amber is the warning. Mode and density are the only two choices that cannot break a reading.</p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Configuration file</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; GET /api/config, POST /api/config/reload. The source marker per value is the &sect;8.2 extension.</span></p>
+          <div class="panel set-panel">
+            <div class="set-head">
+              <span class="mono set-head-id">/etc/darkrouter/darkrouter.yaml</span>
+              <span class="chip status-badge" data-status="success">valid</span>
+              <span class="chip set-chip-warn">3 warnings</span>
+              <span class="micro">parsed 14:02:11 &middot; 118 lines &middot; 0 errors</span>
+            </div>
+
+            <p class="set-subhead">
+              <span class="legend-caps">parsed configuration</span>
+              <span class="micro">read-only. Editing happens above, or in the file.</span>
+            </p>
+            <div class="well set-config">
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">server:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;proxy_listen: ":8080"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;admin_listen: ":8081"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;max_body_bytes: 33554432</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;shutdown_grace: "30s"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">log:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;retention: "720h"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">capture:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;bodies: false</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;max_bytes: 256000</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;retention: "72h"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">catalog:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;models_dev_url: "https://models.dev/api.json"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;sync_interval: "12h"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">discovery:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;enabled: true</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;interval: "15m"</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">file</span><span class="mono">&nbsp;&nbsp;concurrency: 8</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">providers:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;- id: groq</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;&nbsp;&nbsp;preset: groq</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;- id: cerebras</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;&nbsp;&nbsp;preset: cerebras</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">aliases:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;fast-coder: [cerebras/gpt-oss-120b, groq/openai-gpt-oss-120b]</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;long-context: [vertex/gemini-2.5-pro]</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">policy:</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="db">db</span><span class="mono set-config-inert">&nbsp;&nbsp;retry: { max_attempts: 3, cooldown_base: "800ms" }</span></div>
+              <div class="set-config-line"><span class="set-config-src" data-src="file">&nbsp;</span><span class="micro set-config-more">6 more providers, 5 more aliases and 14 more lines not shown</span></div>
+            </div>
+            <div class="set-srckey">
+              <span class="set-config-src" data-src="file">file</span>
+              <span class="micro">the file governs this value and a reload re-reads it</span>
+              <span class="set-config-src" data-src="db">db</span>
+              <span class="micro">imported once, on first run. SQLite governs it now and this text is inert.</span>
+            </div>
+
+            <p class="set-subhead">
+              <span class="legend-caps">warnings</span>
+              <span class="micro">3 &middot; a warning does not stop a reload</span>
+            </p>
+            <div class="set-warnings">
+              <div class="set-warning">
+                <span class="micro set-warning-loc">line 41</span>
+                <p class="prose"><span class="mono">providers[3].api_key</span> is set in the file. That provider was imported on first run and its credential lives encrypted in SQLite; the file value is read by nothing and should be removed before the file is shared.</p>
+              </div>
+              <div class="set-warning">
+                <span class="micro set-warning-loc">line 88</span>
+                <p class="prose"><span class="mono">aliases.cheap-embed</span> holds a target on <span class="mono">deepinfra</span>, which is disabled, so that link in the chain resolves to nothing. The alias still routes through its remaining targets &mdash; a dangling target is a warning, never a validation error.</p>
+              </div>
+              <div class="set-warning">
+                <span class="micro set-warning-loc">line 103</span>
+                <p class="prose"><span class="mono">policy.retry.cooldown_base</span> is 800ms, below the 1s floor the breaker enforces. The ladder uses 1s, and this value has had no effect since the policy block was imported anyway.</p>
+              </div>
+            </div>
+
+            <div class="set-foot">
+              <button class="control" type="button">Reload</button>
+              <p class="prose">Re-reads the file, re-validates it, and re-applies only the blocks the file still governs. A reload that fails to parse changes nothing &mdash; the previous configuration keeps serving, which is why this button is safe to press on a production gateway.</p>
+            </div>
+
+            <p class="prose set-ruling"><span class="legend-caps">what the file still governs</span>
+              <span class="mono">server</span>, <span class="mono">log</span>, <span class="mono">capture</span>, <span class="mono">catalog</span> and <span class="mono">discovery</span> are read from the file on every start and on every reload. <span class="mono">providers</span>, <span class="mono">aliases</span> and <span class="mono">policy</span> are not: each was imported once on first run and lives in SQLite from then on, so editing them in the file has no effect &mdash; exactly as editing <span class="mono">providers:</span> already has none today. Round-tripping YAML would destroy the operator's own comments, and an overlay where the file is the base and the database wins would give one value two sources of truth and no way to see which is in effect. The marker in the gutter above is how a value says which of the two it is, and <span class="mono">GET /api/config</span> cannot answer that question today.</p>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

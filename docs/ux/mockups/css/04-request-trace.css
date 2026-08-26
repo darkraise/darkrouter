@@ -1,0 +1,237 @@
+/*
+ * Task 7 — Request trace ("operate/requests" detail view).
+ *
+ * New component classes this screen introduces: .trace-header (+ -row/-id/
+ * -route/-route-sep/-route-arrow/-route-target), .trace-copy-btn,
+ * .waterfall-tracks (+ -row/-row-label/-track/-seg/-end/-total),
+ * .readout-strip/.readout-tile, .warning-list (named by the task brief's
+ * own Interfaces contract), .json-tree (+ -row/-depth-N/-toggle/-key/
+ * -string/-punct/-collapsed-count), .trace-footer.
+ * Everything else composes .well/.panel/.chip/.row/.mono/.prose/.readout/
+ * .unit/.micro/.spec-note/.section-title/.empty-well/.chart-well/
+ * .chart-axis/.reason/.reason-code/.reason-prose/.mark/.mark-served/
+ * .mark-failed/.control-primary/.status-badge from darkrouter-ui.css or an
+ * earlier screen's partial unchanged — this is a leaf screen, so no later
+ * fragment can depend on anything declared here staying stable.
+ */
+
+/* --- Region 1: header --------------------------------------------------- */
+
+.trace-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--section-pad);
+}
+
+.trace-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trace-id { color: var(--ink); }
+
+/* .chip has no hover treatment of its own; this one is a button, so it
+   needs the opacity-on-hover idiom .view-chip already establishes. */
+.trace-copy-btn {
+  cursor: default;
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.trace-copy-btn:hover {
+  opacity: 1;
+  color: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.trace-route {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-muted);
+}
+.trace-route-sep,
+.trace-route-arrow { color: var(--legend); }
+.trace-route-target {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* --- Region 3: waterfall -------------------------------------------------
+   Sits inside .well.chart-well, reused verbatim from the Usage screen's
+   partial for the recessed, corner-clipped surface a graticule belongs on.
+   The end-of-bar mark reuses .mark/.mark-served/.mark-failed from the
+   ladder two regions up rather than inventing a second failed/served
+   colour idiom — a served or failed attempt should look like the same
+   fact wherever it appears on this screen. */
+
+.waterfall-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: var(--section-pad);
+}
+
+.waterfall-row {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+}
+
+.waterfall-row-label {
+  flex: 0 0 130px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+/* The graticule: a repeating hairline every third of the track width, so
+   the 0/10,000/20,000/30,000ms axis labels below always land on a line —
+   the same "graticule IS the gridline, no second axis" rule the ladder's
+   own latency-bar and the Usage charts both already follow. */
+.waterfall-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 16px;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--border-subtle) 0 1px,
+    transparent 1px calc(100% / 3)
+  );
+}
+
+/* Default fill is neutral --legend: elapsed time before an outcome is
+   known, the same "nothing has been decided yet" register --legend already
+   carries on a skipped ladder mark. Only once an outcome exists does a
+   segment take the router-verdict or provider-outcome colour below. */
+.waterfall-seg{
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 8px;
+  min-width: 2px;
+  margin-top: -4px;
+  border-radius: var(--radius-pill);
+  background: var(--legend);
+}
+.waterfall-seg-serve { background: var(--trace); }
+.waterfall-seg-failed { background: var(--state-failed); }
+
+.waterfall-end {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+/* .mark-served already gets a boundary from its two-tone trace/trace-fill
+   fill; .mark-failed has only the one state-failed token, so its end-cap
+   sitting on a bar of the identical colour has no edge and reads as one
+   shape with the bar instead of a discrete mark. A 1px ring in the
+   track's own background punches a boundary the same way a keyline
+   would, giving the failed cap the same discrete-mark legibility the
+   served cap gets from its fill. */
+.waterfall-end.mark-failed { border: 1px solid var(--surface-2); }
+
+.waterfall-total {
+  flex: 0 0 64px;
+  text-align: right;
+}
+
+/* --- Region 4: readouts --------------------------------------------------
+   A tile shell distinct from Overview's .live-tile on purpose: "live"
+   there names a five-minute rolling window that keeps refreshing; every
+   number in a closed trace is an immutable historical fact, so borrowing
+   that name would misdescribe what these tiles are. */
+
+.readout-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--gutter);
+}
+
+.readout-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* The unit hugs its number. In a column flex the .unit span was blockified
+   into a second flex item and dropped to the tile's bottom-left, reading as
+   a stray label rather than a suffix — setting display:inline on a flex item
+   does not help, so the pair gets a wrapper of its own. */
+.readout-value {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  padding: var(--section-pad);
+}
+
+/* --- Region 5: warnings ---------------------------------------------------
+   Named by Task 7's own Interfaces contract as a leaf class with no later
+   consumer. The box is .table's own recipe restated under its own name
+   rather than reused as .table, since a future warnings screen may want to
+   style severity without touching the request/candidate tables' own
+   class. Rows and their code/sentence pair are .row and .reason, reused
+   unchanged — a warning is the same "machine_code, then a sentence" shape
+   the ladder's reason column already established, and reusing it ties the
+   two together instead of inventing a second vocabulary for one idea. */
+.warning-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* --- Region 6: surface detail (JSON tree) --------------------------------
+   Approximates darkraise-ui's JsonTreeView per pin 6. Colour stays inside
+   the neutral quartet (ink/ink-muted/legend/bezel) throughout — surface_meta
+   is neither a provider health signal nor a routing verdict, so neither
+   the state colours nor --trace belong on it. */
+
+.json-tree {
+  padding: 8px var(--section-pad);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.json-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: pre;
+}
+.json-depth-1 { padding-left: 16px; }
+.json-depth-2 { padding-left: 32px; }
+
+.json-toggle {
+  display: inline-block;
+  width: 10px;
+  font-size: 9px;
+  color: var(--legend);
+}
+.json-toggle-collapsed { color: var(--legend); }
+
+.json-key { color: var(--ink); }
+.json-string { color: var(--ink-muted); }
+.json-punct { color: var(--legend); }
+
+/* The truncation notice standing in for a hidden third level — Spec-note
+   register, since it is metadata about the tree, not data from it. */
+.json-collapsed-count {
+  margin: 0 2px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  color: var(--legend);
+}
+
+/* --- Region 8: open in playground ---------------------------------------- */
+
+.trace-footer {
+  gap: var(--gutter);
+  flex-wrap: wrap;
+  display: flex;
+  justify-content: flex-end;
+}
