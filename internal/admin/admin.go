@@ -163,6 +163,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/models/{provider}/{model}/override", s.requireCSRF(s.handlePutOverride))
 	s.mux.HandleFunc("DELETE /api/models/{provider}/{model}/override", s.requireCSRF(s.handleDeleteOverride))
 
+	s.mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handlePatchCredential))
 	s.mux.HandleFunc("GET /api/proxy-tokens", s.requireSession(s.handleListProxyTokens))
 	s.mux.HandleFunc("POST /api/proxy-tokens", s.requireCSRF(s.handleCreateProxyToken))
 	s.mux.HandleFunc("DELETE /api/proxy-tokens/{id}", s.requireCSRF(s.handleDeleteProxyToken))
