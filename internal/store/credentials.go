@@ -234,3 +234,17 @@ func allCredentialRows(ctx context.Context, q interface {
 	}
 	return out, rows.Err()
 }
+
+// SetCredentialEnabled turns one credential on or off without deleting it, so
+// an operator can take a key out of rotation and put it back without pasting
+// the secret again. It reports whether the credential exists.
+func (d *DB) SetCredentialEnabled(ctx context.Context, providerID, keyID string, enabled bool) (bool, error) {
+	res, err := d.Sync.ExecContext(ctx,
+		`UPDATE provider_keys SET enabled = ? WHERE id = ? AND provider_id = ?`,
+		enabled, keyID, providerID)
+	if err != nil {
+		return false, fmt.Errorf("set credential %s enabled: %w", keyID, err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}

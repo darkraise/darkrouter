@@ -22,6 +22,7 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 		"providers", "provider_keys", "models", "model_overrides",
 		"requests", "request_attempts", "request_bodies",
 		"health", "usage_daily", "sessions", "settings", "aliases",
+		"proxy_tokens",
 	}
 	for _, table := range want {
 		var name string
@@ -232,14 +233,22 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 
 func TestEveryMigrationIsEmbedded(t *testing.T) {
 	// The loader asserts contiguity from 1, so a mis-numbered file fails here
-	// rather than at a customer's first start. One assertion rather than one
-	// per phase: the count is a fact about this build, not about a phase.
+	// rather than at a customer's first start. Counted against the directory
+	// rather than a literal: the risk is a file that exists but was never
+	// embedded, and a literal only catches that until someone updates it.
 	ms, err := loadMigrations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 8 {
-		t.Fatalf("loaded %d migrations, want 8", len(ms))
+	onDisk, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != len(onDisk) {
+		t.Fatalf("loaded %d migrations, %d files on disk", len(ms), len(onDisk))
+	}
+	if len(ms) == 0 {
+		t.Fatal("no migrations were embedded")
 	}
 }
 
