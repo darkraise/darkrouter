@@ -25,7 +25,18 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 			authed = true
 		}
 	}
-	body := map[string]any{"authenticated": authed}
+	// Whether a password exists at all, so a fresh install can explain itself
+	// instead of showing a login that refuses every password.
+	//
+	// This is narrower than it looks and does not weaken §3. An absent hash
+	// means no login can succeed, so disclosing it tells a caller the admin
+	// API is unusable rather than that it is open -- which is why the login
+	// handler still answers "invalid password" either way, and never says
+	// which of the two it was.
+	body := map[string]any{
+		"authenticated": authed,
+		"configured":    s.currentPasswordHash(r.Context()) != "",
+	}
 	if authed {
 		// The SPA needs the token to make its first mutating call after a
 		// reload, and re-issuing it here saves a second round trip.
