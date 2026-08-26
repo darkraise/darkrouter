@@ -13,7 +13,10 @@
 ## Global Constraints
 
 - TDD: a failing test precedes the implementation.
-- `pnpm --filter darkraise-ui test` and `pnpm -r typecheck` are clean before any commit.
+- The gate is `cd packages/ui && npx vitest run` plus `pnpm --filter darkraise-ui typecheck`, both clean before any commit.
+- **Run the suite with `npx vitest run` from inside `packages/ui`, not `pnpm --filter darkraise-ui test`.** The filtered form fails a dozen unrelated component tests when anything else is loading the machine; the direct form runs 168 files in about fifteen seconds. A scattered failure list across components you did not touch is that contention, not a regression — re-run before believing it.
+- **`pnpm -r typecheck` cannot be the gate: `apps/template` fails on `master` at 6.4.0**, on `surfaceIntensity` missing from the config type it imports from `dist`. Pre-existing and out of scope; `packages/ui` typechecks clean and is what this plan holds itself to.
+- **`src/styles/build-output.test.ts` reads `dist/styles.css` and fails if it is absent**, so a full green run needs `pnpm --filter darkraise-ui build` to have completed at least once. That build takes upwards of twenty minutes — start it in the background rather than killing it, because a half-written `dist` is what makes this test fail.
 - Commit subjects: `<type>(<scope>): <subject>`, imperative, **50 characters or fewer**, no trailing period.
 - Comments explain WHY, never WHAT. No comment may reference this plan or task.
 - English only.
@@ -37,26 +40,28 @@ Task 0 fixes it. Do not start Task 1 against a red suite — every later task's 
 - Investigate: `src/components/slider/Slider.tsx`, `src/theme/theme-switcher/AxisControl.tsx`
 - Test: `src/theme/theme-switcher/ThemeSettingsPanel.test.tsx`
 
-The test asserts `getByRole("slider", { name: "Radius" })` and fails, while the same assertion for `"Density"` passes. Its comment claims the `aria-label` "landed on a wrapper span", but that premise is stale: probing the rendered DOM shows a `role="slider"` element carrying `aria-label="Radius"`, one per axis, eleven in total. So the label is present and something else is preventing the accessible-name query from reaching it.
+**Done — the cause was test pollution, not a labelling bug.** The test passes in isolation and fails when the file runs whole. `ThemeProvider` persists the chosen preset to `localStorage`; the earlier test *"thins a group without hiding its heading"* clicks the sci-fi preset radio; `scifi.ts` lists `radius` in `hiddenCommonAxes`. Every test after that click ran under sci-fi, where the radius row is not rendered at all. Clearing storage in `beforeEach` restores isolation.
 
-- [ ] **Step 1: Find the real cause before changing anything**
+The comment claiming the `aria-label` "landed on a wrapper span" was stale and is replaced: eleven `role="slider"` elements each carry their axis name correctly.
+
+- [x] **Step 1: Find the real cause before changing anything**
 
 `getByRole` filters by accessibility, `querySelectorAll` does not — that difference is the likeliest lead. Check whether the Radius thumb is excluded by `aria-hidden` on an ancestor, by `display: none` in the jsdom-computed style, or by a duplicate accessible name colliding with the row's own `<label>`.
 
 Write the finding into the test's comment, replacing the stale one. A future reader must not re-derive this.
 
-- [ ] **Step 2: Fix the cause, not the assertion**
+- [x] **Step 2: Fix the cause, not the assertion**
 
 Whatever the cause, the fix belongs in `Slider.tsx` or `AxisControl.tsx`. Do not relax the assertion, do not query by `querySelector`, and do not delete the test. If the conclusion is that the test asserts something the panel should not do, stop and report rather than deleting it.
 
-- [ ] **Step 3: Run everything**
+- [x] **Step 3: Run everything**
 
-Run: `pnpm --filter darkraise-ui test && pnpm -r typecheck`
-Expected: 2479 passed, 0 failed.
+Run: `cd packages/ui && npx vitest run`
+Result: 168 files, 2479 passed, 0 failed.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
-Subject: `fix(slider): name the axis thumb for assistive tech`
+Committed as `4e082f3`, subject `test(theme): isolate preset state between tests`. The planned subject named the Slider, which is not where the fault was.
 
 ---
 
