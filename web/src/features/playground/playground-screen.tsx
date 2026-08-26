@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
-import { stream } from "../lib/api"
+import { stream, type StreamStart } from "../../lib/api"
 
 /** Reads the assistant text out of whatever complete SSE frames have arrived. */
 function drainSSE(buffer: string): { text: string; rest: string } {
@@ -53,7 +53,7 @@ export function PlaygroundScreen() {
         "/api/playground",
         { model, prompt },
         // The id arrives with the headers, before the body this is rendering.
-        (s) => setRequestID(s.requestId),
+        (s: StreamStart) => setRequestID(s.requestId),
       )) {
         buffer.current += chunk
         const { text, rest } = drainSSE(buffer.current)
