@@ -4,7 +4,7 @@ import type {
   Aliases,
   BreakerEntry,
   ConfigResponse,
-  Model,
+  CatalogResponse,
   Overview,
   Preset,
   Provider,
@@ -110,10 +110,10 @@ export function usePresets(extra?: Extra<Preset[]>) {
   })
 }
 
-export function useModels(extra?: Extra<{ models: Model[] }>) {
+export function useModels(extra?: Extra<CatalogResponse>) {
   return useQuery({
     queryKey: keys.models,
-    queryFn: () => api.get<{ models: Model[] }>("/api/models"),
+    queryFn: () => api.get<CatalogResponse>("/api/models"),
     refetchInterval: POLL.slow,
     ...extra,
   })
