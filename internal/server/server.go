@@ -188,7 +188,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	adm, err := admin.New(admin.Deps{
 		DB: db, PasswordHash: passwordHash,
 		Config: cfgStore, Src: src, Key: key,
-		Catalog: cat, Disc: disc, Breaker: breaker,
+		Catalog: cat, Disc: disc, Sync: syncer, Breaker: breaker,
 		Presets: o.presets, Exec: ex,
 		Warnings: startupWarnings,
 		Flows:    flows,

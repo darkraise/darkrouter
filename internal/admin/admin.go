@@ -42,6 +42,7 @@ type Deps struct {
 	Key      *crypto.Key
 	Catalog  *catalog.Store
 	Disc     *catalog.Discoverer
+	Sync     *catalog.Syncer
 	Breaker  *health.Breaker
 	Presets  catalog.Presets
 	Warnings []string
@@ -147,6 +148,11 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
 	s.mux.HandleFunc("PUT /api/config", s.requireCSRF(s.handleConfigPut))
+
+	s.mux.HandleFunc("GET /api/health/providers", s.requireSession(s.handleHealthProviders))
+	s.mux.HandleFunc("POST /api/providers/{id}/breaker/reset", s.requireCSRF(s.handleBreakerReset))
+	s.mux.HandleFunc("POST /api/providers/{id}/discover", s.requireCSRF(s.handleForceDiscover))
+	s.mux.HandleFunc("POST /api/catalog/sync", s.requireCSRF(s.handleForceCatalogSync))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 
 	// A mistyped API path must answer as an API path. Without these two an
