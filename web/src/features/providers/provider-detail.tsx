@@ -22,7 +22,7 @@ export function ProviderDetail() {
   const { id } = useParams({ from: "/providers/$id" })
   const providers = useProviders()
   const health = useProviderHealth()
-  const provider = providers.data?.find((p) => p.id === id)
+  const provider = providers.data?.providers.find((p) => p.id === id)
   const [draftName, setDraftName] = useState<string | null>(null)
   const [draftPriority, setDraftPriority] = useState<string | null>(null)
 

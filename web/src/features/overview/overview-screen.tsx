@@ -128,8 +128,8 @@ export function OverviewScreen() {
           is not a candidate has no edge at all.
         </p>
         <FlowGraph
-          aliases={aliasesFromUsage(byAlias.data ?? [])}
-          providers={flowProviders(o, byProvider.data ?? [])}
+          aliases={aliasesFromUsage(byAlias.data?.days ?? [])}
+          providers={flowProviders(o, byProvider.data?.days ?? [])}
           failovers={o.failover_edges.map((e) => ({
             from: e.from_provider_id,
             to: e.to_provider_id,

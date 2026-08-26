@@ -31,6 +31,15 @@ export type UsageRow = UsageDay & { key?: string }
 
 export type UsageDimension = "provider" | "model" | "alias"
 
+/** GET /api/usage. An envelope, not a bare array: `priced` reports whether any
+ *  row in scope had a catalog price, which a caller cannot derive from rows
+ *  whose cost is null for two different reasons. */
+export type UsageResponse = {
+  days: UsageRow[]
+  priced: boolean
+  group_by?: UsageDimension
+}
+
 // --- overview ---
 
 /** The four states GET /api/overview emits. `degraded` is not `cooling`: a
@@ -193,6 +202,11 @@ export type Provider = {
 }
 
 export type Preset = { id: string; name: string; kind: string; base_url: string }
+
+/** Both of these are envelopes. Typing them as bare arrays is what made every
+ *  screen throw on first contact with a real gateway. */
+export type ProvidersResponse = { providers: Provider[] }
+export type PresetsResponse = { presets: Preset[] }
 
 /** A model as the catalog merges it: one row per model id, listing every
  *  provider that serves it, rather than one row per (provider, model). */
