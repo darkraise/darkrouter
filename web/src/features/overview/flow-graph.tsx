@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import "./flow-graph.css"
 import type { ProviderTile, UsageRow } from "../../lib/api-types"
 
@@ -163,30 +164,41 @@ export function FlowGraph({
         </div>
 
         {providers.map((p, i) => (
-          <div
+          // display: contents keeps the Link out of the box tree, so the
+          // absolutely-positioned node beneath it still measures against
+          // .rf-graph rather than against the anchor's own box.
+          <Link
             key={p.id}
-            className={
-              p.candidate ? "rf-node rf-provider" : "rf-node rf-provider rf-provider-idle"
-            }
-            style={{
-              left: GEOM.providerX,
-              top: centreY(i) - GEOM.nodeH / 2,
-              width: GEOM.providerW,
-              height: GEOM.nodeH,
-            }}
+            to="/providers/$id"
+            params={{ id: p.id }}
+            style={{ display: "contents" }}
           >
-            <span className="micro rf-prio">{p.priority}</span>
-            <span className="mono rf-name">{p.name}</span>
-            {p.note && <span className="micro rf-note">{p.note}</span>}
-            <span className="rf-right">
-              <span className="mono rf-count">{p.requests}</span>
-              <span className="micro rf-pct">
-                {p.candidate
-                  ? `${Math.round((p.requests / served) * 100)}%`
-                  : "not a candidate"}
+            <div
+              className={
+                p.candidate
+                  ? "rf-node rf-provider"
+                  : "rf-node rf-provider rf-provider-idle"
+              }
+              style={{
+                left: GEOM.providerX,
+                top: centreY(i) - GEOM.nodeH / 2,
+                width: GEOM.providerW,
+                height: GEOM.nodeH,
+              }}
+            >
+              <span className="micro rf-prio">{p.priority}</span>
+              <span className="mono rf-name">{p.name}</span>
+              {p.note && <span className="micro rf-note">{p.note}</span>}
+              <span className="rf-right">
+                <span className="mono rf-count">{p.requests}</span>
+                <span className="micro rf-pct">
+                  {p.candidate
+                    ? `${Math.round((p.requests / served) * 100)}%`
+                    : "not a candidate"}
+                </span>
               </span>
-            </span>
-          </div>
+            </div>
+          </Link>
         ))}
       </div>
     </div>

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { flowProviders } from "./overview-screen"
+import {
+  droppedText,
+  errorSeries,
+  failoverLabel,
+  flowProviders,
+  spendSeries,
+} from "./overview-screen"
 import type { Overview, ProviderTile, UsageRow } from "../../lib/api-types"
 
 const tile = (over: Partial<ProviderTile> & { id: string }): ProviderTile => ({
@@ -78,5 +84,77 @@ describe("flowProviders", () => {
     // "1 cooling" is the reason a row is degraded, and §6.1 gives the note
     // the slack rather than a share bar that repeats the edge thickness.
     expect(got[0]?.note).toBe("2 cooling")
+  })
+})
+
+describe("tile series", () => {
+  it("sums spend per day across a dimension's rows", () => {
+    expect(
+      spendSeries([
+        { ...usage("groq", 1), day: "2026-08-25", cost_micros: 100 },
+        { ...usage("nebius", 1), day: "2026-08-25", cost_micros: 50 },
+        { ...usage("groq", 1), day: "2026-08-26", cost_micros: 70 },
+      ]),
+    ).toEqual([150, 70])
+  })
+
+  it("treats an unpriced day as no spend rather than dropping the day", () => {
+    // The shape has to keep its x-axis: a missing day would compress the
+    // sparkline and misreport when spending happened.
+    expect(
+      spendSeries([
+        { ...usage("groq", 1), day: "2026-08-25", cost_micros: null },
+        { ...usage("groq", 1), day: "2026-08-26", cost_micros: 70 },
+      ]),
+    ).toEqual([0, 70])
+  })
+
+  it("derives errors from attempts beyond requests, floored at zero", () => {
+    expect(
+      errorSeries([
+        { ...usage("groq", 3), day: "2026-08-25", attempts: 5 },
+        { ...usage("groq", 4), day: "2026-08-26", attempts: 4 },
+      ]),
+    ).toEqual([2, 0])
+  })
+})
+
+describe("the failover strip", () => {
+  it("labels a row with its alias, attempt count and serving provider", () => {
+    const label = failoverLabel({
+      id: "x", ts: 0, alias: "fast", attempts: 3,
+      final_provider_id: "nebius", final_model: "m", total_ms: 12,
+    })
+    expect(label).toContain("fast")
+    expect(label).toContain("×3")
+    expect(label).toContain("nebius")
+  })
+
+  it("says so when a request had no alias", () => {
+    // A bare model name is not an alias, and printing an empty arrow would
+    // read as a rendering fault.
+    const label = failoverLabel({
+      id: "x", ts: 0, alias: "", attempts: 2,
+      final_provider_id: "groq", final_model: "m-4", total_ms: 9,
+    })
+    expect(label).toContain("m-4")
+    expect(label).not.toContain("→ →")
+  })
+})
+
+describe("the dropped-record counter", () => {
+  it("reads zero as a statement rather than a number", () => {
+    expect(droppedText(0, 400)).toMatch(/no records dropped/i)
+  })
+
+  it("names the shortfall when records were dropped", () => {
+    // A non-zero count means usage_daily is a lower bound, which is the one
+    // thing that makes every spend figure on this screen approximate. The
+    // total is written + dropped: those are disjoint counters (a dropped
+    // record never reaches the database), so 7 dropped on top of 400
+    // written is 407 observed, not 400.
+    const text = droppedText(7, 400)
+    expect(text).toContain("7")
+    expect(text).toContain("407")
   })
 })

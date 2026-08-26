@@ -1,8 +1,10 @@
 import { PageHeader } from "darkraise-ui/layout"
 import { Card } from "darkraise-ui"
-import { useOverview, useUsage } from "../../lib/queries"
-import type { Overview, UsageRow } from "../../lib/api-types"
+import { useConfig, useOverview, useUsage } from "../../lib/queries"
+import type { FailoverRow, Overview, UsageRow } from "../../lib/api-types"
 import { FlowGraph, aliasesFromUsage, type FlowProvider } from "./flow-graph"
+import { Failovers } from "./failovers"
+import { OpsFooter } from "./ops-footer"
 
 /** Micro-dollars to a readable amount. Unpriced is not zero: a model with no
  *  catalog price has an unknown cost, and showing $0.00 would claim it was
@@ -10,6 +12,38 @@ import { FlowGraph, aliasesFromUsage, type FlowProvider } from "./flow-graph"
 function money(micros: number, priced: boolean): string {
   if (!priced) return "—"
   return `$${(micros / 1_000_000).toFixed(2)}`
+}
+
+/** Daily totals in day order, so a sparkline's x-axis is time. */
+function byDay(rows: UsageRow[], value: (r: UsageRow) => number): number[] {
+  const acc = new Map<string, number>()
+  for (const row of rows) acc.set(row.day, (acc.get(row.day) ?? 0) + value(row))
+  return [...acc.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v)
+}
+
+export function spendSeries(rows: UsageRow[]): number[] {
+  // Null contributes nothing rather than removing the day: dropping it would
+  // compress the shape and misreport when the spending happened.
+  return byDay(rows, (r) => r.cost_micros ?? 0)
+}
+
+export function errorSeries(rows: UsageRow[]): number[] {
+  // Attempts beyond requests are failovers. Floored, because a rollup that
+  // straddles a day boundary can land one attempt short of its request.
+  return byDay(rows, (r) => Math.max(0, r.attempts - r.requests))
+}
+
+export function failoverLabel(row: FailoverRow): string {
+  const asked = row.alias || row.final_model
+  return `${asked} → ${row.final_provider_id}/${row.final_model} ×${row.attempts}`
+}
+
+export function droppedText(dropped: number, written: number): string {
+  if (dropped === 0) return "no records dropped"
+  // A non-zero count is the honest signal that every usage figure on this
+  // screen is a lower bound: dropped and written are disjoint counters, so
+  // the true total is their sum, not the written count alone.
+  return `${dropped} of ${written + dropped} log records dropped`
 }
 
 /** A sparkline over the daily series. Decorative: the number beside it is the
@@ -90,9 +124,11 @@ export function OverviewScreen() {
   const overview = useOverview()
   const byAlias = useUsage("alias")
   const byProvider = useUsage("provider")
+  const config = useConfig()
 
   if (!overview.data) return null
   const o = overview.data
+  const providerDays = byProvider.data?.days ?? []
 
   return (
     <>
@@ -100,6 +136,15 @@ export function OverviewScreen() {
         title="Overview"
         description="Is it working, and what did it just do"
       />
+
+      {config.data && !config.data.valid && (
+        <Card className="mb-6 border-[hsl(var(--destructive))] p-4">
+          <p className="text-sm font-medium">The configuration file is invalid.</p>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            {config.data.error} — {config.data.serving}
+          </p>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-4">
         <Tile
@@ -111,12 +156,23 @@ export function OverviewScreen() {
         <Tile
           caption="error_rate"
           value={`${(o.error_rate * 100).toFixed(1)}%`}
-        />
-        <Tile caption="latency_p95" value={`${o.latency.p95_ms}ms`} />
+        >
+          <Sparkline points={errorSeries(providerDays)} />
+        </Tile>
+        <Tile caption="latency_p95" value={`${o.latency.p95_ms}ms`}>
+          {/* usage_daily has no per-day latency column, so there is no series
+              to plot here — a bare number beside a spend or error sparkline
+              would look like an oversight rather than the fact that it is. */}
+          <p className="mt-2 text-xs text-[hsl(var(--legend))]">
+            no daily series for latency
+          </p>
+        </Tile>
         <Tile
           caption="today_spend"
           value={money(o.today_spend.micros, o.today_spend.priced)}
-        />
+        >
+          <Sparkline points={spendSeries(providerDays)} />
+        </Tile>
       </div>
 
       <section className="mt-6">
@@ -129,7 +185,7 @@ export function OverviewScreen() {
         </p>
         <FlowGraph
           aliases={aliasesFromUsage(byAlias.data?.days ?? [])}
-          providers={flowProviders(o, byProvider.data?.days ?? [])}
+          providers={flowProviders(o, providerDays)}
           failovers={o.failover_edges.map((e) => ({
             from: e.from_provider_id,
             to: e.to_provider_id,
@@ -139,6 +195,10 @@ export function OverviewScreen() {
           failoverCount={o.failovers.length}
         />
       </section>
+
+      <Failovers rows={o.failovers.slice(0, 5)} />
+
+      <OpsFooter />
     </>
   )
 }
