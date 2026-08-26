@@ -57,6 +57,18 @@ func testServerFullWithAliases(t *testing.T, aliases string) (*Server, *store.DB
 		t.Fatal(err)
 	}
 	cfg := configStoreFor(t, aliases)
+	// Mirrors cmd/darkrouter: aliases and policy are overlaid from SQLite, so
+	// a test that writes through the API sees the same snapshot a request
+	// would. Without it the write lands in the database and nowhere else.
+	if _, err := store.ImportConfigOnce(context.Background(), db, cfg.Current()); err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetOverlay(func(c *config.Config) error {
+		return store.OverlayConfig(context.Background(), db, c)
+	})
+	if err := cfg.Reload(); err != nil {
+		t.Fatal(err)
+	}
 	s, err := New(Deps{
 		DB: db, PasswordHash: testHash(),
 		Config: cfg, Key: key, Presets: catalog.Embedded(),

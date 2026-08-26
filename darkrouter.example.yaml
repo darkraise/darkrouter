@@ -47,6 +47,11 @@ providers:
 # A Claude subscription is connected from the dashboard rather than configured
 # here: there is no key to write down, only a flow to complete.
 
+# Aliases and policy are imported into the database on the first run and edited
+# through the admin API from then on, exactly as providers: already is. After
+# that first start, changing either block here has no effect -- the dashboard
+# and the API are where they live. The startup log records what was taken.
+#
 # Aliases map a friendly name to an ordered fallback chain. Targets are
 # provider/model or a bare model name.
 aliases:

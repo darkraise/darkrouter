@@ -22,6 +22,26 @@ type Store struct {
 	lookup  func(string) (string, bool)
 	cur     atomic.Pointer[Config]
 	lastErr atomic.Pointer[error]
+	overlay atomic.Pointer[func(*Config) error]
+}
+
+// SetOverlay installs a transform applied to every freshly-loaded Config
+// before it is published.
+//
+// It is a function rather than a direct call because this package may not
+// import internal/store: store already imports config, and the reverse edge
+// would close a cycle. Aliases and policy reach a snapshot from SQLite through
+// here, which is what lets every reader keep using config.Store.Current().
+func (s *Store) SetOverlay(fn func(*Config) error) {
+	s.overlay.Store(&fn)
+}
+
+func (s *Store) applyOverlay(c *Config) error {
+	p := s.overlay.Load()
+	if p == nil || *p == nil {
+		return nil
+	}
+	return (*p)(c)
 }
 
 func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
@@ -66,6 +86,12 @@ func (s *Store) Reload() error {
 		s.lastErr.Store(&err)
 		return err
 	}
+	// Before publishing, not after: a snapshot carrying the file's aliases for
+	// even an instant is one a request could be routed by.
+	if err := s.applyOverlay(next); err != nil {
+		s.lastErr.Store(&err)
+		return err
+	}
 	prev := s.cur.Load()
 	next.Warnings = append(next.Warnings, restartOnlyWarnings(prev, next)...)
 	s.cur.Store(next)
@@ -89,6 +115,12 @@ func restartOnlyWarnings(prev, next *Config) []string {
 	}
 	if prev.Policy.Timeout.FirstByte != next.Policy.Timeout.FirstByte {
 		out = append(out, "policy.timeout.first_byte changed; takes effect on restart")
+	}
+	if prev.Catalog.SyncInterval != next.Catalog.SyncInterval {
+		out = append(out, "catalog.sync_interval changed; takes effect on restart")
+	}
+	if prev.Catalog.Discovery.Interval != next.Catalog.Discovery.Interval {
+		out = append(out, "catalog.discovery.interval changed; takes effect on restart")
 	}
 	return out
 }

@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +34,9 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	// Collected before defaults are applied, from a second pass over the raw
+	// document: the struct cannot answer "was this written?" afterwards.
+	c.FileKeys = documentKeys(data)
 	applyDefaults(&c)
 	if err := interpolate(&c, lookup); err != nil {
 		return nil, err
@@ -174,18 +178,8 @@ func validate(c *Config) error {
 	if c.Policy.Retry.MaxAttempts < 1 {
 		return fmt.Errorf("policy.retry.max_attempts must be at least 1")
 	}
-	for name, targets := range c.Aliases {
-		if name == "" {
-			return fmt.Errorf("alias: name is required")
-		}
-		if len(targets) == 0 {
-			return fmt.Errorf("alias %q: at least one target is required", name)
-		}
-		for _, tgt := range targets {
-			if strings.TrimSpace(tgt) == "" {
-				return fmt.Errorf("alias %q: target must not be empty", name)
-			}
-		}
+	if err := ValidateAliases(c.Aliases); err != nil {
+		return err
 	}
 
 	seen := make(map[string]bool, len(c.Providers))
@@ -222,6 +216,53 @@ func validate(c *Config) error {
 		if ids := models[m]; len(ids) > 1 {
 			c.Warnings = append(c.Warnings,
 				fmt.Sprintf("model %q is offered by %s; the highest-priority provider wins", m, strings.Join(ids, ", ")))
+		}
+	}
+	return nil
+}
+
+// documentKeys flattens a YAML document to the dotted key paths it carries.
+// Sequences are leaves: a list's indices are not configuration keys, and the
+// config API reports a block like providers: as one source, not one per entry.
+func documentKeys(data []byte) []string {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	var out []string
+	var walk func(prefix string, node map[string]any)
+	walk = func(prefix string, node map[string]any) {
+		for k, v := range node {
+			path := k
+			if prefix != "" {
+				path = prefix + "." + k
+			}
+			out = append(out, path)
+			if child, ok := v.(map[string]any); ok {
+				walk(path, child)
+			}
+		}
+	}
+	walk("", raw)
+	sort.Strings(out)
+	return out
+}
+
+// ValidateAliases applies the shape rules an alias chain must satisfy wherever
+// it arrives from. Exported so the admin API enforces the same rules as the
+// file rather than a second, drifting copy of them.
+func ValidateAliases(aliases map[string][]string) error {
+	for name, targets := range aliases {
+		if name == "" {
+			return fmt.Errorf("alias: name is required")
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("alias %q: at least one target is required", name)
+		}
+		for _, tgt := range targets {
+			if strings.TrimSpace(tgt) == "" {
+				return fmt.Errorf("alias %q: target must not be empty", name)
+			}
 		}
 	}
 	return nil
