@@ -306,3 +306,80 @@ func TestPriorityChangeReachesRoutingImmediately(t *testing.T) {
 			"the write reloaded the provider source but never rebuilt the catalog", got)
 	}
 }
+
+func TestACredentialViewCarriesOAuthMetadata(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "oa", "https://oa.example")
+
+	// Written straight to the store: the create endpoint mints static keys,
+	// and the shape under test is the one the refresh worker writes.
+	expiry := int64(1790000000)
+	if _, err := db.AddCredential(context.Background(), s.deps.Key, store.Credential{
+		ProviderID: "oa", Label: "subscription", Kind: "oauth",
+		Secret: "refresh-token-value", Scope: "read", Enabled: true,
+		ExpiresAt: &expiry,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(t, s, cookie, token, "GET", "/api/providers", "")
+	var out struct {
+		Providers []struct {
+			ID          string `json:"id"`
+			Credentials []struct {
+				Kind      string `json:"kind"`
+				Scope     string `json:"scope"`
+				ExpiresAt *int64 `json:"expires_at"`
+				Masked    string `json:"masked"`
+			} `json:"credentials"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	var oauth *struct {
+		Kind      string `json:"kind"`
+		Scope     string `json:"scope"`
+		ExpiresAt *int64 `json:"expires_at"`
+		Masked    string `json:"masked"`
+	}
+	for i := range out.Providers {
+		if out.Providers[i].ID != "oa" {
+			continue
+		}
+		for j := range out.Providers[i].Credentials {
+			if out.Providers[i].Credentials[j].Kind == "oauth" {
+				oauth = &out.Providers[i].Credentials[j]
+			}
+		}
+	}
+	if oauth == nil {
+		t.Fatalf("no oauth credential in the view: %s", w.Body.String())
+	}
+	if oauth.ExpiresAt == nil || *oauth.ExpiresAt != expiry {
+		t.Fatalf("expiry missing: %+v", oauth)
+	}
+	if oauth.Scope != "read" {
+		t.Fatalf("scope = %q", oauth.Scope)
+	}
+	if strings.Contains(oauth.Masked, "refresh-token") {
+		t.Fatal("the secret leaked into the masked field")
+	}
+}
+
+func TestAStaticKeyOmitsOAuthOnlyFields(t *testing.T) {
+	// Omitted rather than zeroed: an expiry of 0 on a static key reads as
+	// "expired in 1970", which is a different claim from "has no expiry".
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "st", "https://st.example")
+
+	w := do(t, s, cookie, token, "GET", "/api/providers", "")
+	if strings.Contains(w.Body.String(), `"expires_at"`) {
+		t.Fatalf("a static key should carry no expires_at: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"kind"`) {
+		t.Fatalf("kind should always be present: %s", w.Body.String())
+	}
+}
