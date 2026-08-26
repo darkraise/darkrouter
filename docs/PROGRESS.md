@@ -1000,10 +1000,26 @@ this one.
 
 Final gate: `qa: PASS — 18 fragment(s) clean`, 34 tests OK, 36 screenshots
 (every screen in both modes) with no failures and nothing clipped.
-`index.html` is 727 KB — 100 KB of that is four base64 IBM Plex woff2 faces,
-194 KB is the stylesheet and 428 KB is screen markup. The plan predicted
-200–350 KB, which was written before the set existed; nothing improper is
-embedded, and each font blob was verified byte-identical to its file on disk.
+
+`index.html` is 851 KB (871,900 bytes), re-measured on 2026-08-26. Every byte
+is accounted for:
+
+| Part | Bytes | KB |
+|---|---|---|
+| Screen markup, 18 screens | 514,863 | 502.8 |
+| `@font-face`, five base64 woff2 faces | 136,664 | 133.5 |
+| `css/*.css`, 16 per-screen partials | 164,843 | 161.0 |
+| `darkrouter-ui.css` | 52,971 | 51.7 |
+| Document shell and table of contents | 2,540 | 2.5 |
+| `<style>` tags and separating newlines | 19 | — |
+| **Total** | **871,900** | **851.5** |
+
+The plan predicted 200–350 KB, which was written before the set existed.
+Nothing improper is embedded: all five faces were decoded back out of
+`index.html` and are byte-identical to their files in `fonts/`. The faces are
+three Inter weights (400/500/600) and two IBM Plex Mono (400/500) — 99.6 KB
+raw on disk, 133.5 KB embedded, because base64 costs a third and each rule
+carries its own CSS text.
 
 ### Final state — "Warm Console", fitted to darkraise-ui
 
