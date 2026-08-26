@@ -70,3 +70,39 @@ func TestProxyTokenWritesNeedASession(t *testing.T) {
 		t.Fatalf("unauthenticated create = %d, want 401", w.Code)
 	}
 }
+
+func TestPatchCredentialNeverEchoesTheSecret(t *testing.T) {
+	// Phase 7 §4.1: no endpoint returns credential material. A PATCH that
+	// echoed what it stored would be the easiest place to leak one.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+
+	w := do(t, s, cookie, token, "PATCH", "/api/providers/groq/keys/"+keyID,
+		`{"secret":"sk-brand-new-value"}`)
+	if w.Code != 200 {
+		t.Fatalf("patch = %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "sk-brand-new-value") {
+		t.Errorf("the response echoed the secret: %s", w.Body.String())
+	}
+}
+
+func TestPatchCredentialTogglesEnabled(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/groq/keys/"+keyID,
+		`{"enabled":false}`); w.Code != 200 {
+		t.Fatalf("disable = %d: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/groq/keys/nosuch",
+		`{"enabled":false}`); w.Code != 404 {
+		t.Errorf("patching an unknown credential = %d, want 404", w.Code)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/groq/keys/"+keyID,
+		`{}`); w.Code != 400 {
+		t.Errorf("an empty patch = %d, want 400", w.Code)
+	}
+}

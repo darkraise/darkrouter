@@ -76,3 +76,51 @@ func (s *Server) handleDeleteProxyToken(w http.ResponseWriter, r *http.Request) 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handlePatchCredential enables, disables or replaces one credential.
+//
+// It never echoes a secret, per phase 7 §4.1: the response says what changed,
+// not what it changed to.
+func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
+	providerID, keyID := r.PathValue("id"), r.PathValue("keyId")
+	var body struct {
+		Secret  *string `json:"secret"`
+		Enabled *bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Secret == nil && body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "nothing to change")
+		return
+	}
+
+	changed := map[string]any{}
+	if body.Enabled != nil {
+		found, err := s.deps.DB.SetCredentialEnabled(r.Context(), providerID, keyID, *body.Enabled)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, "no credential with that id")
+			return
+		}
+		changed["enabled"] = *body.Enabled
+	}
+	if body.Secret != nil {
+		if err := s.deps.DB.ReplaceCredentialSecret(r.Context(), s.deps.Key,
+			keyID, *body.Secret, nil); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Reported as a fact, not as a value.
+		changed["secret"] = "replaced"
+	}
+	// A changed credential invalidates whatever the breaker learned from the
+	// old one, so the provider gets a clean slate rather than inheriting a
+	// cooldown earned by a key that no longer exists.
+	s.clearCooldowns(r.Context(), providerID, keyID)
+	writeJSON(w, http.StatusOK, changed)
+}
