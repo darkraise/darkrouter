@@ -79,18 +79,31 @@ export const SURFACE_COLORS = ["slate", ...ACCENT_COLORS] as const
 
 Eleven built scales are unreachable, and the eighteen names that *are* reachable are seventeen accent hues plus one neutral.
 
-- [ ] **Step 1: Write the failing test**
+**Done — but §7's "widening that one constant exposes all twelve" is wrong.** Four sites treat `slate` as the only neutral and route every other surface name to `accentColors`, where the new ramps do not exist, so widening alone crashes on `undefined[500]`:
+
+| Site | What it does |
+|---|---|
+| `resolveSurfaceScale` | returned slate for slate, tinted an accent for everything else |
+| `resolveSfHueTokens` | same branch, for the three gradient hue tokens |
+| `--surface-tint` (`generateTokens.ts`) | `surfaceColor === "slate" ? neutral[500] : accentColors[...][500]` |
+| the switcher's swatch preview | same, with slate's mid-tone as a magic string |
+
+Each now dispatches on whether the name is registered, via an exported `isAccentSurface` predicate that narrows the accent branches without a cast. `resolveNeutralScale` is also exported, and a chosen neutral now carries its own hue into the text tiers — otherwise a warm ground sits under slate-derived text, which is the override block this release exists to delete.
+
+Committed as `be212cf`. 169 files, 2485 tests, typecheck clean. The 29-swatch grid uses `auto-fill` and wraps to four rows rather than overflowing, so no CSS change was needed.
+
+- [x] **Step 1: Write the failing test**
 
 Assert that every key of `surfaceColors` appears in `SURFACE_COLORS`. Write it as a set comparison over `Object.keys(surfaceColors)`, not a hardcoded list of twelve, so registering a thirteenth ramp without exposing it fails here too.
 
 Assert separately that the seventeen accent names are still present — widening must not drop the accent-as-surface capability consumers already have.
 
-- [ ] **Step 2: Run it, watch it fail**
+- [x] **Step 2: Run it, watch it fail**
 
 Run: `pnpm --filter darkraise-ui test -- surfaceColors`
 Expected: FAIL naming the eleven missing neutrals.
 
-- [ ] **Step 3: Widen the constant**
+- [x] **Step 3: Widen the constant**
 
 ```ts
 export const SURFACE_COLORS = [
@@ -103,11 +116,11 @@ If deriving it from the registry creates an import cycle (`types.ts` is imported
 
 Warm Console wants `sepia` (hue 36); `stone` is the workable second. **This supersedes the earlier ask for `graphite`**, which is hue 210 and belongs to the cool language this phase was first drawn in.
 
-- [ ] **Step 4: Check the switcher renders twelve more swatches**
+- [x] **Step 4: Check the switcher renders twelve more swatches**
 
 The Surface Color control reads `SURFACE_COLORS`. Confirm it does not overflow its grid at twenty-nine entries; if it does, that is a `theme-switcher.css` change in this task, not a reason to narrow the constant.
 
-- [ ] **Step 5: Run everything, changelog, commit**
+- [x] **Step 5: Run everything, changelog, commit**
 
 Subject: `feat(theme): expose all twelve surface ramps`
 
