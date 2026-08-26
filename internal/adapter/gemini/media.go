@@ -37,6 +37,9 @@ var (
 type Fetcher struct {
 	Client   *http.Client
 	MaxBytes int64
+	// Inline gates the outbound fetch. False drops a remote URL rather than
+	// retrieving it; everything that needs no request is unaffected.
+	Inline bool
 }
 
 func NewFetcher() *Fetcher {
@@ -49,6 +52,7 @@ func NewFetcher() *Fetcher {
 			},
 		},
 		MaxBytes: DefaultMaxInlineBytes,
+		Inline:   true,
 	}
 }
 
@@ -102,6 +106,9 @@ func (f *Fetcher) part(ctx context.Context, m *ir.Media, field string) (map[stri
 		}}, nil
 	}
 
+	if !f.Inline {
+		return drop("media inlining is disabled")
+	}
 	mime, data, err := f.inline(ctx, m.URL)
 	if err != nil {
 		return drop("could not inline the URL: " + err.Error())

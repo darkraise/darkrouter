@@ -132,3 +132,38 @@ func TestPartDropsAnEmptyMedia(t *testing.T) {
 		t.Fatalf("part = %v, warnings = %+v", got, warns)
 	}
 }
+
+func TestADisabledFetcherDropsRemoteURLsWithAWarning(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("png"))
+	}))
+	defer up.Close()
+
+	f := NewFetcher()
+	f.Inline = false
+	got, warns := f.part(context.Background(), &ir.Media{URL: up.URL + "/a.png"}, "image")
+	if got != nil {
+		t.Fatalf("the block should be dropped, got %v", got)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0].Reason, "media inlining is disabled") {
+		t.Fatalf("warnings = %v", warns)
+	}
+}
+
+func TestADisabledFetcherStillPassesWhatNeedsNoFetch(t *testing.T) {
+	// The switch governs outbound requests, not media. Inline data and a
+	// fileUri Gemini already resolves cost the gateway no traffic, and
+	// dropping them would break prompts the switch was never about.
+	f := NewFetcher()
+	f.Inline = false
+	for name, m := range map[string]*ir.Media{
+		"inline data": {Data: "aGk=", MIME: "image/png"},
+		"file id":     {FileID: "files/abc", MIME: "image/png"},
+		"youtube":     {URL: "https://www.youtube.com/watch?v=x"},
+	} {
+		got, warns := f.part(context.Background(), m, "image")
+		if got == nil {
+			t.Errorf("%s: dropped, warnings = %v", name, warns)
+		}
+	}
+}
