@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -348,6 +349,116 @@ func TestTheCountEndpointRejectsABadDialect(t *testing.T) {
 	cookie, token := login(t, s)
 	w := do(t, s, cookie, token, "POST", "/api/playground/count",
 		`{"dialect":"openai","model":"m","prompt":"p"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAuxRequestBuildsTheSurfaceRoute(t *testing.T) {
+	for surface, path := range map[string]string{
+		"embeddings":  "/v1/embeddings",
+		"rerank":      "/v1/rerank",
+		"moderations": "/v1/moderations",
+		"images":      "/v1/images/generations",
+		"speech":      "/v1/audio/speech",
+	} {
+		r, err := auxRequest(context.Background(), auxBody{
+			Surface: surface, Model: "mdl",
+			Body: json.RawMessage(`{"input":"hello"}`),
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", surface, err)
+		}
+		if r.URL.Path != path {
+			t.Errorf("%s: path = %q, want %q", surface, r.URL.Path, path)
+		}
+		body := decodeBuilt(t, r)
+		// The form owns the model field, so a model typed into the panel wins
+		// over one left in the raw body from a previous run.
+		if body["model"] != "mdl" || body["input"] != "hello" {
+			t.Errorf("%s: merged body = %v", surface, body)
+		}
+	}
+}
+
+func TestAuxRequestBuildsAMultipartTranscription(t *testing.T) {
+	r, err := auxRequest(context.Background(), auxBody{
+		Surface: "transcriptions", Model: "whisper-1",
+		FileB64:  base64.StdEncoding.EncodeToString([]byte("RIFFfake")),
+		Filename: "clip.wav",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.URL.Path != "/v1/audio/transcriptions" {
+		t.Fatalf("path = %q", r.URL.Path)
+	}
+	ct := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "multipart/form-data") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.FormValue("model"); got != "whisper-1" {
+		t.Fatalf("model part = %q", got)
+	}
+	f, hdr, err := r.FormFile("file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if hdr.Filename != "clip.wav" {
+		t.Fatalf("filename = %q", hdr.Filename)
+	}
+	raw, _ := io.ReadAll(f)
+	if string(raw) != "RIFFfake" {
+		t.Fatalf("file bytes = %q", raw)
+	}
+}
+
+func TestAuxRequestRefusesWhatItCannotRun(t *testing.T) {
+	for name, in := range map[string]auxBody{
+		"unknown surface": {Surface: "nope"},
+		"no file":         {Surface: "transcriptions", Model: "whisper-1"},
+		"bad base64":      {Surface: "transcriptions", Model: "w", FileB64: "!!!!"},
+		"body is a list":  {Surface: "embeddings", Body: json.RawMessage(`[1,2]`)},
+	} {
+		if _, err := auxRequest(context.Background(), in); err == nil {
+			t.Errorf("%s: want an error, got none", name)
+		}
+	}
+}
+
+func TestTheAuxEndpointReachesTheEmbeddingsSurface(t *testing.T) {
+	// Through the real executor: an embeddings body parsed as a chat
+	// completion is exactly the failure this endpoint is easy to write.
+	var path string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+		  {"object":"embedding","index":0,"embedding":[0.1,0.2]}],
+		  "model":"m","usage":{"prompt_tokens":2,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	s := testServerWithExecutor(t, upstream.URL, "m")
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "POST", "/api/playground/aux",
+		`{"surface":"embeddings","model":"m","body":{"input":"hello"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.HasSuffix(path, "/embeddings") {
+		t.Fatalf("upstream path = %q; the request did not reach the embeddings surface", path)
+	}
+}
+
+func TestTheAuxEndpointRejectsAnUnknownSurface(t *testing.T) {
+	s := testServerWithExecutor(t, "https://unused.example", "m")
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "POST", "/api/playground/aux", `{"surface":"nope"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
