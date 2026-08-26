@@ -15,6 +15,7 @@ import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { OverviewScreen } from "../features/overview/overview-screen"
 import { nav, settingsItem } from "../features/shell/nav"
 import { NotBuilt } from "../features/shell/not-built"
+import { UsageScreen } from "../features/usage/usage-screen"
 import { CommandPalette } from "../features/shell/command-palette"
 import { ScreenBoundary } from "../features/shell/screen-boundary"
 import { RequestsScreen } from "../features/requests/requests-screen"
@@ -105,9 +106,6 @@ function RootShell() {
   )
 }
 
-function UsageStub() {
-  return <NotBuilt title="Usage" />
-}
 function ProvidersStub() {
   return <NotBuilt title="Providers" />
 }
@@ -143,7 +141,7 @@ const rootRoute = createRootRoute({
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/requests", component: RequestsScreen }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/usage", component: UsageStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/usage", component: UsageScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/providers", component: ProvidersStub }),
   createRoute({ getParentRoute: () => rootRoute, path: "/providers/$id", component: ProviderStub }),
   createRoute({ getParentRoute: () => rootRoute, path: "/models", component: CatalogScreen }),
