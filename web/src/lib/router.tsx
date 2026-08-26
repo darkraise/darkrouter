@@ -10,10 +10,12 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
-import { SidebarLayout } from "darkraise-ui/layout"
-import type { NavGroup } from "darkraise-ui/layout"
+import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { OverviewScreen } from "../routes/overview"
+import { nav, settingsItem } from "../features/shell/nav"
+import { NotBuilt } from "../features/shell/not-built"
+import { CommandPalette } from "../features/shell/command-palette"
 import { RequestsScreen } from "../routes/requests"
 import { CatalogScreen } from "../routes/catalog"
 import { PlaygroundScreen } from "../routes/playground"
@@ -72,17 +74,7 @@ export const routerAdapter: RouterAdapter = {
   },
 }
 
-const nav: NavGroup[] = [
-  {
-    items: [
-      { label: "Overview", href: "/" },
-      { label: "Requests", href: "/requests" },
-      { label: "Catalog", href: "/catalog" },
-      { label: "Playground", href: "/playground" },
-      { label: "Settings", href: "/settings" },
-    ],
-  },
-]
+
 
 /**
  * RootShell is the chrome every screen renders inside.
@@ -96,11 +88,34 @@ const nav: NavGroup[] = [
 function RootShell() {
   return (
     <RouterAdapterProvider value={routerAdapter}>
-      <SidebarLayout nav={nav} showThemeSwitcher>
+      <SidebarLayout
+        nav={nav}
+        showThemeSwitcher
+        sidebarFooter={
+          <SidebarNav nav={[{ items: [settingsItem] }]} />
+        }
+      >
+        <CommandPalette />
         <Outlet />
       </SidebarLayout>
     </RouterAdapterProvider>
   )
+}
+
+function UsageStub() {
+  return <NotBuilt title="Usage" />
+}
+function ProvidersStub() {
+  return <NotBuilt title="Providers" />
+}
+function ProviderStub() {
+  return <NotBuilt title="Provider" />
+}
+function RoutingStub() {
+  return <NotBuilt title="Routing" />
+}
+function ConnectStub() {
+  return <NotBuilt title="Connect" />
 }
 
 const rootRoute = createRootRoute({
@@ -118,30 +133,21 @@ const rootRoute = createRootRoute({
   },
 })
 
-// One route per screen. Declared here rather than in a generated tree because
-// there are five of them and a generator would be more machinery than routes.
+// One route per destination in §5, plus the trace deep link. Written out
+// rather than built by a helper: a helper that takes `path: string` erases the
+// literal type TanStack infers, and every typed <Link to="/requests/$id"> in
+// the app stops compiling.
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewScreen }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/requests",
-    component: RequestsScreen,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/catalog",
-    component: CatalogScreen,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/playground",
-    component: PlaygroundScreen,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/settings",
-    component: SettingsScreen,
-  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/requests", component: RequestsScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/usage", component: UsageStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/providers", component: ProvidersStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/providers/$id", component: ProviderStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/models", component: CatalogScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/routing", component: RoutingStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/playground", component: PlaygroundScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/connect", component: ConnectStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsScreen }),
   createRoute({
     // A deep link into one trace. The drawer opens from the table, but a
     // reloaded or shared URL has to land somewhere real rather than 404.

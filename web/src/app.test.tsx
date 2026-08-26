@@ -37,6 +37,9 @@ describe("the authenticated shell", () => {
     render(<App />)
 
     expect(await screen.findByRole("link", { name: /Requests/i })).toBeInTheDocument()
-    expect(await screen.findByRole("link", { name: /Catalog/i })).toBeInTheDocument()
+    // One item from each of §5's three groups, so a rail that lost a group
+    // fails here rather than at a reader wondering where Routing went.
+    expect(await screen.findByRole("link", { name: /Models/i })).toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: /Connect/i })).toBeInTheDocument()
   })
 })
