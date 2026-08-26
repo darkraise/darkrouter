@@ -12,10 +12,11 @@ import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
-import { OverviewScreen } from "../routes/overview"
+import { OverviewScreen } from "../features/overview/overview-screen"
 import { nav, settingsItem } from "../features/shell/nav"
 import { NotBuilt } from "../features/shell/not-built"
 import { CommandPalette } from "../features/shell/command-palette"
+import { ScreenBoundary } from "../features/shell/screen-boundary"
 import { RequestsScreen } from "../routes/requests"
 import { CatalogScreen } from "../routes/catalog"
 import { PlaygroundScreen } from "../routes/playground"
@@ -96,7 +97,9 @@ function RootShell() {
         }
       >
         <CommandPalette />
-        <Outlet />
+        <ScreenBoundary>
+          <Outlet />
+        </ScreenBoundary>
       </SidebarLayout>
     </RouterAdapterProvider>
   )
