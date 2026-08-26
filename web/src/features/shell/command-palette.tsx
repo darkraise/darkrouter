@@ -89,9 +89,9 @@ export function CommandPalette() {
           ))}
         </CommandGroup>
 
-        {providers.data && providers.data.length > 0 && (
+        {providers.data && providers.data.providers.length > 0 && (
           <CommandGroup heading="Providers">
-            {providers.data.map((p) => (
+            {providers.data.providers.map((p) => (
               <CommandItem
                 key={p.id}
                 value={`provider ${p.id} ${p.name}`}

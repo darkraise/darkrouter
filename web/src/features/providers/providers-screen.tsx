@@ -82,7 +82,7 @@ export function ProvidersScreen() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(providers.data ?? []).map((p) => {
+          {(providers.data?.providers ?? []).map((p) => {
             const state = providerState(p)
             const cooling = breakersFor(health.data ?? [], p.id)
             return (

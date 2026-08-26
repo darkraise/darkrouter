@@ -92,7 +92,7 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
 export function UsageScreen() {
   const [dimension, setDimension] = useState<UsageDimension | "day">("day")
   const usage = useUsage(dimension === "day" ? undefined : dimension)
-  const rows = summarise(usage.data ?? [])
+  const rows = summarise(usage.data?.days ?? [])
 
   return (
     <>

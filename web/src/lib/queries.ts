@@ -6,14 +6,14 @@ import type {
   ConfigResponse,
   CatalogResponse,
   Overview,
-  Preset,
-  Provider,
+  PresetsResponse,
+  ProvidersResponse,
   ProxyToken,
   RequestPage,
   RequestTrace,
   Session,
   UsageDimension,
-  UsageRow,
+  UsageResponse,
 } from "./api-types"
 
 /**
@@ -81,29 +81,29 @@ export function useTrace(id: string, extra?: Extra<RequestTrace>) {
   })
 }
 
-export function useUsage(dimension?: UsageDimension, extra?: Extra<UsageRow[]>) {
+export function useUsage(dimension?: UsageDimension, extra?: Extra<UsageResponse>) {
   const query = dimension ? `?group_by=${dimension}` : ""
   return useQuery({
     queryKey: keys.usage(dimension),
-    queryFn: () => api.get<UsageRow[]>(`/api/usage${query}`),
+    queryFn: () => api.get<UsageResponse>(`/api/usage${query}`),
     refetchInterval: POLL.slow,
     ...extra,
   })
 }
 
-export function useProviders(extra?: Extra<Provider[]>) {
+export function useProviders(extra?: Extra<ProvidersResponse>) {
   return useQuery({
     queryKey: keys.providers,
-    queryFn: () => api.get<Provider[]>("/api/providers"),
+    queryFn: () => api.get<ProvidersResponse>("/api/providers"),
     refetchInterval: POLL.slow,
     ...extra,
   })
 }
 
-export function usePresets(extra?: Extra<Preset[]>) {
+export function usePresets(extra?: Extra<PresetsResponse>) {
   return useQuery({
     queryKey: keys.presets,
-    queryFn: () => api.get<Preset[]>("/api/presets"),
+    queryFn: () => api.get<PresetsResponse>("/api/presets"),
     // Shipped with the binary: it cannot change while the tab is open.
     staleTime: Infinity,
     ...extra,
