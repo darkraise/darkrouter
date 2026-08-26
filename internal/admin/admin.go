@@ -154,6 +154,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/providers/{id}/discover", s.requireCSRF(s.handleForceDiscover))
 	s.mux.HandleFunc("POST /api/catalog/sync", s.requireCSRF(s.handleForceCatalogSync))
 	s.mux.HandleFunc("POST /api/route/preview", s.requireCSRF(s.handleRoutePreview))
+
+	s.mux.HandleFunc("GET /api/aliases", s.requireSession(s.handleAliases))
+	s.mux.HandleFunc("PUT /api/aliases", s.requireCSRF(s.handlePutAliases))
+	s.mux.HandleFunc("GET /api/policy", s.requireSession(s.handlePolicy))
+	s.mux.HandleFunc("PUT /api/policy", s.requireCSRF(s.handlePutPolicy))
+	s.mux.HandleFunc("GET /api/models/{provider}/{model}/override", s.requireSession(s.handleGetOverride))
+	s.mux.HandleFunc("PUT /api/models/{provider}/{model}/override", s.requireCSRF(s.handlePutOverride))
+	s.mux.HandleFunc("DELETE /api/models/{provider}/{model}/override", s.requireCSRF(s.handleDeleteOverride))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 
 	// A mistyped API path must answer as an API path. Without these two an

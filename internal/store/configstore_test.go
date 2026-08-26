@@ -266,3 +266,70 @@ func TestOverlayConfigReplacesAliasesAndPolicyOnly(t *testing.T) {
 		t.Error("the overlay touched a block that is not its own")
 	}
 }
+
+func TestModelOverrideRoundTripsPerField(t *testing.T) {
+	// The table is per-field: an override that sets capabilities must not
+	// silently reset the context window someone else set.
+	ctx := context.Background()
+	db := migrated(t)
+	seedProviderRow(t, db, "groq")
+
+	win := 128000
+	if err := db.PutModelOverride(ctx, ModelOverride{
+		ProviderID: "groq", ModelID: "m", ContextWindow: &win,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PutModelOverride(ctx, ModelOverride{
+		ProviderID: "groq", ModelID: "m",
+		Surfaces: []string{"llm"}, ContextWindow: &win,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.ModelOverrides(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d overrides, want 1", len(got))
+	}
+	if got[0].ContextWindow == nil || *got[0].ContextWindow != win {
+		t.Errorf("context_window = %v, want %d", got[0].ContextWindow, win)
+	}
+	if len(got[0].Surfaces) != 1 || got[0].Surfaces[0] != "llm" {
+		t.Errorf("surfaces = %v", got[0].Surfaces)
+	}
+}
+
+func TestDeleteModelOverrideRemovesTheRow(t *testing.T) {
+	ctx := context.Background()
+	db := migrated(t)
+	seedProviderRow(t, db, "groq")
+
+	win := 8192
+	if err := db.PutModelOverride(ctx, ModelOverride{
+		ProviderID: "groq", ModelID: "m", ContextWindow: &win,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteModelOverride(ctx, "groq", "m"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.ModelOverrides(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("the override survived the delete: %+v", got)
+	}
+}
+
+func seedProviderRow(t *testing.T, db *DB, id string) {
+	t.Helper()
+	if err := db.CreateProvider(context.Background(), ProviderRow{
+		ID: id, Name: id, Kind: "openaicompat", BaseURL: "http://127.0.0.1:1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

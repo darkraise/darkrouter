@@ -224,7 +224,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if cold := restartOnlyIn(body.Policy); len(cold) > 0 {
 		writeError(w, http.StatusBadRequest,
-			strings.Join(cold, ", ")+" takes effect on restart and cannot be written here")
+			joinFields(cold)+" takes effect on restart and cannot be written here")
 		return
 	}
 
