@@ -161,10 +161,13 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Timeout:  cfg.Catalog.SyncTimeout,
 	})
 
+	mediaFetcher := geminiadapter.NewFetcher()
+	mediaFetcher.Inline = cfg.MediaInline()
+
 	ex := exec.New(cfgStore, src, map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),
-		"gemini":       geminiadapter.New(),
+		"gemini":       geminiadapter.NewWithFetcher(mediaFetcher),
 		"bedrock":      bedrockadapter.New(),
 		"vertex":       vertexadapter.New(),
 	}, exec.Deps{

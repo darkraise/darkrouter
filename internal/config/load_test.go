@@ -411,3 +411,41 @@ func TestParseRecordsWhichKeysTheFileCarried(t *testing.T) {
 		t.Errorf("server.proxy_listen was in the file but is not recorded: %v", c.FileKeys)
 	}
 }
+
+func TestMediaInlineDefaultsOnAndParsesOff(t *testing.T) {
+	// A pointer, so an explicit false is distinguishable from an absent key.
+	// Without that, the default could only be off.
+	on, err := Parse([]byte(minimal), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !on.MediaInline() {
+		t.Fatal("media.inline defaults to on")
+	}
+	off, err := Parse([]byte(minimal+"media:\n  inline: false\n"),
+		env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.Media.Inline == nil || *off.Media.Inline {
+		t.Fatalf("media.inline should parse false, got %v", off.Media.Inline)
+	}
+	if off.MediaInline() {
+		t.Fatal("MediaInline() must follow the explicit false")
+	}
+}
+
+func TestMediaInlineIsRestartOnly(t *testing.T) {
+	// The adapters map is built once at startup, so a reload changing this
+	// would be accepted, warn about nothing, and take effect at the next
+	// process start.
+	found := false
+	for _, f := range RestartOnly {
+		if f == "media.inline" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("media.inline missing from RestartOnly: %v", RestartOnly)
+	}
+}

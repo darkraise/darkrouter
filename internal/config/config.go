@@ -14,6 +14,7 @@ type Config struct {
 	Log     LogConfig           `yaml:"log"`
 	Capture CaptureConfig       `yaml:"capture"`
 	Catalog CatalogConfig       `yaml:"catalog"`
+	Media   MediaConfig         `yaml:"media"`
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
 	// /healthz rather than rejecting the document.
@@ -111,6 +112,9 @@ var RestartOnly = []string{
 	"policy.timeout.first_byte",
 	"catalog.sync_interval",
 	"catalog.discovery.interval",
+	// The adapters map is constructed once at startup and the Gemini adapter
+	// captures its fetcher there.
+	"media.inline",
 }
 
 // CatalogConfig governs the two background workers that keep the model catalog
@@ -121,6 +125,22 @@ type CatalogConfig struct {
 	SyncTimeout  time.Duration `yaml:"sync_timeout"`
 
 	Discovery DiscoveryConfig `yaml:"discovery"`
+}
+
+// MediaConfig governs media the gateway fetches on a client's behalf.
+//
+// Inlining means Darkrouter issues requests to client-supplied addresses,
+// which the fetcher constrains but cannot make risk-free. An operator who does
+// not want that outbound traffic needs a way to say so.
+type MediaConfig struct {
+	// Inline is a pointer so an explicit false is distinguishable from an
+	// absent key, which is what lets the default be on.
+	Inline *bool `yaml:"inline"`
+}
+
+// MediaInline reports the effective setting: absent means on.
+func (c *Config) MediaInline() bool {
+	return c.Media.Inline == nil || *c.Media.Inline
 }
 
 type DiscoveryConfig struct {
