@@ -1,9 +1,13 @@
 package admin
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
 )
@@ -164,4 +168,161 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+}
+
+// configWrite is the accepted shape of PUT /api/config. Only the two blocks
+// that live in SQLite are writable; everything else is the file's, and an
+// endpoint that pretended otherwise would accept a write it cannot keep.
+type configWrite struct {
+	Aliases map[string][]string `json:"aliases"`
+	Policy  *policyWrite        `json:"policy"`
+}
+
+type policyWrite struct {
+	Cooldown *struct {
+		TripAfter *int    `json:"trip_after"`
+		Max       *string `json:"max"`
+	} `json:"cooldown"`
+	Retry *struct {
+		MaxAttempts *int `json:"max_attempts"`
+	} `json:"retry"`
+	Timeout *struct {
+		Connect   *string `json:"connect"`
+		FirstByte *string `json:"first_byte"`
+		Total     *string `json:"total"`
+		Idle      *string `json:"idle"`
+	} `json:"timeout"`
+}
+
+// restartOnlyIn names the fields a write touched that a running process cannot
+// apply. Refused rather than accepted-with-a-warning: a file reload is an
+// operator editing a file the process watches, while this is an API answering
+// a request it can either honour or cannot.
+func restartOnlyIn(w *policyWrite) []string {
+	var out []string
+	if w == nil || w.Timeout == nil {
+		return nil
+	}
+	if w.Timeout.Connect != nil {
+		out = append(out, "policy.timeout.connect")
+	}
+	if w.Timeout.FirstByte != nil {
+		out = append(out, "policy.timeout.first_byte")
+	}
+	return out
+}
+
+func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Config == nil || s.deps.DB == nil {
+		writeError(w, http.StatusServiceUnavailable, "no configuration store")
+		return
+	}
+	var body configWrite
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if cold := restartOnlyIn(body.Policy); len(cold) > 0 {
+		writeError(w, http.StatusBadRequest,
+			strings.Join(cold, ", ")+" takes effect on restart and cannot be written here")
+		return
+	}
+
+	ctx := r.Context()
+	if body.Aliases != nil {
+		if err := config.ValidateAliases(body.Aliases); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.aliasTargetsExist(ctx, body.Aliases); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.deps.DB.PutAliases(ctx, body.Aliases); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if body.Policy != nil {
+		next := s.deps.Config.Current().Policy
+		if err := applyPolicyWrite(&next, body.Policy); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.deps.DB.PutPolicy(ctx, next); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	// Republish so the next snapshot a request takes carries the write. The
+	// overlay is what pulls it back out of SQLite.
+	if err := s.deps.Config.Reload(); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"valid": false, "error": err.Error(),
+			"serving": "the previous configuration is still serving",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+}
+
+// aliasTargetsExist rejects a chain naming a provider that is not configured.
+// The file loader cannot make this check -- at load time the providers block
+// may not have been imported yet -- but the API can, because by then the
+// provider set is in the database.
+func (s *Server) aliasTargetsExist(ctx context.Context, aliases map[string][]string) error {
+	rows, err := s.deps.DB.ProviderRows(ctx)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]bool, len(rows))
+	for _, p := range rows {
+		known[p.ID] = true
+	}
+	for name, chain := range aliases {
+		for _, target := range chain {
+			id, _, qualified := strings.Cut(target, "/")
+			// A bare model name names no provider, so there is nothing to
+			// check: the router resolves it across whatever is configured.
+			if qualified && !known[id] {
+				return fmt.Errorf("alias %q: no provider named %q", name, id)
+			}
+		}
+	}
+	return nil
+}
+
+func applyPolicyWrite(p *config.PolicyConfig, w *policyWrite) error {
+	dur := func(dst *time.Duration, v *string, field string) error {
+		if v == nil {
+			return nil
+		}
+		d, err := time.ParseDuration(*v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", field, err)
+		}
+		*dst = d
+		return nil
+	}
+	if w.Cooldown != nil {
+		if w.Cooldown.TripAfter != nil {
+			p.Cooldown.TripAfter = w.Cooldown.TripAfter
+		}
+		if err := dur(&p.Cooldown.Max, w.Cooldown.Max, "policy.cooldown.max"); err != nil {
+			return err
+		}
+	}
+	if w.Retry != nil && w.Retry.MaxAttempts != nil {
+		p.Retry.MaxAttempts = *w.Retry.MaxAttempts
+	}
+	if w.Timeout != nil {
+		if err := dur(&p.Timeout.Total, w.Timeout.Total, "policy.timeout.total"); err != nil {
+			return err
+		}
+		if err := dur(&p.Timeout.Idle, w.Timeout.Idle, "policy.timeout.idle"); err != nil {
+			return err
+		}
+	}
+	return nil
 }

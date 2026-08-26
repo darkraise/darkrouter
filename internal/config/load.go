@@ -178,18 +178,8 @@ func validate(c *Config) error {
 	if c.Policy.Retry.MaxAttempts < 1 {
 		return fmt.Errorf("policy.retry.max_attempts must be at least 1")
 	}
-	for name, targets := range c.Aliases {
-		if name == "" {
-			return fmt.Errorf("alias: name is required")
-		}
-		if len(targets) == 0 {
-			return fmt.Errorf("alias %q: at least one target is required", name)
-		}
-		for _, tgt := range targets {
-			if strings.TrimSpace(tgt) == "" {
-				return fmt.Errorf("alias %q: target must not be empty", name)
-			}
-		}
+	if err := ValidateAliases(c.Aliases); err != nil {
+		return err
 	}
 
 	seen := make(map[string]bool, len(c.Providers))
@@ -256,4 +246,24 @@ func documentKeys(data []byte) []string {
 	walk("", raw)
 	sort.Strings(out)
 	return out
+}
+
+// ValidateAliases applies the shape rules an alias chain must satisfy wherever
+// it arrives from. Exported so the admin API enforces the same rules as the
+// file rather than a second, drifting copy of them.
+func ValidateAliases(aliases map[string][]string) error {
+	for name, targets := range aliases {
+		if name == "" {
+			return fmt.Errorf("alias: name is required")
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("alias %q: at least one target is required", name)
+		}
+		for _, tgt := range targets {
+			if strings.TrimSpace(tgt) == "" {
+				return fmt.Errorf("alias %q: target must not be empty", name)
+			}
+		}
+	}
+	return nil
 }
