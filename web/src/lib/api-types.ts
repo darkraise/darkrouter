@@ -57,6 +57,14 @@ export type FailoverRow = {
   total_ms: number
 }
 
+/** Who handed work to whom. The routing graph draws a dashed return per pair;
+ *  `failovers` names only where a request ended, which cannot place an arc. */
+export type FailoverEdge = {
+  from_provider_id: string
+  to_provider_id: string
+  requests: number
+}
+
 export type Overview = {
   providers: ProviderTile[]
   requests_per_min: number
@@ -66,6 +74,7 @@ export type Overview = {
   latency: { p50_ms: number; p95_ms: number }
   series: UsageRow[]
   failovers: FailoverRow[]
+  failover_edges: FailoverEdge[]
 }
 
 // --- requests and the trace ---
