@@ -134,21 +134,25 @@ Subject: `feat(theme): expose all twelve surface ramps`
 
 `ACCENT_COLORS` is seventeen named hues. Coral — `hsl(12, 75%, 59%)`, the brand this console adopts — sits between `red` at hue 0 and `orange` at hue 25 and matches neither. The accent scale drives `--ring`, `--focus-ring`, `--chart-1..5` and the destructive branch as well as the three `--primary*` tokens, so an override is five declarations before the chart ramp even starts.
 
-- [ ] **Step 1: Write the failing test**
+**Done — `da646a5`.** Hue 12 at every stop, drifting 17→6 the way `orange` drifts 33→13. Lightness follows red's profile; saturation is red's scaled so 500 lands on the pinned `12 75% 59%`. The midpoint of the two neighbours would have been 89% saturation, which reads as a signal colour rather than a brand one.
+
+Inserting an eighteenth entry into `ACCENT_COLORS` shifts the wrap-around neighbour `resolveSfHueTokens` uses for a gradient's second hue. Decorative only, and in the changelog.
+
+- [x] **Step 1: Write the failing test**
 
 Assert `accentColors.coral` exists, that `ACCENT_COLORS` contains `"coral"`, and that the scale has all eleven stops (50–950) in the `"H S% L%"` string shape the other scales use. Assert `coral[500]` is at hue 12.
 
-- [ ] **Step 2: Run it, watch it fail**
+- [x] **Step 2: Run it, watch it fail**
 
-- [ ] **Step 3: Build the ramp**
+- [x] **Step 3: Build the ramp**
 
 Derive the eleven stops the way the neighbouring scales are derived rather than inventing values: read how `red` and `orange` step their saturation and lightness and interpolate at hue 12. `500` is fixed at `12 75% 59%` by the spec; the rest must look like a sibling of the scales around it.
 
-- [ ] **Step 4: Prove the ramp is monotonic**
+- [x] **Step 4: Prove the ramp is monotonic**
 
 Lightness must decrease from 50 to 950 with no reversal. A reversed stop is invisible in a swatch grid and produces a `--primary-fill` darker than `--primary` at one intensity only.
 
-- [ ] **Step 5: Run everything, changelog, commit**
+- [x] **Step 5: Run everything, changelog, commit**
 
 Subject: `feat(theme): add the coral accent`
 
@@ -162,17 +166,21 @@ Subject: `feat(theme): add the coral accent`
 
 The engine emits `--foreground` and `--muted-foreground` and stops. Warm Console reads a third, quieter tier for column heads, captions and unit suffixes — `--legend` in `darkrouter-ui.css`. Two tiers force either a caption that competes with body text or one that fails its contrast floor.
 
-- [ ] **Step 1: Write the failing test**
+**Done — `c7b6452`, and it was not additive.** `--muted-foreground` was ramp step 500, which measures **4.31:1** in light across the twelve ramps — already under AA on the warmer ones. One step quieter is 2.37:1, so no third tier could exist beneath it.
+
+The owner chose to compute the tiers against the background rather than snap them to steps: `--muted-foreground` targets 7:1, `--legend` targets 4.6:1. Muted text renders darker in light mode for every consumer. `--sidebar-foreground-muted` is now exactly `--muted-foreground` instead of a parallel pair of steps.
+
+- [x] **Step 1: Write the failing test**
 
 Assert `generateTokens` emits `--legend` in both modes. Assert it is quieter than `--muted-foreground` and still clears **4.5:1** against `--background` — it carries text, so the 3:1 non-text floor does not apply.
 
-- [ ] **Step 2: Run it, watch it fail**
+- [x] **Step 2: Run it, watch it fail**
 
-- [ ] **Step 3: Emit it**
+- [x] **Step 3: Emit it**
 
 Follow the polarity `--muted-foreground` already uses (light → `neutral[500]`, dark → `neutral[400]`), one step quieter, and keep the 4.5:1 floor. If one step quieter cannot clear 4.5:1 in light, the tier is the constraint and the step size gives way — say so in a comment on the value.
 
-- [ ] **Step 4: Run everything, changelog, commit**
+- [x] **Step 4: Run everything, changelog, commit**
 
 Subject: `feat(theme): emit a third text tier`
 
@@ -195,29 +203,42 @@ These are the kit's own defects, independent of Darkrouter and separate from the
 
 `--primary` is a fifth and what it measures depends on the accent: 2.74:1 at sky, 3.23:1 at the coral Task 2 adds — over the 3:1 a mark is held to, under the 4.5:1 text is. It matters more than it looks, because `dist/styles.css` documents that form controls take their focus indicator from `--primary` rather than `--focus-ring`: at 2.74:1 every text field, select and textarea in every consuming app has a sub-3:1 focus ring in light mode.
 
-- [ ] **Step 1: Write the failing test**
+**Done — `ea8110d`, four of five.** `--focus-ring`, `--success`, `--warning`, `--destructive` and `--primary` are each moved to the nearest lightness on their own hue that clears their floor, so anything already passing keeps its place on the accent ladder.
+
+**The button-label floor was deliberately left at 3:1.** Raising `FOREGROUND_MIN_RATIO` to 4.5 broke 77 tests, and not value pins: 66 assert the label *stays white* (the `VIBRANCY` notes call out that flipping to ink makes label colour vary by accent) and 11 assert light mode ignores the axis (fixing labels needs fills moved off the pinned OKLCH ladder, and light is documented as axis-independent). Worst case per step, all eighteen accents:
+
+| Step | Light | Dark |
+|---|---|---|
+| calm | 3.29 | **4.75** |
+| balanced | 3.29 | 4.10 |
+| vivid | 3.29 | 3.59 |
+| intense | 3.29 | 3.18 |
+
+`dark` + `calm` is the only combination clearing AA, which is why Darkrouter pins it. Recorded in the changelog under Known limitations; raising it is a major.
+
+- [x] **Step 1: Write the failing test**
 
 One table-driven test over every accent in `ACCENT_COLORS` and both modes, asserting each token clears its floor: 3:1 for `--focus-ring`, `--success`, `--warning` and `--primary`; 4.5:1 for `--destructive` when used as text. Drive it from the engine's own output, not from hardcoded hex — a repair that only fixes the default accent is not a repair.
 
-- [ ] **Step 2: Run it, watch it fail**
+- [x] **Step 2: Run it, watch it fail**
 
 Expected: failures across most accents, at the ratios tabulated above.
 
-- [ ] **Step 3: Raise `FOREGROUND_MIN_RATIO`**
+- [x] **Step 3: Raise `FOREGROUND_MIN_RATIO`**
 
 `pickForeground` enforces only `FOREGROUND_MIN_RATIO = 3`, which is why button labels are not AA-safe at every `accentIntensity` — `calm` emits a fill at 4.96:1 against a white label while `balanced` emits 4.37:1 and fails. Raise the floor to 4.5 and let the picker flip to ink where white no longer clears it.
 
 This changes rendered label colour on some accent/intensity pairs. That is a visible change in a minor release and belongs in the changelog under `### Fixed` with the pairs it moves.
 
-- [ ] **Step 4: Repair the four token values**
+- [x] **Step 4: Repair the four token values**
 
 Move each to the nearest stop on its own scale that clears the floor, rather than to a hand-picked hex — staying on the ramp is what keeps a repair from becoming a new palette.
 
-- [ ] **Step 5: Confirm dark mode did not regress**
+- [x] **Step 5: Confirm dark mode did not regress**
 
 The floors apply in both modes. Dark already passes; the test covers it so a light-mode repair cannot quietly break it.
 
-- [ ] **Step 6: Run everything, changelog, commit**
+- [x] **Step 6: Run everything, changelog, commit**
 
 Subject: `fix(theme): clear the light-mode contrast floors`
 
@@ -231,19 +252,23 @@ Subject: `fix(theme): clear the light-mode contrast floors`
 
 `DataTable` offers sorting, column visibility, CSV export and a single-column text filter. A 197-row provider list and a long request log want faceted filters and virtualization, and adding them here keeps Darkrouter's tables on the house component.
 
-- [ ] **Step 1: Write the failing tests**
+**Done — `e68904b`, with no new runtime dependency.** `@tanstack/react-virtual` is not installed; windowing is hand-rolled with padding rows above and below the window, which keeps the header sticky and the column widths shared. Row height is declared rather than measured because every row here is one `density` cell.
+
+Building the facet surfaced a defect in the kit: `DropdownMenuCheckboxItem` skipped `onCheckedChange` whenever `onSelect` prevented default. Preventing default is how a caller keeps the menu open, which is exactly what a multi-select needs, so such an item could never be checked. Fixed here; `ColumnVisibility` benefits too.
+
+- [x] **Step 1: Write the failing tests**
 
 Faceted filter: given a column marked facetable, the toolbar offers its distinct values with counts, selecting two shows the union, and clearing restores every row.
 
 Virtualization: given 5000 rows, the DOM holds a bounded number of row elements, scrolling changes which rows are mounted, and the accessible row count still reports 5000.
 
-- [ ] **Step 2: Run them, watch them fail**
+- [x] **Step 2: Run them, watch them fail**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Both are opt-in props, defaulting off. A consumer on 6.4.0 must get byte-identical markup after upgrading unless they pass the new props — that is what makes this a minor release.
 
-- [ ] **Step 4: Run everything, changelog, commit**
+- [x] **Step 4: Run everything, changelog, commit**
 
 Subject: `feat(data-table): add faceted filters and virtual rows`
 
