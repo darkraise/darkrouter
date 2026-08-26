@@ -85,6 +85,27 @@ func runServer(args []string) error {
 	if res.Imported {
 		log.Printf("imported %d providers from %s into the database", res.Providers, *path)
 	}
+
+	cfgRes, err := store.ImportConfigOnce(context.Background(), db, cfg)
+	if err != nil {
+		return err
+	}
+	if cfgRes.Imported {
+		log.Printf("imported %d aliases and %d policy settings from %s into the database; "+
+			"edit them through the admin API from now on",
+			cfgRes.Aliases, cfgRes.Policy, *path)
+	}
+
+	// Installed before the reload below, so the first snapshot any request can
+	// see already carries the database's aliases and policy rather than the
+	// file's.
+	cfgStore.SetOverlay(func(c *config.Config) error {
+		return store.OverlayConfig(context.Background(), db, c)
+	})
+	if err := cfgStore.Reload(); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	cfg = cfgStore.Current()
 	stale, err := store.StaleBlockWarning(context.Background(), db, cfg)
 	if err != nil {
 		return err

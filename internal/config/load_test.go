@@ -384,3 +384,30 @@ providers:
 		t.Fatalf("providers = %+v", c.Providers)
 	}
 }
+
+func TestParseRecordsWhichKeysTheFileCarried(t *testing.T) {
+	// A source marker that says "file" for a value nobody wrote is worse than
+	// no marker, so the loader records the keys the document actually had
+	// rather than letting the reader infer it from a non-zero value.
+	c, err := Parse([]byte(minimal+"\nlog:\n  retention: 96h\n"), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(key string) bool {
+		for _, k := range c.FileKeys {
+			if k == key {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("log.retention") {
+		t.Errorf("log.retention was in the file but is not recorded: %v", c.FileKeys)
+	}
+	if has("capture.bodies") {
+		t.Errorf("capture.bodies was never written but is recorded as from the file")
+	}
+	if !has("server.proxy_listen") {
+		t.Errorf("server.proxy_listen was in the file but is not recorded: %v", c.FileKeys)
+	}
+}
