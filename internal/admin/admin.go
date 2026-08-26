@@ -42,6 +42,7 @@ type Deps struct {
 	Key      *crypto.Key
 	Catalog  *catalog.Store
 	Disc     *catalog.Discoverer
+	Sync     *catalog.Syncer
 	Breaker  *health.Breaker
 	Presets  catalog.Presets
 	Warnings []string
@@ -147,6 +148,29 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
 	s.mux.HandleFunc("PUT /api/config", s.requireCSRF(s.handleConfigPut))
+
+	s.mux.HandleFunc("GET /api/health/providers", s.requireSession(s.handleHealthProviders))
+	s.mux.HandleFunc("POST /api/providers/{id}/breaker/reset", s.requireCSRF(s.handleBreakerReset))
+	s.mux.HandleFunc("POST /api/providers/{id}/discover", s.requireCSRF(s.handleForceDiscover))
+	s.mux.HandleFunc("POST /api/catalog/sync", s.requireCSRF(s.handleForceCatalogSync))
+	s.mux.HandleFunc("POST /api/route/preview", s.requireCSRF(s.handleRoutePreview))
+
+	s.mux.HandleFunc("GET /api/aliases", s.requireSession(s.handleAliases))
+	s.mux.HandleFunc("PUT /api/aliases", s.requireCSRF(s.handlePutAliases))
+	s.mux.HandleFunc("GET /api/policy", s.requireSession(s.handlePolicy))
+	s.mux.HandleFunc("PUT /api/policy", s.requireCSRF(s.handlePutPolicy))
+	s.mux.HandleFunc("GET /api/models/{provider}/{model}/override", s.requireSession(s.handleGetOverride))
+	s.mux.HandleFunc("PUT /api/models/{provider}/{model}/override", s.requireCSRF(s.handlePutOverride))
+	s.mux.HandleFunc("DELETE /api/models/{provider}/{model}/override", s.requireCSRF(s.handleDeleteOverride))
+
+	s.mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handlePatchCredential))
+	s.mux.HandleFunc("GET /api/proxy-tokens", s.requireSession(s.handleListProxyTokens))
+	s.mux.HandleFunc("POST /api/proxy-tokens", s.requireCSRF(s.handleCreateProxyToken))
+	s.mux.HandleFunc("DELETE /api/proxy-tokens/{id}", s.requireCSRF(s.handleDeleteProxyToken))
+
+	s.mux.HandleFunc("GET /api/sessions", s.requireSession(s.handleListSessions))
+	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireCSRF(s.handleDeleteSession))
+	s.mux.HandleFunc("POST /api/auth/password", s.requireCSRF(s.handleChangePassword))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 
 	// A mistyped API path must answer as an API path. Without these two an

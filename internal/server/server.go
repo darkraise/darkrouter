@@ -188,7 +188,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	adm, err := admin.New(admin.Deps{
 		DB: db, PasswordHash: passwordHash,
 		Config: cfgStore, Src: src, Key: key,
-		Catalog: cat, Disc: disc, Breaker: breaker,
+		Catalog: cat, Disc: disc, Sync: syncer, Breaker: breaker,
 		Presets: o.presets, Exec: ex,
 		Warnings: startupWarnings,
 		Flows:    flows,
@@ -297,15 +297,45 @@ func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
 // existing error handling applies.
 func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := s.store.Current().Server.ProxyToken
-		if token != "" && !constantTimeEqual(d.ProxyToken(r), token) {
-			_ = d.WriteError(w, &ir.Error{
-				Type: ir.ErrAuthentication, Message: "invalid proxy token",
-			})
+		presented := d.ProxyToken(r)
+		shared := s.store.Current().Server.ProxyToken
+
+		// The shared secret stays valid alongside per-client tokens. Removing
+		// it in the release that adds them would stop every existing client
+		// the moment an operator upgrades.
+		if shared != "" && constantTimeEqual(presented, shared) {
+			h(w, r)
 			return
 		}
-		h(w, r)
+		if ok, err := s.db.ProxyTokenValid(r.Context(), presented); err == nil && ok {
+			h(w, r)
+			return
+		}
+		// Authentication is off only when neither mechanism is configured: a
+		// gateway with proxy tokens issued must not accept an empty header
+		// just because the shared secret is unset.
+		if shared == "" && !s.hasProxyTokens(r.Context()) {
+			h(w, r)
+			return
+		}
+		_ = d.WriteError(w, &ir.Error{
+			Type: ir.ErrAuthentication, Message: "invalid proxy token",
+		})
 	}
+}
+
+// hasProxyTokens reports whether any per-client credential exists. A failure
+// to read is treated as "yes": refusing an unauthenticated request is the safe
+// answer when the store cannot say.
+func (s *Server) hasProxyTokens(ctx context.Context) bool {
+	if s.db == nil {
+		return false
+	}
+	toks, err := s.db.ProxyTokens(ctx)
+	if err != nil {
+		return true
+	}
+	return len(toks) > 0
 }
 
 // constantTimeEqual compares two secrets without leaking their lengths.

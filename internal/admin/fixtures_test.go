@@ -69,11 +69,19 @@ func testServerFullWithAliases(t *testing.T, aliases string) (*Server, *store.DB
 	if err := cfg.Reload(); err != nil {
 		t.Fatal(err)
 	}
+	src := provider.NewSQLSource(db, key)
+	cat := catalog.NewStore(db, src)
+	breaker := health.New(3, time.Minute)
 	s, err := New(Deps{
 		DB: db, PasswordHash: testHash(),
 		Config: cfg, Key: key, Presets: catalog.Embedded(),
-		Src:     provider.NewSQLSource(db, key),
-		Breaker: health.New(3, time.Minute),
+		Src:     src,
+		Breaker: breaker,
+		Catalog: cat,
+		// Trigger never blocks and SyncOnce is a single call, so both are
+		// exercised without a running worker behind them.
+		Disc: catalog.NewDiscoverer(db, src, cat, breaker, catalog.DiscoveryOptions{}),
+		Sync: catalog.NewSyncer(db, src, cat, catalog.SyncOptions{}),
 	})
 	if err != nil {
 		t.Fatal(err)

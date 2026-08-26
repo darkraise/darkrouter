@@ -49,7 +49,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if !VerifyPassword(s.deps.PasswordHash, body.Password) {
+	if !VerifyPassword(s.currentPasswordHash(r.Context()), body.Password) {
 		// One message for both a wrong password and an unconfigured hash: an
 		// operator reading "no password is set" learns the port is open.
 		writeError(w, http.StatusUnauthorized, "invalid password")

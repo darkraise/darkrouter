@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -318,5 +319,59 @@ func OverlayConfig(ctx context.Context, d *DB, cfg *config.Config) error {
 		return err
 	}
 	cfg.Aliases = aliases
+	return nil
+}
+
+// PutModelOverride writes the operator's correction for one (provider, model).
+//
+// Every column is written, including the nil ones. The row is the whole
+// override rather than a patch: a caller that wanted to keep a field reads the
+// row first, and leaving a stale value behind because this call did not
+// mention it would be the harder failure to see.
+func (d *DB) PutModelOverride(ctx context.Context, o ModelOverride) error {
+	var surfaces, caps any
+	if len(o.Surfaces) > 0 {
+		b, err := json.Marshal(o.Surfaces)
+		if err != nil {
+			return fmt.Errorf("encode override surfaces: %w", err)
+		}
+		surfaces = string(b)
+	}
+	if o.Capabilities != nil {
+		b, err := json.Marshal(o.Capabilities)
+		if err != nil {
+			return fmt.Errorf("encode override capabilities: %w", err)
+		}
+		caps = string(b)
+	}
+	var window any
+	if o.ContextWindow != nil {
+		window = *o.ContextWindow
+	}
+
+	_, err := d.Write.ExecContext(ctx,
+		`INSERT INTO model_overrides
+		     (provider_id, model_id, surfaces, capabilities, context_window)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(provider_id, model_id) DO UPDATE SET
+		     surfaces = excluded.surfaces,
+		     capabilities = excluded.capabilities,
+		     context_window = excluded.context_window`,
+		o.ProviderID, o.ModelID, surfaces, caps, window)
+	if err != nil {
+		return fmt.Errorf("write model override %s/%s: %w", o.ProviderID, o.ModelID, err)
+	}
+	return nil
+}
+
+// DeleteModelOverride removes a correction, returning the merged catalog to
+// whatever the upstream itself reports.
+func (d *DB) DeleteModelOverride(ctx context.Context, providerID, modelID string) error {
+	_, err := d.Write.ExecContext(ctx,
+		`DELETE FROM model_overrides WHERE provider_id = ? AND model_id = ?`,
+		providerID, modelID)
+	if err != nil {
+		return fmt.Errorf("delete model override %s/%s: %w", providerID, modelID, err)
+	}
 	return nil
 }
