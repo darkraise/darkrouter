@@ -95,12 +95,16 @@ type TimeoutConfig struct {
 //
 // max_body_bytes is deliberately absent: the executor reads it from a fresh
 // per-request snapshot, so it does hot-reload. connect and first_byte are
-// listed because they configure a shared http.Transport built once at startup.
+// listed because they configure a shared http.Transport built once at startup,
+// and the two catalog intervals for the same reason one step out: each worker
+// captures its interval into an options struct when it is constructed.
 var RestartOnly = []string{
 	"server.proxy_listen",
 	"server.admin_listen",
 	"policy.timeout.connect",
 	"policy.timeout.first_byte",
+	"catalog.sync_interval",
+	"catalog.discovery.interval",
 }
 
 // CatalogConfig governs the two background workers that keep the model catalog
