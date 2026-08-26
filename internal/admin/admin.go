@@ -146,6 +146,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/requests/{id}", s.requireSession(s.handleRequestTrace))
 
 	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
+	s.mux.HandleFunc("PUT /api/config", s.requireCSRF(s.handleConfigPut))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 
 	// A mistyped API path must answer as an API path. Without these two an

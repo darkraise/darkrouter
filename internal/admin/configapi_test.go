@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -101,5 +102,85 @@ func TestConfigNeverEchoesACredential(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "api_key") {
 		t.Errorf("the config response names api_key:\n%s", w.Body.String())
+	}
+}
+
+func TestPutConfigWritesAliasesAndTheyTakeEffect(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"aliases":{"fast":["groq/llama"]}}`)
+	if w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	stored, err := db.Aliases(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored["fast"]) != 1 {
+		t.Fatalf("aliases in the database = %v", stored)
+	}
+	// The point of the overlay: the next snapshot a request takes carries it.
+	if got := s.deps.Config.Current().Aliases["fast"]; len(got) != 1 {
+		t.Errorf("the live config does not carry the write: %v",
+			s.deps.Config.Current().Aliases)
+	}
+}
+
+func TestPutConfigRejectsAnUnknownProvider(t *testing.T) {
+	// The same validation Load applies. Without it the database becomes a way
+	// to store a configuration the file would have refused.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"aliases":{"fast":["nosuch/model"]}}`)
+	if w.Code != 400 {
+		t.Fatalf("PUT = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "nosuch") {
+		t.Errorf("the error does not name the offending target: %s", w.Body.String())
+	}
+}
+
+func TestPutConfigRefusesARestartOnlyField(t *testing.T) {
+	// Refused, not accepted-with-a-warning. A file reload is an operator
+	// editing a file the process watches; this is an API accepting a request
+	// it can honour or cannot.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"policy":{"timeout":{"connect":"5s"}}}`)
+	if w.Code != 400 {
+		t.Fatalf("PUT = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "restart") {
+		t.Errorf("the refusal does not say why: %s", w.Body.String())
+	}
+}
+
+func TestPutConfigWritesAHotReloadablePolicyField(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"policy":{"retry":{"max_attempts":5}}}`)
+	if w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	if got := s.deps.Config.Current().Policy.Retry.MaxAttempts; got != 5 {
+		t.Errorf("max_attempts = %d, want 5", got)
+	}
+}
+
+func TestPutConfigNeedsASession(t *testing.T) {
+	s, _ := testServerFull(t)
+	r := httptest.NewRequest("PUT", "/api/config",
+		strings.NewReader(`{"aliases":{}}`))
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Fatalf("unauthenticated PUT = %d, want 401", w.Code)
 	}
 }
