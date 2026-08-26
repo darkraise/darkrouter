@@ -33,9 +33,15 @@ export function ladderRows(
     mark: markFor(a),
     target: `${a.provider}/${a.model}`,
     reasonCode: a.status_code > 0 ? String(a.status_code) : a.outcome,
-    reasonProse:
-      a.error ||
-      `${a.latency_ms.toLocaleString()}ms attempt${a.path ? ` · ${a.path}` : ""}`,
+    reasonProse: [
+      a.error || `${a.latency_ms.toLocaleString()}ms attempt`,
+      a.path || "",
+      // A failed attempt that burned tokens still cost money, and the ladder
+      // row is the only place that spend is attributable to a provider.
+      a.cost_micros === null ? "" : `$${(a.cost_micros / 1_000_000).toFixed(4)}`,
+    ]
+      .filter(Boolean)
+      .join(" · "),
     latencyPx: Math.max(2, (a.latency_ms / slowest) * MAX_BAR),
     // Everything after the attempt that served was never sent.
     terminated: servedAt !== -1 && i > servedAt,
@@ -84,6 +90,14 @@ export function TraceDrawer({
                 >
                   {trace.data.status}
                 </Badge>
+              </dd>
+              <dt className="text-[hsl(var(--legend))]">Cost</dt>
+              <dd className="font-mono">
+                {/* Unpriced is not free: a model with no catalog price cost an
+                    unknown amount, and $0.0000 would be a different claim. */}
+                {trace.data.cost_micros === null
+                  ? "—"
+                  : `$${(trace.data.cost_micros / 1_000_000).toFixed(4)}`}
               </dd>
               <dt className="text-[hsl(var(--legend))]">Tokens</dt>
               <dd className="font-mono">

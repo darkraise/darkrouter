@@ -79,6 +79,20 @@ function AliasEditor({ aliases }: { aliases: Aliases }) {
         ))}
       </div>
       <div className="mt-4 flex gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            // An operator with no aliases has to be able to make their first
+            // one here; an editor that only edits what exists cannot be the
+            // only way in.
+            const name = window.prompt("Alias name")?.trim()
+            if (!name) return
+            setDraft((d) => (name in d ? d : { ...d, [name]: [] }))
+          }}
+        >
+          Add chain
+        </Button>
         <Button size="sm" onClick={() => save.mutate(draft)}>
           Save
         </Button>

@@ -1,9 +1,11 @@
+import { useState } from "react"
 import { useParams } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
   Badge,
   Button,
   Card,
+  Input,
   Table,
   TableBody,
   TableCell,
@@ -21,6 +23,20 @@ export function ProviderDetail() {
   const providers = useProviders()
   const health = useProviderHealth()
   const provider = providers.data?.find((p) => p.id === id)
+  const [draftName, setDraftName] = useState<string | null>(null)
+  const [draftPriority, setDraftPriority] = useState<string | null>(null)
+
+  const rename = useApiMutation({
+    mutationFn: (vars: { name: string; priority: number }) =>
+      api.patch(`/api/providers/${id}`, vars),
+    success: "Provider updated",
+    invalidates: [keys.providers],
+  })
+  const toggle = useApiMutation({
+    mutationFn: (enabled: boolean) => api.patch(`/api/providers/${id}`, { enabled }),
+    success: "Provider updated",
+    invalidates: [keys.providers, keys.overview],
+  })
 
   const patch = useApiMutation({
     mutationFn: (vars: { keyId: string; enabled: boolean }) =>
@@ -68,6 +84,45 @@ export function ProviderDetail() {
           <dt className="text-[hsl(var(--legend))]">Auth</dt>
           <dd className="font-mono text-xs">{provider.auth_style}</dd>
         </dl>
+      </Card>
+
+      <Card className="mb-6 p-4">
+        <h2 className="mb-3 text-sm font-medium">Rename and reprioritise</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={draftName ?? provider.name}
+            onChange={(e) => setDraftName(e.target.value)}
+            placeholder="display name"
+            className="w-64"
+          />
+          <Input
+            value={draftPriority ?? String(provider.priority)}
+            onChange={(e) => setDraftPriority(e.target.value)}
+            placeholder="priority"
+            className="w-28"
+            inputMode="numeric"
+          />
+          <Button
+            size="sm"
+            onClick={() =>
+              rename.mutate({
+                name: draftName ?? provider.name,
+                priority: Number(draftPriority ?? provider.priority) || 0,
+              })
+            }
+          >
+            Save
+          </Button>
+          {/* Disabling is a routing decision, not a deletion: the provider and
+              its credentials stay, and the router stops choosing it. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => toggle.mutate(!provider.enabled)}
+          >
+            {provider.enabled ? "Disable" : "Enable"}
+          </Button>
+        </div>
       </Card>
 
       <h2 className="mb-2 text-sm font-medium">Credentials</h2>
