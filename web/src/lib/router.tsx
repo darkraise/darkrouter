@@ -14,16 +14,17 @@ import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { OverviewScreen } from "../features/overview/overview-screen"
 import { nav, settingsItem } from "../features/shell/nav"
-import { NotBuilt } from "../features/shell/not-built"
 import { UsageScreen } from "../features/usage/usage-screen"
 import { ProvidersScreen } from "../features/providers/providers-screen"
+import { ProviderDetail } from "../features/providers/provider-detail"
 import { ModelsScreen } from "../features/models/models-screen"
 import { RoutingScreen } from "../features/routing/routing-screen"
+import { ConnectScreen } from "../features/connect/connect-screen"
+import { PlaygroundScreen } from "../features/playground/playground-screen"
 import { CommandPalette } from "../features/shell/command-palette"
 import { ScreenBoundary } from "../features/shell/screen-boundary"
 import { RequestsScreen } from "../features/requests/requests-screen"
-import { PlaygroundScreen } from "../routes/playground"
-import { SettingsScreen } from "../routes/settings"
+import { SettingsScreen } from "../features/settings/settings-screen"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -108,13 +109,6 @@ function RootShell() {
   )
 }
 
-function ProviderStub() {
-  return <NotBuilt title="Provider" />
-}
-function ConnectStub() {
-  return <NotBuilt title="Connect" />
-}
-
 const rootRoute = createRootRoute({
   component: RootShell,
   // Every route inherits an open string-record search schema, because §5 puts
@@ -139,11 +133,11 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/requests", component: RequestsScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/usage", component: UsageScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/providers", component: ProvidersScreen }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/providers/$id", component: ProviderStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/providers/$id", component: ProviderDetail }),
   createRoute({ getParentRoute: () => rootRoute, path: "/models", component: ModelsScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/routing", component: RoutingScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/playground", component: PlaygroundScreen }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/connect", component: ConnectStub }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/connect", component: ConnectScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsScreen }),
   createRoute({
     // A deep link into one trace. The drawer opens from the table, but a
