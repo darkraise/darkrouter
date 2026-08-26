@@ -29,11 +29,15 @@ dependency graph. Plans live in `docs/superpowers/plans/`.
 | §13 slice | Covers | Plan | Status |
 |---|---|---|---|
 | 3(a) | §8.3 cost and attempt accounting, the `usage_daily` alias migration, the §8.2 usage and overview extensions | `2026-08-25-phase11a-*` | Done |
-| 3(b) | §8.1 aliases and policy into SQLite, `GET`/`PUT /api/config` | none — the missing 11b | **Not started** |
-| 3(c) | The twelve new endpoints in §8.4's order | none | **Not started** |
+| 3(b) | §8.1 aliases and policy into SQLite, `GET`/`PUT /api/config` | `2026-08-26-phase11b-aliases-policy-config.md` | Done |
+| 3(c) | The twelve new endpoints in §8.4's order | `2026-08-26-phase11d-admin-endpoints.md` | Done |
 
 The `11c` label went to a review-fix plan for 11a rather than to slice 3(c), so
 the letters and the slices are out of step. Read the table, not the letters.
+
+§13's other two steps: step 1 is `darkraise-ui` 6.5.0, released 2026-08-26 and
+planned in `2026-08-26-phase12-darkraise-ui-650.md`. Step 4, the console
+itself, has not started.
 
 Everything from phase 10 onward was merged to `master` on 2026-08-26 as
 `fc3f36d`. Nothing has been pushed to `origin`.
@@ -1195,6 +1199,71 @@ The rollup finalizes a day before freezing it, which needs the previous day to
 still be present when the sweeper runs; a shorter retention would let a day be
 pruned before it was ever rolled up. The floor replaced a guard in the rollup
 that tried to defend the same invariant from the wrong end.
+
+## Phase 12 — the console's prerequisites
+
+Three slices landed on 2026-08-26, all merged to `master`.
+
+**`darkraise-ui` 6.5.0** (§13 step 1, a separate repository at
+`/root/repositories/darkraise-web-template`). Five capabilities the console
+needed from the library's own axes rather than from an override block: all
+twelve neutral surface ramps selectable, a `coral` accent, a third text tier,
+the light-mode contrast floors cleared, and `DataTable` faceted filters and
+virtual rows. Released by pushing `master`, which triggers a trusted-publishing
+workflow that derives the version from the commits since the last tag.
+
+Two of those changed rendered output for every consumer, and both are in the
+library's changelog rather than only here:
+
+- **The text tiers are computed against the background instead of snapped to
+  ramp steps.** `--muted-foreground` was step 500, measuring 4.31:1 in light
+  across the twelve ramps — already under AA on the warmer ones — and one step
+  quieter is 2.37:1, so no third tier could exist beneath it. Muted text now
+  renders darker in light mode.
+- **`DropdownMenuCheckboxItem` no longer cancels a toggle when `onSelect`
+  prevents default.** Preventing default is how a caller keeps the menu open,
+  which is what a multi-select needs, so such an item could never be checked.
+
+**The button-label contrast floor was deliberately left at 3:1.** Raising it to
+AA broke 77 tests encoding two design decisions — that a label stays white
+rather than varying by accent, and that light mode ignores the vibrancy axis.
+`dark` + `calm` at 4.75:1 is the only combination clearing AA, which is why
+Darkrouter pins it. Recorded in the library's changelog under Known
+limitations; raising it is a major.
+
+**Slice 3(b) — aliases, policy and the config API.** Both blocks now live in
+SQLite, imported once from the YAML and authoritative after that, exactly as
+`providers:` already is. No reader changed: `router`, `exec`, `server` and
+`admin` still read them through `config.Store.Current()`, and the values are
+overlaid before each snapshot is published. `internal/config` may not import
+`internal/store` — store imports config, and the reverse closes a cycle — so
+the overlay lives in `store` and is injected as a function.
+
+**Slice 3(c) — the twelve endpoints.** Route preview shares the executor's own
+`RouteSnapshot` and the router's own `Resolve`, because §12 states its criterion
+as an equality and two constructions of "the same inputs" would drift. Proxy
+tokens are hashed with SHA-256 rather than the admin password's KDF: the token
+is 256 bits this process generated, so there is nothing to brute-force, and a
+slow hash on the proxy hot path would be a self-inflicted denial of service.
+
+### Three things a future reader will need
+
+**`server.proxy_token` was not removed.** §8.2 says per-client tokens replace
+it, but removing it in the release that adds them would stop every existing
+client on upgrade. Both are accepted, and authentication is off only when
+neither exists — a gateway with tokens issued does not accept an empty header
+just because the shared secret is unset.
+
+**A `PUT` refuses a restart-only field; a file reload warns about it.** The
+contracts differ on purpose. A reload is an operator editing a file the process
+watches, so the change is already made and a warning is the only honest answer.
+An API request can be refused before anything happens.
+
+**The `config.RestartOnly` defect the mockups found is closed.**
+`catalog.sync_interval` and `catalog.discovery.interval` are restart-only in
+behaviour — each worker captures its interval at construction — and were absent
+from the list, so a reload changing either was accepted and warned about
+nothing.
 
 ## Review history
 
