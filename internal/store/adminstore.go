@@ -767,3 +767,47 @@ func (d *DB) DeleteSessionsExcept(ctx context.Context, keep string) (int, error)
 	n, err := res.RowsAffected()
 	return int(n), err
 }
+
+// FailoverEdge counts requests that reached `ToProviderID` after
+// `FromProviderID` refused them.
+type FailoverEdge struct {
+	FromProviderID string `json:"from_provider_id"`
+	ToProviderID   string `json:"to_provider_id"`
+	Requests       int64  `json:"requests"`
+}
+
+// FailoverEdges aggregates who handed work to whom over the window.
+//
+// RecentFailovers answers "which requests failed over" and names only where
+// they ended. The overview's routing graph draws a return from the provider
+// that refused to the one that served, which needs the pair -- so this walks
+// the attempts rather than the request rows.
+func (d *DB) FailoverEdges(ctx context.Context, window time.Duration) ([]FailoverEdge, error) {
+	since := time.Now().Add(-window).UnixMilli()
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT failed.provider_id, served.provider_id, count(*)
+		   FROM request_attempts failed
+		   JOIN request_attempts served
+		     ON served.request_id = failed.request_id
+		    AND served.outcome = 'success'
+		   JOIN requests r ON r.id = failed.request_id
+		  WHERE r.ts >= ?
+		    AND failed.outcome <> 'success'
+		    AND failed.provider_id <> served.provider_id
+		  GROUP BY failed.provider_id, served.provider_id
+		  ORDER BY count(*) DESC, failed.provider_id, served.provider_id`, since)
+	if err != nil {
+		return nil, fmt.Errorf("failover edges: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []FailoverEdge{}
+	for rows.Next() {
+		var e FailoverEdge
+		if err := rows.Scan(&e.FromProviderID, &e.ToProviderID, &e.Requests); err != nil {
+			return nil, fmt.Errorf("scan failover edge: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

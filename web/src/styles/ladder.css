@@ -1,0 +1,271 @@
+/* The routing ladder.
+ *
+ * Bespoke to Darkrouter: it draws a routing decision, which is not something a
+ * component library has an opinion about. The markup is fragment 01 of the
+ * approved mockups, copied rather than reimplemented; these are its rules.
+ *
+ * The mockups' token names collide with darkraise-ui's -- both call something
+ * --border -- and redefining one in terms of itself is a cycle at
+ * computed-value time. Every token is therefore prefixed and resolved once
+ * here from the library's own, so the ladder follows the theme rather than
+ * pinning a palette beside it.
+ */
+.ladder {
+  --lad-surface: hsl(var(--card));
+  --lad-border: hsl(var(--border));
+  --lad-border-subtle: hsl(var(--border) / 0.5);
+  --lad-ink: hsl(var(--foreground));
+  --lad-ink-muted: hsl(var(--muted-foreground));
+  --lad-legend: hsl(var(--legend));
+  --lad-radius: var(--radius);
+  --lad-radius-pill: 9999px;
+  --lad-row-h: 36px;
+  --lad-pad: 16px;
+
+  /* Amber and red here are the two carve-outs the design language names:
+     cooling is a credential's state, failed is an attempt's outcome. Nothing
+     else in the gutter may carry a state colour. */
+  --lad-cooling: hsl(var(--warning));
+  --lad-failed: hsl(var(--destructive));
+
+  /* The router's own colour, distinct from every state colour because a mark
+     reports what the router decided rather than what a provider is. Coral is
+     brand only and deliberately not used here. */
+  --lad-trace: hsl(var(--primary));
+  --lad-trace-fill: hsl(var(--primary) / 0.18);
+}
+
+/* The routing fallback ladder: one row per provider attempt, a spine
+   running through the gutter, and a mark per row for what happened. A
+   ladder mark reports what the ROUTER decided (trace/sky), not what a
+   provider is (state colours) — except cooling, which the spec carves out
+   as one of the two places amber is allowed, and failed, which reports an
+   attempt's outcome rather than a routing choice. */
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  background: var(--lad-surface);
+  border: 1px solid var(--lad-border);
+  border-radius: var(--lad-radius);
+}
+
+.ladder-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--lad-row-h);
+  padding: 0 var(--lad-pad);
+  border-bottom: 1px solid var(--lad-border-subtle);
+}
+.ladder-row:last-child { border-bottom: none; }
+
+/* Where the request landed: a value step plus a 1px --trace rule down the
+   left edge, so the served row reads as the one the eye should stop on
+   without needing to read a single character of it. */
+.ladder-row-served { border-left: 1px solid var(--lad-trace); }
+.ladder-row-served::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--lad-trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+/* Two-digit zero-padding keeps the gutter's optical width constant past
+   rank nine, which matters once a ladder runs past 9 candidates. */
+.rank {
+  position: relative;
+  min-width: 28px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--lad-legend);
+  text-align: right;
+}
+/* A tick drawn into the spine's approach, not onto the spine itself — sits
+   in the 8px gap .ladder-row's flex gap already reserves, so it needs no
+   layout space of its own. Opt-in per rank (.rank-tick) rather than a bare
+   .rank rule, since a ladder with no .spine has nothing for the tick to
+   run into. Every fifth rank gets the long variant. */
+.rank-tick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  width: 3px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--lad-legend);
+}
+.rank-tick-major::after { width: 5px; }
+/* Below the served row a candidate's text is still printed, just at the
+   45% opacity the termination rule puts on it — the spine and mark get
+   their own colour treatment instead, so this is text-only and shared
+   across whichever element in the row needs it (rank, target, reason). */
+.text-terminated { opacity: 0.45; }
+
+.spine {
+  align-self: stretch;
+  width: 1px;
+  background: var(--lad-border);
+}
+/* The termination rule: below the served row the run of ink itself gives
+   out, not just the marks sitting on it. */
+.spine-terminated { background: var(--lad-border-subtle); }
+
+/* All four states share one 7px silhouette footprint so the gutter column
+   never jitters between rows, and split into two families: filled means an
+   attempt happened (served or failed), hollow means it did not (skipped or
+   cooling). Silhouette carries the meaning in greyscale; colour is a second
+   channel on top of it, never the only one. */
+.mark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--lad-legend);
+}
+/* Passed over without an attempt: hollow, 1px --legend stroke, no fill —
+   neither a routing decision nor a health report, so it carries no state
+   colour, and its hollow silhouette matches "no attempt occurred" rather
+   than the filled attempt outcomes below. */
+.mark-skipped { background: transparent; border: 1px solid var(--lad-legend); }
+/* The one other place amber is allowed, per the colour-discipline rule.
+   A centre dot gives it a second, shape-based channel distinct from
+   .mark-skipped's plain hollow ring, since stroke weight alone (1px vs
+   2px) is the weakest pairing in the greyscale proof — the dot reads as
+   "something is still in there, waiting" even with the amber stripped. */
+.mark-cooling {
+  position: relative;
+  background: transparent;
+  border: 2px solid var(--lad-cooling);
+}
+.mark-cooling::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--lad-cooling);
+}
+/* This attempt errored — an outcome for that provider, not a routing
+   choice, so it takes the failed state colour. */
+.mark-failed { background: var(--lad-failed); }
+/* Where the request landed: the router's decision, so trace, never a
+   state colour. */
+.mark-served { background: var(--lad-trace-fill); border: 1px solid var(--lad-trace); }
+/* Below the served row a candidate was never reached at all — a smaller,
+   dimmer silhouette than "skipped", which was still a live decision.
+   This one is just where the ink runs out. */
+.mark-terminated {
+  /* Scaled with the base mark when it went 7px -> 8px. The ratio is what
+     carries the reading: a terminated mark is visibly smaller than a live
+     one, and at 5px against an 8px base it had drifted to merely tiny. */
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  border: 1px solid var(--lad-border-subtle);
+}
+/* The compressed catalog reading: rank plus mark plus provider id only,
+   at a size step up from the ladder's own 7px so a dense column of them
+   still reads as individual marks rather than a smear. */
+.mark-catalog { width: 10px; height: 10px; }
+
+/* The router expands one candidate per (provider, credential, model), so
+   a provider with two configured keys legitimately earns two rows. This
+   footnotes the second (and later) row rather than letting it read as an
+   accidental duplicate — legend weight, off to the side of the id. */
+.credential-tag {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--lad-legend);
+}
+
+/* Solid means the row ended here; dashed means the router moved past it
+   after a failure. A background gradient gives an exact 3px-on-3px dash
+   at any zoom level, which border-style: dashed does not guarantee. */
+.stub {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 1px;
+  background: var(--lad-trace);
+}
+.stub-dashed {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--lad-failed) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.reason {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--lad-ink-muted);
+}
+.reason-code {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--lad-ink);
+}
+.reason-prose {
+  min-width: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--lad-ink-muted);
+}
+
+/* The candidate identity itself — provider/model, off the wire, so mono.
+   Fixed width keeps it a column across rows whose reason text varies
+   wildly in length. */
+.target {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  min-width: 230px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--lad-ink);
+  white-space: nowrap;
+}
+/* A candidate the router passed over keeps its identity legible but
+   unemphasised — nothing happened here, so nothing should draw the eye. */
+.target-muted { color: var(--lad-ink-muted); }
+
+/* A 2px bar in the row's own right margin, width set per row from the
+   ladder's own maximum latency — the ladder becomes a waterfall with no
+   second axis to read. */
+.latency-bar{
+  flex: 0 0 auto;
+  align-self: center;
+  height: 2px;
+  min-width: 2px;
+  max-width: 64px;
+  margin-left: auto;
+  border-radius: var(--lad-radius-pill);
+  background: var(--lad-trace);
+}
+.latency-bar-failed { background: var(--lad-failed); }
+
+/* The evidence panel: the same retrospective ladder with every hue
+   stripped, so the four mark states have to stand on silhouette alone. */
+.ladder-grayscale { filter: grayscale(1); }
+/* --- Console chrome ---------------------------------------------------
+   The 9router shell: a 288px vibrancy sidebar with an icon-led nav, a tall
+   header carrying the page name over its route, and a content pane that
+   caps its measure rather than filling the window. */

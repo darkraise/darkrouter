@@ -10,14 +10,21 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
-import { SidebarLayout } from "darkraise-ui/layout"
-import type { NavGroup } from "darkraise-ui/layout"
+import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
-import { OverviewScreen } from "../routes/overview"
-import { RequestsScreen } from "../routes/requests"
-import { CatalogScreen } from "../routes/catalog"
-import { PlaygroundScreen } from "../routes/playground"
-import { SettingsScreen } from "../routes/settings"
+import { OverviewScreen } from "../features/overview/overview-screen"
+import { nav, settingsItem } from "../features/shell/nav"
+import { UsageScreen } from "../features/usage/usage-screen"
+import { ProvidersScreen } from "../features/providers/providers-screen"
+import { ProviderDetail } from "../features/providers/provider-detail"
+import { ModelsScreen } from "../features/models/models-screen"
+import { RoutingScreen } from "../features/routing/routing-screen"
+import { ConnectScreen } from "../features/connect/connect-screen"
+import { PlaygroundScreen } from "../features/playground/playground-screen"
+import { CommandPalette } from "../features/shell/command-palette"
+import { ScreenBoundary } from "../features/shell/screen-boundary"
+import { RequestsScreen } from "../features/requests/requests-screen"
+import { SettingsScreen } from "../features/settings/settings-screen"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -72,17 +79,7 @@ export const routerAdapter: RouterAdapter = {
   },
 }
 
-const nav: NavGroup[] = [
-  {
-    items: [
-      { label: "Overview", href: "/" },
-      { label: "Requests", href: "/requests" },
-      { label: "Catalog", href: "/catalog" },
-      { label: "Playground", href: "/playground" },
-      { label: "Settings", href: "/settings" },
-    ],
-  },
-]
+
 
 /**
  * RootShell is the chrome every screen renders inside.
@@ -96,39 +93,52 @@ const nav: NavGroup[] = [
 function RootShell() {
   return (
     <RouterAdapterProvider value={routerAdapter}>
-      <SidebarLayout nav={nav} showThemeSwitcher>
-        <Outlet />
+      <SidebarLayout
+        nav={nav}
+        showThemeSwitcher
+        sidebarFooter={
+          <SidebarNav nav={[{ items: [settingsItem] }]} />
+        }
+      >
+        <CommandPalette />
+        <ScreenBoundary>
+          <Outlet />
+        </ScreenBoundary>
       </SidebarLayout>
     </RouterAdapterProvider>
   )
 }
 
-const rootRoute = createRootRoute({ component: RootShell })
+const rootRoute = createRootRoute({
+  component: RootShell,
+  // Every route inherits an open string-record search schema, because §5 puts
+  // every filter in the URL and the filters differ per screen. Empty values
+  // are dropped on the way in, so ?provider= and no provider key are the same
+  // state rather than two.
+  validateSearch: (search: Record<string, unknown>): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(search)) {
+      if (typeof v === "string" && v !== "") out[k] = v
+    }
+    return out
+  },
+})
 
-// One route per screen. Declared here rather than in a generated tree because
-// there are five of them and a generator would be more machinery than routes.
+// One route per destination in §5, plus the trace deep link. Written out
+// rather than built by a helper: a helper that takes `path: string` erases the
+// literal type TanStack infers, and every typed <Link to="/requests/$id"> in
+// the app stops compiling.
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewScreen }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/requests",
-    component: RequestsScreen,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/catalog",
-    component: CatalogScreen,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/playground",
-    component: PlaygroundScreen,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/settings",
-    component: SettingsScreen,
-  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/requests", component: RequestsScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/usage", component: UsageScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/providers", component: ProvidersScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/providers/$id", component: ProviderDetail }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/models", component: ModelsScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/routing", component: RoutingScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/playground", component: PlaygroundScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/connect", component: ConnectScreen }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsScreen }),
   createRoute({
     // A deep link into one trace. The drawer opens from the table, but a
     // reloaded or shared URL has to land somewhere real rather than 404.

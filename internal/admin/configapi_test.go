@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // configBody is the shape GET /api/config returns: every block, each value
@@ -183,4 +186,57 @@ func TestPutConfigNeedsASession(t *testing.T) {
 	if w.Code != 401 {
 		t.Fatalf("unauthenticated PUT = %d, want 401", w.Code)
 	}
+}
+
+func TestOverviewCarriesFailoverEdges(t *testing.T) {
+	// The routing graph draws a return from the provider that refused to the
+	// one that served. RecentFailovers names only where a request ended, so
+	// without the pair the arcs cannot be drawn truthfully.
+	s, db := testServerFull(t)
+	seedFailover(t, db)
+
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/overview", "")
+	if w.Code != 200 {
+		t.Fatalf("GET /api/overview = %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Edges []struct {
+			From     string `json:"from_provider_id"`
+			To       string `json:"to_provider_id"`
+			Requests int64  `json:"requests"`
+		} `json:"failover_edges"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Edges) != 1 {
+		t.Fatalf("failover_edges = %+v, want one pair", body.Edges)
+	}
+	if body.Edges[0].From != "groq" || body.Edges[0].To != "together" {
+		t.Errorf("edge = %+v, want groq -> together", body.Edges[0])
+	}
+}
+
+func TestOverviewFailoverEdgesIsAnArray(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/overview", "")
+	if !strings.Contains(w.Body.String(), `"failover_edges":[]`) {
+		t.Errorf("an empty edge set did not serialize as []: %s", w.Body.String())
+	}
+}
+
+// seedFailover writes one request that groq refused and together served.
+func seedFailover(t *testing.T, db *store.DB) {
+	t.Helper()
+	db.WriteBatchForTest(t, []*store.RequestRecord{{
+		ID: "01FAILOVER", TS: time.Now(), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", FinalProviderID: "together", FinalModel: "m",
+		Status: "success",
+		Attempts: []store.AttemptRecord{
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider"},
+			{Seq: 2, ProviderID: "together", Model: "m", Outcome: "success"},
+		},
+	}})
 }
