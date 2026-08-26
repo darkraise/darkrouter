@@ -15,7 +15,7 @@ agentrouter:
     style: x-api-key
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: agentrouter
   free_tier: true
   website: https://agentrouter.org
 agnes:
@@ -26,7 +26,7 @@ agnes:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: agnes
   free_tier: true
   website: https://agnes-ai.com
 ai21:
@@ -2083,7 +2083,6 @@ vercel-ai-gateway:
 vertex:
   name: Google Vertex AI
   kind: vertex
-  publisher: publishers/google
   base_url: https://us-central1-aiplatform.googleapis.com/v1/projects
   auth:
     style: gcp-sa
@@ -2093,10 +2092,10 @@ vertex:
   models_dev_id: google-vertex
   free_tier: true
   website: https://cloud.google.com/vertex-ai
+  publisher: publishers/google
 vertex-anthropic:
   name: Google Vertex AI (Anthropic publisher)
   kind: vertex
-  publisher: publishers/anthropic
   base_url: ""
   auth:
     style: gcp-sa
@@ -2106,6 +2105,7 @@ vertex-anthropic:
   website: https://cloud.google.com/vertex-ai
   quirks:
     - requires-max-tokens
+  publisher: publishers/anthropic
 void-ai:
   name: Void AI
   kind: openaicompat

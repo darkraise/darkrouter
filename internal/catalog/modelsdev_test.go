@@ -159,10 +159,6 @@ func TestEmbeddedFallbackAgreesWithTheLiveShape(t *testing.T) {
 	}
 	live, _ := ParseModelsDev([]byte(liveSample))
 	want, _ := live.Metadata("anthropic", "claude-opus-4-5")
-	// The embedded snapshot was generated before tools/presetgen carried
-	// cache-write rates, so it has none yet -- that gap closes on the next
-	// regeneration, not here.
-	want.CacheWriteMicrosPerMTok = 0
 	if got != want {
 		t.Errorf("fallback = %+v\nlive     = %+v", got, want)
 	}
