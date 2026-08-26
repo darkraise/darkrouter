@@ -899,3 +899,57 @@ func TestSpendSinceIsNilWhenNothingIsPriced(t *testing.T) {
 			"not read as a confident zero", micros, priced)
 	}
 }
+
+func TestDiscoveryHealthAggregatesPerProvider(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	for _, p := range []string{"groq", "nebius"} {
+		if err := db.CreateProvider(ctx, ProviderRow{
+			ID: p, Name: p, Kind: "openaicompat", BaseURL: "https://" + p + "/v1", Enabled: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed := func(providerID, modelID, state string, streak int) {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO models (provider_id, model_id, state, missing_streak)
+			 VALUES (?, ?, ?, ?)`, providerID, modelID, state, streak); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("groq", "m1", "live", 0)
+	seed("groq", "m2", "live", 0)
+	seed("groq", "m3", "stale", 3)
+	seed("nebius", "m4", "removed_upstream", 9)
+
+	got, err := db.DiscoveryHealth(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ProviderID != "groq" || got[1].ProviderID != "nebius" {
+		t.Fatalf("want groq then nebius in order, got %+v", got)
+	}
+	g := got[0]
+	if g.Total != 3 || g.Live != 2 || g.Stale != 1 || g.RemovedUpstream != 0 || g.MaxMissingStreak != 3 {
+		t.Fatalf("groq rollup wrong: %+v", g)
+	}
+	n := got[1]
+	if n.Total != 1 || n.RemovedUpstream != 1 || n.MaxMissingStreak != 9 {
+		t.Fatalf("nebius rollup wrong: %+v", n)
+	}
+}
+
+func TestDiscoveryHealthIsEmptySliceNotNil(t *testing.T) {
+	// A nil slice marshals to JSON null, which the console would have to special
+	// case; an empty result must already be the empty-array shape.
+	got, err := migrated(t).DiscoveryHealth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("want an empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("want no rows before any provider is catalogued, got %+v", got)
+	}
+}
