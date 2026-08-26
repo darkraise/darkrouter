@@ -35,9 +35,15 @@ dependency graph. Plans live in `docs/superpowers/plans/`.
 The `11c` label went to a review-fix plan for 11a rather than to slice 3(c), so
 the letters and the slices are out of step. Read the table, not the letters.
 
-§13's other two steps: step 1 is `darkraise-ui` 6.5.0, released 2026-08-26 and
-planned in `2026-08-26-phase12-darkraise-ui-650.md`. Step 4, the console
-itself, has not started.
+§13's other two steps are done too: step 1 is `darkraise-ui` 6.5.0, published
+to npm on 2026-08-26; step 4 is the console, built in
+`2026-08-26-phase13-operator-console.md` and merged the same day.
+
+**The console has never been run against a live gateway.** Every claim about it
+rests on unit tests over pure functions and on reading the code. §12's first
+criterion — every screen renders against a real gateway in both modes — is
+unmet, and `docs/ux/DONE-CRITERIA.md` records criterion by criterion what is
+actually backed by what.
 
 Everything from phase 10 onward was merged to `master` on 2026-08-26 as
 `fc3f36d`. Nothing has been pushed to `origin`.
@@ -1264,6 +1270,46 @@ An API request can be refused before anything happens.
 behaviour — each worker captures its interval at construction — and were absent
 from the list, so a reload changing either was accepted and warned about
 nothing.
+
+## Phase 13 — the operator console
+
+Fifteen screens against the API phase 12 finished, merged 2026-08-26. Nine
+destinations in §5's three rail groups plus Settings, a command palette, and
+the two bespoke visuals four and one screens depend on.
+
+**The ladder is defined once and its modes are enforced by types.** Fragment 01
+is the contract; the mark union is narrowed by mode, so a filled mark outside a
+trace does not compile rather than being caught in review.
+
+**The chart ramp is overridden and scoped to a class.** The engine derives
+`--chart-4` and `--chart-5` from the accent, which at coral lands them in the
+orange and lime neighbourhood — on the Usage charts specifically that reads as
+the reserved cooling amber and healthy green, so a series would look like a
+state.
+
+**One screen's failure no longer blanks the console.** A boundary wraps the
+outlet, because the rail is how an operator reaches a screen that still works.
+Its fallback is deliberately plain markup: written with `PageHeader` and `Card`
+first, it threw for want of the router context, which is an error screen
+failing for the reason the screen it reports on did.
+
+### Three things a future reader should not have to rediscover
+
+**The API type module is not enforced.** `web/src/lib/api-types.ts` mirrors the
+Go json tags by hand. Its first version had every `RequestRow` field wrong —
+invented rather than read — and it typechecked cleanly for two commits. Check a
+shape against its handler before trusting it.
+
+**Two API gaps were found by building screens, not by reading the spec.**
+`FailoverEdges` had to be added because the routing graph draws a return
+between two providers and `RecentFailovers` names only where a request ended;
+`/api/auth/status` had to report whether a password exists, because a fresh
+install otherwise shows a login that refuses everything and explains nothing.
+
+**Walking §12 one criterion at a time found three more.** Provider rename had
+an endpoint no screen called, the alias editor could not create a chain, and
+the trace showed tokens but not cost. None would have been found by running the
+tests.
 
 ## Review history
 
