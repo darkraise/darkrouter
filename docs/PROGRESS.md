@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Phase status
 
@@ -17,10 +17,18 @@ Last updated: 2026-08-25
 | 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, and now **verified live against Groq** (§11), which found two defects. |
 | 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
 | 11a — Cost, attempts and the usage dimension | ✅ | ✅ | **Complete.** 10 tasks; race-clean. Cost computed at commit time from catalog pricing, failed attempts counted, `usage_daily` keyed on alias. |
-| 11c — Cache tokens and coherence | ✅ | 🔄 | **In progress.** Cache-write cost fixed in `modelsdev.go` and generator carries the field; embedded snapshot predates the field (see note below). |
+| 11c — Cache tokens and coherence | ✅ | ✅ | **Complete.** 15 tasks; race-clean. `InputTokens` means one thing repo-wide, cache writes are priced, and the two cost surfaces agree. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
+
+**There is no phase 11b.** The numbering runs 11a → 11c with nothing between
+them; no spec, plan, branch or commit for an 11b has ever existed. The gap is a
+labelling slip, not missing work — do not go looking for it.
+
+Everything from phase 10 onward sits on the unmerged branch
+`feat/cost-usage-dimension`. `master`'s tip is still `7afde9a`, the phase 10
+mockup plan, so the mockup set and all of phase 11 are unmerged.
 
 ## Build environment
 
@@ -319,13 +327,13 @@ still required and now substitutes the catalog's value. The findings ledger's
   filters were dropped and only `anthropic-oauth`, whose values are verifiable,
   is hand-written. Sourcing the rest is phase 8 work.
 - **The embedded metadata snapshot ages.**
-  `internal/catalog/models_snapshot.json` was taken on 2026-08-22. It is only
-  the cold-start fallback — the sync overwrites it within twelve hours of a
+  `internal/catalog/models_snapshot.json` was regenerated on 2026-08-26 and
+  carries 7295 models, 1186 of them with a cache-write rate. It is only the
+  cold-start fallback — the sync overwrites it within twelve hours of a
   networked start — but a long-lived offline install runs on those numbers
-  indefinitely. Regenerate it when the binary ships. **Cache-write rates are
-  absent from the embedded snapshot** (it predates the field); models priced
-  from the fallback will omit the cache-write cost component until the snapshot
-  is regenerated with live models.dev data.
+  indefinitely. Regenerate it when the binary ships. The cache-write gap that
+  the 2026-08-23 snapshot had (it predated the field, so models priced from the
+  fallback silently omitted that cost component) is closed.
 - **Vertex and Bedrock have no discovery.** `ProbeFor` returns
   `ErrKindNotDiscoverable` for both, so their models come from presets and
   models.dev alone. Bedrock's two control-plane calls arrive with its adapter in
@@ -1105,6 +1113,64 @@ are restart-only in behaviour — but neither is listed in `RestartOnly`
 warns about nothing, and takes effect at the next process start. This is the
 exact failure `RestartOnly` exists to prevent. Screen 14 records it; the code
 is unchanged.
+
+## Phase 11 — cost, attempts and coherence
+
+Three plans, all landed on `feat/cost-usage-dimension`:
+`2026-08-25-phase11a-cost-attempts-usage.md` (10 tasks),
+`2026-08-25-phase11a-fix-attempt-attribution.md`, and
+`2026-08-25-phase11c-cache-tokens-and-coherence.md` (15 tasks). The 11c plan
+exists because a whole-branch review of the two 11a plans found the defects it
+closes. All three plans still carry unticked `- [ ]` boxes: the boxes were never
+maintained, and the commit log is the record of what was done, not the plans.
+
+**Spend is now real.** Cost is computed once, in `(*Executor).log`, from the
+catalog price of the model that actually served — not from the alias the client
+asked for. `CostMicros` is `*int64` throughout and an unpriced model stays
+`nil`, because zero would report genuinely free.
+
+**Failed attempts stopped being invisible.** Migration `0006` gave
+`request_attempts` its own `tokens_in`, `tokens_out` and `cost_micros`, and
+`0007` gave `usage_daily` an `attempts` column so `requests` keeps meaning
+requests. A pre-commit failure's burn is transferred onto its own row when the
+attempt is demoted, so failover no longer understates the day.
+
+**`ir.Usage.InputTokens` has one meaning repo-wide: input excluding cache
+reads.** Anthropic and Bedrock already reported it that way; the
+OpenAI-compatible and Gemini adapters now subtract. Nothing on the wire moved —
+`ir.Usage.PromptTokens()` (`internal/ir/ir.go:247`) re-adds cache reads when an
+edge renders back to a dialect that reports an inclusive prompt count, and
+`internal/golden` is the tripwire that proves it. Because `tokens_in` now means
+something narrower than it did, `cache_read_tokens` is exposed on the request
+list and the trace detail so an operator can still reconstruct the full prompt
+count against a provider invoice.
+
+**Cache writes are priced.** `catalog.Pricing` gained
+`CacheWriteMicrosPerMTok`, `tools/presetgen` carries the rate, and the embedded
+snapshot was regenerated on 2026-08-26 to supply it — see the phase 6 note
+above.
+
+**The two cost surfaces agree.** `today_spend` is sourced from the same
+attempt-level cost the rollup reads, so the overview tile and the usage chart
+answer the same question. The dead `UsageByDay` shim is gone.
+
+### Two things a future reader will trip over
+
+**`request_attempts` has no cache columns, so an attempt row can carry a cost
+with zero tokens.** That is correct, not a bug: a fully cached prompt burns
+`cache_read` tokens only, which the attempt row cannot express, but the money
+was real and the aggregates read cost rather than tokens. The guard that copies
+a request's cost onto its serving attempt therefore tests all five burn fields
+on the *record* — `TokensIn`, `TokensOut`, `CacheReadTokens`,
+`CacheWriteTokens`, `ReasoningTokens` — not the attempt's copied tokens.
+Checking only the two token fields is the bug that was fixed twice, in
+`4813736` and again in `95d4f88`.
+
+**`log.retention` has a hard floor of 48 hours** (`internal/config/load.go:165`).
+The rollup finalizes a day before freezing it, which needs the previous day to
+still be present when the sweeper runs; a shorter retention would let a day be
+pruned before it was ever rolled up. The floor replaced a guard in the rollup
+that tried to defend the same invariant from the wrong end.
 
 ## Review history
 
