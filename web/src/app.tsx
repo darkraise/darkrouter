@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { ThemeProvider } from "darkraise-ui/theme"
+import { Toaster } from "darkraise-ui"
 import { themeConfig } from "./theme.config"
 import { api, onUnauthorized, setCsrfToken } from "./lib/api"
 import { ApiError } from "./lib/api"
 import { RouterProvider } from "@tanstack/react-router"
 import { LoginScreen } from "./routes/login"
+import { FirstRun } from "./features/shell/first-run"
 import { router } from "./lib/router"
 
 const queryClient = new QueryClient({
@@ -23,7 +25,12 @@ const queryClient = new QueryClient({
   },
 })
 
-type AuthStatus = { authenticated: boolean; csrf_token?: string }
+type AuthStatus = {
+  authenticated: boolean
+  /** Whether an admin password exists at all. */
+  configured: boolean
+  csrf_token?: string
+}
 
 function Shell() {
   const [authed, setAuthed] = useState<boolean | null>(null)
@@ -52,6 +59,9 @@ function Shell() {
 
   if (authed === null) return null
   if (!authed) {
+    // A login form nobody can pass is worse than useless: it refuses every
+    // password and says nothing about why.
+    if (status.data && !status.data.configured) return <FirstRun />
     return <LoginScreen onAuthenticated={() => void status.refetch()} />
   }
   // The shell is the root route's component rather than a wrapper here, so
@@ -64,6 +74,9 @@ export function App() {
     <ThemeProvider config={themeConfig}>
       <QueryClientProvider client={queryClient}>
         <Shell />
+        {/* Outside Shell so a failure raised while the login screen is up has
+            somewhere to land too. */}
+        <Toaster />
       </QueryClientProvider>
     </ThemeProvider>
   )

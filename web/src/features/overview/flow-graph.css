@@ -1,0 +1,146 @@
+/* The routing flow graph.
+ *
+ * Aliases left, router centre, providers right in priority order. Edge
+ * thickness is share of the window and dashed returns are traffic that landed
+ * somewhere because somewhere else refused it. A provider that is not a
+ * candidate has no edge at all, which is the fastest way to see that a
+ * disabled or unconfigured provider is not quietly absorbing work.
+ *
+ * Nodes are HTML positioned over an SVG edge layer, so text is real text at
+ * real weights rather than <text> that ignores the type scale. Coordinates are
+ * fixed px and the viewBox matches them 1:1, so the graph scrolls rather than
+ * scales: a scaled graph distorts stroke widths, and stroke width is data.
+ *
+ * Tokens are prefixed and resolved once from darkraise-ui's, for the same
+ * reason the ladder's are -- the mockups' names collide with the library's.
+ */
+.rf-wrap {
+  --rf-border: hsl(var(--border));
+  --rf-surface: hsl(var(--card));
+  --rf-ground-alt: hsl(var(--muted));
+  --rf-legend: hsl(var(--legend));
+  --rf-ink-muted: hsl(var(--muted-foreground));
+  --rf-radius: calc(var(--radius) - 2px);
+  --rf-shadow: 0 1px 2px hsl(var(--foreground) / 0.06);
+
+  /* The router's verdict colour, not the brand. Coral is position and primary
+     action only, so it never draws a routing decision. */
+  --rf-trace: hsl(var(--primary));
+
+  /* The one node that is the product rather than a participant, so it is the
+     one node allowed the accent border. */
+  --rf-accent: hsl(var(--primary));
+  --rf-accent-ink: hsl(var(--primary));
+}
+
+.rf-wrap { overflow-x: auto; }
+
+.rf-graph { position: relative; }
+
+.rf-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rf-edge { fill: none; stroke-linecap: round; }
+/* Inbound is plumbing, not a decision: the thinnest structural stroke. */
+.rf-edge-in { stroke: var(--rf-border); stroke-width: 1; }
+/* Outbound is the router's verdict, so it takes --trace and its width is
+   share of the window. */
+.rf-edge-out { stroke: var(--rf-trace); opacity: 0.55; }
+/* Traffic that landed here because somewhere else refused it. Dashed for the
+   same reason the ladder dashes an attempted-and-failed stub. */
+.rf-edge-fail {
+  stroke: var(--rf-trace);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+.rf-fo-label {
+  fill: var(--rf-legend);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.rf-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--rf-border);
+  border-radius: var(--rf-radius);
+  background: var(--rf-surface);
+  box-shadow: var(--rf-shadow);
+  /* A node is a fixed box: nothing inside it may escape to the right, or a
+     count lands on top of the failover arcs drawn beside the column. */
+  overflow: hidden;
+}
+
+.rf-alias { justify-content: space-between; }
+.rf-alias .rf-vol { color: var(--rf-legend); }
+
+/* The one node that is the product rather than a participant, so it is the
+   one node allowed to carry the accent border. It does NOT take
+   --shadow-warm: that is spent on the brand mark in the sidebar and nowhere
+   else, and a second warm shadow would make the rule a preference. */
+.rf-router {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border-color: var(--rf-accent);
+  background: var(--rf-surface);
+  box-shadow: var(--rf-shadow);
+}
+.rf-router-label { margin: 0; color: var(--rf-accent-ink); }
+/* The readout role, not a new size: a router total is a primary reading. */
+.rf-router-total { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; }
+.rf-router-unit,
+.rf-router-fo { color: var(--rf-legend); }
+.rf-router-fo { margin-top: 4px; }
+
+.rf-prio {
+  min-width: 22px;
+  text-align: right;
+  color: var(--rf-legend);
+  font-variant-numeric: tabular-nums;
+}
+.rf-name { flex: 0 0 auto; }
+.rf-note {
+  /* The note takes the slack and the bar is fixed, not the other way round:
+     "1 cooling" is the reason a row is degraded and must not be the thing
+     an ellipsis eats. */
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--rf-legend);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* No share bar. Edge thickness already encodes share, and far more
+   legibly than a 56px bar repeating it — the space is better spent on the
+   credential note, which nothing else on the screen carries. */
+
+.rf-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+.rf-count { font-variant-numeric: tabular-nums; }
+.rf-pct, .rf-out { color: var(--rf-legend); }
+.rf-fo { color: var(--rf-trace); }
+
+/* Not a candidate. The node stays legible — it is still configured — but it
+   reads as out of the path, which is exactly what it is. */
+.rf-provider-idle {
+  background: var(--rf-ground-alt);
+  border-style: dashed;
+  box-shadow: none;
+}
+.rf-provider-idle .rf-name { color: var(--rf-ink-muted); }

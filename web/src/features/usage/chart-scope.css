@@ -1,0 +1,30 @@
+/* The chart ramp, overridden.
+ *
+ * The theme engine derives --chart-1..5 from the accent. At coral that puts
+ * --chart-4 and --chart-5 in the orange and lime neighbourhood, which on these
+ * charts specifically read as the reserved cooling amber and healthy green --
+ * so a series would look like a state.
+ *
+ * The replacement is one accent differentiated by fill rather than by hue:
+ * solid, 60% tint, 45° hatch, dot, outline. Five series stay distinguishable
+ * without borrowing a colour that means something else, and it survives
+ * greyscale printing and the commonest colour-vision deficiencies.
+ *
+ * Scoped to a class rather than :root, because custom properties inherit and a
+ * class on an ancestor wins -- the ramp must not leak onto any other screen.
+ */
+.chart-scope {
+  --chart-1: var(--primary);
+  --chart-2: var(--primary);
+  --chart-3: var(--primary);
+  --chart-4: var(--primary);
+  --chart-5: var(--primary);
+}
+
+/* Fill patterns are referenced by id from the SVG the chart renders. */
+.chart-scope .chart-fill-tint { opacity: 0.6; }
+.chart-scope .chart-fill-outline {
+  fill: transparent;
+  stroke: hsl(var(--primary));
+  stroke-width: 1.5;
+}

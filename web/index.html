@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-density="comfortable" data-radius="rounded" data-elevation="low" data-button-elevation="flat" data-surface-intensity="balanced" data-font-size="medium" data-background-style="solid" data-background-intensity="neutral" data-outer-glow="none" data-inner-glow="none" data-preset="default">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,6 +12,12 @@
     />
     <script>
       ;(function () {
+        // Only the two axes an operator can change need restoring here. The
+        // rest are the identity and are stamped on <html> as static
+        // attributes, so the first paint already has them and there is nothing
+        // to mirror. The forty lines this replaces duplicated twelve
+        // axis-to-storage mappings and a preset-neutralisation table that both
+        // live in the library.
         var mode = localStorage.getItem("mode") || "system"
         var resolved =
           mode === "system"
@@ -21,41 +27,8 @@
             : mode
         document.documentElement.setAttribute("data-mode", resolved)
 
-        // Restore every attribute-driven theme axis before React mounts
-        // so the first paint matches the persisted theme. The
-        // attribute-name to localStorage-key map mirrors
-        // packages/ui/src/theme/theme-provider/ThemeProvider.tsx —
-        // note "theme-bg-style" / "theme-bg-intensity" are NOT just
-        // kebab-cased "background-*" keys.
-        var AXIS_LS_KEYS = {
-          "preset": "theme-preset",
-          "background-style": "theme-bg-style",
-          "background-intensity": "theme-bg-intensity",
-          "gradient-pattern": "theme-gradient-pattern",
-          "density": "theme-density",
-          "elevation": "theme-elevation",
-          "button-elevation": "theme-button-elevation",
-          "surface-intensity": "theme-surface-intensity",
-          "radius": "theme-radius",
-          "font-size": "theme-font-size",
-          "outer-glow": "theme-outer-glow",
-          "inner-glow": "theme-inner-glow",
-        }
-        // Presets that reinterpret an axis neutralise it rather than merely
-        // hiding its control, so restoring a stored value here would flash the
-        // wrong surface treatment before hydration corrects it. Mirrors
-        // NEUTRALISED_WHEN_HIDDEN + hiddenCommonAxes in the library.
-        var NEUTRALISED_BY_PRESET = {
-          glass: ["surface-intensity"],
-          scifi: ["surface-intensity"],
-        }
-        var activePreset = localStorage.getItem("theme-preset") || ""
-        var neutralised = NEUTRALISED_BY_PRESET[activePreset] || []
-        Object.keys(AXIS_LS_KEYS).forEach(function (axis) {
-          if (neutralised.indexOf(axis) !== -1) return
-          var v = localStorage.getItem(AXIS_LS_KEYS[axis])
-          if (v) document.documentElement.setAttribute("data-" + axis, v)
-        })
+        var density = localStorage.getItem("theme-density")
+        if (density) document.documentElement.setAttribute("data-density", density)
       })()
     </script>
   </head>
