@@ -22,13 +22,21 @@ Last updated: 2026-08-26
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
 
-**There is no phase 11b.** The numbering runs 11a → 11c with nothing between
-them; no spec, plan, branch or commit for an 11b has ever existed. The gap is a
-labelling slip, not missing work — do not go looking for it.
+**No phase 11b plan was ever written, and the gap points at real work.** Spec
+§13 splits the console into four steps, and the third — the admin API additions
+— is itself three plans. The phase letters were meant to track them:
 
-Everything from phase 10 onward sits on the unmerged branch
-`feat/cost-usage-dimension`. `master`'s tip is still `7afde9a`, the phase 10
-mockup plan, so the mockup set and all of phase 11 are unmerged.
+| §13 slice | Covers | Plan | Status |
+|---|---|---|---|
+| 3(a) | §8.3 cost and attempt accounting, the `usage_daily` alias migration, the §8.2 usage and overview extensions | `2026-08-25-phase11a-*` | Done |
+| 3(b) | §8.1 aliases and policy into SQLite, `GET`/`PUT /api/config` | none — the missing 11b | **Not started** |
+| 3(c) | The twelve new endpoints in §8.4's order | none | **Not started** |
+
+The `11c` label went to a review-fix plan for 11a rather than to slice 3(c), so
+the letters and the slices are out of step. Read the table, not the letters.
+
+Everything from phase 10 onward was merged to `master` on 2026-08-26 as
+`fc3f36d`. Nothing has been pushed to `origin`.
 
 ## Build environment
 
