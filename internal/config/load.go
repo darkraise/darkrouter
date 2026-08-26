@@ -1,11 +1,11 @@
 package config
 
 import (
-	"sort"
 	"fmt"
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
