@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/darkraise/darkrouter/internal/catalog"
+	"github.com/darkraise/darkrouter/internal/ir"
 )
 
 type catalogBody struct {
@@ -130,5 +133,106 @@ func TestAnEmptyCatalogReturnsArraysNotNull(t *testing.T) {
 	got := w.Body.String()
 	if !strings.Contains(got, `"models":[]`) || !strings.Contains(got, `"aliases":[]`) {
 		t.Errorf("body = %s", got)
+	}
+}
+
+func pricedCatalog() *catalog.Store {
+	c := &catalog.Store{}
+	c.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "groq", ModelID: "priced-model", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, Publisher: "meta",
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			Pricing: catalog.Pricing{
+				InputMicrosPerMTok: 150000, OutputMicrosPerMTok: 600000, Known: true,
+			}},
+		{ProviderID: "groq", ModelID: "overridden-model", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, Publisher: "meta",
+			Source:       catalog.SourceOverride,
+			Capabilities: catalog.Capabilities{Known: true}},
+		{ProviderID: "groq", ModelID: "unpriced-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceInferred,
+			Capabilities: catalog.Capabilities{Known: false}},
+	}, []string{"groq"}))
+	return c
+}
+
+// modelSummary is the pricing/publisher/provenance slice of modelView that
+// modelViews reads back. Named rather than repeated inline as a map value
+// type, a var out struct field, and a composite literal, which is the same
+// struct written three times.
+type modelSummary struct {
+	Publisher   string `json:"publisher"`
+	MergeSource string `json:"merge_source"`
+	Pricing     *struct {
+		InputMicros  int64 `json:"input_micros"`
+		OutputMicros int64 `json:"output_micros"`
+	} `json:"pricing"`
+}
+
+func modelViews(t *testing.T, s *Server) map[string]modelSummary {
+	t.Helper()
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/models", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/models = %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Models []struct {
+			Model string `json:"model"`
+			modelSummary
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v\n%s", err, w.Body.String())
+	}
+	byModel := map[string]modelSummary{}
+	for _, m := range out.Models {
+		byModel[m.Model] = m.modelSummary
+	}
+	return byModel
+}
+
+func TestAModelViewCarriesPricingAndPublisher(t *testing.T) {
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["priced-model"]
+	if got.Pricing == nil {
+		t.Fatal("a priced model must carry a price")
+	}
+	if got.Pricing.InputMicros != 150000 || got.Pricing.OutputMicros != 600000 {
+		t.Fatalf("pricing = %+v", got.Pricing)
+	}
+	if got.Publisher != "meta" {
+		t.Fatalf("publisher = %q", got.Publisher)
+	}
+}
+
+func TestAnUnpricedModelRendersNullNotZero(t *testing.T) {
+	// Zero is a claim that the model is free. Null is the claim that the
+	// catalog has no price for it, which is the true one.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	if got := modelViews(t, s)["unpriced-model"]; got.Pricing != nil {
+		t.Fatalf("unpriced model priced as %+v", got.Pricing)
+	}
+}
+
+func TestAModelViewNamesItsSource(t *testing.T) {
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)
+	if got["priced-model"].MergeSource != "models_dev" {
+		t.Errorf("merge_source = %q", got["priced-model"].MergeSource)
+	}
+	if got["overridden-model"].MergeSource != "override" {
+		t.Errorf("merge_source = %q", got["overridden-model"].MergeSource)
+	}
+	if got["unpriced-model"].MergeSource != "inferred" {
+		t.Errorf("merge_source = %q", got["unpriced-model"].MergeSource)
 	}
 }

@@ -10,6 +10,15 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
+// pricingView is micro-dollars per million tokens. Null rather than a zeroed
+// object when the catalog has no price: catalog.Pricing carries Known for
+// exactly this reason, since a free model and an unpriced one are both zero
+// and only one of them may be printed as a number.
+type pricingView struct {
+	InputMicros  int64 `json:"input_micros"`
+	OutputMicros int64 `json:"output_micros"`
+}
+
 type modelView struct {
 	Model         string   `json:"model"`
 	Providers     []string `json:"providers"`
@@ -22,8 +31,15 @@ type modelView struct {
 	// Inferred marks a row whose capabilities were guessed rather than read.
 	// Master design §6.4 routes these with a warning, and an operator needs to
 	// know which they are.
-	Inferred bool   `json:"inferred"`
-	State    string `json:"state"`
+	Inferred bool         `json:"inferred"`
+	State    string       `json:"state"`
+	Pricing  *pricingView `json:"pricing"`
+	// Publisher and MergeSource come from the first provider in catalog order,
+	// which is priority order — the row folds several providers into one, and
+	// where they disagree the one the router would reach first is the answer
+	// that matches what a request would actually cost.
+	Publisher   string `json:"publisher,omitempty"`
+	MergeSource string `json:"merge_source"`
 }
 
 type aliasView struct {
@@ -78,7 +94,15 @@ func (s *Server) collectModels(r *http.Request) []modelView {
 				Surfaces: surfaceNames(m.Surfaces), State: string(m.State),
 				ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutputTokens,
 				Tools: m.Capabilities.Tools, Vision: m.Capabilities.Vision,
-				Reasoning: m.Capabilities.Reasoning,
+				Reasoning:   m.Capabilities.Reasoning,
+				Publisher:   m.Publisher,
+				MergeSource: string(m.Source),
+			}
+			if m.Pricing.Known {
+				v.Pricing = &pricingView{
+					InputMicros:  m.Pricing.InputMicrosPerMTok,
+					OutputMicros: m.Pricing.OutputMicrosPerMTok,
+				}
 			}
 			byModel[m.ModelID] = v
 			order = append(order, m.ModelID)
