@@ -88,9 +88,9 @@ func WriteResponse(w http.ResponseWriter, resp *ir.Response) error {
 // claim the provider reported them.
 func usageBody(u ir.Usage) map[string]any {
 	body := map[string]any{
-		"prompt_tokens":     u.InputTokens,
+		"prompt_tokens":     u.PromptTokens(),
 		"completion_tokens": u.OutputTokens,
-		"total_tokens":      u.InputTokens + u.OutputTokens,
+		"total_tokens":      u.PromptTokens() + u.OutputTokens,
 	}
 	if u.CacheReadTokens > 0 {
 		body["prompt_tokens_details"] = map[string]any{"cached_tokens": u.CacheReadTokens}

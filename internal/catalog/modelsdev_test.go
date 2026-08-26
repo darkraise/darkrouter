@@ -1,6 +1,11 @@
 package catalog
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
+)
 
 const liveSample = `{
   "anthropic": {
@@ -91,6 +96,35 @@ func TestLimitsAndUnknownPrice(t *testing.T) {
 	}
 	if np.MaxOutputTokens != 0 {
 		t.Errorf("max output = %d, want 0 for an absent limit", np.MaxOutputTokens)
+	}
+}
+
+func TestCacheWriteRateIsParsed(t *testing.T) {
+	// models.dev reports cache creation at a premium over input. Discarding
+	// it prices the first request of every cached session as if writing the
+	// context were free.
+	doc, err := ParseModelsDev([]byte(liveSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := Merge(MergeInput{
+		Providers: []provider.Provider{{ID: "anthropic", Kind: "anthropic", Preset: "anthropic"}},
+		Presets: Presets{"anthropic": {
+			Name: "Anthropic", Kind: "anthropic", ModelsDevID: "anthropic",
+		}},
+		Doc: doc,
+		Rows: []store.ModelRow{
+			{ProviderID: "anthropic", ModelID: "claude-opus-4-5", State: "live", CapabilitiesSource: "inferred"},
+		},
+	})
+	snap := NewSnapshot(models, []string{"anthropic"})
+	m, ok := snap.Lookup("anthropic", "claude-opus-4-5")
+	if !ok {
+		t.Fatal("claude-opus-4-5 missing from the snapshot")
+	}
+	if m.Pricing.CacheWriteMicrosPerMTok != 6_250_000 {
+		t.Fatalf("cache-write rate = %d, want 6250000 (6.25 per Mtok)",
+			m.Pricing.CacheWriteMicrosPerMTok)
 	}
 }
 

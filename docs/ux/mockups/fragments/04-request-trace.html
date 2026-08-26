@@ -1,0 +1,297 @@
+<section class="screen" id="s-04-request-trace" data-screen-title="operate/requests &mdash; request trace">
+  <p class="legend">
+    The payoff of the whole design: the request trace, opened from the row
+    Requests already showed for this failover. Same eight-candidate ladder
+    Task 4's specimen renders &mdash; groq's 429, cerebras' 30-second
+    timeout, together's 1,847ms serve &mdash; now followed by the waterfall
+    that explains where the 32 seconds actually went, the token and cost
+    readouts, the two dropped-field warnings, the surface metadata, and the
+    permanently empty Bodies panel. Press <kbd>A</kbd> to reveal pins,
+    <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Requests</h2>
+          <p class="topbar-route mono">operate/requests</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Header &mdash; GET /api/requests/{id} {id,dialect,surface,alias,provider,final_model,status,error_code}.</span></p>
+          <div class="panel trace-header">
+            <div class="trace-header-row">
+              <span class="chip status-badge" data-status="success">success</span>
+              <span class="mono trace-id">01M0W4NWMRZQCN2VMD9F6K3H7P</span>
+              <button class="chip trace-copy-btn" type="button" aria-label="copy request id">⧉ copy</button>
+            </div>
+            <p class="mono trace-route">
+              <span>openai</span><span class="trace-route-sep">&middot;</span><span>llm</span><span class="trace-route-sep">&middot;</span><span>fast-coder</span><span class="trace-route-arrow">&rarr;</span><span class="trace-route-target">together/openai-gpt-oss-120b</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Routing ladder</p>
+          <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; Ladder &mdash; candidates[] and skips[] ("target:reason") and attempts[]{seq,provider,key_label,model,outcome,status_code,latency_ms,error,path}. seq is 0-indexed at source and displayed 1-based.</span></p>
+      <div class="ladder">
+        <div class="ladder-row">
+          <span class="rank rank-tick">01</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">groq/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">http</span>
+            <span class="reason-prose">429 rate limited</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:2px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick">02</span>
+          <span class="spine"></span>
+          <span class="mark mark-failed"></span>
+          <span class="stub stub-dashed"></span>
+          <span class="target">cerebras/gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">timeout</span>
+            <span class="reason-prose">30000ms elapsed before first byte</span>
+          </span>
+          <span class="latency-bar latency-bar-failed" style="width:64px"></span>
+        </div>
+        <div class="ladder-row ladder-row-served">
+          <span class="rank rank-tick">03</span>
+          <span class="spine"></span>
+          <span class="mark mark-served"></span>
+          <span class="stub"></span>
+          <span class="target">together/openai-gpt-oss-120b</span>
+          <span class="reason">
+            <span class="reason-code">200</span>
+            <span class="reason-prose">1,847ms attempt &middot; 284ms time-to-first-token</span>
+          </span>
+          <span class="latency-bar" style="width:4px"></span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">04</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">deepinfra/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick rank-tick-major text-terminated">05</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">openrouter/openai/gpt-oss-120b</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">06</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">anthropic/claude-opus-4-20250514</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">07</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">bedrock/us.anthropic.claude-opus-4</span>
+        </div>
+        <div class="ladder-row">
+          <span class="rank rank-tick text-terminated">08</span>
+          <span class="spine spine-terminated"></span>
+          <span class="mark mark-terminated"></span>
+          <span class="target text-terminated">vertex/gemini-2.5-pro</span>
+        </div>
+      </div>
+          <p class="prose">
+            The router stopped at rank 03. Ranks 04&ndash;08 sit below the
+            termination rule, never attempted.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Waterfall</p>
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Waterfall &mdash; attempts[].latency_ms plus ttft_ms. Graticule doubles as the gridline; no second axis.</span></p>
+          <div class="well chart-well">
+            <div class="waterfall-tracks">
+
+              <div class="waterfall-row">
+                <div class="waterfall-row-label">
+                  <span class="micro">01</span>
+                  <span class="mono">groq</span>
+                </div>
+                <div class="waterfall-track">
+                  <span class="waterfall-seg waterfall-seg-failed" style="width:1.37%"></span>
+                  <span class="mark mark-failed waterfall-end" style="left:1.37%"></span>
+                </div>
+                <span class="micro waterfall-total">412<span class="unit">ms</span></span>
+              </div>
+
+              <div class="waterfall-row">
+                <div class="waterfall-row-label">
+                  <span class="micro">02</span>
+                  <span class="mono">cerebras</span>
+                </div>
+                <div class="waterfall-track">
+                  <span class="waterfall-seg waterfall-seg-failed" style="width:100%"></span>
+                  <span class="mark mark-failed waterfall-end" style="left:100%"></span>
+                </div>
+                <span class="micro waterfall-total">30,000<span class="unit">ms</span></span>
+              </div>
+
+              <div class="waterfall-row">
+                <div class="waterfall-row-label">
+                  <span class="micro">03</span>
+                  <span class="mono">together</span>
+                </div>
+                <div class="waterfall-track">
+                  <span class="waterfall-seg" style="width:0.95%"></span>
+                  <span class="waterfall-seg waterfall-seg-serve" style="left:0.95%;width:5.21%"></span>
+                  <span class="mark mark-served waterfall-end" style="left:6.16%"></span>
+                </div>
+                <span class="micro waterfall-total">1,847<span class="unit">ms</span></span>
+              </div>
+
+            </div>
+            <div class="chart-axis" style="padding:0 var(--section-pad) var(--section-pad)">
+              <span class="micro">0ms</span>
+              <span class="micro">10,000ms</span>
+              <span class="micro">20,000ms</span>
+              <span class="micro">30,000ms</span>
+            </div>
+          </div>
+          <p class="prose">
+            The axis runs to cerebras' 30,000ms timeout, the ladder's own
+            maximum &mdash; the same scale that makes rank 01 and rank 03
+            read as slivers on the ladder does it here too. Bezel marks the
+            wait for a first byte; together's bar turns --trace once
+            its first token lands at 284ms, then ends in the same
+            served mark the ladder uses for rank 03.
+          </p>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Readouts</p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Readouts &mdash; tokens_in/out, cost_micros (null renders an em-dash, never $0.00), ttft_ms, total_ms. Cost needs spec &sect;8.3.</span></p>
+          <div class="readout-strip">
+
+            <div class="well readout-tile">
+              <p class="spec-note">tokens_in</p>
+              <span class="readout">8,412</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">tokens_out</p>
+              <span class="readout">1,904</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">cost_micros</p>
+              <span class="readout">$0.0024</span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">ttft_ms</p>
+              <span class="readout-value"><span class="readout">284</span><span class="unit">ms</span></span>
+            </div>
+
+            <div class="well readout-tile">
+              <p class="spec-note">total_ms</p>
+              <span class="readout-value"><span class="readout">32,259</span><span class="unit">ms</span></span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Warnings</p>
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Warnings &mdash; warnings[]. Phase 4 dropped-field warnings; this is where a vanished cache_control marker becomes visible.</span></p>
+          <div class="warning-list">
+            <div class="row">
+              <span class="reason">
+                <span class="reason-code">dropped_field</span>
+                <span class="reason-prose">openai&rarr;anthropic: a request parameter was dropped in translation</span>
+              </span>
+            </div>
+            <div class="row">
+              <span class="reason">
+                <span class="reason-code">dropped_field</span>
+                <span class="reason-prose">openai&rarr;together: a cache_control breakpoint was dropped in translation</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Surface detail</p>
+          <p><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Surface detail &mdash; surface_meta, rendered with darkraise-ui JsonTreeView.</span></p>
+          <div class="well json-tree">
+            <div class="json-row json-depth-0"><span class="json-punct">{</span></div>
+            <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">headers</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">x-request-id</span><span class="json-punct">:</span> <span class="json-string">"01M0W4NWMRZQCN2VMD9F6K3H7P"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">content-type</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">accept</span><span class="json-punct">:</span> <span class="json-string">"application/json"</span></div>
+            <div class="json-row json-depth-1"><span class="json-punct">},</span></div>
+            <div class="json-row json-depth-1"><span class="json-toggle">&#9662;</span><span class="json-key">client</span><span class="json-punct">:</span> <span class="json-punct">{</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">ip</span><span class="json-punct">:</span> <span class="json-string">"10.42.0.18"</span><span class="json-punct">,</span></div>
+            <div class="json-row json-depth-2"><span class="json-key">user_agent</span><span class="json-punct">:</span> <span class="json-string">"darkrouter-sdk/1.4.2"</span></div>
+            <div class="json-row json-depth-1"><span class="json-punct">},</span></div>
+            <div class="json-row json-depth-1"><span class="json-toggle json-toggle-collapsed">&#9656;</span><span class="json-key">policy</span><span class="json-punct">:</span> <span class="json-punct">{</span><span class="json-collapsed-count">3 keys</span><span class="json-punct">}</span></div>
+            <div class="json-row json-depth-0"><span class="json-punct">}</span></div>
+          </div>
+        </div>
+
+        <div class="region">
+          <p class="section-title">Bodies</p>
+          <p><b class="pin" data-pin="7">7</b><span class="pin-note">7 &middot; Bodies &mdash; bodies[] is always empty: capture.bodies has a retention sweep and no writer. Saying so beats an empty panel that reads as a bug.</span></p>
+          <div class="well empty-well">
+            <p class="mono" style="margin:0">Not captured.</p>
+            <p class="prose" style="margin:0">Body capture has a retention sweep but no writer yet, so this panel is off by design, not broken.</p>
+          </div>
+        </div>
+
+        <div class="region trace-footer">
+          <p><b class="pin" data-pin="8">8</b><span class="pin-note">8 &middot; Open in playground &mdash; seeds the playground with this request's model and params. Spec &sect;6.3.</span></p>
+          <button class="control control-primary" type="button">Open in playground &rarr;</button>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

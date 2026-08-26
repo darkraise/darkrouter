@@ -1,0 +1,404 @@
+<section class="screen" id="s-13-connect" data-screen-title="use/connect">
+  <p class="legend">
+    The screen a stranger opens first: the three base URLs this router answers
+    on, which of the seven surfaces its configured providers can actually
+    serve, the tokens a client authenticates with, a ready-made config for
+    each of the six clients people point at it, and the four response headers
+    that make routing readable from a terminal. Press <kbd>A</kbd> to reveal
+    pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Connect</h2>
+          <p class="topbar-route mono">use/connect</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="region">
+          <p><b class="pin" data-pin="1-2">1-2</b><span class="pin-note">1-2 &middot; Static, derived from server.proxy_listen and the configured providers' declared surfaces.</span></p>
+
+          <p class="section-title">Endpoints</p>
+          <div class="cn-endpoints">
+
+            <div class="panel cn-endpoint">
+              <div class="cn-endpoint-head">
+                <span class="data-emph">openai</span>
+                <span class="chip">Authorization: Bearer</span>
+              </div>
+              <div class="well cn-url">
+                <span class="cn-url-text">http://192.168.0.10:8080/v1</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the openai base url">&#10697; copy</button>
+              </div>
+              <p class="legend-caps cn-serves">Serves</p>
+              <div class="cn-routes">
+                <span class="chip chip-path">/chat/completions</span>
+                <span class="chip chip-path">/responses</span>
+                <span class="chip chip-path">/embeddings</span>
+                <span class="chip chip-path">/images/generations</span>
+                <span class="chip chip-path">/audio/transcriptions</span>
+                <span class="chip chip-path">/audio/speech</span>
+                <span class="chip chip-path">/rerank</span>
+                <span class="chip chip-path">/moderations</span>
+                <span class="chip chip-path">/models</span>
+              </div>
+            </div>
+
+            <div class="panel cn-endpoint">
+              <div class="cn-endpoint-head">
+                <span class="data-emph">anthropic</span>
+                <span class="chip">x-api-key or Bearer</span>
+              </div>
+              <div class="well cn-url">
+                <span class="cn-url-text">http://192.168.0.10:8080/v1</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the anthropic base url">&#10697; copy</button>
+              </div>
+              <p class="legend-caps cn-serves">Serves</p>
+              <div class="cn-routes">
+                <span class="chip chip-path">/messages</span>
+                <span class="chip chip-path">/messages/count_tokens</span>
+              </div>
+              <p class="micro cn-note">Same base URL as openai. The path decides which dialect parses the body, so one client can hold one URL and still speak either.</p>
+            </div>
+
+            <div class="panel cn-endpoint">
+              <div class="cn-endpoint-head">
+                <span class="data-emph">gemini</span>
+                <span class="chip">x-goog-api-key or ?key=</span>
+              </div>
+              <div class="well cn-url">
+                <span class="cn-url-text">http://192.168.0.10:8080/v1beta</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the gemini base url">&#10697; copy</button>
+              </div>
+              <p class="legend-caps cn-serves">Serves</p>
+              <div class="cn-routes">
+                <span class="chip chip-path">/models/{model}:generateContent</span>
+                <span class="chip chip-path">:streamGenerateContent</span>
+                <span class="chip chip-path">:countTokens</span>
+                <span class="chip chip-path">/models</span>
+              </div>
+              <p class="micro cn-note">The header wins over the query parameter, because a key in the query string ends up in access logs.</p>
+            </div>
+
+          </div>
+
+          <p class="section-title cn-subhead">Surfaces live</p>
+          <p class="micro cn-note cn-note-lead">5 of 7 &mdash; a surface goes live when at least one enabled provider declares a model for it. Nothing here is a health reading: an absent surface is unconfigured, not broken.</p>
+          <div class="cn-surfaces">
+
+            <div class="well cn-surface">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">llm</span>
+                <span class="micro cn-surface-flag">live</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/chat/completions</p>
+              <p class="micro cn-surface-by">6 enabled providers</p>
+            </div>
+
+            <div class="well cn-surface">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">embedding</span>
+                <span class="micro cn-surface-flag">live</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/embeddings</p>
+              <p class="micro cn-surface-by">together, vertex</p>
+            </div>
+
+            <div class="well cn-surface">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">image</span>
+                <span class="micro cn-surface-flag">live</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/images/generations</p>
+              <p class="micro cn-surface-by">together</p>
+            </div>
+
+            <div class="well cn-surface">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">stt</span>
+                <span class="micro cn-surface-flag">live</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/audio/transcriptions</p>
+              <p class="micro cn-surface-by">groq</p>
+            </div>
+
+            <div class="well cn-surface">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">rerank</span>
+                <span class="micro cn-surface-flag">live</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/rerank</p>
+              <p class="micro cn-surface-by">together</p>
+            </div>
+
+            <div class="well cn-surface">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">tts</span>
+                <span class="micro cn-surface-flag">live</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/audio/speech</p>
+              <p class="micro cn-surface-by">groq</p>
+            </div>
+
+            <div class="well cn-surface cn-surface-off">
+              <div class="cn-surface-head">
+                <span class="cn-surface-mark"></span>
+                <span class="mono">moderation</span>
+                <span class="micro cn-surface-flag">not available</span>
+              </div>
+              <p class="micro cn-surface-path">POST /v1/moderations</p>
+              <p class="micro cn-surface-by">no enabled provider declares a model</p>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; GET/POST/DELETE /api/proxy-tokens. New. server.proxy_token today is a single shared secret compared constant-time after SHA-256, accepted in all three dialects' auth headers.</span></p>
+          <p class="section-title">Proxy tokens</p>
+
+          <div class="panel cn-notice">
+            <p class="prose cn-notice-lead">Today darkrouter authenticates against one shared secret &mdash; <span class="mono">server.proxy_token</span> in the config file, with no rotation and no per-client keys.</p>
+            <p class="prose cn-notice-body">Every client below would be holding the same string, so a single leaked token cannot be revoked without reconfiguring every client at once. The table below is what per-client tokens look like once a proxy-token endpoint exists; it is not what the router does today.</p>
+          </div>
+
+          <div class="table cn-token-table">
+            <div class="row row-head">
+              <span class="legend-caps cn-tok-label">label</span>
+              <span class="legend-caps cn-tok-value">token</span>
+              <span class="legend-caps cn-tok-created">created</span>
+              <span class="legend-caps cn-tok-used">last used</span>
+              <span class="legend-caps cn-tok-action">&nbsp;</span>
+            </div>
+            <div class="row">
+              <span class="mono cn-tok-label">claude-code</span>
+              <span class="mono cn-tok-value"><span class="cn-mask">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>a91k</span>
+              <span class="mono cn-tok-created">2026-06-14</span>
+              <span class="mono cn-tok-used">2026-08-24 09:41</span>
+              <span class="cn-tok-action"><button class="cn-revoke" type="button">Revoke</button></span>
+            </div>
+            <div class="row">
+              <span class="mono cn-tok-label">cursor</span>
+              <span class="mono cn-tok-value"><span class="cn-mask">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>zx43</span>
+              <span class="mono cn-tok-created">2026-07-02</span>
+              <span class="mono cn-tok-used">2026-08-24 08:57</span>
+              <span class="cn-tok-action"><button class="cn-revoke" type="button">Revoke</button></span>
+            </div>
+            <div class="row">
+              <span class="mono cn-tok-label">nightly-script</span>
+              <span class="mono cn-tok-value"><span class="cn-mask">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>7q2m</span>
+              <span class="mono cn-tok-created">2026-08-01</span>
+              <span class="mono cn-tok-used">2026-08-24 03:00</span>
+              <span class="cn-tok-action"><button class="cn-revoke" type="button">Revoke</button></span>
+            </div>
+          </div>
+
+          <div class="cn-token-foot">
+            <button class="control" type="button">Create token&hellip;</button>
+            <span class="micro">The value is shown once, at creation. The console stores only its SHA-256 and can never display it again &mdash; which is why every row above, and every snippet below, shows a mask rather than a secret.</span>
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Snippets are generated from the endpoint plus the selected token. No endpoint.</span></p>
+          <p class="section-title">Client snippets</p>
+
+          <div class="cn-tabbar">
+            <div class="segmented">
+              <span class="segmented-option" data-active="true">Claude Code</span>
+              <span class="segmented-option">Codex</span>
+              <span class="segmented-option">Cursor</span>
+              <span class="segmented-option">OpenAI SDK</span>
+              <span class="segmented-option">Anthropic SDK</span>
+              <span class="segmented-option">curl</span>
+            </div>
+            <div class="combo cn-token-pick">
+              <button class="control combo-trigger" type="button">
+                <span>token: claude-code</span>
+                <span class="combo-chevron">&#9662;</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="cn-pane cn-pane-active">
+            <div class="cn-pane-head">
+              <span class="legend-caps cn-pane-title">Claude Code</span>
+              <span class="micro cn-pane-target">shell environment</span>
+              <button class="chip cn-copy" type="button" aria-label="copy the Claude Code snippet">&#10697; copy</button>
+            </div>
+            <div class="well cn-snippet"><pre class="cn-code">export ANTHROPIC_BASE_URL=http://192.168.0.10:8080
+export ANTHROPIC_AUTH_TOKEN=&lt;your-proxy-token&gt;</pre></div>
+            <p class="micro cn-pane-note">No <span class="mono">/v1</span> on the base URL &mdash; Claude Code appends <span class="mono">/v1/messages</span> itself. ANTHROPIC_AUTH_TOKEN leaves as <span class="mono">Authorization: Bearer</span>; ANTHROPIC_API_KEY would leave as <span class="mono">x-api-key</span>. The anthropic dialect accepts either.</p>
+          </div>
+
+          <p class="section-title cn-subhead">The other five tabs</p>
+          <div class="cn-panes">
+
+            <div class="cn-pane">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">Codex</span>
+                <span class="micro cn-pane-target">~/.codex/config.toml</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the Codex snippet">&#10697; copy</button>
+              </div>
+              <div class="well cn-snippet"><pre class="cn-code">model = "openai/gpt-oss-120b"
+model_provider = "darkrouter"
+
+[model_providers.darkrouter]
+name = "darkrouter"
+base_url = "http://192.168.0.10:8080/v1"
+env_key = "DARKROUTER_TOKEN"
+wire_api = "responses"</pre></div>
+              <p class="micro cn-pane-note">Codex reads the secret from the environment variable named by <span class="mono">env_key</span>, so the token is exported rather than written into the file. <span class="mono">wire_api = "responses"</span> targets <span class="mono">POST /v1/responses</span>.</p>
+            </div>
+
+            <div class="cn-pane">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">Cursor</span>
+                <span class="micro cn-pane-target">Settings &rsaquo; Models</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the Cursor base url">&#10697; copy</button>
+              </div>
+              <div class="well cn-snippet"><pre class="cn-code">Override OpenAI Base URL   http://192.168.0.10:8080/v1
+OpenAI API Key             &lt;your-proxy-token&gt;</pre></div>
+              <p class="micro cn-pane-note">Cursor has no config file for this &mdash; both fields are typed into Settings. Its Verify button calls <span class="mono">GET /v1/models</span>, which the router answers from its own catalog rather than forwarding.</p>
+            </div>
+
+            <div class="cn-pane">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">OpenAI SDK</span>
+                <span class="micro cn-pane-target">python</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the OpenAI SDK snippet">&#10697; copy</button>
+              </div>
+              <div class="well cn-snippet"><pre class="cn-code">from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://192.168.0.10:8080/v1",
+    api_key="&lt;your-proxy-token&gt;",
+)</pre></div>
+              <p class="micro cn-pane-note">base_url keeps <span class="mono">/v1</span> here: this SDK appends <span class="mono">/chat/completions</span> to whatever it is given. api_key leaves as <span class="mono">Authorization: Bearer</span>, which is the only form the openai dialect reads.</p>
+            </div>
+
+            <div class="cn-pane">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">Anthropic SDK</span>
+                <span class="micro cn-pane-target">python</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the Anthropic SDK snippet">&#10697; copy</button>
+              </div>
+              <div class="well cn-snippet"><pre class="cn-code">from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://192.168.0.10:8080",
+    api_key="&lt;your-proxy-token&gt;",
+)</pre></div>
+              <p class="micro cn-pane-note">base_url stops at the origin: this SDK appends <span class="mono">/v1/messages</span>. api_key leaves as <span class="mono">x-api-key</span>, which the router prefers when a client sends both headers.</p>
+            </div>
+
+            <div class="cn-pane cn-pane-wide">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">curl</span>
+                <button class="chip cn-copy" type="button" aria-label="copy the curl snippet">&#10697; copy</button>
+              </div>
+              <div class="well cn-snippet"><pre class="cn-code">curl -i http://192.168.0.10:8080/v1/chat/completions \
+  -H "Authorization: Bearer &lt;your-proxy-token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"ping"}]}'</pre></div>
+              <p class="micro cn-pane-note">The <span class="mono">-i</span> is what prints the four headers below, so a client can read the routing decision without opening this console at all.</p>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="region">
+          <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Headers &mdash; set by the proxy on every response; the terminal-visible half of the trace.</span></p>
+          <p class="section-title">Response headers</p>
+
+          <div class="cn-headers">
+
+            <div class="cn-pane">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">Off the wire</span>
+                <span class="micro cn-pane-target">one response, three attempts</span>
+              </div>
+              <div class="well cn-snippet"><pre class="cn-code">HTTP/1.1 200 OK
+Content-Type: application/json
+X-Darkrouter-Provider: cerebras
+X-Darkrouter-Model: openai/gpt-oss-120b
+X-Darkrouter-Attempts: 3
+X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
+            </div>
+
+            <div class="cn-pane">
+              <div class="cn-pane-head">
+                <span class="legend-caps cn-pane-title">What each one tells you</span>
+              </div>
+              <div class="cn-hdr-list">
+                <div class="cn-hdr-row">
+                  <span class="mono cn-hdr-name">X-Darkrouter-Provider</span>
+                  <span class="prose cn-hdr-what">Which provider actually answered &mdash; not necessarily the first candidate the ladder offered.</span>
+                </div>
+                <div class="cn-hdr-row">
+                  <span class="mono cn-hdr-name">X-Darkrouter-Model</span>
+                  <span class="prose cn-hdr-what">The upstream model id that provider was asked for, after any alias the request used was resolved.</span>
+                </div>
+                <div class="cn-hdr-row">
+                  <span class="mono cn-hdr-name">X-Darkrouter-Attempts</span>
+                  <span class="prose cn-hdr-what">How many candidates were tried before one answered; a request that never reached a provider reports 0. Anything above 1 is what the request log marks <span class="chip chip-failover">failover &times;3</span></span>
+                </div>
+                <div class="cn-hdr-row">
+                  <span class="mono cn-hdr-name">X-Darkrouter-Request</span>
+                  <span class="prose cn-hdr-what">The ULID to paste into <span class="mono">operate/requests</span> to read the whole ladder, including the attempts that failed.</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <p class="micro cn-note">A fifth header, <span class="mono">X-Darkrouter-Estimated: true</span>, appears only on the responses whose token counts the router had to estimate rather than read back from the provider.</p>
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

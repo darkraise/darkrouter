@@ -1,0 +1,438 @@
+<section class="screen" id="s-08-preset-browser" data-screen-title="configure/providers &mdash; preset browser">
+  <p class="legend">
+    All 197 shipped presets, browsable by surface, auth kind and free tier,
+    with <span class="mono">cerebras</span> picked and its create form open.
+    Today the same catalogue is one flat dropdown of
+    <span class="mono">name (id)</span>; every other field on this screen is
+    already in the payload that dropdown reads and throws away. Press
+    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Providers</h2>
+          <p class="topbar-route mono">configure/providers</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="preset-stage">
+
+          <div class="preset-under">
+            <p class="section-title">Providers</p>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <button class="control control-primary">Add provider</button>
+              <button class="control control-ghost">Add without a preset</button>
+            </div>
+            <div class="table">
+              <div class="row">
+                <span class="legend-caps" style="flex:0 0 6px"></span>
+                <span class="legend-caps" style="flex:0 0 180px">provider</span>
+                <span class="legend-caps" style="flex:0 0 140px">kind</span>
+                <span class="legend-caps" style="flex:0 0 90px;text-align:right">priority</span>
+                <span class="legend-caps" style="flex:1 1 auto">credentials</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">groq</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">100</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="degraded"></span>
+                <span class="mono" style="flex:0 0 180px">cerebras</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">90</span>
+                <span class="micro" style="flex:1 1 auto">3 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">anthropic</span>
+                <span class="mono" style="flex:0 0 140px">anthropic</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">80</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">openrouter</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">70</span>
+                <span class="micro" style="flex:1 1 auto">3 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">together</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">60</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="disabled"></span>
+                <span class="mono" style="flex:0 0 180px">deepinfra</span>
+                <span class="mono" style="flex:0 0 140px">openaicompat</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">50</span>
+                <span class="micro" style="flex:1 1 auto">2 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="unconfigured"></span>
+                <span class="mono" style="flex:0 0 180px">bedrock</span>
+                <span class="mono" style="flex:0 0 140px">bedrock</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">40</span>
+                <span class="micro" style="flex:1 1 auto">0 credential(s)</span>
+              </div>
+              <div class="row">
+                <span class="state-pip" data-state="healthy"></span>
+                <span class="mono" style="flex:0 0 180px">vertex</span>
+                <span class="mono" style="flex:0 0 140px">vertex</span>
+                <span class="micro" style="flex:0 0 90px;text-align:right">30</span>
+                <span class="micro" style="flex:1 1 auto">1 credential(s)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="preset-scrim"></div>
+
+          <div class="preset-modal">
+            <div class="preset-modal-head">
+              <p class="preset-modal-title">Add a provider from a preset</p>
+              <a class="preset-modal-close" href="#">&times;</a>
+            </div>
+
+            <div class="preset-modal-body">
+              <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; Overlay &mdash; the one place in the product with a shadow: 0 8px 24px -8px. Spec &sect;3.3.</span></p>
+              <p><b class="pin" data-pin="2">2</b><b class="pin" data-pin="3">3</b><b class="pin" data-pin="4">4</b><span class="pin-note">2-4 &middot; GET /api/presets presets[]{id,name,kind,base_url,surfaces,auth_kind,website,free_tier}. Every one of these fields is served today and the current dropdown drops all but name and id.</span></p>
+
+              <div class="preset-browse">
+
+                <div class="preset-search-block">
+                  <p class="legend-caps">Search 197 presets</p>
+                  <div class="well preset-search">
+                    <span class="preset-search-q">cere</span><span class="preset-caret"></span>
+                    <span class="micro preset-search-count">3 of 197 match</span>
+                  </div>
+                  <div class="well preset-suggest">
+                    <div class="preset-suggest-row" data-picked="true">
+                      <span class="mono" style="flex:0 0 150px">cerebras</span>
+                      <span class="micro" style="flex:0 0 210px">Cerebras</span>
+                      <span class="micro">openaicompat</span>
+                      <span class="preset-suggest-why">substring &middot; CEREbras</span>
+                    </div>
+                    <div class="preset-suggest-row">
+                      <span class="mono" style="flex:0 0 150px">cohere</span>
+                      <span class="micro" style="flex:0 0 210px">Cohere</span>
+                      <span class="micro">openaicompat</span>
+                      <span class="preset-suggest-why">subsequence &middot; CohERE</span>
+                    </div>
+                    <div class="preset-suggest-row">
+                      <span class="mono" style="flex:0 0 150px">opencode</span>
+                      <span class="micro" style="flex:0 0 210px">OpenCode Free</span>
+                      <span class="micro">openaicompat</span>
+                      <span class="preset-suggest-why">subsequence &middot; openCodE fRee</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="preset-cols">
+
+                  <div class="preset-facets">
+                    <div class="preset-facet-group">
+                      <p class="legend-caps">Surface</p>
+                      <div class="well preset-facet-list">
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>llm</span><span class="preset-facet-count">196</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>embedding</span><span class="preset-facet-count">11</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>image</span><span class="preset-facet-count">3</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>stt</span><span class="preset-facet-count">2</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>tts</span><span class="preset-facet-count">2</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>rerank</span><span class="preset-facet-count">1</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>moderation</span><span class="preset-facet-count">1</span></span>
+                      </div>
+                    </div>
+                    <div class="preset-facet-group">
+                      <p class="legend-caps">Auth kind</p>
+                      <div class="well preset-facet-list">
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>bearer</span><span class="preset-facet-count">178</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>x-api-key</span><span class="preset-facet-count">6</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>api-key</span><span class="preset-facet-count">4</span></span>
+                        <span class="preset-facet-row" data-empty="true"><span class="combo-check">&check;</span><span>query-param</span><span class="preset-facet-count">0</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>none</span><span class="preset-facet-count">5</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>sigv4</span><span class="preset-facet-count">1</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>gcp-sa</span><span class="preset-facet-count">2</span></span>
+                        <span class="preset-facet-row"><span class="combo-check">&check;</span><span>oauth</span><span class="preset-facet-count">1</span></span>
+                      </div>
+                    </div>
+                    <div class="preset-facet-group">
+                      <p class="legend-caps">Free tier</p>
+                      <div class="well">
+                        <span class="preset-toggle-row">
+                          <span class="switch" data-on="false"><span class="switch-track"><span class="switch-knob"></span></span></span>
+                          <span class="switch-label">free tier only</span>
+                          <span class="preset-facet-count">121</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="preset-results">
+                    <div class="preset-results-head">
+                      <span class="micro">12 of 197 presets &middot; unfiltered, sorted by preset id</span>
+                      <span class="micro">&crarr; narrows the grid to the 3 matches</span>
+                    </div>
+                    <div class="preset-grid">
+                <div class="well preset-card" data-selected="true">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Cerebras</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>cerebras</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.cerebras.ai/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://inference.cerebras.ai">inference.cerebras.ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Groq</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>groq</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.groq.com/openai/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">stt</span>
+                    <span class="preset-surface-chip">tts</span>
+                    <a class="preset-link link" href="https://groq.com">groq.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-form">
+                  <div>
+                    <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; POST /api/providers {id,preset}. The preset supplies kind, base_url, auth_style, declared surfaces, quirks, model traits and the models.dev join key.</span></p>
+                    <label class="legend-caps preset-field-label" for="preset-new-id">provider id</label>
+                    <input class="field-input" id="preset-new-id" value="cerebras">
+                    <p class="preset-field-note">Prefilled from the preset id and editable. This is the only field you type &mdash; it becomes the provider's key in routing and the left half of every <span class="mono">provider/model</span> pair it serves.</p>
+                    <div class="preset-actions">
+                      <button class="control control-primary">Add provider</button>
+                      <button class="control control-ghost">Cancel</button>
+                    </div>
+                    <p class="micro" style="margin:10px 0 0">POST /api/providers {"id":"cerebras","preset":"cerebras"}</p>
+                  </div>
+                  <div>
+                    <p class="legend-caps">What the preset supplies</p>
+                    <div class="panel preset-supplies">
+                      <span class="preset-supplies-key">kind</span>
+                      <span class="preset-supplies-val">openaicompat</span>
+                      <span class="preset-supplies-key">base_url</span>
+                      <span class="preset-supplies-val">https://api.cerebras.ai/v1</span>
+                      <span class="preset-supplies-key">auth style</span>
+                      <span class="preset-supplies-val">bearer &mdash; Authorization: Bearer &hellip;</span>
+                      <span class="preset-supplies-key">declared surfaces</span>
+                      <span class="preset-supplies-val">llm</span>
+                      <span class="preset-supplies-key">quirks</span>
+                      <span class="preset-supplies-val preset-supplies-none">none declared</span>
+                      <span class="preset-supplies-key">model traits</span>
+                      <span class="preset-supplies-val preset-supplies-none">none declared</span>
+                      <span class="preset-supplies-key">models.dev key</span>
+                      <span class="preset-supplies-val">cerebras</span>
+                    </div>
+                    <p class="preset-field-note">Eight fields arrive with the preset &mdash; name, kind, base_url, auth style, surfaces, free tier, website and the models.dev join key. The two declared empty are answers too: cerebras needs no request rewriting and no per-model budget overrides, where anthropic declares one quirk and sixteen model traits.</p>
+                  </div>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">DeepInfra</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>deepinfra</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.deepinfra.com/v1/openai</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">embedding</span>
+                    <a class="preset-link link" href="https://deepinfra.com">deepinfra.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Together AI</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>together</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://api.together.xyz/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">embedding</span>
+                    <span class="preset-surface-chip">image</span>
+                    <a class="preset-link link" href="https://www.together.ai">www.together.ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">OpenRouter</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>openrouter</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://openrouter.ai/api/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://openrouter.ai">openrouter.ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Anthropic</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>x-api-key</span>
+                  </span>
+                  <span class="preset-url">https://api.anthropic.com/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://platform.claude.com">platform.claude.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Anthropic (Claude subscription)</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>anthropic-oauth</span><span class="preset-meta-sep">&middot;</span><span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>oauth</span>
+                  </span>
+                  <span class="preset-url">https://api.anthropic.com/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://claude.com">claude.com &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Amazon Bedrock</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>bedrock</span><span class="preset-meta-sep">&middot;</span><span>bedrock</span><span class="preset-meta-sep">&middot;</span><span>sigv4</span>
+                  </span>
+                  <span class="preset-url preset-url-derived" title="base_url is empty in the preset; the endpoint is assembled at create time as https://bedrock-runtime.{region}.amazonaws.com">https://bedrock-runtime.{region}.amazonaws.com</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://aws.amazon.com/bedrock">aws.amazon.com/bedrock &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Google Vertex AI</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>vertex</span><span class="preset-meta-sep">&middot;</span><span>vertex</span><span class="preset-meta-sep">&middot;</span><span>gcp-sa</span>
+                  </span>
+                  <span class="preset-url" title="https://us-central1-aiplatform.googleapis.com/v1/projects">https://us-central1-…googleapis.com/v1/projects</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <span class="preset-surface-chip">embedding</span>
+                    <a class="preset-link link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Google Vertex AI (Anthropic publisher)</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>vertex-anthropic</span><span class="preset-meta-sep">&middot;</span><span>vertex</span><span class="preset-meta-sep">&middot;</span><span>gcp-sa</span>
+                  </span>
+                  <span class="preset-url preset-url-derived" title="base_url is empty in the preset; the endpoint is assembled at create time as https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}">https://{location}-aiplatform.…/locations/{location}</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://cloud.google.com/vertex-ai">cloud.google.com/vertex-ai &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">AgentRouter</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>agentrouter</span><span class="preset-meta-sep">&middot;</span><span>anthropic</span><span class="preset-meta-sep">&middot;</span><span>x-api-key</span>
+                  </span>
+                  <span class="preset-url">https://agentrouter.org/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://agentrouter.org">agentrouter.org &#8599;</a>
+                  </span>
+                </div>
+                <div class="well preset-card">
+                  <span class="preset-card-head">
+                    <span class="data-emph preset-name">Agnes AI</span>
+                    <span class="preset-free">free tier</span>
+                  </span>
+                  <span class="preset-meta">
+                    <span>agnes</span><span class="preset-meta-sep">&middot;</span><span>openaicompat</span><span class="preset-meta-sep">&middot;</span><span>bearer</span>
+                  </span>
+                  <span class="preset-url">https://apihub.agnes-ai.com/v1</span>
+                  <span class="preset-card-foot">
+                    <span class="preset-surface-chip">llm</span>
+                    <a class="preset-link link" href="https://agnes-ai.com">agnes-ai.com &#8599;</a>
+                  </span>
+                </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+
+            <div class="preset-modal-foot">
+              <span class="preset-counts">197 presets &middot; 186 openaicompat &middot; 7 anthropic &middot; 2 vertex &middot; 1 gemini &middot; 1 bedrock</span>
+              <span><b class="pin" data-pin="6">6</b><span class="pin-note">6 &middot; Counts &mdash; derived from the preset list.</span></span>
+            </div>
+          </div>
+
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>

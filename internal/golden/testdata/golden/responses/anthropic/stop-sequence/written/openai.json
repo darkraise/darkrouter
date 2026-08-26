@@ -17,11 +17,11 @@
     "object": "chat.completion",
     "usage": {
       "completion_tokens": 5,
-      "prompt_tokens": 9,
+      "prompt_tokens": 12,
       "prompt_tokens_details": {
         "cached_tokens": 3
       },
-      "total_tokens": 14
+      "total_tokens": 17
     }
   },
   "status": 200

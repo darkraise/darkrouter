@@ -1,0 +1,1583 @@
+/*
+ * Darkrouter operator console — mockup design tokens ("Warm Console").
+ *
+ * The identity is adopted from 9router (github.com/decolua/9router): coral
+ * brand, warm neutral surfaces that stack upward from the ground, generous
+ * radius, real elevation, Inter, and a faint accent graticule behind the
+ * page. Values are taken verbatim from its src/app/globals.css except where
+ * a measurement forced a repair — every such repair is marked REPAIRED and
+ * carries both ratios, and fragments/17-light-proof.html shows them.
+ *
+ * Two rules are ours, not 9router's, and both are deliberate:
+ *   1. Coral is BRAND only — navigation, active state, primary action. What
+ *      the router DECIDED takes a cool hue (--trace); what a provider IS
+ *      takes green/amber/red. Coral sits between amber and red in hue, so
+ *      letting it mean "decision" would put three warm hues in the ladder
+ *      gutter doing three different jobs.
+ *   2. Inter carries the chrome; IBM Plex Mono still carries DATA. A gateway
+ *      console is mostly machine output — ULIDs, model ids, latencies, token
+ *      counts — and mono is what says "this came off the wire".
+ */
+
+:root,
+.force-dark {
+  color-scheme: dark;
+
+  /* Surfaces stack upward from the ground: a card is lighter than the
+     ground it sits on, in both modes. The INSET inside a card is where
+     that stops in light — there is nothing above white, so it steps down
+     to --surface-2 instead and is read from its border. This is an
+     elevation model, not the recessed-well model the previous language
+     used, and it is why light here is a palette swap rather than a
+     polarity inversion. */
+  --ground: #1A1A1A;
+  --ground-alt: #1F1F1E;
+  --surface: #262626;
+  --surface-2: #303030;
+  --surface-3: #3A3A3A;
+  --sidebar: rgba(38, 38, 38, 0.72);
+
+  --border: #333333;
+  --border-subtle: #2A2A2A;
+
+  --ink: #EDEDED;
+  --ink-muted: #9CA3AF;
+  /* REPAIRED — 9router ships #6B7280, which measures 3.13:1 on --surface and
+     fails the 4.5:1 text floor. 4.82:1. */
+  --legend: #8A929F;
+
+  /* Brand. --accent fills and marks; --accent-ink is the same brand as text. */
+  --accent: #E56A4A;
+  --accent-ink: #EA7855;
+  --accent-hover: #CC5236;
+
+  /* What the router decided. Cool, so it never reads as a health state. */
+  --trace: #60A5FA;
+  --trace-fill: rgba(96, 165, 250, 0.18);
+
+  /* What a provider is. */
+  --state-healthy: #22C55E;
+  --state-cooling: #FBBF24;
+  /* REPAIRED — 9router ships #EF4444, which measures 4.02:1 on --surface and
+     fails the text floor a status label needs. 5.47:1. */
+  --state-failed: #F87171;
+
+  /* darkraise-ui's radius axis at data-radius="rounded" sets --radius to
+     0.5rem and Tailwind derives md/sm from it as −2px/−4px. Matching that
+     scale exactly means the implementation sets one axis and writes no
+     radius rule at all; the 10/14px we drew first would have cost an
+     override on every card for a difference nobody can see. */
+  --radius-xs: 4px;   /* Tailwind rounded-sm  = --radius − 4 */
+  --radius-sm: 6px;   /* Tailwind rounded-md  = --radius − 2 */
+  --radius: 8px;      /* darkraise-ui --radius, data-radius="rounded" */
+  --radius-lg: 12px;  /* Tailwind rounded-xl  = --radius + 4 */
+  --radius-pill: 999px;
+
+  --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.25);
+  --shadow-elevated: 0 12px 28px -4px rgba(0, 0, 0, 0.45);
+  --shadow-elev:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 16px 48px -8px rgba(0, 0, 0, 0.55);
+  --shadow-focus: 0 0 0 3px rgba(229, 106, 74, 0.18);
+
+  --graticule: rgba(229, 106, 74, 0.04);
+
+  --row-h: 36px;
+  --control-h: 36px;
+  --control-h-sm: 28px;
+  --topbar-h: 64px;
+  --rail-w: 256px;   /* darkraise-ui --sidebar-width-expanded default (16rem) */
+  --section-pad: 16px;
+  --page-pad: 40px;
+  --gutter: 20px;
+  --content-max: 1280px;
+
+  --dur-hover: 150ms;
+  --dur-disclosure: 200ms;
+  --dur-swap: 90ms;
+}
+
+body.theme-light,
+.force-light {
+  color-scheme: light;
+
+  --ground: #FDFAF6;
+  --ground-alt: #F7F3EE;
+  --surface: #FFFFFF;
+  --surface-2: #F4F4F5;
+  --surface-3: #E7E7E9;
+  --sidebar: rgba(255, 255, 255, 0.72);
+
+  --border: #E5E7EB;
+  --border-subtle: #F1F1F3;
+
+  --ink: #0A0A0A;
+  /* REPAIRED — 9router's muted #6B7280 measures 4.83:1 and is fine, but its
+     subtle tier #9CA3AF measures 2.54:1 and fails outright. Both tiers step
+     down one so two distinct greys survive and both clear 4.5:1. */
+  --ink-muted: #4B5563;
+  --legend: #6B7280;
+
+  --accent: #E56A4A;
+  /* REPAIRED — brand-500 as TEXT measures 3.23:1 on white. brand-700 is the
+     same ramp at 6.21:1. The fill above keeps brand-500, which clears the
+     3:1 non-text floor at 3.23:1. */
+  --accent-ink: #A64027;
+  --accent-hover: #CC5236;
+
+  /* REPAIRED — 9router ships #3B82F6 at 3.68:1, fine as a mark and short of
+     the text floor. blue-600 is 5.17:1. */
+  --trace: #2563EB;
+  --trace-fill: rgba(37, 99, 235, 0.12);
+
+  /* REPAIRED — #10B981 measures 2.54:1 and fails even the 3:1 non-text
+     floor. 5.48:1. */
+  --state-healthy: #047857;
+  /* REPAIRED — #F59E0B measures 2.15:1. #D97706 is 3.19:1: non-text only,
+     which is why a cooling reading never says its word in amber. Amber at
+     text grade on white turns brown. */
+  --state-cooling: #D97706;
+  --state-failed: #CF222E;
+
+  --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.18);
+  --shadow-elevated: 0 12px 28px -4px rgba(60, 50, 45, 0.06);
+  --shadow-elev:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 36px -8px rgba(15, 23, 42, 0.10);
+
+  --graticule: rgba(229, 106, 74, 0.08);
+}
+
+/* --- darkraise-ui mapping ----------------------------------------------
+   What each token above becomes when this is built on darkraise-ui 6.4.0,
+   so the implementation is a rename rather than a re-derivation. The axes
+   carry most of it: density="comfortable" sets --density-cell-base to
+   2.25rem, which is the control height the 36px row matches (kit table
+   cells are padding-sized and land near it rather than being set to it),
+   radius="rounded" already gives 8px, elevation="low" already gives this
+   shadow ramp's geometry, and --font-sans is already Inter.
+
+     --ground          --surface-base / --background
+     --ground-alt      none — --surface-tint is a saturated glow hue, not
+                       a second canvas; the library has no counterpart
+     --surface         --surface-raised / --card
+     --surface-2       --surface-sunken
+     --surface-3       --muted
+     --sidebar         --surface-sidebar
+     --border          --border-default
+     --border-subtle   --border-subtle
+     --ink             --foreground / --card-foreground
+     --ink-muted       --muted-foreground
+     --legend          none — a third text tier the library does not emit
+     --accent          --primary            (OVERRIDE, see below)
+     --accent-ink      --primary as text    (OVERRIDE)
+     --accent-hover    --primary-fill       (OVERRIDE)
+     --trace           --info
+     --state-healthy   --success
+     --state-cooling   --warning
+     --state-failed    --destructive
+     --focus           --focus-ring / --ring
+     --shadow-soft     --elevation-low  (--shadow-soft is a preset recipe
+                       whose static default is none, not the axis token)
+     --shadow-elevated --elevation-high (likewise --shadow-dropdown)
+     --shadow-warm     none — custom, and spent only on the brand mark
+     --graticule       none — custom, one background-image on the screen
+
+   FOUR THINGS COST SOMETHING. Everything else is an axis setting.
+
+   1. Coral is not a themeable accent. ACCENT_COLORS is SEVENTEEN named
+      hues and coral (hsl 12 75% 59%) sits between `red` (hue 0) and
+      `orange` (hue 25), matching neither. The accent scale drives more than
+      the three --primary* tokens: --ring, --focus-ring, --chart-1..5 and
+      the destructive branch derive from it too, so the override is five
+      declarations before the chart ramp. Adding a `coral` ColorScale
+      upstream removes all of it.
+   2. The warm ground is unreachable. sepia (hue 36) is a near-exact match
+      for it and stone is a workable second, but SURFACE_COLORS is
+      ["slate", ...ACCENT_COLORS], so twelve neutral ramps ship and one is
+      selectable. Spec §7's widening is what unblocks this.
+   3. --chart-1..5 must be overridden. The ramp rotates from the accent's
+      index, so WHICH positions collide with the reserved cooling and
+      healthy colours depends on the accent — at sky it is 4 and 5. The
+      collision is the point, not the index. .chart-scope already does it.
+   4. --legend has no counterpart. The library emits --foreground and
+      --muted-foreground and stops; this language reads a third, quieter
+      tier for column heads and captions. One token.
+
+   NOT A TOKEN PROBLEM, A COMPONENT ONE: the routing ladder, the routing
+   flow graph and the trace waterfall have no equivalent in the kit and are
+   built. Everything else on these eighteen screens maps onto a shipped
+   component — the shell included: layout/sidebar, layout-header,
+   page-header, brand-logo and user-menu are the console chrome. */
+
+/* A forced container pins a subtree to one mode whatever the T toggle says,
+   so one document can set the two side by side. */
+.force-dark,
+.force-light {
+  background: var(--ground);
+  color: var(--ink);
+}
+
+/* The nine values 9router ships that a measurement rejected. They live here
+   because this is the one file allowed to hold a hex, and they appear in
+   exactly one place — the contrast proof — beside the tokens replacing them.
+   Nothing else may reference them. */
+:root {
+  --shipped-dark-legend: #6b7280;
+  --shipped-dark-state-failed: #ef4444;
+  --shipped-dark-accent-ink: #E56A4A;
+  --shipped-light-ink-muted: #6B7280;
+  --shipped-light-legend: #9CA3AF;
+  --shipped-light-accent-ink: #E56A4A;
+  --shipped-light-trace: #3B82F6;
+  --shipped-light-state-healthy: #10B981;
+  --shipped-light-state-cooling: #F59E0B;
+}
+
+/* --- Reset & base -------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The faint accent grid 9router lays behind the dashboard. Scoped to the
+   screen rather than the viewport — which is what 9router does too, on its
+   main pane — so it ends where the screen ends. A viewport-fixed grid paints
+   every row of the render and check.py can no longer tell where the content
+   stopped. */
+.screen { position: relative; }
+.screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--graticule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--graticule) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.screen > * { position: relative; z-index: 1; }
+
+a { color: inherit; }
+
+/* Pins are inert until A is pressed, so a screenshot of the design reads as
+   the design and a screenshot with pins reads as the specification. */
+.pin { display: none; }
+body.pins-on .pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: var(--radius);
+  /* accent-ink on --surface-2 clears 4.5:1 in both modes, dark 4.60:1 and
+     light 5.65:1 — the dark margin is thin, which is why the pin is 600 weight;
+     trace-fill/ground only managed ~2.2:1 in light mode. */
+  background: var(--accent-ink);
+  color: var(--surface-2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* --- Type roles ------------------------------------------------------ */
+
+.mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Micro data" role: the smallest data face, for things like the rank
+   column or a stat's fine print, still tabular since it is still a number. */
+.micro {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* "Emphasis data" role: table/body data with more visual weight, e.g. a
+   value a screen wants to draw the eye to without promoting it to a
+   30px readout. */
+.data-emph {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.prose {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* The per-screen caption qa.py requires exactly one of. It reads as a
+   sentence, so it takes the prose face at legend weight, not small caps. */
+.legend {
+  margin: 0 0 var(--section-pad);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--legend);
+}
+
+/* A label that IS an identifier — a config key, an API field, an env var.
+   It takes mono and no transform, because .legend-caps uppercases, and
+   `proxy_listen` uppercased is `PROXY_LISTEN`, which is not the key. The
+   type rule already says it: mono means this came off the wire, and a
+   config key is the most literal off-the-wire string on any screen. */
+.field-key {
+  margin: 0 0 6px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--legend);
+}
+
+/* The small-caps "Legend" type role from the spec: section and nav-group
+   labels, distinct from the .legend caption above. */
+.legend-caps {
+  margin: 0 0 6px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--legend);
+}
+
+/* "Section title" role: a panel or block header, one step up from
+   .legend-caps in size and down in tracking. Without this class a later
+   screen's panel headers would need inline styles, which is how a type
+   scale erodes one screen at a time. */
+/* A block heading, sentence case at 16px. 9router leads its sections with
+   a real heading rather than a silkscreened legend; the uppercase small-caps
+   role survives only as .legend-caps, on nav groups and column heads, where
+   the label really is a legend and not a title. */
+.section-title {
+  margin: 0 0 10px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.readout {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* No space before the unit in markup: <span class="readout">142</span
+   ><span class="unit">ms</span> */
+.unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--legend);
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+/* --- Surfaces ---------------------------------------------------------
+   Cards sit ON the ground rather than being cut into it. Each carries a
+   border, a radius and a soft shadow, and cards are separated by a gutter
+   instead of sharing a seam — the elevation model 9router uses, and the
+   reason light mode here is a palette swap rather than a polarity flip. */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+
+/* An inset region INSIDE a card — a chart bed, a code block, a readout
+   trough. It is not recessed below the ground; it is a quieter surface
+   within a card, which is the only kind of "inside" this language has. */
+.well {
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* A failover count names a routing decision (the router walked through
+   more than one candidate), the same split the ladder's --trace/state-
+   colour rule already draws — so it stays in the trace family, not a
+   neutral chip. Border/rule keeps --trace; the text is --accent-ink, the
+   readable pairing for accent-coloured text (--trace only clears 5.17:1
+   in light mode). Requests and Overview both report it, so both consume
+   this chip rather than reinventing it. */
+.chip-failover {
+  background: var(--trace-fill);
+  color: var(--trace);
+}
+
+/* Dialect/path annotations — quiet facts about how a request was handled,
+   the same register --legend already carries for secondary captions. */
+.chip-path { color: var(--legend); }
+
+/* A low-emphasis control variant: same 30px silhouette as .control, no
+   fill, dimmed until hovered. Used for a page-level "Reset" affordance in
+   more than one screen. */
+.control-ghost {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--ink-muted);
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.control-ghost:hover { opacity: 1; }
+
+/* --- Segmented control ---------------------------------------------------
+   One "pick exactly one of N" bar, joined into a single bordered strip
+   with hairline dividers between options. The active option sits on
+   --surface-2 — the recessed, "value in effect" surface already used for
+   tables, the ladder, and time-range presets — not --surface-2, which the
+   surface hierarchy (see the header comment above) reserves for popovers;
+   an inline selection state is not an elevated surface. */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 10px;
+  border-right: 1px solid var(--border-subtle);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.segmented-option:last-child { border-right: none; }
+.segmented-option:hover { opacity: 1; color: var(--ink); }
+.segmented-option[data-active="true"] {
+  opacity: 1;
+  background: var(--surface-2);
+  color: var(--accent-ink);
+}
+
+/* --- Table / rows ------------------------------------------------------ */
+
+.table {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  min-height: var(--row-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.row:last-child { border-bottom: none; }
+/* Every screen with a clickable row (Overview's failover log, Usage's rank
+   tables) makes it an <a class="row">, so the browser's default anchor
+   underline needs cancelling once here rather than once per partial. */
+a.row { text-decoration: none; }
+
+/* Row highlight animates opacity on a full-bleed overlay layer, not the
+   background-color itself — background-color never transitions in this
+   product; opacity is the only animated property on hover. A positioned
+   pseudo-element paints above in-flow text, so the target opacity is a
+   subtle wash (.06), not 1 — at 1 it is an opaque slab that covers the
+   row's own content instead of tinting it. */
+.row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) ease;
+}
+.row:hover::after { opacity: 0.06; }
+
+/* --- State pip -----------------------------------------------------
+   A provider identity pip: what a provider IS. Colour comes from a
+   data-state attribute, not a modifier class, since Task 2 owns no screen
+   that needs named variants yet. */
+
+.state-pip {
+  display: inline-block;
+  /* A pip is 7px and carries the row's whole state reading, so it must never
+     be a shrink candidate: inside a crowded flex row the default
+     flex-shrink:1 collapses it to zero width and the state silently
+     disappears rather than overflowing visibly. */
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--legend);
+}
+/* The four states GET /api/overview actually emits for a provider tile.
+   "degraded" rather than "cooling" is the API's word and the accurate one:
+   a CREDENTIAL cools, and a provider is degraded while any of its
+   credentials is cooling. The ladder keeps .mark-cooling because there the
+   subject really is one candidate's credential.
+   Disabled and unconfigured both mean "no health reading exists", so
+   neither takes a state colour; they split filled from hollow the way the
+   ladder marks do — disabled is a thing that is switched off, unconfigured
+   is a thing with nothing in it. */
+.state-pip[data-state="healthy"] { background: var(--state-healthy); }
+.state-pip[data-state="degraded"] { background: var(--state-cooling); }
+.state-pip[data-state="disabled"] { background: var(--legend); }
+.state-pip[data-state="unconfigured"] {
+  background: transparent;
+  border: 1px solid var(--legend);
+}
+/* Outcome, not health — a finished request or probe. Never on a provider. */
+.state-pip[data-state="failed"] { background: var(--state-failed); }
+
+/* --- Ladder ----------------------------------------------------------
+   The routing fallback ladder: one row per provider attempt, a spine
+   running through the gutter, and a mark per row for what happened. A
+   ladder mark reports what the ROUTER decided (trace/sky), not what a
+   provider is (state colours) — except cooling, which the spec carves out
+   as one of the two places amber is allowed, and failed, which reports an
+   attempt's outcome rather than a routing choice. */
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ladder-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  padding: 0 var(--section-pad);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ladder-row:last-child { border-bottom: none; }
+
+/* Where the request landed: a value step plus a 1px --trace rule down the
+   left edge, so the served row reads as the one the eye should stop on
+   without needing to read a single character of it. */
+.ladder-row-served { border-left: 1px solid var(--trace); }
+.ladder-row-served::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+/* Two-digit zero-padding keeps the gutter's optical width constant past
+   rank nine, which matters once a ladder runs past 9 candidates. */
+.rank {
+  position: relative;
+  min-width: 28px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+  text-align: right;
+}
+/* A tick drawn into the spine's approach, not onto the spine itself — sits
+   in the 8px gap .ladder-row's flex gap already reserves, so it needs no
+   layout space of its own. Opt-in per rank (.rank-tick) rather than a bare
+   .rank rule, since a ladder with no .spine has nothing for the tick to
+   run into. Every fifth rank gets the long variant. */
+.rank-tick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  width: 3px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--legend);
+}
+.rank-tick-major::after { width: 5px; }
+/* Below the served row a candidate's text is still printed, just at the
+   45% opacity the termination rule puts on it — the spine and mark get
+   their own colour treatment instead, so this is text-only and shared
+   across whichever element in the row needs it (rank, target, reason). */
+.text-terminated { opacity: 0.45; }
+
+.spine {
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+}
+/* The termination rule: below the served row the run of ink itself gives
+   out, not just the marks sitting on it. */
+.spine-terminated { background: var(--border-subtle); }
+
+/* All four states share one 7px silhouette footprint so the gutter column
+   never jitters between rows, and split into two families: filled means an
+   attempt happened (served or failed), hollow means it did not (skipped or
+   cooling). Silhouette carries the meaning in greyscale; colour is a second
+   channel on top of it, never the only one. */
+.mark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--legend);
+}
+/* Passed over without an attempt: hollow, 1px --legend stroke, no fill —
+   neither a routing decision nor a health report, so it carries no state
+   colour, and its hollow silhouette matches "no attempt occurred" rather
+   than the filled attempt outcomes below. */
+.mark-skipped { background: transparent; border: 1px solid var(--legend); }
+/* The one other place amber is allowed, per the colour-discipline rule.
+   A centre dot gives it a second, shape-based channel distinct from
+   .mark-skipped's plain hollow ring, since stroke weight alone (1px vs
+   2px) is the weakest pairing in the greyscale proof — the dot reads as
+   "something is still in there, waiting" even with the amber stripped. */
+.mark-cooling {
+  position: relative;
+  background: transparent;
+  border: 2px solid var(--state-cooling);
+}
+.mark-cooling::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
+}
+/* This attempt errored — an outcome for that provider, not a routing
+   choice, so it takes the failed state colour. */
+.mark-failed { background: var(--state-failed); }
+/* Where the request landed: the router's decision, so trace, never a
+   state colour. */
+.mark-served { background: var(--trace-fill); border: 1px solid var(--trace); }
+/* Below the served row a candidate was never reached at all — a smaller,
+   dimmer silhouette than "skipped", which was still a live decision.
+   This one is just where the ink runs out. */
+.mark-terminated {
+  /* Scaled with the base mark when it went 7px -> 8px. The ratio is what
+     carries the reading: a terminated mark is visibly smaller than a live
+     one, and at 5px against an 8px base it had drifted to merely tiny. */
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+}
+/* The compressed catalog reading: rank plus mark plus provider id only,
+   at a size step up from the ladder's own 7px so a dense column of them
+   still reads as individual marks rather than a smear. */
+.mark-catalog { width: 10px; height: 10px; }
+
+/* The router expands one candidate per (provider, credential, model), so
+   a provider with two configured keys legitimately earns two rows. This
+   footnotes the second (and later) row rather than letting it read as an
+   accidental duplicate — legend weight, off to the side of the id. */
+.credential-tag {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--legend);
+}
+
+/* Solid means the row ended here; dashed means the router moved past it
+   after a failure. A background gradient gives an exact 3px-on-3px dash
+   at any zoom level, which border-style: dashed does not guarantee. */
+.stub {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 1px;
+  background: var(--trace);
+}
+.stub-dashed {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--state-failed) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.reason {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-muted);
+}
+.reason-code {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+.reason-prose {
+  min-width: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* The candidate identity itself — provider/model, off the wire, so mono.
+   Fixed width keeps it a column across rows whose reason text varies
+   wildly in length. */
+.target {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  min-width: 230px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+/* A candidate the router passed over keeps its identity legible but
+   unemphasised — nothing happened here, so nothing should draw the eye. */
+.target-muted { color: var(--ink-muted); }
+
+/* A 2px bar in the row's own right margin, width set per row from the
+   ladder's own maximum latency — the ladder becomes a waterfall with no
+   second axis to read. */
+.latency-bar{
+  flex: 0 0 auto;
+  align-self: center;
+  height: 2px;
+  min-width: 2px;
+  max-width: 64px;
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  background: var(--trace);
+}
+.latency-bar-failed { background: var(--state-failed); }
+
+/* The evidence panel: the same retrospective ladder with every hue
+   stripped, so the four mark states have to stand on silhouette alone. */
+.ladder-grayscale { filter: grayscale(1); }
+/* --- Console chrome ---------------------------------------------------
+   The 9router shell: a 288px vibrancy sidebar with an icon-led nav, a tall
+   header carrying the page name over its route, and a content pane that
+   caps its measure rather than filling the window. */
+
+.chrome {
+  display: flex;
+  min-height: 720px;
+  background: var(--ground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.rail {
+  flex: 0 0 var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px 16px;
+  background: var(--sidebar);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 16px;
+  text-decoration: none;
+}
+/* The one gradient in the product, and the only place --shadow-warm is
+   spent: a brand mark is the single element allowed to look like a logo. */
+.rail-logo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: var(--shadow-warm);
+  color: #FFFFFF;
+}
+.rail-logo-mark { width: 20px; height: 20px; }
+.rail-brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.rail-brand-name {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.rail-brand-version { font-size: 11px; color: var(--legend); }
+
+.rail-group { display: flex; flex-direction: column; gap: 2px; }
+.rail-group + .rail-group { margin-top: 16px; }
+.rail-group .legend-caps { margin: 0 0 6px; padding: 0 12px; }
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: background var(--dur-hover) ease, color var(--dur-hover) ease;
+}
+.rail-item:hover { background: var(--surface-2); color: var(--ink); }
+/* Active is a coral wash plus coral text — brand marking position, which is
+   the only job coral has in this language. */
+.rail-item[data-active="true"] {
+  background: rgba(229, 106, 74, 0.10);
+  color: var(--accent-ink);
+}
+.rail-icon { flex: 0 0 auto; width: 18px; height: 18px; }
+
+.rail-foot { margin-top: auto; padding-top: 16px; }
+
+.chrome-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gutter);
+  min-height: var(--topbar-h);
+  padding: 14px var(--page-pad);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.topbar-heading { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* The page name in sans, the route beneath it in mono. 9router stacks a
+   title over a sentence of description; this keeps the stack and spends the
+   second line on the route, which is the thing an operator can act on. */
+.topbar-title {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.topbar-route { margin: 0; font-size: 12px; color: var(--legend); }
+
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: background var(--dur-hover) ease, color var(--dur-hover) ease;
+}
+.topbar-btn:hover { background: var(--surface-2); color: var(--ink); }
+.topbar-btn-icon { padding: 0; width: var(--control-h); justify-content: center; }
+.topbar-icon { width: 18px; height: 18px; }
+.topbar-caret { font-size: 10px; color: var(--legend); }
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--page-pad);
+}
+/* 9router caps its dashboard at 1280px rather than letting tables run the
+   full width of a wide monitor. */
+.content > * { max-width: var(--content-max); margin-inline: auto; }
+
+/* --- Document shell (outside the .chrome, describing the doc itself) -- */
+
+.screen {
+  display: block;
+  max-width: 1440px;
+  margin: 0 auto 48px;
+}
+
+.doc-head {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 32px var(--section-pad) 24px;
+}
+.doc-title {
+  margin: 0 0 4px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+}
+.doc-keys {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.toc {
+  max-width: 1440px;
+  margin: 0 auto 32px;
+  padding: var(--section-pad);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+.toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.toc li { border-top: 1px solid var(--border-subtle); }
+.toc li:first-child { border-top: none; }
+.toc a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  color: var(--ink-muted);
+  text-decoration: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  opacity: 0.8;
+  transition: opacity var(--dur-hover) ease;
+}
+.toc a:hover { opacity: 1; color: var(--ink); }
+.toc-n {
+  color: var(--legend);
+  font-size: 11px;
+}
+
+/* --- Promoted cross-screen vocabulary ----------------------------------
+   Consolidation pass: components four or more screens each drew their own
+   copy of. Promoted here once, with every local clone deleted and every
+   consumer repointed, so the set describes one component rather than
+   several variants that happen to look alike. */
+
+/* A boolean control's on-state is a UI SELECTION, not a router verdict, so
+   it takes --accent-ink — the same token the rail's active item and
+   Requests' active saved view already use for "this one is chosen". The
+   knob is drawn, not tweened: this product has exactly four movements
+   (hover opacity, disclosure height, value swap) and a sliding knob is
+   none of them. 26x14, well track — the one shape every screen adopts;
+   Provider detail's 26x16 and the preset browser's 24x14 both round to
+   this. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+}
+.switch-track{
+  position: relative;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+.switch-knob{
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--legend);
+}
+.switch[data-on="true"] .switch-track { border-color: var(--accent-ink); }
+.switch[data-on="true"] .switch-knob {
+  left: auto;
+  right: 1px;
+  background: var(--accent-ink);
+}
+.switch-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.switch[data-on="true"] .switch-label { color: var(--ink); }
+
+/* The one committing action on a screen. Outlined in --accent-ink rather
+   than filled — this console has no filled buttons. */
+/* The one filled control in the product. Coral marks the primary action on
+   a screen, which is the second and last job brand colour has here. */
+.control-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-soft);
+}
+.control-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* A generic status pill: box shape from .chip, colour from data-status.
+   success/error are outcomes — a request's own result or a probe's own
+   result — never a routing verdict, which is the same reasoning that lets
+   .status-success/-error use the state colours on the Requests table. */
+.status-badge[data-status="success"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--state-healthy) 15%, transparent);
+  color: var(--state-healthy);
+}
+.status-badge[data-status="error"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--state-failed) 15%, transparent);
+  color: var(--state-failed);
+}
+
+/* A table header row: the hairline it sits on is one step darker than a
+   body row's, and its .legend-caps labels lose their own bottom margin,
+   which a 30px flex row does not collapse on its own. */
+.row-head { border-bottom-color: var(--border); }
+.row-head .legend-caps,
+.row-head .field-key { margin: 0; }
+
+/* The grip for drag-to-reprioritise. Three 1px rules painted with a
+   gradient rather than a glyph or an image: it stays crisp at any zoom,
+   carries no font dependency, and needs no fetched asset. Dimmed at rest,
+   brought up on hover — the one hover animation the motion budget allows
+   for a row's own chrome. */
+.priority-handle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: var(--control-h);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--legend) 0 1px,
+    transparent 1px 4px
+  );
+  background-size: 10px 9px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  transition: opacity var(--dur-hover) ease;
+}
+.row:hover .priority-handle { opacity: 1; }
+
+/* Where a dragged row will land: 2px of --trace across the row width plus
+   a square cap on the leading edge, so the insertion point stays readable
+   crossing a busy row. Height stays at the border's own 2px so the list
+   does not re-lay-out under the cursor mid-drag. */
+.drop-indicator {
+  position: relative;
+  height: 0;
+  border-top: 2px solid var(--accent);
+}
+.drop-indicator::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  background: var(--accent);
+}
+
+/* A provider's discovery-health dot. Deliberately a CIRCLE while
+   .state-pip is a 2px-radius square: the two marks answer different
+   questions ("is this provider serving" vs "is its model listing still
+   being refreshed") and must not read as one repeated mark. Hollow
+   --legend is the base — no current reading. Stale takes the 2px ring plus
+   centre dot .mark-cooling already established for "something is still
+   in there, waiting", so the shape carries it without spending amber on
+   a fourth thing. */
+.discovery-status {
+  position: relative;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--legend);
+  border-radius: 50%;
+  background: transparent;
+}
+.discovery-status[data-discovery="fresh"] {
+  border-color: var(--state-healthy);
+  background: var(--state-healthy);
+}
+.discovery-status[data-discovery="stale"] {
+  border: 2px solid var(--state-cooling);
+  background: transparent;
+}
+.discovery-status[data-discovery="stale"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--state-cooling);
+}
+
+/* --- Combobox ------------------------------------------------------------
+   A multi-select trigger plus its popover menu. The popover sits on
+   --surface-2 + --shadow-elevated: the surface hierarchy's one elevated
+   value, never --surface or --surface-2. */
+.combo {
+  display: flex;
+  flex-direction: column;
+}
+
+.combo-trigger {
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: default;
+}
+
+.combo-chevron {
+  color: var(--legend);
+  font-size: 10px;
+}
+
+.combo-menu {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-elevated);
+}
+.combo[data-open="true"] .combo-menu { display: flex; }
+
+.combo-option{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--ink);
+  opacity: 0.85;
+  transition: opacity var(--dur-hover) ease;
+}
+.combo-option:hover { opacity: 1; }
+
+.combo-check{
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--legend);
+  border-radius: var(--radius-xs);
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+}
+.combo-option[data-checked="true"] .combo-check {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.combo-count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* A row of real filter controls, top-aligned so an open combobox or menu
+   grows downward inside its own column without pushing or overlapping a
+   sibling — closed siblings just end 30px up from wherever the tallest,
+   open one does. */
+.filter-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gutter);
+}
+
+/* The bar above a data table: a result count on the left, actions on the
+   right. */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.table-toolbar-actions {
+  position: relative;
+  display: flex;
+  gap: 8px;
+}
+
+/* The positioning context a table needs to float something astride its
+   own edge — a queued-rows pill, an absolutely-positioned column menu. */
+.table-wrap { position: relative; }
+
+.col-right { text-align: right; }
+.text-muted { color: var(--ink-muted); }
+
+/* --- Form field vocabulary ----------------------------------------------
+   One repeated unit across every settings form and read-only fact panel
+   in the product: a label, a value, and a note about it. The grid that
+   lays out a run of fields stays local per screen — a screen's column
+   count follows its own field count — but the field wrapper and the
+   input control itself are the same everywhere an operator edits or
+   reads a value. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.field .legend-caps,
+.field .field-key { margin: 0; }
+.field .spec-note { margin-top: 2px; }
+.field-span-2 { grid-column: span 2; }
+
+/* An input is a value the operator can change, so it sits on --surface-2: the
+   recessed surface this product already uses for anything that is data
+   rather than chrome, and the one that stacks upward in both themes. */
+.field-input {
+  height: var(--control-h);
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--ink);
+}
+.field-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
+}
+/* Read-only: still a fact worth a well's worth of weight, just not one
+   this control can change right now. */
+.field-input[readonly] {
+  background: var(--surface);
+  border-color: var(--border-subtle);
+  color: var(--ink-muted);
+}
+/* Not applicable to the current selection, which is a different fact
+   from read-only: still there, still labelled, just not accepting a
+   value at all. Dashed says "there is nothing to read here" where a
+   solid border would say "there is, you just cannot change it". */
+.field-input-inert {
+  background: var(--surface);
+  border-style: dashed;
+  color: var(--legend);
+}
+
+/* The value of a read-only field that is a link or a short composite
+   rather than a plain string. Same box as .field-input so the grid keeps
+   one baseline. */
+.field-static {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* A run of read-only wire fields printed side by side rather than
+   stacked in a form. auto-fit collapses the tracks a shorter run does
+   not fill, so a run of four fields and a run of five both come out
+   evenly divided. */
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--gutter);
+}
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.kv-key { color: var(--legend); }
+.kv-value { color: var(--ink); }
+
+/* The one inline text link in the product — an operator-facing anchor to
+   another site or another screen, distinct from .link-out's button-
+   styled navigation. RULING: always underlined. An underline is the
+   accessible affordance that does not depend on colour alone, so it
+   applies whether or not the link is being hovered. --accent-ink because
+   this is accent-coloured text (--trace only reaches 5.17:1 in light
+   mode and fails AA at body size). */
+.link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.link:hover { opacity: 1; }
+
+/* --- Design-language specimen classes ---------------------------------
+   Everything below exists only because fragments/00-design-language.html
+   has to render a rule as a live specimen rather than describe it, and no
+   class above already did the job. Each is scoped to one numbered region
+   of that screen, so a later screen reusing one is a deliberate choice. */
+
+/* Region 1 (palette): one colour chip per token row. Size and border only
+   — the fill always comes from an inline var(--token), never from here. */
+.swatch{
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+/* The annotation sentence beside a numbered .pin badge. A 16px pill has no
+   room for a sentence, so the sentence lives next to it in its own
+   element, hidden and revealed in lockstep with .pin by the same toggle. */
+.pin-note {
+  display: none;
+  margin-left: 6px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--legend);
+}
+body.pins-on .pin-note { display: inline; }
+
+/* Region 3 (type scale): the spec string printed beside each role
+   specimen, e.g. "13px / Mono 500". Distinct from .legend (the one
+   per-screen caption) and .legend-caps (the uppercase nav-group label). */
+.spec-note {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* Region 4 (unit rule): the same value set without the size/colour step
+   that separates a number from its unit, so the two renderings sit side
+   by side and the difference is visible instead of asserted. */
+.naive {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Region 5 (surface): the one place --shadow-elevated is allowed to appear
+   outside real overlay chrome (menus, popovers). */
+.surface-overlay {
+  padding: var(--section-pad);
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Region 5 (surface): the radius comparison. border-radius is set per
+   instance inline — geometry, not colour, so qa.py's hex rule is silent
+   on it. */
+.radius-demo {
+  width: 48px;
+  height: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Region 6 (density): a generic 30px control silhouette proving
+   var(--control-h) — not a finished button spec; later screens define
+   their own controls. */
+.control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+  transition: background var(--dur-hover) ease, border-color var(--dur-hover) ease;
+}
+.control:hover { background: var(--surface-3); }
+/* The fourth permitted motion: 9router presses a control rather than
+   flashing it. No transition — a press is instant and the release is
+   what the eye reads. */
+.control:active,
+.control-primary:active,
+.topbar-btn:active { transform: scale(0.97); }
+
+/* Region 6 (density): a caliper bracket for calling out an exact pixel
+   measurement next to the thing it measures. */
+.measure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.measure::before,
+.measure::after {
+  content: "";
+  width: 1px;
+  height: 8px;
+  background: var(--legend);
+}
+
+/* Region 8 (motion): the 160ms height-disclosure specimen. Collapsed to
+   one line; hovering reveals the rest. At 24px (border-box: 1px border +
+   2 * var(--section-pad)) the content height is zero, cropping the line
+   instead of showing it. 43px was measured pixel-by-pixel against the
+   actual render: it fits the mono line with no clipping and stops just
+   short of the second paragraph's margin, so no sliver of it bleeds
+   through. --section-pad stays the shared padding rhythm every specimen
+   box uses, so the box grows instead of shrinking its padding. */
+.disclosure {
+  max-height: 43px;
+  padding: var(--section-pad);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  transition: max-height var(--dur-disclosure) ease;
+}
+.disclosure:hover { max-height: 90px; }
+
+/* Region 8 (motion): the 90ms cross-fade specimen simulating a live value
+   swap. Only opacity transitions here — background-color never does,
+   anywhere in this product. */
+.value-swap {
+  position: relative;
+  display: inline-block;
+  min-width: 52px;
+  height: 1.45em;
+}
+.value-swap .v-a,
+.value-swap .v-b {
+  display: inline-block;
+  transition: opacity var(--dur-swap) ease;
+}
+.value-swap .v-b {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.value-swap:hover .v-a { opacity: 0; }
+.value-swap:hover .v-b { opacity: 1; }
+
+/* The 8 numbered blocks on the specimen board share one seam-plus-gutter
+   rhythm rather than eight one-off spacing rules, the same convention
+   .rail-group already uses for its own three groups. */
+.region + .region {
+  margin-top: var(--gutter);
+  padding-top: var(--gutter);
+  border-top: 1px solid var(--border-subtle);
+}

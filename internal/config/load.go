@@ -159,8 +159,11 @@ func validate(c *Config) error {
 	if c.Policy.Cooldown.Max <= 0 {
 		return fmt.Errorf("policy.cooldown.max must be positive")
 	}
-	if c.Log.Retention <= 0 {
-		return fmt.Errorf("log.retention must be positive")
+	// The daily rollup recomputes yesterday and today, so anything it can
+	// still rewrite must still be in the log. Two days is the exact point
+	// where pruning can no longer reach a row the rollup would rebuild.
+	if c.Log.Retention < 48*time.Hour {
+		return fmt.Errorf("log.retention must be at least 48h, got %s", c.Log.Retention)
 	}
 	if c.Capture.Retention <= 0 {
 		return fmt.Errorf("capture.retention must be positive")

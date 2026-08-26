@@ -286,6 +286,7 @@ type RequestSummary struct {
 	Status          string
 	TokensIn        int64
 	TokensOut       int64
+	CacheReadTokens int64
 	CostMicros      *int64
 	TTFTMs          *int64
 	TotalMs         *int64
@@ -344,7 +345,7 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT r.id, r.ts, r.dialect, r.surface, r.requested_model, r.resolved_alias,
 		        r.final_provider_id, r.final_model, r.status,
-		        r.tokens_in, r.tokens_out, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
+		        r.tokens_in, r.tokens_out, r.cache_read_tokens, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
 		        (SELECT count(*) FROM request_attempts a WHERE a.request_id = r.id)
 		   FROM requests r
 		  WHERE `+strings.Join(where, " AND ")+`
@@ -360,7 +361,7 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		var s RequestSummary
 		if err := rows.Scan(&s.ID, &s.TSMs, &s.Dialect, &s.Surface, &s.RequestedModel,
 			&s.ResolvedAlias, &s.FinalProviderID, &s.FinalModel, &s.Status,
-			&s.TokensIn, &s.TokensOut, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
+			&s.TokensIn, &s.TokensOut, &s.CacheReadTokens, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
 			&s.ErrorCode, &s.Attempts); err != nil {
 			return nil, fmt.Errorf("list requests: %w", err)
 		}
@@ -413,13 +414,13 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT id, ts, dialect, surface, requested_model, resolved_alias,
 		        final_provider_id, final_model, status,
-		        tokens_in, tokens_out, cost_micros, ttft_ms, total_ms, error_code,
+		        tokens_in, tokens_out, cache_read_tokens, cost_micros, ttft_ms, total_ms, error_code,
 		        candidates_json, warnings_json, surface_meta_json,
 		        response_bytes, response_content_type
 		   FROM requests WHERE id = ?`, id).Scan(
 		&tr.ID, &tr.TSMs, &tr.Dialect, &tr.Surface, &tr.RequestedModel, &tr.ResolvedAlias,
 		&tr.FinalProviderID, &tr.FinalModel, &tr.Status,
-		&tr.TokensIn, &tr.TokensOut, &tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
+		&tr.TokensIn, &tr.TokensOut, &tr.CacheReadTokens, &tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
 		&traceJSON, &warningsJSON, &metaJSON,
 		&tr.ResponseBytes, &tr.ResponseContentType)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -455,7 +456,8 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	}
 
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path
+		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path,
+		        tokens_in, tokens_out, cost_micros
 		   FROM request_attempts WHERE request_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
@@ -465,7 +467,8 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	for rows.Next() {
 		var a AttemptRecord
 		if err := rows.Scan(&a.Seq, &a.ProviderID, &a.KeyID, &a.Model,
-			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error, &a.Path); err != nil {
+			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error, &a.Path,
+			&a.TokensIn, &a.TokensOut, &a.CostMicros); err != nil {
 			return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
 		}
 		tr.Attempts = append(tr.Attempts, a)
@@ -496,44 +499,87 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 
 // UsageDay is one row of the usage chart.
 type UsageDay struct {
-	Day        string
-	Requests   int64
-	TokensIn   int64
-	TokensOut  int64
-	CostMicros *int64
+	Day        string `json:"day"`
+	Requests   int64  `json:"requests"`
+	Attempts   int64  `json:"attempts"`
+	TokensIn   int64  `json:"tokens_in"`
+	TokensOut  int64  `json:"tokens_out"`
+	CostMicros *int64 `json:"cost_micros"`
 }
 
-// UsageByDay rolls usage_daily up across providers and models, oldest first
-// because a chart reads left to right.
-func (d *DB) UsageByDay(ctx context.Context, days int) ([]UsageDay, error) {
+// UsageDimension is the column usage rolls up by. The zero value aggregates
+// across everything, which is what the rollup reported before there was a
+// choice.
+type UsageDimension int
+
+const (
+	UsageByDayOnly UsageDimension = iota
+	UsageByProvider
+	UsageByModel
+	UsageByAlias
+)
+
+// column is the SQL identifier for a dimension. It returns "" for the
+// day-only case, and the caller must not interpolate anything else -- these
+// are fixed identifiers, never user input.
+func (d UsageDimension) column() string {
+	switch d {
+	case UsageByProvider:
+		return "provider_id"
+	case UsageByModel:
+		return "model"
+	case UsageByAlias:
+		return "alias"
+	default:
+		return ""
+	}
+}
+
+// UsageRow is a UsageDay plus the value of the dimension it was grouped by.
+// Key is empty for UsageByDayOnly.
+type UsageRow struct {
+	UsageDay
+	Key string `json:"key,omitempty"`
+}
+
+// UsageBy rolls usage_daily up over the last `days` days, split by one
+// dimension, oldest first because a chart reads left to right.
+func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]UsageRow, error) {
 	if days <= 0 || days > 365 {
 		days = 30
 	}
-	rows, err := d.Read.QueryContext(ctx,
-		`SELECT day, sum(requests), sum(tokens_in), sum(tokens_out), sum(cost_micros)
-		   FROM usage_daily GROUP BY day ORDER BY day DESC LIMIT ?`, days)
+	col := dim.column()
+	sel, group := "'' AS k", "day"
+	if col != "" {
+		sel, group = col+" AS k", "day, "+col
+	}
+	// The LIMIT is on DAYS, not on rows. Grouping by a dimension multiplies
+	// the row count by that dimension's cardinality, so a row limit would
+	// silently return thirty rows covering four days once eight providers
+	// are in play.
+	q := `SELECT day, ` + sel + `,
+	             sum(requests), sum(attempts), sum(tokens_in), sum(tokens_out),
+	             CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
+	        FROM usage_daily
+	       WHERE day IN (SELECT day FROM usage_daily
+	                      GROUP BY day ORDER BY day DESC LIMIT ?)
+	       GROUP BY ` + group + `
+	       ORDER BY day, k`
+	rows, err := d.Read.QueryContext(ctx, q, days)
 	if err != nil {
-		return nil, fmt.Errorf("usage by day: %w", err)
+		return nil, fmt.Errorf("usage by: %w", err)
 	}
 	defer rows.Close()
-
-	out := []UsageDay{}
+	out := []UsageRow{}
 	for rows.Next() {
-		var u UsageDay
-		if err := rows.Scan(&u.Day, &u.Requests, &u.TokensIn, &u.TokensOut, &u.CostMicros); err != nil {
-			return nil, fmt.Errorf("usage by day: %w", err)
+		var r UsageRow
+		if err := rows.Scan(&r.Day, &r.Key, &r.Requests, &r.Attempts,
+			&r.TokensIn, &r.TokensOut, &r.CostMicros); err != nil {
+			return nil, fmt.Errorf("usage by: %w", err)
 		}
-		out = append(out, u)
+		out = append(out, r)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// Reversed after the LIMIT: the query takes the newest N, the chart shows
-	// them oldest first.
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // RecentStats is the overview's headline numbers over a window.
@@ -541,10 +587,6 @@ type RecentStats struct {
 	Requests  int64
 	Errors    int64
 	WindowSec int64
-	// PricedRows counts rows carrying a cost. Zero means nothing computes
-	// pricing, which the overview reports rather than showing a confident zero.
-	PricedRows int64
-	CostMicros int64
 }
 
 func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats, error) {
@@ -555,13 +597,126 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	// int64 fails rather than yielding zero.
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT count(*),
-		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0),
-		        coalesce(sum(CASE WHEN cost_micros IS NOT NULL THEN 1 ELSE 0 END), 0),
-		        coalesce(sum(cost_micros), 0)
+		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0)
 		   FROM requests WHERE ts >= ?`, since).
-		Scan(&s.Requests, &s.Errors, &s.PricedRows, &s.CostMicros)
+		Scan(&s.Requests, &s.Errors)
 	if err != nil {
 		return s, fmt.Errorf("recent stats: %w", err)
 	}
 	return s, nil
+}
+
+// SpendSince sums cost from since through now.
+//
+// Cost is sourced the same way RecentStats and the daily rollup source it:
+// from each attempt's own cost, falling back to the request's own cost_micros
+// for requests with no attempt rows. Diverging from that shape here would
+// make this figure disagree with the usage chart about what a day cost.
+func (d *DB) SpendSince(ctx context.Context, since time.Time) (*int64, bool, error) {
+	sinceMs := since.UnixMilli()
+	var pricedRows, cost int64
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(CASE WHEN c IS NOT NULL THEN 1 ELSE 0 END), 0), coalesce(sum(c), 0)
+		   FROM (
+		     SELECT a.cost_micros AS c
+		       FROM requests r
+		       JOIN request_attempts a ON a.request_id = r.id
+		      WHERE r.ts >= ?
+		     UNION ALL
+		     SELECT r.cost_micros
+		       FROM requests r
+		      WHERE r.ts >= ?
+		        AND r.final_provider_id <> ''
+		        AND NOT EXISTS (
+		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
+		   )`, sinceMs, sinceMs).
+		Scan(&pricedRows, &cost)
+	if err != nil {
+		return nil, false, fmt.Errorf("spend since: %w", err)
+	}
+	// A nil pointer here rather than a zero: an unpriced model leaves
+	// cost_micros NULL, and a summed zero is ambiguous between "no spend" and
+	// "no price data for what ran".
+	if pricedRows == 0 {
+		return nil, false, nil
+	}
+	return &cost, true, nil
+}
+
+// LatencyPercentiles returns p50 and p95 of total_ms over the window.
+//
+// Computed in SQL with a window function rather than by loading the rows: a
+// busy window is tens of thousands of requests and the overview polls every
+// three seconds.
+func (d *DB) LatencyPercentiles(ctx context.Context, window time.Duration) (int64, int64, error) {
+	since := time.Now().Add(-window).UnixMilli()
+	row := d.Read.QueryRowContext(ctx,
+		`WITH ranked AS (
+		     SELECT total_ms,
+		            row_number() OVER (ORDER BY total_ms) AS rn,
+		            count(*)     OVER ()                  AS n
+		       FROM requests
+		      WHERE ts >= ? AND total_ms IS NOT NULL
+		 )
+		 -- Nearest-rank: the ceil(n*p)-th value. percent_rank() is
+		 -- (rank-1)/(n-1), so "pr >= 0.50" over 100 values returns the 51st,
+		 -- not the 50th -- one position high on every sample, on a tile an
+		 -- operator reads as p50. Integer division truncates, so
+		 -- (n*50 + 99)/100 is ceil(n*50/100).
+		 SELECT coalesce((SELECT total_ms FROM ranked WHERE rn = (n * 50 + 99) / 100), 0),
+		        coalesce((SELECT total_ms FROM ranked WHERE rn = (n * 95 + 99) / 100), 0)`,
+		since)
+	var p50, p95 int64
+	if err := row.Scan(&p50, &p95); err != nil {
+		return 0, 0, fmt.Errorf("latency percentiles: %w", err)
+	}
+	return p50, p95, nil
+}
+
+// FailoverRow is one request the router had to walk past a candidate for.
+type FailoverRow struct {
+	ID              string `json:"id"`
+	TS              int64  `json:"ts"`
+	Alias           string `json:"alias"`
+	FinalProviderID string `json:"final_provider_id"`
+	FinalModel      string `json:"final_model"`
+	Attempts        int    `json:"attempts"`
+	TotalMs         int64  `json:"total_ms"`
+}
+
+// RecentFailovers returns the newest requests within window that took more
+// than one attempt. Bounded the same way its RecentStats and
+// LatencyPercentiles siblings are: the overview polls this every few
+// seconds, and without a window it joins and groups the entire request
+// history on every call, plus a quiet gateway would show a month-old
+// failover as though it just happened.
+func (d *DB) RecentFailovers(ctx context.Context, window time.Duration, limit int) ([]FailoverRow, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	since := time.Now().Add(-window).UnixMilli()
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT r.id, r.ts, r.resolved_alias, r.final_provider_id, r.final_model,
+		        count(a.seq) AS attempts, coalesce(r.total_ms, 0)
+		   FROM requests r
+		   JOIN request_attempts a ON a.request_id = r.id
+		  WHERE r.ts >= ?
+		  GROUP BY r.id
+		 HAVING attempts > 1
+		  ORDER BY r.ts DESC
+		  LIMIT ?`, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent failovers: %w", err)
+	}
+	defer rows.Close()
+	out := []FailoverRow{}
+	for rows.Next() {
+		var f FailoverRow
+		if err := rows.Scan(&f.ID, &f.TS, &f.Alias, &f.FinalProviderID,
+			&f.FinalModel, &f.Attempts, &f.TotalMs); err != nil {
+			return nil, fmt.Errorf("recent failovers: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }

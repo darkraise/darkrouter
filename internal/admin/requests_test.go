@@ -148,6 +148,74 @@ func TestTheTraceEndpointExplainsAFailover(t *testing.T) {
 	}
 }
 
+func TestTraceEndpointCarriesPerAttemptUsage(t *testing.T) {
+	// The drawer shows the burn beneath each attempt, not only the request's
+	// total -- without per-attempt figures a failover's discarded tokens are
+	// invisible next to the try that actually served.
+	s, db := testServerFull(t)
+	db.SeedFailoverTraceForTest(t, "01FAIL")
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests/01FAIL", "")
+	var tr struct {
+		Attempts []struct {
+			Seq        int    `json:"seq"`
+			TokensIn   int64  `json:"tokens_in"`
+			TokensOut  int64  `json:"tokens_out"`
+			CostMicros *int64 `json:"cost_micros"`
+		} `json:"attempts"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Attempts) != 2 {
+		t.Fatalf("attempts = %+v", tr.Attempts)
+	}
+	failed, served := tr.Attempts[0], tr.Attempts[1]
+	if failed.TokensIn != 15 || failed.TokensOut != 5 || failed.CostMicros == nil || *failed.CostMicros != 200 {
+		t.Errorf("failed attempt usage = %+v; a discarded try's burn must still show", failed)
+	}
+	if served.TokensIn != 10 || served.TokensOut != 20 || served.CostMicros == nil || *served.CostMicros != 1234 {
+		t.Errorf("served attempt usage = %+v", served)
+	}
+}
+
+func TestRequestSurfacesReportCacheReadTokens(t *testing.T) {
+	// tokens_in now excludes cache reads, so an operator reconciling against a
+	// provider invoice needs cache_read_tokens alongside it to recover the
+	// full prompt size.
+	s, db := testServerFull(t)
+	db.SeedFailoverTraceForTest(t, "01FAIL")
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests", "")
+	var list struct {
+		Requests []struct {
+			ID              string `json:"id"`
+			TokensIn        int64  `json:"tokens_in"`
+			CacheReadTokens int64  `json:"cache_read_tokens"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Requests) != 1 || list.Requests[0].CacheReadTokens != 4 {
+		t.Fatalf("requests = %+v; cache reads missing from the list", list.Requests)
+	}
+
+	w = do(t, s, cookie, token, "GET", "/api/requests/01FAIL", "")
+	var tr struct {
+		TokensIn        int64 `json:"tokens_in"`
+		CacheReadTokens int64 `json:"cache_read_tokens"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.CacheReadTokens != 4 {
+		t.Errorf("trace cache_read_tokens = %d, want 4", tr.CacheReadTokens)
+	}
+}
+
 func TestAnUnknownTraceIs404(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)

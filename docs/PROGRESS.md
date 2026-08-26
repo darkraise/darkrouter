@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-08-24
+Last updated: 2026-08-26
 
 ## Phase status
 
@@ -15,9 +15,20 @@ Last updated: 2026-08-24
 | 7 — Admin API and UI | ✅ | ✅ | **Complete.** 29 tasks; race-clean, dashboard served from the image. |
 | 8 — Signed and OAuth credentials | ✅ | ✅ | **Complete.** 20 tasks; race-clean, verified against fakes only. |
 | 9 — Passthrough fast path | ✅ | ✅ | **Merged to master** as `a052e44`. 17 tasks; race-clean, and now **verified live against Groq** (§11), which found two defects. |
+| 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
+| 11a — Cost, attempts and the usage dimension | ✅ | ✅ | **Complete.** 10 tasks; race-clean. Cost computed at commit time from catalog pricing, failed attempts counted, `usage_daily` keyed on alias. |
+| 11c — Cache tokens and coherence | ✅ | ✅ | **Complete.** 15 tasks; race-clean. `InputTokens` means one thing repo-wide, cache writes are priced, and the two cost surfaces agree. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
+
+**There is no phase 11b.** The numbering runs 11a → 11c with nothing between
+them; no spec, plan, branch or commit for an 11b has ever existed. The gap is a
+labelling slip, not missing work — do not go looking for it.
+
+Everything from phase 10 onward sits on the unmerged branch
+`feat/cost-usage-dimension`. `master`'s tip is still `7afde9a`, the phase 10
+mockup plan, so the mockup set and all of phase 11 are unmerged.
 
 ## Build environment
 
@@ -316,10 +327,13 @@ still required and now substitutes the catalog's value. The findings ledger's
   filters were dropped and only `anthropic-oauth`, whose values are verifiable,
   is hand-written. Sourcing the rest is phase 8 work.
 - **The embedded metadata snapshot ages.**
-  `internal/catalog/models_snapshot.json` was taken on 2026-08-22. It is only
-  the cold-start fallback — the sync overwrites it within twelve hours of a
+  `internal/catalog/models_snapshot.json` was regenerated on 2026-08-26 and
+  carries 7295 models, 1186 of them with a cache-write rate. It is only the
+  cold-start fallback — the sync overwrites it within twelve hours of a
   networked start — but a long-lived offline install runs on those numbers
-  indefinitely. Regenerate it when the binary ships.
+  indefinitely. Regenerate it when the binary ships. The cache-write gap that
+  the 2026-08-23 snapshot had (it predated the field, so models priced from the
+  fallback silently omitted that cost component) is closed.
 - **Vertex and Bedrock have no discovery.** `ProbeFor` returns
   `ErrKindNotDiscoverable` for both, so their models come from presets and
   models.dev alone. Bedrock's two control-plane calls arrive with its adapter in
@@ -970,6 +984,194 @@ Nothing else in the brief's substance was skipped. Both processes were tracked
 by PID from the moment they started, killed at the end (`pkill -P` then
 `kill`), and `ss -ltnp` afterward showed no listener on 18080, 18081 or 18090.
 
+## Phase 10 — the mockup set
+
+Eighteen annotated screens live in `docs/ux/mockups/`, assembled by `build.py`
+into a self-contained `index.html` (a document) and `artifact.html` (the same
+content with no document wrapper, because the Artifact tool supplies its own).
+
+**Published artifact:** https://claude.ai/code/artifact/604611dd-18a6-47fc-a980-f0aec6204879
+
+Republish by calling the Artifact tool with the **same file path**
+(`docs/ux/mockups/artifact.html`) from a conversation that published it, or by
+passing that URL as `url` from any other conversation. Publishing without the
+URL from a fresh conversation creates a second artifact instead of updating
+this one.
+
+Final gate: `qa: PASS — 18 fragment(s) clean`, 34 tests OK, 36 screenshots
+(every screen in both modes) with no failures and nothing clipped.
+`index.html` is 727 KB — 100 KB of that is four base64 IBM Plex woff2 faces,
+194 KB is the stylesheet and 428 KB is screen markup. The plan predicted
+200–350 KB, which was written before the set existed; nothing improper is
+embedded, and each font blob was verified byte-identical to its file on disk.
+
+### Final state — "Warm Console", fitted to darkraise-ui
+
+The set is finished in **Warm Console**, adopted from 9router
+(`github.com/decolua/9router`, checked out at
+`/root/repositories-community/9router`) and sat on darkraise-ui's own theming
+axes so the implementation is a rename rather than a re-derivation.
+
+Most of the identity is an axis setting, not a rule: `density="comfortable"`
+already emits the 36px cell, `radius="rounded"` already emits 8px,
+`elevation="low"` already emits this shadow ramp's geometry, `--font-sans` is
+already Inter, and the whole console shell already exists in `layout/`.
+`darkrouter-ui.css` carries the token-for-token mapping. Four things cost
+something and spec §7 asks for them upstream: a `coral` accent (ACCENT_COLORS
+is eighteen hues with no escape hatch), a selectable warm neutral ramp (twelve
+ship, one is reachable), a third text tier, and the chart ramp.
+
+Nine token values are repaired against 9router's own — seven of its shipped
+values sit under the floor their role is held to, including a light success
+green at 2.54:1 and an amber at 2.15:1, both under the 3:1 floor a *shape*
+must clear. Screen 17 shows all nine.
+
+Three rules are Darkrouter's rather than 9router's: coral is **brand only**
+(position and primary action, never state) so it never joins amber and red in
+the ladder gutter; **Inter carries the chrome, IBM Plex Mono still carries
+data**; and the identity mark stays the §3.5 routing ladder, presented in
+9router's coral-gradient tile.
+
+The overview carries a **routing flow graph** in place of a health grid:
+aliases left, router centre, providers right in priority order, edge thickness
+as share, and dashed returns for traffic that arrived somewhere because
+somewhere else refused it. A provider that is not a candidate has no edge at
+all.
+
+### Superseded 2026-08-25 — the earlier "Graticule Bench" set
+
+The four decisions below describe **Graticule Bench**, the language the phase
+was executed in. The owner asked for 9router's identity instead
+(`github.com/decolua/9router`, checked out at
+`/root/repositories-community/9router`), and the set was moved to it in
+`2f31605` and `818954e`. Spec §3 is the contract; the plan's Global
+Constraints table is marked superseded.
+
+What changed: coral `#E56A4A` brand, warm neutral surfaces that **stack
+upward** from the ground, 4/8/10/14px radius, real elevation, Inter for the
+chrome, a 288px vibrancy sidebar, and a faint accent graticule. Nine token
+values are repaired against 9router's own — seven of its shipped values sit
+under the floor their role is held to, including a light success green at
+2.54:1 and an amber at 2.15:1, both under the 3:1 floor a *shape* must clear.
+
+Three rules are Darkrouter's rather than 9router's, all deliberate: coral is
+**brand only** (position and primary action, never state) so it never joins
+amber and red in the ladder gutter; **Inter carries the chrome, IBM Plex Mono
+still carries data**; and the identity mark stays the §3.5 routing ladder,
+presented in 9router's coral-gradient tile.
+
+**What did NOT survive:** well polarity. This language stacks surfaces upward
+in both modes, so light is a palette swap by design and there is no inversion
+to prove. Screen 17 is now a contrast proof of the nine repairs instead. Read
+the first decision below as history, not as current doctrine.
+
+### Four decisions a future reader will need
+
+**Light mode inverts well polarity; it is not a palette swap.** The well is the
+extreme end of the value range and the panel is mid-range, so in dark the well
+is *darker* than the panel and in light it is *brighter*. Measured from the
+rendered pixels: dark panel luma 27.6 → well 9.9; light panel 249.9 → well
+255.0. Light keeps the polarity at a third of the strength (1.045:1 against
+dark's 1.157:1), so every recessed region in light is carried by its 1px
+`--hairline` rather than by the value step inside it. Screen 17 is the proof and
+re-measures it.
+
+**The ladder is defined once and copied, never reimplemented.** Fragment 01 is
+the contract; screens 04, 09, 10 and 17 embed it byte-identically, indentation
+included. Three modes: retrospective (filled marks — the attempts happened),
+predictive and compressed (hollow — nothing has been sent). Fill versus outline
+is the only thing separating them, so a filled mark outside a trace is a bug.
+
+**State colour has exactly three carve-outs, and they are named on screen 00.**
+Destructive affordance, request outcome, and attention. Attention is the widest
+— it is why amber appears on stale discovery, warning chips, dangling aliases
+and unset values — and the one worth policing. What none of them permit: a
+state colour in the ladder gutter, or `--trace` on a provider pip.
+
+**A credential cools; a provider degrades.** Provider pips take the four states
+`GET /api/overview` actually emits — healthy, degraded, disabled, unconfigured
+— and `degraded` is not a synonym for `cooling`. The ladder keeps
+`.mark-cooling` because down there the subject really is one credential.
+
+### Two token divergences from the plan's verbatim-copy table
+
+Both are deliberate, ruled in `darkrouter-ui.css` and rendered as doctrine on
+screens 00 and 17. Light `--overlay` is `#F9FAFB` (panel-valued, not white):
+light panel-to-well is only 1.045:1 total, so a well recessed into a white
+overlay would be indistinguishable from the overlay. Light `--state-healthy`
+is `#047857`, not the plan's `#059467`, so it clears AA as body text rather
+than only the 3:1 non-text floor. If spec §3.1's table is ever treated as
+authoritative again, it is the table that is stale.
+
+### One code defect the mockups found
+
+`config.RestartOnly` under-reports. The catalog sync worker and the discovery
+sweeper each capture their interval into an options struct at construction
+(`internal/catalog/sync.go:96`, `internal/catalog/discovery.go:151`), so they
+are restart-only in behaviour — but neither is listed in `RestartOnly`
+(`internal/config/config.go:99`), so a reload that changes one is accepted,
+warns about nothing, and takes effect at the next process start. This is the
+exact failure `RestartOnly` exists to prevent. Screen 14 records it; the code
+is unchanged.
+
+## Phase 11 — cost, attempts and coherence
+
+Three plans, all landed on `feat/cost-usage-dimension`:
+`2026-08-25-phase11a-cost-attempts-usage.md` (10 tasks),
+`2026-08-25-phase11a-fix-attempt-attribution.md`, and
+`2026-08-25-phase11c-cache-tokens-and-coherence.md` (15 tasks). The 11c plan
+exists because a whole-branch review of the two 11a plans found the defects it
+closes. All three plans still carry unticked `- [ ]` boxes: the boxes were never
+maintained, and the commit log is the record of what was done, not the plans.
+
+**Spend is now real.** Cost is computed once, in `(*Executor).log`, from the
+catalog price of the model that actually served — not from the alias the client
+asked for. `CostMicros` is `*int64` throughout and an unpriced model stays
+`nil`, because zero would report genuinely free.
+
+**Failed attempts stopped being invisible.** Migration `0006` gave
+`request_attempts` its own `tokens_in`, `tokens_out` and `cost_micros`, and
+`0007` gave `usage_daily` an `attempts` column so `requests` keeps meaning
+requests. A pre-commit failure's burn is transferred onto its own row when the
+attempt is demoted, so failover no longer understates the day.
+
+**`ir.Usage.InputTokens` has one meaning repo-wide: input excluding cache
+reads.** Anthropic and Bedrock already reported it that way; the
+OpenAI-compatible and Gemini adapters now subtract. Nothing on the wire moved —
+`ir.Usage.PromptTokens()` (`internal/ir/ir.go:247`) re-adds cache reads when an
+edge renders back to a dialect that reports an inclusive prompt count, and
+`internal/golden` is the tripwire that proves it. Because `tokens_in` now means
+something narrower than it did, `cache_read_tokens` is exposed on the request
+list and the trace detail so an operator can still reconstruct the full prompt
+count against a provider invoice.
+
+**Cache writes are priced.** `catalog.Pricing` gained
+`CacheWriteMicrosPerMTok`, `tools/presetgen` carries the rate, and the embedded
+snapshot was regenerated on 2026-08-26 to supply it — see the phase 6 note
+above.
+
+**The two cost surfaces agree.** `today_spend` is sourced from the same
+attempt-level cost the rollup reads, so the overview tile and the usage chart
+answer the same question. The dead `UsageByDay` shim is gone.
+
+### Two things a future reader will trip over
+
+**`request_attempts` has no cache columns, so an attempt row can carry a cost
+with zero tokens.** That is correct, not a bug: a fully cached prompt burns
+`cache_read` tokens only, which the attempt row cannot express, but the money
+was real and the aggregates read cost rather than tokens. The guard that copies
+a request's cost onto its serving attempt therefore tests all five burn fields
+on the *record* — `TokensIn`, `TokensOut`, `CacheReadTokens`,
+`CacheWriteTokens`, `ReasoningTokens` — not the attempt's copied tokens.
+Checking only the two token fields is the bug that was fixed twice, in
+`4813736` and again in `95d4f88`.
+
+**`log.retention` has a hard floor of 48 hours** (`internal/config/load.go:165`).
+The rollup finalizes a day before freezing it, which needs the previous day to
+still be present when the sweeper runs; a shorter retention would let a day be
+pruned before it was ever rolled up. The floor replaced a guard in the rollup
+that tried to defend the same invariant from the wrong end.
+
 ## Review history
 
 | Artifact | Reviewers | Outcome |
@@ -977,3 +1179,4 @@ by PID from the moment they started, killed at the end (`pkill -P` then
 | All 10 specs | 5 × Fable, read-only | ~150 findings → `docs/superpowers/specs/2026-08-22-spec-review-findings.md`, all specs revised |
 | Task 13 (`internal/exec`) | 1 × Fable, read-only | Concurrency core sound; 6 defects fixed in 8b0b81d |
 | Task 14 (`internal/server`) | 1 × Fable, read-only | 8 defects fixed in 8b0b81d, including a drain deadline that did nothing |
+| Phase 10 — all 18 mockup screens | 1 × Fable, read-only | 4 Important + 27 Minor, all verified against source and all fixed in 641c63d |

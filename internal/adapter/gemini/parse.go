@@ -40,8 +40,14 @@ type wireUsage struct {
 }
 
 func (u *wireUsage) toIR() ir.Usage {
+	// promptTokenCount includes the cached subset. Subtracting it here is
+	// what lets every provider's InputTokens mean the same thing downstream.
+	in := u.PromptTokenCount - u.CachedContentTokenCount
+	if in < 0 {
+		in = 0
+	}
 	return ir.Usage{
-		InputTokens:     u.PromptTokenCount,
+		InputTokens:     in,
 		OutputTokens:    u.CandidatesTokenCount,
 		CacheReadTokens: u.CachedContentTokenCount,
 		ReasoningTokens: u.ThoughtsTokenCount,

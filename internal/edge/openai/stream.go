@@ -128,9 +128,9 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			}
 			c := chunk(id, model, map[string]any{}, nil)
 			c["usage"] = map[string]any{
-				"prompt_tokens":     ev.Usage.InputTokens,
+				"prompt_tokens":     ev.Usage.PromptTokens(),
 				"completion_tokens": ev.Usage.OutputTokens,
-				"total_tokens":      ev.Usage.InputTokens + ev.Usage.OutputTokens,
+				"total_tokens":      ev.Usage.PromptTokens() + ev.Usage.OutputTokens,
 			}
 			sendErr = send(c)
 		case ir.EventMessageStop:

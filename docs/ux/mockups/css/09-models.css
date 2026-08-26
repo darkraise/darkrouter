@@ -1,0 +1,554 @@
+/*
+ * Task 12 — the model catalog ("configure/models").
+ *
+ * New vocabulary this screen introduces, and why nothing already in
+ * darkrouter-ui.css or an earlier partial could do the job:
+ *
+ *   .range-facet (+ -label/-track/-fill/-input)  a two-ended numeric facet;
+ *       .segmented picks one of N and .combo picks a set, neither expresses
+ *       a MIN..MAX span, which is what min_context actually is.
+ *   .cap-triad/.cap-bit                          a fixed three-slot bit
+ *       field for tools/vision/reasoning. .chip is variable-width, so a
+ *       column of chips jitters; the point here is that the slot stays put
+ *       whether or not the bit is set.
+ *   .cap-toggle                                  the editable form of the
+ *       same triad inside the override editor, where the slots are labelled
+ *       and hit-testable rather than 18px glyphs.
+ *   .source-tag                                  provenance, differentiated
+ *       by border treatment and ink level rather than hue: source is not a
+ *       health reading and not a routing verdict, so it may take neither
+ *       the state colours nor --trace.
+ *   .lifecycle/.lifecycle-mark                   live|stale|removed_upstream,
+ *       neutral for the same reason. .state-pip is provider health and its
+ *       three data-state values are the health values, not these.
+ *   .value-guessed                               a dashed underline on a
+ *       number that inference produced rather than an API.
+ *   .row-inferred / .row-retired                 the row-level readings of
+ *       the two above.
+ *   .prov-more                                   the "+4" continuation count
+ *       in a collapsed list cell.
+ *   .sheet (+ -head/-title/-meta/-block/-split/-col/-caption)  the model
+ *       detail surface. .panel is the surface; these are its internal
+ *       rhythm.
+ *   .precedence (+ -step/-arrow/-step[data-winner])  the merge order strip.
+ *   .field-row (+ -label/-control/-input/-detected/-revert/-chips)  the
+ *       override editor's one repeated unit. .time-range-input is a
+ *       date field inside a popover; this is a labelled form row with a
+ *       detected-value gutter and a per-field revert.
+ *   .alias-note                                  a read-only footnote in
+ *       the aliases panel; .legend is claimed once per screen by qa.py and
+ *       .spec-note is the design-language board's own specimen label.
+ *   .mcol-*/.pcol-*/.vcol-*/.acol-*              column geometry for this
+ *       screen's four tables, the same convention 03-requests.css set with
+ *       .col-*.
+ *
+ * Reused unchanged: .panel/.well/.table/.row/.chip/.control/.control-ghost/
+ * .control-primary/.segmented/.mono/.micro/.data-emph/.prose/.legend-caps/
+ * .section-title/.region/.pin/.pin-note/.spec-note/.ladder/.ladder-row/
+ * .rank/.mark/.mark-catalog/.credential-tag/.target-muted/.filter-bar/
+ * .combo/.combo-trigger/.combo-menu/.combo-option/.combo-check/.combo-count/
+ * .combo-chevron/.table-toolbar/.table-toolbar-actions/.table-wrap/
+ * .row-head/.col-right/.text-muted/.switch (+ parts)/.field (+ -span-2)/
+ * .field-input/.link.
+ */
+
+/* --- Region 1: facets --------------------------------------------------
+   The catalog's query box sits in the same 30px silhouette as .control so
+   the filter bar keeps one baseline; it is an input rather than a trigger
+   because q= is free text, not a chosen value. .field-input supplies the
+   look; this is only the one width this screen's box needs. */
+
+.q-input { width: 200px; padding: 0 var(--section-pad); }
+/* readonly here is only what keeps a static mockup from looking typable —
+   an operator would type into this box in the real product, unlike a
+   Provider-detail field .field-input[readonly] marks as not patchable —
+   so it keeps the live input's own well/ink weight instead of dimming. */
+.q-input[readonly] { background: var(--surface-2); color: var(--ink); }
+
+/* A span, not one of N. The two ends are real numbers the operator types,
+   and the track between them is the reading — how much of the catalog's
+   full context range the span covers — not a draggable control surface. */
+.range-facet {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-h);
+  padding: 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.range-label {
+  margin: 0;
+  color: var(--legend);
+}
+
+.range-input{
+  width: 76px;
+  height: 20px;
+  padding: 0 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-align: right;
+}
+.range-input-wide { width: 84px; }
+
+.range-track{
+  position: relative;
+  width: 56px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--border-subtle);
+}
+/* The selected span, in --accent-ink because it reports a control's own
+   state, the same register .view-chip[data-active] and .segmented-option
+   [data-active] already occupy — not a routing verdict, so not --trace. */
+.range-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 18%;
+  right: 0;
+  border-radius: var(--radius);
+  background: var(--accent-ink);
+}
+
+/* --- Region 2: capability bit field ------------------------------------
+   Three slots, always all three, so the column reads as a register dump
+   rather than a variable-length list of chips. An unset bit keeps its slot
+   and drops to 30% opacity — silhouette first, exactly as the ladder's
+   marks do. */
+
+.cap-triad {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cap-bit{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--legend);
+  border-radius: var(--radius-xs);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--ink);
+}
+/* Absent, not disabled: it still has to be readable. At 0.3 on a white card
+   the glyph all but vanished in light while staying legible in dark, so the
+   colour carries the dimming and the opacity only softens it. */
+.cap-bit[data-on="false"] {
+  border-color: var(--border);
+  color: var(--legend);
+  opacity: 0.55;
+}
+
+/* --- Region 2: provenance and lifecycle --------------------------------
+   Neither is a health reading and neither is a routing verdict, so neither
+   may take a state colour or --trace. They differentiate on border
+   treatment and ink level instead: dashed means guessed, full ink means an
+   operator asserted it, and the two machine sources sit between. */
+
+.source-tag{
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.source-tag[data-source="discovered"] { border-color: var(--border-subtle); }
+.source-tag[data-source="inferred"] {
+  border-style: dashed;
+  border-color: var(--legend);
+}
+.source-tag[data-source="override"] {
+  border-color: var(--legend);
+  color: var(--ink);
+}
+
+.lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.lifecycle-mark{
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+}
+.lifecycle[data-state="stale"] { color: var(--legend); }
+.lifecycle[data-state="stale"] .lifecycle-mark {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--legend);
+}
+.lifecycle[data-state="removed_upstream"] { color: var(--legend); }
+.lifecycle[data-state="removed_upstream"] .lifecycle-mark {
+  height: 1px;
+  background: var(--legend);
+}
+
+/* A number inference produced rather than an API. The row already carries
+   an "≈" in front of each such value; the dashed rule under it is the
+   second, non-textual channel, so the guess survives a squint. */
+.value-guessed {
+  border-bottom: 1px dashed var(--legend);
+  color: var(--ink-muted);
+}
+
+/* The row-level reading of the same fact: an inferred row routes with a
+   warning, so its left edge breaks. --legend, not amber — this is not a
+   health reading. */
+.row-inferred { border-left: 1px dashed var(--legend); }
+
+.row-retired { opacity: 0.6; }
+.row-retired > span { text-decoration: line-through; }
+.row-retired .source-tag,
+.row-retired .lifecycle,
+.row-retired .cap-triad { text-decoration: none; }
+
+/* The collapsed tail of a list cell: "groq +4" says five without spending
+   five columns on it. */
+.prov-more {
+  margin-left: 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* --- Region 2: catalog table geometry ----------------------------------
+   Eleven columns in 1,188px, so the shared 12px row gap drops to 10 here
+   and the model id is the only elastic column. */
+
+.models-table .row { gap: 10px; }
+
+.mcol-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcol-providers { flex: 0 0 98px; }
+.mcol-surfaces { flex: 0 0 70px; }
+.mcol-context { flex: 0 0 80px; }
+.mcol-maxout { flex: 0 0 64px; }
+.mcol-in { flex: 0 0 76px; }
+.mcol-out { flex: 0 0 76px; }
+.mcol-publisher { flex: 0 0 80px; }
+.mcol-caps { flex: 0 0 74px; }
+.mcol-source { flex: 0 0 86px; }
+.mcol-state { flex: 0 0 116px; }
+
+/* --- Regions 4 and 5: the model detail sheet ---------------------------
+   Docked under the table rather than floating as a positioned overlay —
+   a board has to show the sheet and the rows it came from at once — but
+   it now carries the --surface-2 surface and its one shadow rather than
+   --surface. --surface was only ever a workaround: in light mode --surface-2
+   and --surface-2 used to share a value, which would have flattened every
+   recessed region inside a floated sheet. Now that the overlay ruling
+   makes --surface-2 panel-valued in light, the well/overlay step is the
+   same one every well already gets, so the sheet can read as what it
+   is — the one elevated surface open on the page, same as a popover. */
+
+.sheet {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-top: 1px solid var(--accent-ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-elevated);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--section-pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.sheet-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.sheet-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+  padding: var(--section-pad);
+}
+
+.sheet-split {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gutter);
+}
+.sheet-col { flex: 1 1 0; min-width: 0; }
+.sheet-col-ladder { flex: 0 0 236px; }
+
+.sheet-caption {
+  margin: 6px 0 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--legend);
+}
+
+.pcol-provider { flex: 0 0 96px; }
+.pcol-credential { flex: 0 0 72px; }
+.pcol-context { flex: 0 0 80px; }
+.pcol-maxout { flex: 0 0 66px; }
+.pcol-in { flex: 0 0 70px; }
+.pcol-out { flex: 0 0 70px; }
+.pcol-traits { flex: 1 1 auto; min-width: 0; }
+.pcol-source { flex: 0 0 96px; }
+
+/* The merge order, left to right, highest precedence first. A step that
+   actually won a field is called out in the provenance table beside it
+   rather than here — this strip is the rule, not the result. */
+.precedence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.precedence-arrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+.precedence-step[data-winner="true"] {
+  border-color: var(--legend);
+  color: var(--ink);
+}
+
+.vcol-field { flex: 0 0 168px; }
+.vcol-effective { flex: 0 0 150px; }
+.vcol-from { flex: 0 0 104px; }
+.vcol-contributors { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The two-column key/value strip under the pricing table. .legend-caps
+   carries a 6px bottom margin for use as a block label, which would push a
+   30px row off centre, so the key cell cancels it the same way .row-head
+   already does for the table headers. */
+.icol-key { flex: 0 0 168px; margin: 0; }
+.icol-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- Region 5: override editor -----------------------------------------
+   One repeated unit: what the field is, what the override says, what the
+   merge detected without it, and a control that throws the override away
+   for that field alone. The detected gutter is the reason this is not a
+   plain form — an override is only legible next to the value it displaces. */
+
+.override-editor {
+  display: flex;
+  flex-direction: column;
+  padding: 2px var(--section-pad) var(--section-pad);
+}
+
+/* This is a primary form, not a sub-row — its controls stand at the full
+   30px control height rather than a table's 24px sub-row height, so an
+   override reads with the same weight as the value it is about to
+   replace. min-height grows with the control and keeps the same spare
+   room for a two-line .field-detected wrap. */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 44px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.field-row:last-of-type { border-bottom: none; }
+
+.field-label {
+  flex: 0 0 132px;
+  margin: 0;
+}
+
+/* .field-input supplies the look; this editor only needs its own width
+   and a step down in size to sit comfortably in a dense field list. */
+.override-editor .field-input {
+  width: 132px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+/* readonly is the same static-mockup device as .q-input's above: every
+   value here is one an operator could type over, so it stays on the live
+   input's well/ink weight rather than the "not patchable" dimming. */
+.override-editor input.field-input[readonly] {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+/* An edited-but-unsaved field. Accent, not a state colour: nothing has
+   gone right or wrong yet — this is the control reporting its own state,
+   the register .view-chip[data-active] already uses. */
+.field-row[data-dirty="true"] .field-input { border-color: var(--accent-ink); }
+
+.field-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--control-h);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.cap-toggle[data-on="true"] {
+  border-color: var(--legend);
+  color: var(--ink);
+}
+.cap-toggle-box{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--legend);
+  border-radius: var(--radius-xs);
+  font-size: 9px;
+  line-height: 1;
+  color: transparent;
+}
+.cap-toggle[data-on="true"] .cap-toggle-box {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.field-detected {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.field-revert {
+  height: var(--control-h);
+  padding: 0 8px;
+  font-size: 11px;
+}
+/* Nothing to revert to: the field still shows the control so the column
+   stays a column, but it is plainly inert. */
+.field-revert[data-inert="true"] {
+  opacity: 0.35;
+  border-color: var(--border-subtle);
+}
+
+.override-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: var(--section-pad);
+  padding-top: var(--section-pad);
+  border-top: 1px solid var(--border);
+}
+.override-footer .micro { margin-left: auto; text-align: right; }
+
+/* --- Region 6: aliases --------------------------------------------------
+   Read-only here on purpose, so the panel says where the writer lives
+   instead of growing one. */
+
+.acol-alias { flex: 0 0 150px; }
+.acol-arrow { flex: 0 0 14px; color: var(--legend); }
+.acol-target { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acol-surface { flex: 0 0 88px; }
+.acol-candidates { flex: 0 0 104px; }
+.acol-requests { flex: 0 0 110px; }
+
+.alias-note {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--legend);
+}
+
+.alias-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  margin-top: 10px;
+}
+.alias-footer .alias-note { flex: 1 1 auto; }
+
+/* A .control that is genuinely a navigation link. The base reset keeps an
+   anchor's colour but not its underline, and a 30px control that wraps to
+   two lines stops being a 30px control. */
+.link-out {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+/* The specimen band under the catalog table: the two rows the retired
+   toggle is currently withholding, rendered so the state has a picture. */
+.retired-band {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  flex-wrap: wrap;
+  padding: 8px var(--section-pad);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+.retired-band .micro { margin-left: auto; }
+
+/* The catalog row whose detail sheet is open. --trace, and only here: the
+   ladder rule says trace answers "what did the router choose", and a
+   selected row is the same question asked of the operator's own pointer.
+   A second pseudo-element rather than reusing .row::after, which owns the
+   120ms hover wash and would otherwise dim on hover instead of brighten. */
+.row-selected { border-left: 1px solid var(--accent); }
+.row-selected::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--trace);
+  opacity: 0.08;
+  pointer-events: none;
+}

@@ -561,9 +561,9 @@ func applyResponsesEcho(body map[string]any, echo *responsesEcho) {
 
 func responsesUsage(u ir.Usage) map[string]any {
 	body := map[string]any{
-		"input_tokens":  u.InputTokens,
+		"input_tokens":  u.PromptTokens(),
 		"output_tokens": u.OutputTokens,
-		"total_tokens":  u.InputTokens + u.OutputTokens,
+		"total_tokens":  u.PromptTokens() + u.OutputTokens,
 	}
 	// The details objects are always present: an SDK reads through them
 	// without a nil check, unlike chat's, where OpenAI itself omits them.

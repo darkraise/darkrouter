@@ -19,33 +19,77 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	from := startOfToday.AddDate(0, 0, -1)
 	to := startOfToday.AddDate(0, 0, 1)
 
-	// The whole window is recomputed and upserted, so running this repeatedly
-	// converges rather than accumulating.
-	_, err := d.Write.ExecContext(ctx,
-		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out, cost_micros)
-		 SELECT strftime('%Y-%m-%d', ts / 1000, 'unixepoch') AS day,
-		        final_provider_id,
-		        final_model,
-		        count(*),
-		        coalesce(sum(tokens_in), 0),
-		        coalesce(sum(tokens_out), 0),
-		        -- NULL rather than 0 when nothing in the group is priced:
-		        -- zero would report the day's spend as genuinely nothing.
-		        CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
-		   FROM requests
-		  WHERE ts >= ? AND ts < ?
-		    AND final_provider_id <> ''
-		  GROUP BY day, final_provider_id, final_model
-		 ON CONFLICT(day, provider_id, model) DO UPDATE SET
-		        requests    = excluded.requests,
-		        tokens_in   = excluded.tokens_in,
-		        tokens_out  = excluded.tokens_out,
-		        cost_micros = excluded.cost_micros`,
-		from.UnixMilli(), to.UnixMilli())
+	// Yesterday and today are recomputed wholesale. That is safe because
+	// log.retention is floored at two days, so pruning can never reach a row
+	// inside this window -- a recompute always sees everything the day had.
+
+	// The window's rows are cleared rather than upserted. 0006 widened the key
+	// with alias, so a recomputed group no longer matches the row a narrower
+	// key wrote: upserting alone would leave the old row behind and double the
+	// day permanently. But the clear only reaches days the requests table can
+	// still rebuild: a day with nothing left in requests simply never appears
+	// in the DELETE's day list, so a row with no current backing survives
+	// untouched instead of being erased for good.
+	tx, err := d.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("rollup: %w", err)
 	}
-	return nil
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM usage_daily
+		  WHERE day IN (
+		        SELECT DISTINCT strftime('%Y-%m-%d', ts / 1000, 'unixepoch')
+		          FROM requests
+		         WHERE ts >= ? AND ts < ?)`,
+		from.UnixMilli(), to.UnixMilli()); err != nil {
+		return fmt.Errorf("rollup clear: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO usage_daily (day, provider_id, model, alias, requests, attempts, tokens_in, tokens_out, cost_micros)
+		 SELECT day, provider_id, model, alias,
+		        sum(is_served), sum(is_attempt), sum(t_in), sum(t_out),
+		        CASE WHEN count(c) = 0 THEN NULL ELSE sum(c) END
+		   FROM (
+		     -- Attributed to the attempt's OWN provider: a failover's discarded
+		     -- tokens were burned where they were tried, not where the retry
+		     -- happened to succeed.
+		     SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch') AS day,
+		            a.provider_id AS provider_id, a.model AS model,
+		            r.resolved_alias AS alias,
+		            -- Only the serving attempt counts as a request, so summing
+		            -- this column across providers still equals the real
+		            -- request count. Keyed on the outcome rather than on
+		            -- matching the request's final provider: the pre-commit 400
+		            -- retry re-attempts the SAME provider and model, so a
+		            -- provider match identifies two rows where one served.
+		            CASE WHEN a.outcome = 'success' THEN 1 ELSE 0 END AS is_served,
+		            1 AS is_attempt,
+		            coalesce(a.tokens_in, 0) AS t_in,
+		            coalesce(a.tokens_out, 0) AS t_out,
+		            a.cost_micros AS c
+		       FROM requests r
+		       JOIN request_attempts a ON a.request_id = r.id
+		      WHERE r.ts >= ? AND r.ts < ?
+		     UNION ALL
+		     -- A request that predates attempt rows still has its own counts.
+		     SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch'),
+		            r.final_provider_id, r.final_model, r.resolved_alias,
+		            1, 0,
+		            coalesce(r.tokens_in, 0), coalesce(r.tokens_out, 0),
+		            r.cost_micros
+		       FROM requests r
+		      WHERE r.ts >= ? AND r.ts < ?
+		        AND r.final_provider_id <> ''
+		        AND NOT EXISTS (
+		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
+		   )
+		  GROUP BY day, provider_id, model, alias`,
+		from.UnixMilli(), to.UnixMilli(), from.UnixMilli(), to.UnixMilli()); err != nil {
+		return fmt.Errorf("rollup: %w", err)
+	}
+	return tx.Commit()
 }
 
 // RunRollup runs the rollup on an interval until ctx is cancelled.

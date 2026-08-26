@@ -1,0 +1,201 @@
+/*
+ * Task 9 — Providers ("configure/providers").
+ *
+ * New vocabulary this screen introduces: .prov-row-dragging, the
+ * .prov-col-* column geometry, .prov-prio-* renumbering pair,
+ * .discovery-grid, .prov-add (+ -link), and the .prov-form grid.
+ *
+ * Reused unchanged: .table/.row/.state-pip/.chip/.control/.control-ghost/
+ * .micro/.mono/.prose/.section-title/.legend-caps/.region/.well/.panel/
+ * .segmented/.switch (+ parts)/.control-primary/.row-head/.combo-trigger/
+ * .combo-chevron/.text-muted/.priority-handle/.drop-indicator/
+ * .discovery-status/.field (+ -span-2)/.field-input (+ -inert) from
+ * darkrouter-ui.css; .health-tile/.health-tile-head/.health-tile-name/
+ * .health-tile-alert/.health-tile-alert-text/.ops-footer from Overview's
+ * partial (its header names both as Task 9 consumers); .spec-note from
+ * the design language board, for the per-field annotations.
+ */
+
+/* --- Region 1: the provider list --------------------------------------
+   .table/.row/.row-head carry the surface and the 30px rhythm; everything
+   here is column geometry. Names are prefixed because three other screens
+   are being drawn against this same concatenated stylesheet and a bare
+   .col-name would be a coin toss. */
+
+/* The header row reserves the handle's column without drawing a grip: a
+   header is not draggable, and a grip there would advertise a gesture the
+   row does not accept. */
+.prov-col-handle { flex: 0 0 16px; }
+
+.prov-col-prio {
+  flex: 0 0 44px;
+  text-align: right;
+  color: var(--ink);
+}
+.prov-col-name {
+  flex: 0 0 128px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.prov-col-kind { flex: 0 0 104px; color: var(--ink-muted); }
+.prov-col-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+.prov-col-creds { flex: 0 0 150px; }
+.prov-col-switch { flex: 0 0 48px; display: flex; align-items: center; }
+.prov-col-disc {
+  flex: 0 0 112px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.prov-col-flag {
+  flex: 0 0 140px;
+  display: flex;
+  align-items: center;
+}
+/* .legend-caps carries its own 6px bottom margin, which a 30px flex row
+   does not collapse — the same zeroing Requests' .row-head already does. */
+.prov-table .row-head .legend-caps { margin: 0; }
+
+/* A row switched off is still a row: it keeps its id, its credentials and
+   its place in the order, so it dims rather than disappearing. Static
+   opacity, not a transition — nothing here is animating. */
+.prov-row[data-enabled="false"] { opacity: 0.5; }
+
+/* --- Region 2: reordering ----------------------------------------------
+   The dragged row is genuinely lifted off the panel, which makes it the
+   one legitimate --shadow-elevated surface on this screen. Its left rule
+   is --trace, the same "this is the row the eye should stop on" mark
+   .ladder-row-served already uses for the candidate that was chosen. */
+.prov-reorder { max-width: 760px; }
+
+.prov-row-dragging {
+  position: relative;
+  z-index: 1;
+  transform: translateX(6px);
+  background: var(--surface-2);
+  border-left: 1px solid var(--accent);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* The priority column while a drag is in flight: the value that is being
+   written and the value it replaces, side by side. The outgoing number is
+   struck through at --legend; the incoming one is --accent-ink, because
+   accent-coloured TEXT takes accent-ink (--trace only reaches 5.17:1 in
+   light mode and fails AA at body size). */
+.prov-col-prio-edit {
+  flex: 0 0 108px;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.prov-prio-was {
+  color: var(--legend);
+  text-decoration: line-through;
+}
+.prov-prio-arrow { color: var(--legend); font-size: 11px; }
+.prov-prio-now { color: var(--accent-ink); }
+
+.prov-reorder-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--legend);
+}
+
+/* --- Region 3: discovery health ---------------------------------------
+   Three tiles, not a four-up grid, because these are
+   three named states side by side rather than a fleet roster. The tile
+   itself is .well.health-tile, reused verbatim. */
+.discovery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gutter);
+}
+
+.discovery-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* A wire field name and the value read out of it, on one line: the field
+   in --legend so the eye lands on the reading, not the label. */
+.discovery-field { color: var(--legend); }
+
+/* --- Region 4: add provider -------------------------------------------- */
+.prov-add {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  flex-wrap: wrap;
+}
+
+/* The secondary route into the same job. A link, not a second button:
+   two buttons side by side would read as two equal choices, and the
+   preset browser is the one an operator should reach for 197 times out of
+   198. --accent-ink because this is accent-coloured text. */
+.prov-add-link {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+  transition: opacity var(--dur-hover) ease;
+}
+.prov-add-link:hover { opacity: 1; }
+
+/* --- Region 5: the raw provider form ------------------------------------
+   Three columns on a 12px/20px rhythm. Fields that the selected kind does
+   not use stay visible and inert rather than vanishing, so the form always
+   shows the whole shape of what POST /api/providers accepts. .field and
+   .field-input are the shared vocabulary; only the column count is this
+   screen's own. */
+.prov-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--section-pad) var(--gutter);
+  padding: var(--section-pad);
+}
+
+/* This form's values are printed as static spans, not live inputs, so
+   they need the centering and truncation a real <input> gets from the
+   browser for free. */
+.prov-form .field-input {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The caret sits inside the field, so the select needs the row layout
+   .combo-trigger already defines; this only stops the button stretching
+   to the grid column's full height. */
+.prov-select { width: 100%; }
+
+.prov-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--section-pad);
+  padding: 0 var(--section-pad) var(--section-pad);
+}
+
+/* --- Region 6 ------------------------------------------------------------
+   The count line is .ops-footer, reused from Overview's partial exactly as
+   that file's header says it would be: one --legend line under a hairline,
+   summarising the screen above it. It brings its own rule and gutter, so
+   this block deliberately is NOT a .region — two hairlines 25px apart with
+   nothing between them reads as a mistake rather than as a separation. The
+   pin paragraph loses its margin for the same reason: with pins off it is
+   an empty element, and an empty element should not reserve a band. */
+.prov-counts > p:first-child { margin: 0; }

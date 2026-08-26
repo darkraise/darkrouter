@@ -72,9 +72,9 @@
       "usageMetadata": {
         "cachedContentTokenCount": 8,
         "candidatesTokenCount": 9,
-        "promptTokenCount": 21,
+        "promptTokenCount": 29,
         "thoughtsTokenCount": 0,
-        "totalTokenCount": 30
+        "totalTokenCount": 38
       }
     }
   }

@@ -35,7 +35,7 @@
   ],
   "StopReason": "tool_use",
   "Usage": {
-    "InputTokens": 12,
+    "InputTokens": 8,
     "OutputTokens": 6,
     "CacheReadTokens": 4,
     "CacheWriteTokens": 0,

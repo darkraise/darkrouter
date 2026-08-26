@@ -31,8 +31,8 @@
       "object": "chat.completion.chunk",
       "usage": {
         "completion_tokens": 0,
-        "prompt_tokens": 21,
-        "total_tokens": 21
+        "prompt_tokens": 29,
+        "total_tokens": 29
       }
     }
   },
@@ -85,8 +85,8 @@
       "object": "chat.completion.chunk",
       "usage": {
         "completion_tokens": 9,
-        "prompt_tokens": 21,
-        "total_tokens": 30
+        "prompt_tokens": 29,
+        "total_tokens": 38
       }
     }
   },
