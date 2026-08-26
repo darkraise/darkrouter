@@ -817,3 +817,43 @@ func (d *DB) FailoverEdges(ctx context.Context, window time.Duration) ([]Failove
 	}
 	return out, rows.Err()
 }
+
+// DiscoveryHealthRow is one provider's catalogue, summarised.
+//
+// MaxMissingStreak is the loud number: a provider whose listing has been
+// failing looks identical to a healthy one until something counts the
+// consecutive sweeps that omitted its models.
+type DiscoveryHealthRow struct {
+	ProviderID       string
+	Total            int
+	Live             int
+	Stale            int
+	RemovedUpstream  int
+	MaxMissingStreak int
+}
+
+func (d *DB) DiscoveryHealth(ctx context.Context) ([]DiscoveryHealthRow, error) {
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT provider_id, count(*),
+		        sum(state = 'live'), sum(state = 'stale'),
+		        sum(state = 'removed_upstream'),
+		        coalesce(max(missing_streak), 0)
+		   FROM models
+		  GROUP BY provider_id
+		  ORDER BY provider_id`)
+	if err != nil {
+		return nil, fmt.Errorf("discovery health: %w", err)
+	}
+	defer rows.Close()
+
+	out := []DiscoveryHealthRow{}
+	for rows.Next() {
+		var r DiscoveryHealthRow
+		if err := rows.Scan(&r.ProviderID, &r.Total, &r.Live, &r.Stale,
+			&r.RemovedUpstream, &r.MaxMissingStreak); err != nil {
+			return nil, fmt.Errorf("discovery health: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
