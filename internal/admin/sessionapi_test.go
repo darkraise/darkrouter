@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -119,5 +120,29 @@ func TestPasswordChangeRejectsAShortPassword(t *testing.T) {
 		`{"current":"`+testPassword+`","new":"short"}`)
 	if w.Code != 400 {
 		t.Fatalf("short password = %d, want 400", w.Code)
+	}
+}
+
+func TestAuthStatusSaysWhetherAPasswordExists(t *testing.T) {
+	// §12: a fresh install must explain itself rather than present a login
+	// that refuses every password. The status endpoint is unauthenticated, so
+	// this is the only place the SPA can learn it before trying.
+	s, _ := testServerFull(t)
+	r := httptest.NewRequest("GET", "/api/auth/status", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+
+	var body struct {
+		Authenticated bool `json:"authenticated"`
+		Configured    bool `json:"configured"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Authenticated {
+		t.Error("an unauthenticated request reported a session")
+	}
+	if !body.Configured {
+		t.Error("a server with a password hash reported itself unconfigured")
 	}
 }
