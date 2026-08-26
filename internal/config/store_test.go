@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"context"
 	"os"
 	"path/filepath"
@@ -160,5 +161,47 @@ func TestReloadWarnsOnWorkerIntervalChange(t *testing.T) {
 			}
 			t.Fatalf("no restart warning for %s, got %v", tc.match, s.Current().Warnings)
 		})
+	}
+}
+
+func TestOverlayAppliesOnEveryReload(t *testing.T) {
+	// A reload that dropped the overlay would silently restore the file's
+	// aliases until the next restart, which is the whole failure the overlay
+	// exists to prevent.
+	s, path := newTestStore(t, minimal)
+	s.SetOverlay(func(c *Config) error {
+		c.Aliases = map[string][]string{"from-db": {"groq/llama"}}
+		return nil
+	})
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Current().Aliases["from-db"]; len(got) != 1 {
+		t.Fatalf("overlay did not reach the first reload: %v", s.Current().Aliases)
+	}
+
+	writeFile(t, path, strings.Replace(minimal, "id: groq", "id: renamed", 1))
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Current().Aliases["from-db"]; len(got) != 1 {
+		t.Fatalf("overlay was dropped by a later reload: %v", s.Current().Aliases)
+	}
+	if s.Current().Providers[0].ID != "renamed" {
+		t.Fatal("the overlay swallowed the file's own change")
+	}
+}
+
+func TestOverlayFailureKeepsThePreviousConfig(t *testing.T) {
+	s, _ := newTestStore(t, minimal)
+	s.SetOverlay(func(*Config) error { return errors.New("database unreachable") })
+	if err := s.Reload(); err == nil {
+		t.Fatal("expected the reload to fail")
+	}
+	if s.Current().Providers[0].ID != "groq" {
+		t.Fatal("a failed overlay must leave the previous config live")
+	}
+	if s.LastError() == nil {
+		t.Fatal("expected LastError to record the overlay failure")
 	}
 }

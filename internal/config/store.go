@@ -22,6 +22,26 @@ type Store struct {
 	lookup  func(string) (string, bool)
 	cur     atomic.Pointer[Config]
 	lastErr atomic.Pointer[error]
+	overlay atomic.Pointer[func(*Config) error]
+}
+
+// SetOverlay installs a transform applied to every freshly-loaded Config
+// before it is published.
+//
+// It is a function rather than a direct call because this package may not
+// import internal/store: store already imports config, and the reverse edge
+// would close a cycle. Aliases and policy reach a snapshot from SQLite through
+// here, which is what lets every reader keep using config.Store.Current().
+func (s *Store) SetOverlay(fn func(*Config) error) {
+	s.overlay.Store(&fn)
+}
+
+func (s *Store) applyOverlay(c *Config) error {
+	p := s.overlay.Load()
+	if p == nil || *p == nil {
+		return nil
+	}
+	return (*p)(c)
 }
 
 func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
@@ -63,6 +83,12 @@ func (s *Store) RecordError(err error) {
 func (s *Store) Reload() error {
 	next, err := Load(s.path, s.lookup)
 	if err != nil {
+		s.lastErr.Store(&err)
+		return err
+	}
+	// Before publishing, not after: a snapshot carrying the file's aliases for
+	// even an instant is one a request could be routed by.
+	if err := s.applyOverlay(next); err != nil {
 		s.lastErr.Store(&err)
 		return err
 	}
