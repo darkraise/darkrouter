@@ -8,7 +8,7 @@ const cred = (over: Partial<Credential> = {}): Credential => ({
   masked: "sk-…",
   enabled: true,
   cooling: false,
-  kind: "api_key",
+  kind: "static",
   ...over,
 })
 

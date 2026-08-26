@@ -301,8 +301,6 @@ export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }
 
 // --- playground ---
 
-export type CountResult = { tokens: number; estimated: boolean }
-
 export type AuxSurface =
   | "embeddings" | "rerank" | "moderations"
   | "images" | "speech" | "transcriptions"
@@ -330,6 +328,17 @@ export type AuxBody = {
   file_b64?: string
   filename?: string
 }
+
+// --- derived, not mirrored ---
+
+/** No handler emits this shape. POST /api/playground/count answers with a
+ *  dialect-specific body — `{"input_tokens": n}` for the OpenAI-style count,
+ *  `{"totalTokens": n}` for Gemini's — and reports whether the count is
+ *  exact or approximated in the `X-Darkrouter-Estimated` response header,
+ *  never in the body. `CountResult` is what `readCount(res, body)` builds
+ *  after reading both: the normalised result a client assembles, not a
+ *  server claim. */
+export type CountResult = { tokens: number; estimated: boolean }
 
 // --- config ---
 
