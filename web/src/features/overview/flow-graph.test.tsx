@@ -1,4 +1,12 @@
 import { render } from "@testing-library/react"
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router"
+import type { ReactElement } from "react"
 import { describe, it, expect } from "vitest"
 import { FlowGraph, aliasesFromUsage } from "./flow-graph"
 import type { FlowProvider } from "./flow-graph"
@@ -12,12 +20,37 @@ const provider = (over: Partial<FlowProvider> & { id: string }): FlowProvider =>
   ...over,
 })
 
+/** FlowGraph now links each provider node to its detail page, which needs a
+ *  router in context. A standalone route tree keeps this from pulling in the
+ *  app's real router, which would import every screen it renders. The first
+ *  render is a pending match until the router resolves, so this awaits
+ *  `router.load()` before handing back the container. */
+async function renderFlowGraph(ui: ReactElement) {
+  const rootRoute = createRootRoute()
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => ui,
+  })
+  const providerRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/providers/$id",
+    component: () => null,
+  })
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([indexRoute, providerRoute]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
+  await router.load()
+  return render(<RouterProvider router={router} />)
+}
+
 describe("the routing flow graph", () => {
-  it("draws no edge for a provider that is not a candidate", () => {
+  it("draws no edge for a provider that is not a candidate", async () => {
     // §6.1: the fastest way to see that a disabled or unconfigured provider is
     // not quietly absorbing work. An edge at zero width would still read as a
     // connection.
-    const { container } = render(
+    const { container } = await renderFlowGraph(
       <FlowGraph
         aliases={[{ name: "fast", requests: 10 }]}
         providers={[
@@ -33,8 +66,8 @@ describe("the routing flow graph", () => {
     expect(container.querySelectorAll(".rf-provider-idle")).toHaveLength(1)
   })
 
-  it("scales edge thickness by share", () => {
-    const { container } = render(
+  it("scales edge thickness by share", async () => {
+    const { container } = await renderFlowGraph(
       <FlowGraph
         aliases={[]}
         providers={[
@@ -53,8 +86,8 @@ describe("the routing flow graph", () => {
     expect(widths[0]).toBeCloseTo(7.5, 1)
   })
 
-  it("draws a dashed return only between providers it can place", () => {
-    const { container } = render(
+  it("draws a dashed return only between providers it can place", async () => {
+    const { container } = await renderFlowGraph(
       <FlowGraph
         aliases={[]}
         providers={[provider({ id: "a", requests: 5 }), provider({ id: "b", requests: 5 })]}
