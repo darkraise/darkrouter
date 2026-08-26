@@ -110,3 +110,55 @@ func TestWatchDetectsRenameStyleSave(t *testing.T) {
 		}
 	}
 }
+
+func TestRestartOnlyNamesTheWorkerIntervals(t *testing.T) {
+	// The catalog sync worker and the discovery sweeper each capture their
+	// interval into an options struct at construction, so a reload that
+	// changes one takes effect only at the next process start.
+	want := []string{"catalog.sync_interval", "catalog.discovery.interval"}
+	for _, field := range want {
+		found := false
+		for _, got := range RestartOnly {
+			if got == field {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s is restart-only in behaviour but RestartOnly does not name it", field)
+		}
+	}
+}
+
+func TestReloadWarnsOnWorkerIntervalChange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		body  string
+		match string
+	}{
+		{
+			name:  "sync interval",
+			body:  minimal + "\ncatalog:\n  sync_interval: 3h\n",
+			match: "catalog.sync_interval",
+		},
+		{
+			name:  "discovery interval",
+			body:  minimal + "\ncatalog:\n  discovery:\n    interval: 3h\n",
+			match: "catalog.discovery.interval",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, path := newTestStore(t, minimal)
+			writeFile(t, path, tc.body)
+			if err := s.Reload(); err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range s.Current().Warnings {
+				if strings.Contains(w, tc.match) && strings.Contains(w, "restart") {
+					return
+				}
+			}
+			t.Fatalf("no restart warning for %s, got %v", tc.match, s.Current().Warnings)
+		})
+	}
+}

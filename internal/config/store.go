@@ -90,6 +90,12 @@ func restartOnlyWarnings(prev, next *Config) []string {
 	if prev.Policy.Timeout.FirstByte != next.Policy.Timeout.FirstByte {
 		out = append(out, "policy.timeout.first_byte changed; takes effect on restart")
 	}
+	if prev.Catalog.SyncInterval != next.Catalog.SyncInterval {
+		out = append(out, "catalog.sync_interval changed; takes effect on restart")
+	}
+	if prev.Catalog.Discovery.Interval != next.Catalog.Discovery.Interval {
+		out = append(out, "catalog.discovery.interval changed; takes effect on restart")
+	}
 	return out
 }
 
