@@ -15,7 +15,7 @@
     "@tanstack/react-query": "^5.102.1",
     "@tanstack/react-router": "^1.170.32",
     "@tanstack/react-table": "^9.1.2",
-    "darkraise-ui": "^6.4.0",
+    "darkraise-ui": "^6.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1"
