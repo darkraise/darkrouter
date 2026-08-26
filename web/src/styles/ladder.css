@@ -35,7 +35,7 @@
   --lad-trace-fill: hsl(var(--primary) / 0.18);
 }
 
-The routing fallback ladder: one row per provider attempt, a spine
+/* The routing fallback ladder: one row per provider attempt, a spine
    running through the gutter, and a mark per row for what happened. A
    ladder mark reports what the ROUTER decided (trace/sky), not what a
    provider is (state colours) — except cooling, which the spec carves out
