@@ -239,3 +239,84 @@ func ApplyPolicy(p *config.PolicyConfig, overrides map[string]string) error {
 	}
 	return nil
 }
+
+// settingConfigImportedAt marks that the YAML aliases and policy blocks have
+// been taken. It is what separates "never imported" from "imported, then
+// emptied through the console" -- an emptiness check alone would silently
+// reimport a set the operator deliberately cleared.
+const settingConfigImportedAt = "config.imported_at"
+
+// ConfigImportResult reports what the first-run import took, so the caller can
+// log it. Spec §8.1 requires the import to say what it moved: an operator who
+// later edits the file to no effect needs that line to find.
+type ConfigImportResult struct {
+	Imported bool
+	Aliases  int
+	Policy   int
+}
+
+// ImportConfigOnce moves the YAML aliases and policy blocks into SQLite, once.
+//
+// After it has run the file has stopped being authoritative for either, in
+// exactly the way it already has for providers.
+func ImportConfigOnce(ctx context.Context, d *DB, cfg *config.Config) (ConfigImportResult, error) {
+	if _, ok, err := getSetting(ctx, d.Read, settingConfigImportedAt); err != nil {
+		return ConfigImportResult{}, err
+	} else if ok {
+		return ConfigImportResult{}, nil
+	}
+
+	if err := d.PutAliases(ctx, cfg.Aliases); err != nil {
+		return ConfigImportResult{}, err
+	}
+	if err := d.PutPolicy(ctx, cfg.Policy); err != nil {
+		return ConfigImportResult{}, err
+	}
+	stored, err := d.PolicyOverrides(ctx)
+	if err != nil {
+		return ConfigImportResult{}, err
+	}
+	if err := putSetting(ctx, d.Write, settingConfigImportedAt,
+		time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return ConfigImportResult{}, err
+	}
+	return ConfigImportResult{
+		Imported: true,
+		Aliases:  len(cfg.Aliases),
+		Policy:   len(stored),
+	}, nil
+}
+
+// ConfigImportedAt reports when the aliases and policy import ran, if it has.
+func ConfigImportedAt(ctx context.Context, d *DB) (time.Time, bool, error) {
+	raw, ok, err := getSetting(ctx, d.Read, settingConfigImportedAt)
+	if err != nil || !ok {
+		return time.Time{}, false, err
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("stored config import marker is not a timestamp: %w", err)
+	}
+	return t, true, nil
+}
+
+// OverlayConfig replaces a loaded Config's aliases and policy with the
+// database's, leaving every other block exactly as the file set it.
+//
+// Installed on config.Store as its overlay, so router, exec, server and admin
+// keep reading both through the snapshot they already take.
+func OverlayConfig(ctx context.Context, d *DB, cfg *config.Config) error {
+	aliases, err := d.Aliases(ctx)
+	if err != nil {
+		return err
+	}
+	overrides, err := d.PolicyOverrides(ctx)
+	if err != nil {
+		return err
+	}
+	if err := ApplyPolicy(&cfg.Policy, overrides); err != nil {
+		return err
+	}
+	cfg.Aliases = aliases
+	return nil
+}

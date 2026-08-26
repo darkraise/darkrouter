@@ -162,3 +162,107 @@ func TestApplyPolicyRejectsAnUnparseableValue(t *testing.T) {
 		t.Fatal("expected an error for a value that is not a duration")
 	}
 }
+
+func TestImportConfigOnceTakesTheYamlThenStopsTaking(t *testing.T) {
+	ctx := context.Background()
+	db := migrated(t)
+
+	trip := 3
+	first := &config.Config{
+		Aliases: map[string][]string{"fast": {"groq/a", "groq/b"}},
+		Policy: config.PolicyConfig{
+			Retry:    config.RetryConfig{MaxAttempts: 2},
+			Cooldown: config.CooldownConfig{TripAfter: &trip},
+		},
+	}
+	res, err := ImportConfigOnce(ctx, db, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Imported || res.Aliases != 1 {
+		t.Fatalf("first import took %+v", res)
+	}
+
+	// Different YAML, same database: the file has stopped being authoritative.
+	second := &config.Config{
+		Aliases: map[string][]string{"other": {"openai/c"}},
+		Policy:  config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 9}},
+	}
+	res, err = ImportConfigOnce(ctx, db, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Imported {
+		t.Fatalf("second import took %+v; the database is authoritative", res)
+	}
+
+	got, err := db.Aliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["fast"]) != 2 || len(got["other"]) != 0 {
+		t.Errorf("aliases = %v, want only the first import", got)
+	}
+}
+
+func TestImportConfigOnceDoesNotReimportAnEmptiedSet(t *testing.T) {
+	// An operator who deleted every alias through the console must not have
+	// the file's silently reimported on the next restart.
+	ctx := context.Background()
+	db := migrated(t)
+	cfg := &config.Config{Aliases: map[string][]string{"fast": {"groq/a"}}}
+
+	if _, err := ImportConfigOnce(ctx, db, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PutAliases(ctx, map[string][]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ImportConfigOnce(ctx, db, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.Aliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("an emptied set was reimported: %v", got)
+	}
+}
+
+func TestOverlayConfigReplacesAliasesAndPolicyOnly(t *testing.T) {
+	ctx := context.Background()
+	db := migrated(t)
+	if err := db.PutAliases(ctx, map[string][]string{"db": {"groq/x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PutPolicy(ctx, config.PolicyConfig{
+		Retry: config.RetryConfig{MaxAttempts: 6},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Aliases:   map[string][]string{"from-file": {"openai/y"}},
+		Policy:    config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 2}},
+		Providers: []config.ProviderConfig{{ID: "groq"}},
+		Log:       config.LogConfig{Retention: 72 * time.Hour},
+	}
+	if err := OverlayConfig(ctx, db, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := cfg.Aliases["from-file"]; ok {
+		t.Error("the file's aliases survived the overlay")
+	}
+	if len(cfg.Aliases["db"]) != 1 {
+		t.Errorf("aliases = %v, want the database's", cfg.Aliases)
+	}
+	if cfg.Policy.Retry.MaxAttempts != 6 {
+		t.Errorf("max_attempts = %d, want 6", cfg.Policy.Retry.MaxAttempts)
+	}
+	if len(cfg.Providers) != 1 || cfg.Log.Retention != 72*time.Hour {
+		t.Error("the overlay touched a block that is not its own")
+	}
+}
