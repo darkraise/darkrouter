@@ -12,6 +12,8 @@ const model = (over: Partial<Model> & { model: string }): Model => ({
   reasoning: false,
   inferred: false,
   state: "live",
+  pricing: null,
+  merge_source: "models_dev",
   ...over,
 })
 

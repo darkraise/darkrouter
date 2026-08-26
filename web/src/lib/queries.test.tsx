@@ -51,3 +51,34 @@ describe("poll cadence", () => {
     expect(POLL.slow).toBe(30000)
   })
 })
+
+describe("the new surfaces", () => {
+  it("keys healthz, discovery and policy distinctly", () => {
+    const flat = [keys.healthz, keys.discovery, keys.policy, keys.health].map((k) =>
+      JSON.stringify(k),
+    )
+    expect(new Set(flat).size).toBe(flat.length)
+  })
+
+  it("varies the usage key with its range", () => {
+    // A 7-day and a 90-day view of one dimension are two answers. One key
+    // would show the first range's rows under the second range's label.
+    expect(JSON.stringify(keys.usage("provider", 7))).not.toBe(
+      JSON.stringify(keys.usage("provider", 90)),
+    )
+  })
+
+  it("keys an override by provider and model", () => {
+    expect(JSON.stringify(keys.override("groq", "m"))).not.toBe(
+      JSON.stringify(keys.override("groq", "n")),
+    )
+  })
+
+  it("keeps the existing string call form of the usage key", () => {
+    // Overview and the command palette call useUsage("alias"). Widening the
+    // signature must not move their cache entry.
+    expect(JSON.stringify(keys.usage("alias"))).toBe(
+      JSON.stringify(["usage", "alias", 0]),
+    )
+  })
+})
