@@ -9,10 +9,12 @@ import (
 	"sync"
 )
 
-//go:embed models_snapshot.json
 // snapshotJSON is the embedded fallback metadata for Darkrouter's first run.
-// It was generated before cache-write rates were added to the cost model,
-// so models priced from it do not include a cache-write cost component.
+// Regenerate it with tools/presetgen when the binary ships: it is only the
+// cold-start fallback, but a long-lived offline install runs on its numbers
+// indefinitely.
+//
+//go:embed models_snapshot.json
 var snapshotJSON []byte
 
 // Metadata is what a metadata source knows about one model. It is deliberately
