@@ -1,6 +1,7 @@
 package config
 
 import (
+	"sort"
 	"fmt"
 	"net/url"
 	"os"
@@ -33,6 +34,9 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	// Collected before defaults are applied, from a second pass over the raw
+	// document: the struct cannot answer "was this written?" afterwards.
+	c.FileKeys = documentKeys(data)
 	applyDefaults(&c)
 	if err := interpolate(&c, lookup); err != nil {
 		return nil, err
@@ -225,4 +229,31 @@ func validate(c *Config) error {
 		}
 	}
 	return nil
+}
+
+// documentKeys flattens a YAML document to the dotted key paths it carries.
+// Sequences are leaves: a list's indices are not configuration keys, and the
+// config API reports a block like providers: as one source, not one per entry.
+func documentKeys(data []byte) []string {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	var out []string
+	var walk func(prefix string, node map[string]any)
+	walk = func(prefix string, node map[string]any) {
+		for k, v := range node {
+			path := k
+			if prefix != "" {
+				path = prefix + "." + k
+			}
+			out = append(out, path)
+			if child, ok := v.(map[string]any); ok {
+				walk(path, child)
+			}
+		}
+	}
+	walk("", raw)
+	sort.Strings(out)
+	return out
 }
