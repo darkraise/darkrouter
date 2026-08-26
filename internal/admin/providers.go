@@ -40,6 +40,12 @@ type credentialView struct {
 	Masked  string `json:"masked"`
 	Enabled bool   `json:"enabled"`
 	Cooling bool   `json:"cooling"`
+	Kind    string `json:"kind"`
+	// OAuth-only metadata. A static key has neither, and omitting them is what
+	// keeps the table honest about which rows have an account behind them.
+	// Neither is secret: this is metadata about a token, not the token.
+	ExpiresAt *int64 `json:"expires_at,omitempty"`
+	Scope     string `json:"scope,omitempty"`
 }
 
 type providerView struct {
@@ -82,6 +88,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 				v.Credentials = append(v.Credentials, credentialView{
 					ID: c.ID, Label: c.Label, Masked: maskSecret(c.Secret),
 					Enabled: c.Enabled, Cooling: s.cooling(p.ID, c.ID),
+					Kind: c.Kind, ExpiresAt: c.ExpiresAt, Scope: c.Scope,
 				})
 			}
 		}
