@@ -262,13 +262,14 @@ type RequestQuery struct {
 	AfterTS int64
 	AfterID string
 
-	Provider string
-	Model    string
-	Status   string
-	Alias    string
-	Surface  string
-	SinceMs  int64
-	UntilMs  int64
+	Provider  string
+	Model     string
+	Status    string
+	Alias     string
+	Surface   string
+	ErrorCode string
+	SinceMs   int64
+	UntilMs   int64
 }
 
 // RequestSummary is one row of the table. It carries TSMs and ID because the
@@ -292,6 +293,7 @@ type RequestSummary struct {
 	TotalMs         *int64
 	ErrorCode       string
 	Attempts        int
+	Path            string
 }
 
 // ListRequests returns one keyset page, newest first.
@@ -326,6 +328,7 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		{"r.status", q.Status},
 		{"r.resolved_alias", q.Alias},
 		{"r.surface", q.Surface},
+		{"r.error_code", q.ErrorCode},
 	} {
 		if f.val != "" {
 			where = append(where, f.col+" = ?")
@@ -346,7 +349,10 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		`SELECT r.id, r.ts, r.dialect, r.surface, r.requested_model, r.resolved_alias,
 		        r.final_provider_id, r.final_model, r.status,
 		        r.tokens_in, r.tokens_out, r.cache_read_tokens, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
-		        (SELECT count(*) FROM request_attempts a WHERE a.request_id = r.id)
+		        (SELECT count(*) FROM request_attempts a WHERE a.request_id = r.id),
+		        coalesce((SELECT a.path FROM request_attempts a
+		                   WHERE a.request_id = r.id
+		                   ORDER BY a.seq DESC LIMIT 1), '')
 		   FROM requests r
 		  WHERE `+strings.Join(where, " AND ")+`
 		  ORDER BY r.ts DESC, r.id DESC
@@ -362,7 +368,7 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		if err := rows.Scan(&s.ID, &s.TSMs, &s.Dialect, &s.Surface, &s.RequestedModel,
 			&s.ResolvedAlias, &s.FinalProviderID, &s.FinalModel, &s.Status,
 			&s.TokensIn, &s.TokensOut, &s.CacheReadTokens, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
-			&s.ErrorCode, &s.Attempts); err != nil {
+			&s.ErrorCode, &s.Attempts, &s.Path); err != nil {
 			return nil, fmt.Errorf("list requests: %w", err)
 		}
 		out = append(out, s)

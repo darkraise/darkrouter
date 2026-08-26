@@ -253,3 +253,89 @@ func TestTraceEndpointNamesTheAttemptPath(t *testing.T) {
 		t.Errorf("attempts = %+v", body.Attempts)
 	}
 }
+
+func seedRow(t *testing.T, db *store.DB, id, errorCode, path string) {
+	t.Helper()
+	rec := &store.RequestRecord{
+		ID: id, TS: time.UnixMilli(1700000000000), Dialect: "openai",
+		Surface: "llm", RequestedModel: "m", FinalProviderID: "groq",
+		FinalModel: "m", Status: "success", ErrorCode: errorCode,
+	}
+	if path != "" {
+		rec.Attempts = []store.AttemptRecord{{
+			Seq: 0, ProviderID: "groq", Model: "m", Outcome: "success", Path: path,
+		}}
+	}
+	db.WriteBatchForTest(t, []*store.RequestRecord{rec})
+}
+
+func TestFilteringByErrorCodeReturnsOnlyMatchingRows(t *testing.T) {
+	s, db := testServerFull(t)
+	seedRow(t, db, "01REQA", "", "")
+	seedRow(t, db, "01REQB", "rate_limit", "")
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests?error_code=rate_limit", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var page struct {
+		Requests []struct {
+			ID        string `json:"id"`
+			ErrorCode string `json:"error_code"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Requests) != 1 || page.Requests[0].ID != "01REQB" {
+		t.Fatalf("want only 01REQB, got %+v", page.Requests)
+	}
+}
+
+func TestACursorMintedUnderOneErrorCodeIsRejectedUnderAnother(t *testing.T) {
+	// The hash is a mismatch detector. A cursor that survived a filter change
+	// would page through rows the operator is not looking at, which reads as
+	// the table showing the wrong data rather than as a rejected request.
+	s, db := testServerFull(t)
+	seedRow(t, db, "01REQA", "rate_limit", "")
+	seedRow(t, db, "01REQB", "rate_limit", "")
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests?error_code=rate_limit&limit=1", "")
+	var first struct {
+		NextCursor string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("no cursor on a page that has more rows")
+	}
+	w = do(t, s, cookie, token, "GET",
+		"/api/requests?error_code=timeout&cursor="+first.NextCursor, "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestARequestRowNamesTheServingPath(t *testing.T) {
+	// §6.2's passthrough-versus-translated chip. The row has no other source
+	// for it: the trace carries a path per attempt, and the list does not.
+	s, db := testServerFull(t)
+	seedRow(t, db, "01REQA", "", "passthrough")
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests", "")
+	var page struct {
+		Requests []struct {
+			Path string `json:"path"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Requests) != 1 || page.Requests[0].Path != "passthrough" {
+		t.Fatalf("path missing from the row view: %+v", page.Requests)
+	}
+}
