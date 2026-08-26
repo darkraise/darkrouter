@@ -81,19 +81,25 @@ export type Overview = {
 
 export type RequestRow = {
   id: string
-  ts: number
+  ts_ms: number
+  dialect: string
   surface: string
-  requested_model: string
-  final_provider_id: string
-  final_model: string
-  status: number
-  error_code?: string
+  /** What the client asked for: an alias or a bare model name. */
+  model: string
+  /** Present when `model` resolved through an alias. */
+  alias?: string
+  /** The provider that served. Absent when nothing did. */
+  provider?: string
+  final_model?: string
+  /** A word, not an HTTP code: "success", "error", and so on. */
+  status: string
   tokens_in: number
   tokens_out: number
   cache_read_tokens: number
   cost_micros: number | null
   ttft_ms: number | null
-  total_ms: number
+  total_ms: number | null
+  error_code?: string
   attempts: number
 }
 
@@ -101,29 +107,33 @@ export type RequestPage = { requests: RequestRow[]; next_cursor?: string }
 
 export type TraceAttempt = {
   seq: number
-  provider_id: string
+  provider: string
+  key_label: string
   model: string
   outcome: string
-  status: number
-  error_code?: string
-  path?: string
-  ttft_ms: number | null
-  total_ms: number
+  status_code: number
+  latency_ms: number
+  error: string
+  path: string
   tokens_in: number
   tokens_out: number
   cost_micros: number | null
 }
 
-export type TraceSkip = {
-  provider_id: string
-  key_id?: string
-  model: string
-  reason: SkipReason
-}
+export type TraceBody = { kind: string; content: string }
 
-export type RequestTrace = RequestRow & {
-  attempts_detail: TraceAttempt[]
-  skips: TraceSkip[]
+export type RequestTrace = Omit<RequestRow, "attempts"> & {
+  /** Three separate lists, deliberately: attempts alone explains a failover,
+   *  while candidates and skips explain the routing decision that led to it.
+   *  Both are stored as formatted strings rather than structured rows. */
+  candidates: string[]
+  skips: string[]
+  /** The handler reuses the key `attempts` for the list, where a row uses
+   *  it for a count. Omit above is what lets both be typed truthfully. */
+  attempts: TraceAttempt[]
+  warnings?: string[]
+  surface_meta?: Record<string, unknown>
+  bodies?: TraceBody[]
 }
 
 // --- routing ---
@@ -150,7 +160,7 @@ export type RouteCandidate = {
 
 export type RoutePreview = {
   candidates: RouteCandidate[]
-  skips: TraceSkip[]
+  skips: string[]
   /** Present when nothing routed; the skips say why. */
   error?: string
 }
