@@ -103,7 +103,20 @@ function RootShell() {
   )
 }
 
-const rootRoute = createRootRoute({ component: RootShell })
+const rootRoute = createRootRoute({
+  component: RootShell,
+  // Every route inherits an open string-record search schema, because §5 puts
+  // every filter in the URL and the filters differ per screen. Empty values
+  // are dropped on the way in, so ?provider= and no provider key are the same
+  // state rather than two.
+  validateSearch: (search: Record<string, unknown>): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(search)) {
+      if (typeof v === "string" && v !== "") out[k] = v
+    }
+    return out
+  },
+})
 
 // One route per screen. Declared here rather than in a generated tree because
 // there are five of them and a generator would be more machinery than routes.

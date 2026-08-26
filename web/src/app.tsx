@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { ThemeProvider } from "darkraise-ui/theme"
+import { Toaster } from "darkraise-ui"
 import { themeConfig } from "./theme.config"
 import { api, onUnauthorized, setCsrfToken } from "./lib/api"
 import { ApiError } from "./lib/api"
@@ -64,6 +65,9 @@ export function App() {
     <ThemeProvider config={themeConfig}>
       <QueryClientProvider client={queryClient}>
         <Shell />
+        {/* Outside Shell so a failure raised while the login screen is up has
+            somewhere to land too. */}
+        <Toaster />
       </QueryClientProvider>
     </ThemeProvider>
   )
