@@ -102,6 +102,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		failovers = []store.FailoverRow{}
 	}
+	edges, err := s.deps.DB.FailoverEdges(r.Context(), overviewWindow)
+	if err != nil {
+		// Same reasoning as the percentiles: a graph that loses its return
+		// arcs is worse than an overview that fails to load.
+		edges = []store.FailoverEdge{}
+	}
 	series, err := s.deps.DB.UsageBy(r.Context(), 30, store.UsageByDayOnly)
 	if err != nil {
 		series = []store.UsageRow{}
@@ -126,9 +132,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			"micros": spendMicros,
 			"priced": spendPriced,
 		},
-		"latency":   map[string]any{"p50_ms": p50, "p95_ms": p95},
-		"series":    series,
-		"failovers": failovers,
+		"latency":        map[string]any{"p50_ms": p50, "p95_ms": p95},
+		"series":         series,
+		"failovers":      failovers,
+		"failover_edges": edges,
 	})
 }
 
