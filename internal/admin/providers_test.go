@@ -379,7 +379,34 @@ func TestAStaticKeyOmitsOAuthOnlyFields(t *testing.T) {
 	if strings.Contains(w.Body.String(), `"expires_at"`) {
 		t.Fatalf("a static key should carry no expires_at: %s", w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"kind"`) {
-		t.Fatalf("kind should always be present: %s", w.Body.String())
+
+	// A whole-body substring check for "kind" would pass on providerView's own
+	// top-level kind field regardless of the credential; scoped to the
+	// credential's own JSON is what actually exercises credentialView.Kind.
+	var out struct {
+		Providers []struct {
+			ID          string `json:"id"`
+			Credentials []struct {
+				Kind string `json:"kind"`
+			} `json:"credentials"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, p := range out.Providers {
+		if p.ID != "st" {
+			continue
+		}
+		for _, c := range p.Credentials {
+			found = true
+			if c.Kind == "" {
+				t.Fatalf("credential kind should always be present: %s", w.Body.String())
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no credential in the view: %s", w.Body.String())
 	}
 }
