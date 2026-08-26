@@ -21,7 +21,7 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 	want := []string{
 		"providers", "provider_keys", "models", "model_overrides",
 		"requests", "request_attempts", "request_bodies",
-		"health", "usage_daily", "sessions", "settings",
+		"health", "usage_daily", "sessions", "settings", "aliases",
 	}
 	for _, table := range want {
 		var name string
@@ -36,6 +36,12 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 func TestMigrateIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(ms)
+
 	for i := 0; i < 3; i++ {
 		db, err := Open(path)
 		if err != nil {
@@ -48,8 +54,11 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err := db.Read.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		if v != 7 {
-			t.Errorf("run %d: version = %d, want 7", i, v)
+		// Pinned to the embedded count rather than a literal: the invariant is
+		// that a repeated run lands on the last migration, not that there are
+		// seven of them.
+		if v != want {
+			t.Errorf("run %d: version = %d, want %d", i, v, want)
 		}
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
@@ -221,7 +230,7 @@ func TestMigrationThreeIsAdditive(t *testing.T) {
 	}
 }
 
-func TestMigrationsReachVersionSeven(t *testing.T) {
+func TestEveryMigrationIsEmbedded(t *testing.T) {
 	// The loader asserts contiguity from 1, so a mis-numbered file fails here
 	// rather than at a customer's first start. One assertion rather than one
 	// per phase: the count is a fact about this build, not about a phase.
@@ -229,8 +238,8 @@ func TestMigrationsReachVersionSeven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) != 7 {
-		t.Fatalf("loaded %d migrations, want 7", len(ms))
+	if len(ms) != 8 {
+		t.Fatalf("loaded %d migrations, want 8", len(ms))
 	}
 }
 
