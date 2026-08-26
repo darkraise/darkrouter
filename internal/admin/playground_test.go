@@ -272,3 +272,83 @@ func TestThePlaygroundSpeaksAnthropicEndToEnd(t *testing.T) {
 }
 
 func ptrOf[T any](v T) *T { return &v }
+
+func TestCountRequestBuildsTheNativeCountingCall(t *testing.T) {
+	r, d, kind, err := countRequest(context.Background(), countBody{
+		Dialect: "anthropic", Model: "claude-sonnet-4-6", Prompt: "hello world",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.URL.Path != "/v1/messages/count_tokens" {
+		t.Fatalf("path = %q", r.URL.Path)
+	}
+	if kind != "anthropic" || d.Name() != "anthropic" {
+		t.Fatalf("kind = %q, dialect = %q", kind, d.Name())
+	}
+	body := decodeBuilt(t, r)
+	if len(body["messages"].([]any)) != 1 {
+		t.Fatalf("messages = %v", body["messages"])
+	}
+	// A counting body is not a completion body. max_tokens and stream on this
+	// endpoint are rejected upstream.
+	if body["max_tokens"] != nil || body["stream"] != nil {
+		t.Fatalf("counting body carries completion fields: %v", body)
+	}
+}
+
+func TestCountRequestBuildsGeminiCountTokens(t *testing.T) {
+	r, _, kind, err := countRequest(context.Background(), countBody{
+		Dialect: "gemini", Model: "gemini-2.5-pro", Prompt: "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.URL.Path != "/v1beta/models/gemini-2.5-pro:countTokens" {
+		t.Fatalf("path = %q", r.URL.Path)
+	}
+	if kind != "gemini" {
+		t.Fatalf("kind = %q", kind)
+	}
+	if got := r.PathValue("model"); got != "gemini-2.5-pro:countTokens" {
+		t.Fatalf("path value = %q", got)
+	}
+	if _, ok := decodeBuilt(t, r)["contents"]; !ok {
+		t.Fatal("gemini counting takes contents")
+	}
+}
+
+func TestCountRequestRefusesTheOpenAIDialect(t *testing.T) {
+	// There is no OpenAI counting endpoint, so offering the option would mean
+	// silently answering a different question — a local estimate presented as
+	// a native count.
+	if _, _, _, err := countRequest(context.Background(), countBody{
+		Dialect: "openai", Model: "m", Prompt: "p",
+	}); err == nil {
+		t.Fatal("openai must be refused")
+	}
+}
+
+func TestTheCountEndpointRequiresACSRFToken(t *testing.T) {
+	s := testServerWithExecutor(t, "https://unused.example", "m")
+	cookie, _ := login(t, s)
+	r := httptest.NewRequest("POST", "/api/playground/count",
+		strings.NewReader(`{"dialect":"anthropic","model":"m","prompt":"p"}`))
+	r.AddCookie(cookie)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestTheCountEndpointRejectsABadDialect(t *testing.T) {
+	s := testServerWithExecutor(t, "https://unused.example", "m")
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "POST", "/api/playground/count",
+		`{"dialect":"openai","model":"m","prompt":"p"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}

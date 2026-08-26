@@ -139,6 +139,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/oauth/callback", s.requireSession(s.handleOAuthCallback))
 
 	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
+	s.mux.HandleFunc("POST /api/playground/count", s.requireCSRF(s.handlePlaygroundCount))
 
 	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
 	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
