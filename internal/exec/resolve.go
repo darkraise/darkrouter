@@ -46,22 +46,13 @@ func (e *Executor) resolve(ctx context.Context, w http.ResponseWriter, ew errorW
 	rec.Surface = string(q.Surface)
 	rec.RequestedModel = q.Model
 
-	providers, err := e.src.Providers(ctx)
+	snap, err := e.RouteSnapshot(ctx, start, cfg)
 	if err != nil {
 		rec.ErrorCode = string(ir.ErrDarkrouter)
 		_ = ew.WriteError(w, &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()})
 		return resolved{}, false
 	}
-
-	cat := e.catalogFor(providers)
-	snap := router.Snapshot{
-		At: start, Providers: providers, Catalog: cat, Config: cfg,
-		AdapterSurfaces: e.adapterSurfaces,
-	}
-	if e.deps.Fleet != nil {
-		snap.Health = e.deps.Fleet.SnapshotAvailability(start)
-		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
-	}
+	cat := snap.Catalog
 
 	cands, skips, rerr := router.Resolve(q, snap)
 	// Recorded before the error check: the skips are what explain an empty
@@ -77,9 +68,36 @@ func (e *Executor) resolve(ctx context.Context, w http.ResponseWriter, ew errorW
 		return resolved{}, false
 	}
 
+	providers := snap.Providers
 	byID := make(map[string]provider.Provider, len(providers))
 	for _, p := range providers {
 		byID[p.ID] = p
 	}
 	return resolved{Candidates: cands, ByID: byID, Catalog: cat, Cfg: cfg}, true
+}
+
+// RouteSnapshot freezes every input the router is allowed to read, at one
+// instant.
+//
+// Exported because the admin route preview must resolve against the same
+// snapshot a real request would: §12 states the criterion as an equality, and
+// two constructions of "the same inputs" would drift the first time one of
+// them gained a field. Health is resolved to booleans here rather than inside
+// Resolve, which is what keeps the router a pure function of its arguments.
+func (e *Executor) RouteSnapshot(ctx context.Context, at time.Time,
+	cfg *config.Config) (router.Snapshot, error) {
+
+	providers, err := e.src.Providers(ctx)
+	if err != nil {
+		return router.Snapshot{}, err
+	}
+	snap := router.Snapshot{
+		At: at, Providers: providers, Catalog: e.catalogFor(providers),
+		Config: cfg, AdapterSurfaces: e.adapterSurfaces,
+	}
+	if e.deps.Fleet != nil {
+		snap.Health = e.deps.Fleet.SnapshotAvailability(at)
+		snap.LastUsed = e.deps.Fleet.LastUsedSnapshot()
+	}
+	return snap, nil
 }
