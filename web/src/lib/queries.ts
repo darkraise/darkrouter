@@ -5,7 +5,10 @@ import type {
   BreakerEntry,
   ConfigResponse,
   CatalogResponse,
+  DiscoveryHealthResponse,
+  Healthz,
   Overview,
+  PolicyBlock,
   PresetsResponse,
   ProvidersResponse,
   ProxyToken,
@@ -27,7 +30,8 @@ export const keys = {
   overview: ["overview"] as const,
   requests: (filters: Record<string, string>) => ["requests", filters] as const,
   trace: (id: string) => ["requests", "trace", id] as const,
-  usage: (dimension?: UsageDimension) => ["usage", dimension ?? "day"] as const,
+  usage: (dimension?: UsageDimension, days?: number) =>
+    ["usage", dimension ?? "day", days ?? 0] as const,
   providers: ["providers"] as const,
   presets: ["presets"] as const,
   models: ["models"] as const,
@@ -36,6 +40,11 @@ export const keys = {
   health: ["health", "providers"] as const,
   proxyTokens: ["proxy-tokens"] as const,
   sessions: ["sessions"] as const,
+  healthz: ["healthz"] as const,
+  discovery: ["health", "discovery"] as const,
+  policy: ["policy"] as const,
+  override: (provider: string, model: string) =>
+    ["models", "override", provider, model] as const,
 } as const
 
 /**
@@ -81,11 +90,21 @@ export function useTrace(id: string, extra?: Extra<RequestTrace>) {
   })
 }
 
-export function useUsage(dimension?: UsageDimension, extra?: Extra<UsageResponse>) {
-  const query = dimension ? `?group_by=${dimension}` : ""
+type UsageOpts = { dimension?: UsageDimension; days?: number }
+
+export function useUsage(
+  opts?: UsageDimension | UsageOpts,
+  extra?: Extra<UsageResponse>,
+) {
+  const { dimension, days } =
+    typeof opts === "string" ? { dimension: opts, days: undefined } : (opts ?? {})
+  const params = new URLSearchParams()
+  if (dimension) params.set("group_by", dimension)
+  if (days) params.set("days", String(days))
+  const query = params.toString()
   return useQuery({
-    queryKey: keys.usage(dimension),
-    queryFn: () => api.get<UsageResponse>(`/api/usage${query}`),
+    queryKey: keys.usage(dimension, days),
+    queryFn: () => api.get<UsageResponse>(`/api/usage${query ? `?${query}` : ""}`),
     refetchInterval: POLL.slow,
     ...extra,
   })
@@ -158,6 +177,35 @@ export function useSessions(extra?: Extra<Session[]>) {
   return useQuery({
     queryKey: keys.sessions,
     queryFn: () => api.get<Session[]>("/api/sessions"),
+    ...extra,
+  })
+}
+
+export function useHealthz(extra?: Extra<Healthz>) {
+  return useQuery({
+    queryKey: keys.healthz,
+    queryFn: () => api.get<Healthz>("/healthz"),
+    // The ops footer's numbers move with the log writer, not with a request.
+    refetchInterval: POLL.slow,
+    ...extra,
+  })
+}
+
+export function useDiscoveryHealth(extra?: Extra<DiscoveryHealthResponse>) {
+  return useQuery({
+    queryKey: keys.discovery,
+    queryFn: () => api.get<DiscoveryHealthResponse>("/api/health/discovery"),
+    // A sweep interval, not a request interval: this changes when discovery
+    // runs, which is minutes apart.
+    refetchInterval: POLL.slow,
+    ...extra,
+  })
+}
+
+export function usePolicy(extra?: Extra<PolicyBlock>) {
+  return useQuery({
+    queryKey: keys.policy,
+    queryFn: () => api.get<PolicyBlock>("/api/policy"),
     ...extra,
   })
 }

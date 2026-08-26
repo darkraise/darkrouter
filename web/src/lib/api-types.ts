@@ -110,6 +110,9 @@ export type RequestRow = {
   total_ms: number | null
   error_code?: string
   attempts: number
+  /** Which rendering served: the fast path untouched, or translated through
+   *  the IR. Absent when nothing served. */
+  path?: "passthrough" | "ir"
 }
 
 export type RequestPage = { requests: RequestRow[]; next_cursor?: string }
@@ -185,6 +188,10 @@ export type Credential = {
   masked: string
   enabled: boolean
   cooling: boolean
+  kind: string
+  /** OAuth only. Seconds since the epoch. */
+  expires_at?: number
+  scope?: string
 }
 
 export type Provider = {
@@ -201,12 +208,26 @@ export type Provider = {
   credentials: Credential[]
 }
 
-export type Preset = { id: string; name: string; kind: string; base_url: string }
+export type Preset = {
+  id: string
+  name: string
+  kind: string
+  base_url: string
+  surfaces: string[]
+  auth_kind: string
+  website: string
+  free_tier: boolean
+}
 
 /** Both of these are envelopes. Typing them as bare arrays is what made every
  *  screen throw on first contact with a real gateway. */
 export type ProvidersResponse = { providers: Provider[] }
 export type PresetsResponse = { presets: Preset[] }
+
+export type Pricing = { input_micros: number; output_micros: number }
+
+/** Where a merged model row's data came from. Mirrors catalog.MergeSource. */
+export type MergeSource = "models_dev" | "discovered" | "inferred" | "override"
 
 /** A model as the catalog merges it: one row per model id, listing every
  *  provider that serves it, rather than one row per (provider, model). */
@@ -223,6 +244,10 @@ export type Model = {
    *  these with a warning, and an operator needs to know which they are. */
   inferred: boolean
   state: string
+  /** Null when the catalog has no price. Zero would claim the model is free. */
+  pricing: Pricing | null
+  publisher?: string
+  merge_source: MergeSource
 }
 
 export type AliasView = { name: string; targets: string[] }
@@ -251,6 +276,59 @@ export type BreakerEntry = {
   cooling_until?: string
   backoff_level: number
   consecutive_failures: number
+}
+
+export type Healthz = {
+  config_valid: boolean
+  warnings: string[]
+  uptime: string
+  version: string
+  log_records_dropped: number
+  log_records_written: number
+  config_error?: string
+}
+
+export type DiscoveryHealthRow = {
+  provider_id: string
+  total: number
+  live: number
+  stale: number
+  removed_upstream: number
+  max_missing_streak: number
+}
+
+export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }
+
+// --- playground ---
+
+export type CountResult = { tokens: number; estimated: boolean }
+
+export type AuxSurface =
+  | "embeddings" | "rerank" | "moderations"
+  | "images" | "speech" | "transcriptions"
+
+export type PlaygroundMessage = { role: string; content: string }
+
+export type PlaygroundDialect = "openai" | "anthropic" | "gemini"
+
+export type PlaygroundChatBody = {
+  model: string
+  prompt?: string
+  system?: string
+  messages?: PlaygroundMessage[]
+  temperature?: number
+  max_tokens?: number
+  tools?: Record<string, unknown>[]
+  stream?: boolean
+  dialect?: PlaygroundDialect
+}
+
+export type AuxBody = {
+  surface: AuxSurface
+  model?: string
+  body?: Record<string, unknown>
+  file_b64?: string
+  filename?: string
 }
 
 // --- config ---
