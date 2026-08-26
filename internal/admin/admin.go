@@ -166,6 +166,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/proxy-tokens", s.requireSession(s.handleListProxyTokens))
 	s.mux.HandleFunc("POST /api/proxy-tokens", s.requireCSRF(s.handleCreateProxyToken))
 	s.mux.HandleFunc("DELETE /api/proxy-tokens/{id}", s.requireCSRF(s.handleDeleteProxyToken))
+
+	s.mux.HandleFunc("GET /api/sessions", s.requireSession(s.handleListSessions))
+	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireCSRF(s.handleDeleteSession))
+	s.mux.HandleFunc("POST /api/auth/password", s.requireCSRF(s.handleChangePassword))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 
 	// A mistyped API path must answer as an API path. Without these two an
