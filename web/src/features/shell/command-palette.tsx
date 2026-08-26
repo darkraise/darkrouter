@@ -121,15 +121,15 @@ export function CommandPalette() {
           <CommandGroup heading="Models">
             {models.data.models.slice(0, 50).map((m) => (
               <CommandItem
-                key={`${m.provider_id}/${m.model_id}`}
-                value={`model ${m.provider_id} ${m.model_id}`}
-                onSelect={() =>
-                  go(`/models?model=${encodeURIComponent(m.model_id)}`)
-                }
+                key={m.model}
+                value={`model ${m.model} ${m.providers.join(" ")}`}
+                onSelect={() => go(`/models?model=${encodeURIComponent(m.model)}`)}
               >
-                {m.model_id}
+                {m.model}
+                {/* The catalog merges by model id, so a row lists every
+                    provider that serves it rather than naming just one. */}
                 <span className="ml-2 text-[hsl(var(--legend))]">
-                  {m.provider_id}
+                  {m.providers.join(", ")}
                 </span>
               </CommandItem>
             ))}

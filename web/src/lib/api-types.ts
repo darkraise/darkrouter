@@ -172,35 +172,48 @@ export type Aliases = Record<string, string[]>
 export type Credential = {
   id: string
   label: string
+  /** Enough of the secret to recognise it, never enough to use it. */
+  masked: string
   enabled: boolean
   cooling: boolean
-  last_used?: number
-  expires_at?: number
-  needs_reauth?: boolean
 }
 
 export type Provider = {
   id: string
   name: string
-  preset?: string
+  preset: string
   kind: string
   base_url: string
-  auth_style: string
   priority: number
   enabled: boolean
+  /** Which credential form to show. A static key form is useless for an oauth
+   *  provider: there is no key to type. */
+  auth_style: string
   credentials: Credential[]
 }
 
 export type Preset = { id: string; name: string; kind: string; base_url: string }
 
+/** A model as the catalog merges it: one row per model id, listing every
+ *  provider that serves it, rather than one row per (provider, model). */
 export type Model = {
-  provider_id: string
-  model_id: string
-  state: string
+  model: string
+  providers: string[]
   surfaces: string[]
-  context_window?: number
-  capabilities?: ModelCapabilities
+  context_window: number
+  max_output_tokens: number
+  tools: boolean
+  vision: boolean
+  reasoning: boolean
+  /** Capabilities were guessed rather than read. Master design §6.4 routes
+   *  these with a warning, and an operator needs to know which they are. */
+  inferred: boolean
+  state: string
 }
+
+export type AliasView = { name: string; targets: string[] }
+
+export type CatalogResponse = { models: Model[]; aliases: AliasView[] }
 
 export type ModelCapabilities = {
   tools?: boolean
