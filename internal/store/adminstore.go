@@ -720,3 +720,50 @@ func (d *DB) RecentFailovers(ctx context.Context, window time.Duration, limit in
 	}
 	return out, rows.Err()
 }
+
+// SessionRow is one live admin session. The id is the credential the cookie
+// carries, so a caller that renders these must not show it in full.
+type SessionRow struct {
+	ID        string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+// SessionRows lists sessions that have not expired, newest first.
+func (d *DB) SessionRows(ctx context.Context, now time.Time) ([]SessionRow, error) {
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT id, created_at, expires_at FROM sessions
+		  WHERE expires_at > ? ORDER BY created_at DESC, id`, now.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []SessionRow{}
+	for rows.Next() {
+		var (
+			r                SessionRow
+			created, expires int64
+		)
+		if err := rows.Scan(&r.ID, &created, &expires); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		r.CreatedAt = time.Unix(created, 0).UTC()
+		r.ExpiresAt = time.Unix(expires, 0).UTC()
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteSessionsExcept revokes every session but one. It is what a password
+// change uses: anything that also revoked the caller would log the operator
+// out of the screen they just used.
+func (d *DB) DeleteSessionsExcept(ctx context.Context, keep string) (int, error) {
+	res, err := d.Write.ExecContext(ctx,
+		`DELETE FROM sessions WHERE id <> ?`, keep)
+	if err != nil {
+		return 0, fmt.Errorf("revoke sessions: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
