@@ -1,7 +1,10 @@
+import { useState } from "react"
 import { PageHeader } from "darkraise-ui/layout"
 import { Card } from "darkraise-ui"
-import { useConfig, useOverview, useUsage } from "../../lib/queries"
+import { useConfig, useOverview, useProviders, useUsage } from "../../lib/queries"
 import type { FailoverRow, Overview, UsageRow } from "../../lib/api-types"
+import { AddProviderDialog } from "../providers/add-provider-dialog"
+import { FirstRunProviders } from "../shell/first-run-providers"
 import { FlowGraph, aliasesFromUsage, type FlowProvider } from "./flow-graph"
 import { Failovers } from "./failovers"
 import { OpsFooter } from "./ops-footer"
@@ -125,10 +128,16 @@ export function OverviewScreen() {
   const byAlias = useUsage("alias")
   const byProvider = useUsage("provider")
   const config = useConfig()
+  const providers = useProviders()
+  const [addOpen, setAddOpen] = useState(false)
 
   if (!overview.data) return null
   const o = overview.data
   const providerDays = byProvider.data?.days ?? []
+  // Guards the array itself, not just the response object: a caller that
+  // returns a response shaped differently than expected must read as "not
+  // known yet" rather than crash the whole screen on a missing collection.
+  const noProviders = providers.data?.providers?.length === 0
 
   return (
     <>
@@ -146,59 +155,67 @@ export function OverviewScreen() {
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Tile
-          caption="requests_per_min"
-          value={o.requests_per_min.toFixed(1)}
-        >
-          <Sparkline points={o.series.map((s) => s.requests)} />
-        </Tile>
-        <Tile
-          caption="error_rate"
-          value={`${(o.error_rate * 100).toFixed(1)}%`}
-        >
-          <Sparkline points={errorSeries(providerDays)} />
-        </Tile>
-        <Tile caption="latency_p95" value={`${o.latency.p95_ms}ms`}>
-          {/* usage_daily has no per-day latency column, so there is no series
-              to plot here — a bare number beside a spend or error sparkline
-              would look like an oversight rather than the fact that it is. */}
-          <p className="mt-2 text-xs text-[hsl(var(--legend))]">
-            no daily series for latency
-          </p>
-        </Tile>
-        <Tile
-          caption="today_spend"
-          value={money(o.today_spend.micros, o.today_spend.priced)}
-        >
-          <Sparkline points={spendSeries(providerDays)} />
-        </Tile>
-      </div>
+      {noProviders ? (
+        <FirstRunProviders onAdd={() => setAddOpen(true)} />
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-4">
+            <Tile
+              caption="requests_per_min"
+              value={o.requests_per_min.toFixed(1)}
+            >
+              <Sparkline points={o.series.map((s) => s.requests)} />
+            </Tile>
+            <Tile
+              caption="error_rate"
+              value={`${(o.error_rate * 100).toFixed(1)}%`}
+            >
+              <Sparkline points={errorSeries(providerDays)} />
+            </Tile>
+            <Tile caption="latency_p95" value={`${o.latency.p95_ms}ms`}>
+              {/* usage_daily has no per-day latency column, so there is no series
+                  to plot here — a bare number beside a spend or error sparkline
+                  would look like an oversight rather than the fact that it is. */}
+              <p className="mt-2 text-xs text-[hsl(var(--legend))]">
+                no daily series for latency
+              </p>
+            </Tile>
+            <Tile
+              caption="today_spend"
+              value={money(o.today_spend.micros, o.today_spend.priced)}
+            >
+              <Sparkline points={spendSeries(providerDays)} />
+            </Tile>
+          </div>
 
-      <section className="mt-6">
-        <h2 className="text-sm font-medium">Routing</h2>
-        <p className="mt-1 mb-4 max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
-          Aliases on the left, providers on the right in priority order. Edge
-          thickness is share of the window; a dashed return is traffic that
-          arrived somewhere because somewhere else refused it. A provider that
-          is not a candidate has no edge at all.
-        </p>
-        <FlowGraph
-          aliases={aliasesFromUsage(byAlias.data?.days ?? [])}
-          providers={flowProviders(o, providerDays)}
-          failovers={o.failover_edges.map((e) => ({
-            from: e.from_provider_id,
-            to: e.to_provider_id,
-            count: e.requests,
-          }))}
-          totalRequests={Math.round((o.requests_per_min * o.window_sec) / 60)}
-          failoverCount={o.failovers.length}
-        />
-      </section>
+          <section className="mt-6">
+            <h2 className="text-sm font-medium">Routing</h2>
+            <p className="mt-1 mb-4 max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
+              Aliases on the left, providers on the right in priority order. Edge
+              thickness is share of the window; a dashed return is traffic that
+              arrived somewhere because somewhere else refused it. A provider
+              that is not a candidate has no edge at all.
+            </p>
+            <FlowGraph
+              aliases={aliasesFromUsage(byAlias.data?.days ?? [])}
+              providers={flowProviders(o, providerDays)}
+              failovers={o.failover_edges.map((e) => ({
+                from: e.from_provider_id,
+                to: e.to_provider_id,
+                count: e.requests,
+              }))}
+              totalRequests={Math.round((o.requests_per_min * o.window_sec) / 60)}
+              failoverCount={o.failovers.length}
+            />
+          </section>
+        </>
+      )}
 
       <Failovers rows={o.failovers.slice(0, 5)} />
 
       <OpsFooter />
+
+      <AddProviderDialog open={addOpen} onOpenChange={setAddOpen} />
     </>
   )
 }

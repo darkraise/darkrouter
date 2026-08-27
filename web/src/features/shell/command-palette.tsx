@@ -89,7 +89,10 @@ export function CommandPalette() {
           ))}
         </CommandGroup>
 
-        {providers.data && providers.data.providers.length > 0 && (
+        {/* A disabled query still reads the cache another mount already
+            populated under the same key, so this cannot assume `providers`
+            survived whatever that other fetch actually returned. */}
+        {providers.data?.providers && providers.data.providers.length > 0 && (
           <CommandGroup heading="Providers">
             {providers.data.providers.map((p) => (
               <CommandItem
