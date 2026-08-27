@@ -29,11 +29,11 @@ const CAPABILITIES = ["tools", "vision", "reasoning"] as const
  * context window and surfaces, and until now nothing in the product could
  * write one.
  *
- * Each field tracks its own draft, separately from the loaded override, so
- * Save can send exactly the fields the operator touched. Merging drafts over
- * the loaded values before sending would resend every currently-displayed
- * value — including ones nobody asked to change — the first time any one
- * field was edited.
+ * PUT replaces the whole row: a field the body omits is written NULL, not
+ * left as it was. Save therefore resends every value the editor currently
+ * shows, not just the one the operator touched. Each field still tracks its
+ * own draft, separately from the loaded override, purely so an untouched
+ * control keeps displaying the loaded value until it is edited.
  */
 export function OverrideEditor({
   provider,
@@ -75,21 +75,6 @@ export function OverrideEditor({
     onSuccess: resetDrafts,
   })
 
-  function buildPatch(): Partial<ModelOverride> {
-    const patch: Partial<ModelOverride> = {}
-    if (draftContextWindow !== null && draftContextWindow.trim() !== "") {
-      patch.context_window = Number(draftContextWindow)
-    }
-    if (draftCapabilities !== null) patch.capabilities = draftCapabilities
-    if (draftSurfaces !== null) {
-      patch.surfaces = draftSurfaces
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-    return patch
-  }
-
   const contextWindowValue =
     draftContextWindow ??
     (existing?.context_window !== undefined ? String(existing.context_window) : "")
@@ -101,6 +86,26 @@ export function OverrideEditor({
 
   function setCapability(key: keyof ModelCapabilities, value: boolean) {
     setDraftCapabilities((d) => ({ ...(d ?? {}), [key]: value }))
+  }
+
+  // Built from the displayed values, not the drafts alone: PUT is a full
+  // replace, so a field left at its loaded value still has to be resent or
+  // the replace writes it away. This is also why capabilities is always sent
+  // whole — capability() already merges a partial draft over the loaded
+  // object one key at a time.
+  function buildPatch(): Partial<ModelOverride> {
+    const patch: Partial<ModelOverride> = {}
+    if (contextWindowValue.trim() !== "") {
+      patch.context_window = Number(contextWindowValue)
+    }
+    const capabilities: ModelCapabilities = {}
+    for (const key of CAPABILITIES) capabilities[key] = capability(key)
+    patch.capabilities = capabilities
+    patch.surfaces = surfacesValue
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+    return patch
   }
 
   return (
