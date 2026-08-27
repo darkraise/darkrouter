@@ -49,7 +49,10 @@ export function priceLabel(p: Pricing | null): string {
   // Unpriced is not free. An em-dash is the same claim the spend tile and
   // every cost cell already make.
   if (p === null) return "—"
-  const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(2)}`
+  // Four places, matching formatCost: two would round a real sub-cent price
+  // like 4,000 micros ($0.004/MTok) down to $0.00, the exact string this
+  // function reserves for "unpriced".
+  const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(4)}`
   return `${dollars(p.input_micros)} / ${dollars(p.output_micros)}`
 }
 
