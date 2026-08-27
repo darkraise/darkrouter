@@ -39,7 +39,6 @@ export const routerAdapter: RouterAdapter = {
     children,
     className,
     activeClassName,
-    activeExact,
     style,
     onClick,
   }: {
@@ -47,7 +46,6 @@ export const routerAdapter: RouterAdapter = {
     children: ReactNode
     className?: string
     activeClassName?: string
-    activeExact?: boolean
     style?: CSSProperties
     onClick?: (e: MouseEvent<HTMLAnchorElement>) => void
   }) => (
@@ -55,10 +53,16 @@ export const routerAdapter: RouterAdapter = {
       to={to}
       className={className}
       activeProps={activeClassName ? { className: activeClassName } : undefined}
-      // Without this every item whose path prefixes the current one lights up,
-      // and "/" prefixes all of them — so Overview would read as active on
-      // every screen.
-      activeOptions={{ exact: activeExact ?? false }}
+      // Only "/" matches exactly. Every other rail item owns its subtree, so
+      // Providers stays lit on /providers/groq and Requests on a trace deep
+      // link — the destination the operator navigated from is still the
+      // section they are in.
+      //
+      // The caller's `activeExact` is deliberately ignored: darkraise's
+      // SidebarItem hardcodes it to true, which switched the rail item off the
+      // moment a detail page opened. "/" prefixes every path, so it is the one
+      // that still needs the exact test.
+      activeOptions={{ exact: to === "/" }}
       style={style}
       onClick={onClick}
     >
