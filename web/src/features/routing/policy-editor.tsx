@@ -80,7 +80,7 @@ function PolicyForm({ policy }: { policy: PolicyBlock }) {
             id="policy-cooldown-max"
             value={draft.cooldownMax}
             onChange={set("cooldownMax")}
-            className="font-mono text-xs"
+            className="font-mono text-sm"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -100,7 +100,7 @@ function PolicyForm({ policy }: { policy: PolicyBlock }) {
             id="policy-total"
             value={draft.total}
             onChange={set("total")}
-            className="font-mono text-xs"
+            className="font-mono text-sm"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -109,7 +109,7 @@ function PolicyForm({ policy }: { policy: PolicyBlock }) {
             id="policy-idle"
             value={draft.idle}
             onChange={set("idle")}
-            className="font-mono text-xs"
+            className="font-mono text-sm"
           />
         </div>
         {/* connect and first_byte configure the one shared transport built at
@@ -125,7 +125,7 @@ function PolicyForm({ policy }: { policy: PolicyBlock }) {
             id="policy-connect"
             value={policy.timeout.connect}
             disabled
-            className="font-mono text-xs"
+            className="font-mono text-sm"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -137,7 +137,7 @@ function PolicyForm({ policy }: { policy: PolicyBlock }) {
             id="policy-first-byte"
             value={policy.timeout.first_byte}
             disabled
-            className="font-mono text-xs"
+            className="font-mono text-sm"
           />
         </div>
       </div>

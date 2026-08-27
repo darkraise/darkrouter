@@ -160,7 +160,7 @@ export function ConnectScreen() {
                 <span className="w-24 shrink-0 text-sm text-[hsl(var(--muted-foreground))]">
                   {DIALECT_LABEL[dialect]}
                 </span>
-                <code className="flex-1 overflow-x-auto rounded bg-[hsl(var(--muted))] px-2 py-1 font-mono text-xs">
+                <code className="flex-1 overflow-x-auto rounded bg-[hsl(var(--muted))] px-2 py-1 font-mono text-sm">
                   {url}
                 </code>
                 <CopyButton text={url} />
@@ -193,7 +193,7 @@ export function ConnectScreen() {
             )
             return (
               <TabsContent key={tool} value={tool} className="flex flex-col gap-2">
-                <pre className="overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-xs">
+                <pre className="overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-sm">
                   {snippet}
                 </pre>
                 <div>
@@ -245,7 +245,7 @@ export function ConnectScreen() {
             {/* The column holds a digest, so the API genuinely cannot
                 reproduce this. Saying "copy it now" is a statement of fact
                 rather than a nudge. */}
-            <pre className="mt-2 overflow-x-auto font-mono text-xs">
+            <pre className="mt-2 overflow-x-auto font-mono text-sm">
               {minted.secret}
             </pre>
           </div>
@@ -266,7 +266,7 @@ export function ConnectScreen() {
           {(tokens.data ?? []).map((t) => (
             <TableRow key={t.id}>
               <TableCell>{t.name}</TableCell>
-              <TableCell className="font-mono text-xs">{t.prefix}…</TableCell>
+              <TableCell className="font-mono text-sm">{t.prefix}…</TableCell>
               <TableCell>{new Date(t.created_at).toLocaleDateString()}</TableCell>
               <TableCell>
                 {t.last_used_at ? (
