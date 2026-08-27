@@ -33,7 +33,11 @@ export class ApiError extends Error {
   }
 }
 
-function loggedOut(): never {
+// Exported so a caller that talks to the executor with its own fetch — the
+// playground's aux and count calls, which need response headers request()
+// does not expose — can trigger the same shared side effect stream() does,
+// rather than growing a second notion of "the session died".
+export function loggedOut(): never {
   csrfToken = ""
   unauthorizedListeners.forEach((fn) => fn())
   throw new ApiError(401, "not authenticated")
