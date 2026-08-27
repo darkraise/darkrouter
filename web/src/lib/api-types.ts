@@ -299,6 +299,17 @@ export type DiscoveryHealthRow = {
 
 export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }
 
+/** POST /api/providers/{id}/test. A rejected credential is a 200 with
+ *  ok:false, not an error response — the button exists to discover exactly
+ *  that outcome. */
+export type ProbeResult = {
+  ok: boolean
+  probe: string
+  latency_ms: number
+  model_count?: number
+  error?: string
+}
+
 // --- playground ---
 
 export type AuxSurface =

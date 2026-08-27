@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { breakersFor, providerState } from "./providers-screen"
+import { breakersFor, discoveryLine, providerState } from "./providers-screen"
 import type { BreakerEntry, Credential, Provider } from "../../lib/api-types"
 
 const cred = (over: Partial<Credential> = {}): Credential => ({
@@ -72,5 +72,33 @@ describe("breakersFor", () => {
       "groq",
     )
     expect(got).toHaveLength(1)
+  })
+})
+
+describe("the discovery line", () => {
+  it("reports a healthy catalogue as live out of total", () => {
+    expect(
+      discoveryLine({
+        provider_id: "groq", total: 40, live: 40, stale: 0,
+        removed_upstream: 0, max_missing_streak: 0,
+      }),
+    ).toBe("40 of 40 live")
+  })
+
+  it("names the missing streak, which is the number that matters", () => {
+    // A provider whose listing has been failing for six hours looks identical
+    // to a healthy one until something counts the sweeps that omitted it.
+    const line = discoveryLine({
+      provider_id: "groq", total: 40, live: 30, stale: 10,
+      removed_upstream: 0, max_missing_streak: 6,
+    })
+    expect(line).toContain("10 stale")
+    expect(line).toContain("6")
+  })
+
+  it("says never discovered when the provider has no rows at all", () => {
+    // Absence is the signal. "0 of 0 live" reads as a sweep that ran and
+    // found nothing, which is a different fact.
+    expect(discoveryLine(undefined)).toBe("never discovered")
   })
 })
