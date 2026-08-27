@@ -68,7 +68,9 @@ export function ProvidersScreen() {
   const [freeTier, setFreeTier] = useState(false)
 
   function open(row: ProviderRow) {
-    if (!row.configured) {
+    // The row, not the accounts: a provider emptied of keys still has a
+    // detail page carrying its priority and import settings.
+    if (!row.provider) {
       // Nothing to show yet: the detail page reads a database row, and one
       // does not exist until the provider has an account. Sending an operator
       // to an empty page would be a dead end with the useful action one click
@@ -237,7 +239,7 @@ export function ProvidersScreen() {
                     {row.priority ?? <span className="text-[hsl(var(--legend))]">—</span>}
                   </TableCell>
                   <TableCell>
-                    {row.configured ? (
+                    {row.accounts > 0 ? (
                       <>
                         {row.accounts}
                         {cooling.length > 0 && (
@@ -251,14 +253,14 @@ export function ProvidersScreen() {
                     )}
                   </TableCell>
                   <TableCell
-                    title={row.configured ? discoveryLine(discoveryRow) : undefined}
+                    title={row.provider ? discoveryLine(discoveryRow) : undefined}
                     className={
                       discoveryRow && discoveryRow.max_missing_streak > 0
                         ? "max-w-[11rem] truncate text-sm text-[hsl(var(--warning))]"
                         : "max-w-[11rem] truncate text-sm text-[hsl(var(--legend))]"
                     }
                   >
-                    {row.configured ? discoveryLine(discoveryRow) : "—"}
+                    {row.provider ? discoveryLine(discoveryRow) : "—"}
                   </TableCell>
                   <TableCell>
                     <Badge variant={STATE_VARIANT[row.state]}>{row.state}</Badge>
