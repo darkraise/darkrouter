@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "darkraise-ui/components/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "darkraise-ui/components/tabs"
-import { ApiError, getCsrfToken, loggedOut } from "../../lib/api"
+import { getCsrfToken, throwOnExecutorError } from "../../lib/api"
 import type { AuxBody, AuxSurface, CountResult } from "../../lib/api-types"
 
 export const AUX_SURFACES = [
@@ -69,39 +69,12 @@ export function readCount(res: Response, body: unknown): CountResult {
 }
 
 /**
- * Distinguishes a dead session's 401 from a legitimate rejection shaped like
- * one, and throws for both. The aux and count calls read response headers
- * (the request id, the estimate marker) that `api.post` does not expose, so
- * they fetch directly and land on the same ambiguity `stream()` already
- * resolves for chat: every admin-issued rejection — a dead session included
- * — shapes its body as {"error": "<string>"}; only a body that reached a
- * dialect writer nests an object there instead, which means the session
- * held and the executor itself is calling the request bad.
- */
-async function throwForError(res: Response): Promise<never> {
-  let message = res.statusText
-  let sessionDead = res.status === 401
-  try {
-    const parsed = (await res.json()) as { error?: unknown }
-    if (typeof parsed.error === "string") {
-      message = parsed.error
-    } else if (parsed.error && typeof parsed.error === "object") {
-      sessionDead = false
-      const nested = parsed.error as { message?: string }
-      if (nested.message) message = nested.message
-    }
-  } catch {
-    // A non-JSON error body means something upstream of the API answered.
-    // The status line is all there is to report.
-  }
-  if (sessionDead) loggedOut()
-  throw new ApiError(res.status, message)
-}
-
-/**
  * The one fetch call this file makes. Callers need the raw `Response` for
  * its headers and, for speech, its bytes — exactly what `api.post` cannot
- * give them, which is why this exists instead of reusing it.
+ * give them, which is why this exists instead of reusing it. A non-OK
+ * response goes through the same session-death classification `stream()`
+ * uses, since this hits the same executor and the same dialect-writer error
+ * shape.
  */
 async function postRaw(path: string, body: unknown): Promise<Response> {
   const res = await fetch(path, {
@@ -114,7 +87,7 @@ async function postRaw(path: string, body: unknown): Promise<Response> {
     body: JSON.stringify(body),
     credentials: "same-origin",
   })
-  if (!res.ok) await throwForError(res)
+  if (!res.ok) return await throwOnExecutorError(res)
   return res
 }
 
