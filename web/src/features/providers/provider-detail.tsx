@@ -30,6 +30,25 @@ import { CredentialRow } from "./credential-row"
 import { DiscoveryPanel } from "./discovery-panel"
 import { ProbePanel } from "./probe-panel"
 
+/**
+ * Only the touched half of the region/project patch.
+ *
+ * Both are pointer fields on the backend (`store.ProviderPatch.Region` /
+ * `.Project`): a key present with value "" means "set this to empty", not
+ * "leave alone". `GET /api/providers` never returns either field, so the
+ * inputs here start with nothing to prefill — null distinguishes "never
+ * touched" from "touched and cleared", which "" alone cannot.
+ */
+export function locationPatch(
+  region: string | null,
+  project: string | null,
+): Record<string, string> {
+  const patch: Record<string, string> = {}
+  if (region !== null) patch.region = region
+  if (project !== null) patch.project = project
+  return patch
+}
+
 export function ProviderDetail() {
   const { id } = useParams({ from: "/providers/$id" })
   const navigate = useNavigate()
@@ -38,8 +57,8 @@ export function ProviderDetail() {
   const provider = providers.data?.providers.find((p) => p.id === id)
   const [draftName, setDraftName] = useState<string | null>(null)
   const [draftPriority, setDraftPriority] = useState<string | null>(null)
-  const [draftRegion, setDraftRegion] = useState("")
-  const [draftProject, setDraftProject] = useState("")
+  const [draftRegion, setDraftRegion] = useState<string | null>(null)
+  const [draftProject, setDraftProject] = useState<string | null>(null)
   const [newCredLabel, setNewCredLabel] = useState("")
   const [newCredSecret, setNewCredSecret] = useState("")
 
@@ -55,10 +74,13 @@ export function ProviderDetail() {
     invalidates: [keys.providers, keys.overview],
   })
   const saveLocation = useApiMutation({
-    mutationFn: (vars: { region: string; project: string }) =>
-      api.patch(`/api/providers/${id}`, vars),
+    mutationFn: (vars: Record<string, string>) => api.patch(`/api/providers/${id}`, vars),
     success: "Provider updated",
     invalidates: [keys.providers],
+    onSuccess: () => {
+      setDraftRegion(null)
+      setDraftProject(null)
+    },
   })
   const addCredential = useApiMutation({
     mutationFn: (vars: { label: string; secret: string }) =>
@@ -172,20 +194,21 @@ export function ProviderDetail() {
             either field, so there is no current value here to show. */}
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            value={draftRegion}
+            value={draftRegion ?? ""}
             onChange={(e) => setDraftRegion(e.target.value)}
             placeholder="region"
             className="w-40"
           />
           <Input
-            value={draftProject}
+            value={draftProject ?? ""}
             onChange={(e) => setDraftProject(e.target.value)}
             placeholder="project"
             className="w-40"
           />
           <Button
             size="sm"
-            onClick={() => saveLocation.mutate({ region: draftRegion, project: draftProject })}
+            disabled={draftRegion === null && draftProject === null}
+            onClick={() => saveLocation.mutate(locationPatch(draftRegion, draftProject))}
           >
             Save
           </Button>
