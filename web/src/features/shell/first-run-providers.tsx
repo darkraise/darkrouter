@@ -4,7 +4,7 @@ import { Button, Card } from "darkraise-ui"
 // would otherwise read as the same string twice, which is confusing on the
 // page and ambiguous to anything that queries by text.
 const STEPS = [
-  "Add your first provider",
+  "Give a provider an account",
   "Let discovery find its models",
   "Point a client at Connect",
 ]
@@ -21,13 +21,14 @@ export function FirstRunProviders({ onAdd }: { onAdd: () => void }) {
     <Card className="p-6">
       <h2 className="text-sm font-medium">Nothing is configured yet</h2>
       <p className="mt-1 max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
-        The router has nothing to route to. Three steps get it serving.
+        The router has nothing to route to. Providers ship with the release; give
+        one an account and it starts serving.
       </p>
 
       <ol className="mt-4 flex flex-col gap-2 text-sm">
         {STEPS.map((step, i) => (
           <li key={step} className="flex items-center gap-2">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--muted))] font-mono text-xs">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--muted))] font-mono text-sm">
               {i + 1}
             </span>
             {step}
@@ -48,7 +49,7 @@ export function FirstRunProviders({ onAdd }: { onAdd: () => void }) {
       </div>
 
       <Button className="mt-6" onClick={onAdd}>
-        Add a provider
+        Add accounts
       </Button>
     </Card>
   )

@@ -53,7 +53,7 @@ describe("the empty legend", () => {
 describe("the zero-providers state", () => {
   it("teaches the three steps rather than showing an empty grid", () => {
     render(<FirstRunProviders onAdd={() => {}} />)
-    expect(screen.getByText(/add a provider/i)).toBeInTheDocument()
+    expect(screen.getByText(/give a provider an account/i)).toBeInTheDocument()
     expect(screen.getByText(/discover/i)).toBeInTheDocument()
     expect(screen.getByText(/connect/i)).toBeInTheDocument()
   })
@@ -61,7 +61,8 @@ describe("the zero-providers state", () => {
   it("offers the action it is teaching", () => {
     const onAdd = vi.fn()
     render(<FirstRunProviders onAdd={onAdd} />)
-    screen.getByRole("button", { name: /add a provider/i }).click()
+    // Accounts, not providers: the provider set ships with the release.
+    screen.getByRole("button", { name: /add accounts/i }).click()
     expect(onAdd).toHaveBeenCalled()
   })
 })
