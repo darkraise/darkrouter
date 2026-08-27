@@ -160,7 +160,7 @@ export function SettingsScreen() {
       {config.data && config.data.warnings.length > 0 && (
         <Card className="mb-6 p-4">
           <h2 className="mb-2 text-sm font-medium">Warnings</h2>
-          <ul className="flex flex-col gap-1 text-xs">
+          <ul className="flex flex-col gap-1 text-sm">
             {config.data.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
@@ -181,8 +181,8 @@ export function SettingsScreen() {
           {config.data &&
             configRows(config.data).map(({ field, value, meta }) => (
               <TableRow key={field}>
-                <TableCell className="font-mono text-xs">{field}</TableCell>
-                <TableCell className="font-mono text-xs">{value}</TableCell>
+                <TableCell className="font-mono text-sm">{field}</TableCell>
+                <TableCell className="font-mono text-sm">{value}</TableCell>
                 <TableCell>
                   <span title={SOURCE_NOTE[meta.source]}>{meta.source}</span>
                 </TableCell>
@@ -206,7 +206,7 @@ export function SettingsScreen() {
         <h2 className="mb-3 text-sm font-medium">Sessions</h2>
         <ul className="flex flex-col gap-2">
           {(sessions.data ?? []).map((s) => (
-            <li key={s.id} className="flex items-center gap-3 text-xs">
+            <li key={s.id} className="flex items-center gap-3 text-sm">
               <span className="font-mono">{s.prefix}…</span>
               <span className="text-[hsl(var(--legend))]">
                 since {new Date(s.created_at).toLocaleString()}

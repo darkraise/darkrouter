@@ -57,6 +57,19 @@ func Resolve(q Query, snap Snapshot) ([]Candidate, []Skip, error) {
 	return cands, skips, nil
 }
 
+// MatchedAlias reports the alias a requested model name resolved through, or
+// "" when the name was not an alias.
+//
+// Exported for the request log. Usage grouped by alias, the Requests filter
+// and the overview's routing graph all read that column, and every one of them
+// is empty for a row that never recorded which alias it came in under.
+func MatchedAlias(model string, snap Snapshot) string {
+	if snap.Config == nil {
+		return ""
+	}
+	return aliasFor(model, snap.Config.Aliases)
+}
+
 // emptyReason picks the error that best explains an empty candidate list.
 //
 // Cooling wins only when it explains *everything*: a mixed result where one

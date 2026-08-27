@@ -31,7 +31,7 @@ export class ScreenBoundary extends Component<
         <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
           The gateway is still running — only this screen failed.
         </p>
-        <pre className="mt-4 overflow-x-auto rounded border border-[hsl(var(--border))] p-3 font-mono text-xs">
+        <pre className="mt-4 overflow-x-auto rounded border border-[hsl(var(--border))] p-3 font-mono text-sm">
           {this.state.error.message}
         </pre>
       </div>

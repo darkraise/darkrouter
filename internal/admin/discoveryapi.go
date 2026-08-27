@@ -9,6 +9,9 @@ type discoveryHealthView struct {
 	Stale            int    `json:"stale"`
 	RemovedUpstream  int    `json:"removed_upstream"`
 	MaxMissingStreak int    `json:"max_missing_streak"`
+	// FilteredOut is how many models the last sweep dropped before recording
+	// it. Non-zero only under the free-models filter.
+	FilteredOut int `json:"filtered_out"`
 }
 
 func (s *Server) handleDiscoveryHealth(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +25,7 @@ func (s *Server) handleDiscoveryHealth(w http.ResponseWriter, r *http.Request) {
 		out = append(out, discoveryHealthView{
 			ProviderID: row.ProviderID, Total: row.Total, Live: row.Live,
 			Stale: row.Stale, RemovedUpstream: row.RemovedUpstream,
-			MaxMissingStreak: row.MaxMissingStreak,
+			MaxMissingStreak: row.MaxMissingStreak, FilteredOut: row.FilteredOut,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})

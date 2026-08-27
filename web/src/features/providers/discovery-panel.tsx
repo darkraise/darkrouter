@@ -11,8 +11,8 @@ export function DiscoveryPanel({ providerId }: { providerId: string }) {
   const warning = row !== undefined && row.max_missing_streak > 0
 
   return (
-    <Card className="mb-6 p-4">
-      <h2 className="mb-2 text-sm font-medium">Discovery</h2>
+    <Card className="p-4">
+      <h3 className="mb-2 text-sm font-medium">Discovery</h3>
       <p className={warning ? "text-sm text-[hsl(var(--warning))]" : "text-sm"}>
         {discoveryLine(row)}
       </p>

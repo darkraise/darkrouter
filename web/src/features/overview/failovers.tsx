@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { Card } from "darkraise-ui"
+import { Badge, Card } from "darkraise-ui"
 import type { FailoverRow } from "../../lib/api-types"
 import { failoverLabel } from "./overview-screen"
 
@@ -8,24 +8,44 @@ import { failoverLabel } from "./overview-screen"
  *
  * A fleet-wide error rate hides one provider quietly degrading; this is the
  * early warning the rate cannot give.
+ *
+ * Laid out as columns rather than a sentence per row: five rows are read down
+ * the time column and across to the route, which a run-on string of the same
+ * facts makes impossible.
  */
 export function Failovers({ rows }: { rows: FailoverRow[] }) {
   if (rows.length === 0) return null
   return (
-    <Card className="mt-6 p-4">
+    <section className="mt-6">
       <h2 className="mb-2 text-sm font-medium">Recent failovers</h2>
-      <ul className="flex flex-col gap-1 font-mono text-xs">
-        {rows.map((row) => (
-          <li key={row.id}>
-            <Link to="/requests/$id" params={{ id: row.id }} className="underline">
-              {failoverLabel(row)}
-            </Link>
-            <span className="ml-2 text-[hsl(var(--legend))]">
-              {new Date(row.ts).toLocaleTimeString()} · {row.total_ms}ms
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Card>
+      <Card className="overflow-hidden">
+        <ul className="divide-y divide-[hsl(var(--border))]">
+          {rows.map((row) => (
+            <li key={row.id}>
+              <Link
+                to="/requests/$id"
+                params={{ id: row.id }}
+                className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-[hsl(var(--muted))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))] focus-visible:-outline-offset-2"
+              >
+                <span className="shrink-0 whitespace-nowrap font-mono text-sm text-[hsl(var(--legend))] tabular-nums">
+                  {new Date(row.ts).toLocaleTimeString(undefined, { hour12: false })}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                  {failoverLabel(row)}
+                </span>
+                <span className="shrink-0">
+                  <Badge variant="outline" size="sm" className="font-mono">
+                    ×{row.attempts}
+                  </Badge>
+                </span>
+                <span className="shrink-0 whitespace-nowrap text-right font-mono text-sm tabular-nums">
+                  {row.total_ms.toLocaleString()}ms
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
   )
 }

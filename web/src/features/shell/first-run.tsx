@@ -20,11 +20,11 @@ export function FirstRun() {
       </p>
       <Card className="mt-6 p-4">
         <p className="text-sm">Set one, then restart:</p>
-        <pre className="mt-3 overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-xs">
+        <pre className="mt-3 overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-sm">
           {`darkrouter hash-password
 export DARKROUTER_ADMIN_PASSWORD_HASH='<the output>'`}
         </pre>
-        <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">
+        <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">
           The proxy port is unaffected either way — this gates the console, not
           the gateway.
         </p>

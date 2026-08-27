@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest"
 import {
-  droppedText,
+  duration,
   errorSeries,
   failoverLabel,
   flowProviders,
+  money,
+  requestSeries,
   spendSeries,
 } from "./overview-screen"
 import type { Overview, ProviderTile, UsageRow } from "../../lib/api-types"
@@ -76,18 +78,28 @@ describe("flowProviders", () => {
     expect(got[0]?.requests).toBe(10)
   })
 
-  it("says why a provider is degraded when it can", () => {
+  it("carries the credential facts a row needs to explain itself", () => {
     const got = flowProviders(
-      overview([tile({ id: "a", state: "degraded", cooling: 2 })]),
+      overview([tile({ id: "a", state: "degraded", cooling: 2, credentials: 3 })]),
       [],
     )
-    // "1 cooling" is the reason a row is degraded, and §6.1 gives the note
-    // the slack rather than a share bar that repeats the edge thickness.
-    expect(got[0]?.note).toBe("2 cooling")
+    // The count is the denominator: 2 cooling out of 3 is a different
+    // reading from 2 out of 2, and the node cannot say which without it.
+    expect(got[0]).toMatchObject({ cooling: 2, credentials: 3, needsReauth: false })
   })
 })
 
 describe("tile series", () => {
+  it("sums requests per day", () => {
+    expect(
+      requestSeries([
+        { ...usage("groq", 3), day: "2026-08-25" },
+        { ...usage("nebius", 4), day: "2026-08-25" },
+        { ...usage("groq", 5), day: "2026-08-26" },
+      ]),
+    ).toEqual([7, 5])
+  })
+
   it("sums spend per day across a dimension's rows", () => {
     expect(
       spendSeries([
@@ -119,14 +131,38 @@ describe("tile series", () => {
   })
 })
 
+describe("the spend readout", () => {
+  it("prints a sub-cent day rather than rounding it to nothing", () => {
+    // $0.00 is the exact string that would claim a gateway which has spent
+    // something has spent nothing.
+    expect(money(4_000, true)).toBe("$0.0040")
+    // Past a cent it is a headline figure again, not a scientific one.
+    expect(money(3_470_000, true)).toBe("$3.47")
+  })
+
+  it("says unknown rather than free when nothing in scope had a price", () => {
+    expect(money(0, false)).toBe("—")
+  })
+})
+
+describe("the latency readout", () => {
+  it("reads past the thousand in seconds", () => {
+    // 4100ms makes the reader do the division.
+    expect(duration(4100)).toEqual({ value: "4.1", unit: "s" })
+  })
+
+  it("keeps sub-second readings in milliseconds", () => {
+    expect(duration(890)).toEqual({ value: "890", unit: "ms" })
+  })
+})
+
 describe("the failover strip", () => {
-  it("labels a row with its alias, attempt count and serving provider", () => {
+  it("labels a row with its alias and the provider that served it", () => {
     const label = failoverLabel({
       id: "x", ts: 0, alias: "fast", attempts: 3,
       final_provider_id: "nebius", final_model: "m", total_ms: 12,
     })
     expect(label).toContain("fast")
-    expect(label).toContain("×3")
     expect(label).toContain("nebius")
   })
 
@@ -139,22 +175,5 @@ describe("the failover strip", () => {
     })
     expect(label).toContain("m-4")
     expect(label).not.toContain("→ →")
-  })
-})
-
-describe("the dropped-record counter", () => {
-  it("reads zero as a statement rather than a number", () => {
-    expect(droppedText(0, 400)).toMatch(/no records dropped/i)
-  })
-
-  it("names the shortfall when records were dropped", () => {
-    // A non-zero count means usage_daily is a lower bound, which is the one
-    // thing that makes every spend figure on this screen approximate. The
-    // total is written + dropped: those are disjoint counters (a dropped
-    // record never reaches the database), so 7 dropped on top of 400
-    // written is 407 observed, not 400.
-    const text = droppedText(7, 400)
-    expect(text).toContain("7")
-    expect(text).toContain("407")
   })
 })

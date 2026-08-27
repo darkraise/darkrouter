@@ -19,8 +19,8 @@ export function ProbePanel({ providerId }: { providerId: string }) {
   })
 
   return (
-    <Card className="mb-6 p-4">
-      <h2 className="mb-3 text-sm font-medium">Probe</h2>
+    <Card className="p-4">
+      <h3 className="mb-3 text-sm font-medium">Probe</h3>
       <Button size="sm" onClick={() => probe.mutate(undefined)} disabled={probe.isPending}>
         Send test request
       </Button>
@@ -33,7 +33,7 @@ export function ProbePanel({ providerId }: { providerId: string }) {
             </Badge>
           </dd>
           <dt className="text-[hsl(var(--legend))]">Probe</dt>
-          <dd className="font-mono text-xs">{probe.data.probe}</dd>
+          <dd className="font-mono text-sm">{probe.data.probe}</dd>
           <dt className="text-[hsl(var(--legend))]">Latency</dt>
           <dd className="tabular-nums">{probe.data.latency_ms} ms</dd>
           {probe.data.model_count !== undefined && (

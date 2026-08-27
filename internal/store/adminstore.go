@@ -91,6 +91,11 @@ type ProviderRow struct {
 	// Location is Vertex's regional endpoint. It is set at creation and not
 	// patchable: changing it moves every catalogued model to a different host.
 	Location string
+	// FreeModelsOnly narrows what a discovery sweep imports for this provider
+	// to the models it can show are free. It is a filter on the catalogue, not
+	// on routing: a paid model already in the catalogue stays routable until
+	// the next sweep drops it.
+	FreeModelsOnly bool
 }
 
 // ProviderPatch is a partial update. Every field is a pointer because a partial
@@ -103,6 +108,16 @@ type ProviderPatch struct {
 	Enabled  *bool   `json:"enabled"`
 	Region   *string `json:"region"`
 	Project  *string `json:"project"`
+	// FreeModelsOnly is patchable so an operator can change their mind without
+	// deleting a provider they cannot recreate: the set is defined in code.
+	FreeModelsOnly *bool `json:"free_models_only"`
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (d *DB) CreateProvider(ctx context.Context, p ProviderRow) error {
@@ -118,10 +133,11 @@ func (d *DB) CreateProvider(ctx context.Context, p ProviderRow) error {
 	if _, err := d.Write.ExecContext(ctx,
 		`INSERT INTO providers
 		   (id, name, preset, kind, base_url, auth_style, priority, enabled,
-		    region, project, location, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    region, project, location, free_models_only, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Preset, p.Kind, p.BaseURL, p.AuthStyle,
-		p.Priority, enabled, p.Region, p.Project, p.Location, time.Now().UnixMilli()); err != nil {
+		p.Priority, enabled, p.Region, p.Project, p.Location,
+		boolToInt(p.FreeModelsOnly), time.Now().UnixMilli()); err != nil {
 		return fmt.Errorf("create provider %q: %w", p.ID, err)
 	}
 	return nil
@@ -157,6 +173,10 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 	}
 	if patch.Project != nil {
 		sets, args = append(sets, "project = ?"), append(args, *patch.Project)
+	}
+	if patch.FreeModelsOnly != nil {
+		sets = append(sets, "free_models_only = ?")
+		args = append(args, boolToInt(*patch.FreeModelsOnly))
 	}
 	if len(sets) == 0 {
 		// An empty patch is a client bug, not a no-op to absorb: it means the
@@ -228,7 +248,7 @@ func (d *DB) DeleteCredential(ctx context.Context, providerID, keyID string) err
 func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT id, name, preset, kind, base_url, auth_style, priority, enabled,
-		        region, project, location
+		        region, project, location, free_models_only
 		   FROM providers ORDER BY priority DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
@@ -239,10 +259,13 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	for rows.Next() {
 		var p ProviderRow
 		var enabled int
+		var freeOnly int
 		if err := rows.Scan(&p.ID, &p.Name, &p.Preset, &p.Kind, &p.BaseURL,
-			&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project, &p.Location); err != nil {
+			&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project, &p.Location,
+			&freeOnly); err != nil {
 			return nil, fmt.Errorf("list providers: %w", err)
 		}
+		p.FreeModelsOnly = freeOnly == 1
 		p.Enabled = enabled != 0
 		out = append(out, p)
 	}
@@ -830,17 +853,38 @@ type DiscoveryHealthRow struct {
 	Stale            int
 	RemovedUpstream  int
 	MaxMissingStreak int
+	// FilteredOut is how many models the last sweep dropped before recording
+	// it. Non-zero only under the free-models filter, and the only thing that
+	// distinguishes "this provider serves nothing" from "this provider serves
+	// nothing free".
+	FilteredOut int
 }
 
 func (d *DB) DiscoveryHealth(ctx context.Context) ([]DiscoveryHealthRow, error) {
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT provider_id, count(*),
-		        sum(state = 'live'), sum(state = 'stale'),
-		        sum(state = 'removed_upstream'),
-		        coalesce(max(missing_streak), 0)
-		   FROM models
-		  GROUP BY provider_id
-		  ORDER BY provider_id`)
+		// Driven from the union of both tables, not from either alone.
+		//
+		// models alone loses a sweep that imported nothing -- every model
+		// filtered out -- which then reads as a provider discovery has never
+		// visited: a different fact with a different fix. provider_discovery
+		// alone loses a provider whose models were written by the config
+		// import, which never runs a sweep. A provider in neither table has
+		// genuinely never been discovered and is still absent, which is what
+		// the caller reads as "never discovered".
+		`SELECT p.provider_id,
+		        coalesce(count(m.model_id), 0),
+		        coalesce(sum(m.state = 'live'), 0),
+		        coalesce(sum(m.state = 'stale'), 0),
+		        coalesce(sum(m.state = 'removed_upstream'), 0),
+		        coalesce(max(m.missing_streak), 0),
+		        coalesce(max(d.filtered_out), 0)
+		   FROM (SELECT provider_id FROM models
+		         UNION
+		         SELECT provider_id FROM provider_discovery) p
+		   LEFT JOIN models m ON m.provider_id = p.provider_id
+		   LEFT JOIN provider_discovery d ON d.provider_id = p.provider_id
+		  GROUP BY p.provider_id
+		  ORDER BY p.provider_id`)
 	if err != nil {
 		return nil, fmt.Errorf("discovery health: %w", err)
 	}
@@ -850,7 +894,7 @@ func (d *DB) DiscoveryHealth(ctx context.Context) ([]DiscoveryHealthRow, error) 
 	for rows.Next() {
 		var r DiscoveryHealthRow
 		if err := rows.Scan(&r.ProviderID, &r.Total, &r.Live, &r.Stale,
-			&r.RemovedUpstream, &r.MaxMissingStreak); err != nil {
+			&r.RemovedUpstream, &r.MaxMissingStreak, &r.FilteredOut); err != nil {
 			return nil, fmt.Errorf("discovery health: %w", err)
 		}
 		out = append(out, r)

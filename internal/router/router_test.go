@@ -198,3 +198,29 @@ func TestResolveDoesNotTruncateToMaxAttempts(t *testing.T) {
 		t.Errorf("got %d candidates, want the full list of 3", len(cands))
 	}
 }
+
+func TestMatchedAliasNamesTheAliasARequestCameInUnder(t *testing.T) {
+	// The request log's alias column, Usage's alias dimension and the
+	// overview's routing graph all read this. A row that records nothing
+	// leaves all three empty against a real gateway.
+	cfg := &config.Config{Aliases: map[string][]string{"fast": {"groq/shared"}}}
+	snap := fullSnap(twoProviders(), cfg, health.Availability{})
+
+	if got := MatchedAlias("fast", snap); got != "fast" {
+		t.Errorf("MatchedAlias(alias) = %q, want fast", got)
+	}
+	// A bare model name is not an alias, and reporting one would attribute
+	// traffic to an alias nobody asked for.
+	if got := MatchedAlias("shared", snap); got != "" {
+		t.Errorf("MatchedAlias(model) = %q, want empty", got)
+	}
+	if got := MatchedAlias("groq/shared", snap); got != "" {
+		t.Errorf("MatchedAlias(provider/model) = %q, want empty", got)
+	}
+}
+
+func TestMatchedAliasSurvivesASnapshotWithNoConfig(t *testing.T) {
+	if got := MatchedAlias("fast", Snapshot{}); got != "" {
+		t.Errorf("MatchedAlias = %q, want empty", got)
+	}
+}

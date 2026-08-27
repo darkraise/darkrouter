@@ -283,8 +283,7 @@ func TestPriorityChangeReachesRoutingImmediately(t *testing.T) {
 	seedProviderWithKey(t, s, cookie, token, "high", "http://high.invalid")
 	for _, id := range []string{"low", "high"} {
 		if err := db.RecordDiscoverySuccess(ctx, id,
-			[]store.DiscoveredModel{{ModelID: "m", ContextWindow: 1000, MaxOutputTokens: 100}},
-			time.Now()); err != nil {
+			[]store.DiscoveredModel{{ModelID: "m", ContextWindow: 1000, MaxOutputTokens: 100}}, 0, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
