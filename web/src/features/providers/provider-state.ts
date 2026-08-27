@@ -32,7 +32,14 @@ export function discoveryLine(row: DiscoveryHealthRow | undefined): string {
   // Absence is the signal: "0 of 0 live" would read as a sweep that ran and
   // found nothing, which is a different fact from one that never ran.
   if (!row) return "never discovered"
+  // A sweep that imported nothing because the free filter dropped everything
+  // is not an empty provider. Saying "0 of 0 live" for it sends an operator
+  // to look at a listing endpoint that is working perfectly.
+  if (row.total === 0 && row.filtered_out > 0) {
+    return `no free models · ${row.filtered_out} paid, not imported`
+  }
   const parts = [`${row.live} of ${row.total} live`]
+  if (row.filtered_out > 0) parts.push(`${row.filtered_out} filtered out`)
   if (row.stale > 0) parts.push(`${row.stale} stale`)
   if (row.removed_upstream > 0) parts.push(`${row.removed_upstream} removed upstream`)
   if (row.max_missing_streak > 0) {

@@ -65,3 +65,15 @@ export function discoveryFraction(row: DiscoveryHealthRow | undefined): string |
   if (!row) return null
   return `${row.live}/${row.total}`
 }
+
+/** What the discovery stat says beneath its number. The filtered case comes
+ *  first: it is the one an operator would otherwise misread as a fault. */
+export function discoveryNote(row: DiscoveryHealthRow | undefined): string {
+  if (!row) return "never discovered"
+  if (row.total === 0 && row.filtered_out > 0) {
+    return `none free of ${row.filtered_out} listed`
+  }
+  if (row.filtered_out > 0) return `${row.filtered_out} paid, not imported`
+  if (row.max_missing_streak > 0) return `missing for ${row.max_missing_streak} sweeps`
+  return "live of known"
+}

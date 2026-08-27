@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -45,6 +46,7 @@ type discoveryRollup struct {
 	Stale            int    `json:"stale"`
 	RemovedUpstream  int    `json:"removed_upstream"`
 	MaxMissingStreak int    `json:"max_missing_streak"`
+	FilteredOut      int    `json:"filtered_out"`
 }
 
 func discoveryHealth(t *testing.T, s *Server) []discoveryRollup {
@@ -95,6 +97,31 @@ func TestDiscoveryHealthIsEmptyBeforeAnySweep(t *testing.T) {
 	s, _ := testServerFull(t)
 	if got := discoveryHealth(t, s); len(got) != 0 {
 		t.Fatalf("want an empty list, got %+v", got)
+	}
+}
+
+func TestAWhollyFilteredSweepIsNotSilence(t *testing.T) {
+	// The case the filtered count exists for. A provider whose every model is
+	// paid, swept under the free-models filter, imports nothing — and before
+	// the count it dropped out of the rollup entirely, reading exactly like a
+	// provider discovery had never visited. Those need different fixes.
+	s, db := testServerFull(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, store.ProviderRow{
+		ID: "paid-only", Kind: "openaicompat", BaseURL: "https://x.example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "paid-only", nil, 12, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := discoveryHealth(t, s)
+	if len(got) != 1 {
+		t.Fatalf("want one rollup for a provider that swept, got %+v", got)
+	}
+	if got[0].ProviderID != "paid-only" || got[0].Total != 0 || got[0].FilteredOut != 12 {
+		t.Fatalf("rollup wrong: %+v", got[0])
 	}
 }
 
