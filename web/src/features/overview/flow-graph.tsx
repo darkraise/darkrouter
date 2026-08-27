@@ -1,21 +1,52 @@
+import { useEffect, useMemo, useRef, type RefObject } from "react"
+import { useTheme } from "darkraise-ui/theme"
 import { Link } from "@tanstack/react-router"
+import {
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  Controls,
+  EdgeLabelRenderer,
+  Handle,
+  Position,
+  ReactFlow,
+  useReactFlow,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react"
+import "@xyflow/react/dist/style.css"
 import "./flow-graph.css"
 import type { ProviderTile, UsageRow } from "../../lib/api-types"
 
-/** Fixed pixel geometry. The viewBox matches 1:1 so the graph scrolls rather
- *  than scales — a scaled graph distorts stroke widths, and stroke width is
- *  data here. */
+/** How much wider the columns have to be at each step of the font-size axis.
+ *
+ *  The node text is `--text-sm`, which the axis moves 12 → 18px, so geometry
+ *  fixed in pixels truncates every alias at extra-large and lets the router's
+ *  own label fall out of its box. These are the ratios of each step's
+ *  `--text-sm` to the medium step's 14px. */
+const TEXT_SCALE: Record<string, number> = {
+  small: 12 / 14,
+  medium: 1,
+  large: 16 / 14,
+  "extra-large": 18 / 14,
+}
+
+/** Column geometry at the medium step, scaled by TEXT_SCALE. Rows are laid out
+ *  rather than force-directed: the provider column is priority order, and an
+ *  ordering the router does not use would be a lie however pretty it looked. */
 const GEOM = {
-  aliasX: 24,
-  aliasW: 140,
-  routerX: 232,
-  routerW: 104,
-  providerX: 398,
-  providerW: 396,
-  nodeH: 34,
-  rowGap: 58,
-  top: 30,
-  minHeight: 320,
+  aliasX: 0,
+  routerX: 260,
+  providerX: 470,
+  aliasW: 196,
+  routerW: 136,
+  providerW: 424,
+  rowGap: 68,
+  top: 16,
+  minHeight: 360,
+  maxHeight: 620,
 } as const
 
 /** The widest an edge may be drawn. A share of one maps here; everything else
@@ -30,177 +61,300 @@ export type FlowProvider = {
   priority: number
   /** No edge is drawn for a provider the router cannot currently choose. */
   candidate: boolean
-  note?: string
+  credentials: number
+  cooling: number
+  needsReauth: boolean
   state: ProviderTile["state"]
 }
 
 /** Traffic that arrived at `to` because `from` refused it. */
 export type FlowFailover = { from: string; to: string; count: number }
 
-function centreY(index: number): number {
-  return GEOM.top + index * GEOM.rowGap + GEOM.nodeH / 2
+type AliasData = FlowAlias & { width: number } & Record<string, unknown>
+type RouterData = { total: number; failoverCount: number; width: number } & Record<string, unknown>
+type ProviderData = FlowProvider & { share: number; width: number } & Record<string, unknown>
+
+function rowY(index: number): number {
+  return GEOM.top + index * GEOM.rowGap
 }
 
-/** A cubic with horizontal control points, so an edge leaves and arrives flat
- *  and the eye reads the column rather than the curve. */
-function edge(x1: number, y1: number, x2: number, y2: number): string {
-  const dx = (x2 - x1) / 2
-  return `M${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+/** What a provider row says about itself when it is not simply serving.
+ *
+ *  The credential count is the denominator: "1 cooling" alone cannot say
+ *  whether two working keys remain or none do. */
+export function providerNote(p: FlowProvider): string {
+  const creds = `${p.credentials} ${p.credentials === 1 ? "credential" : "credentials"}`
+  if (p.state === "disabled") return "disabled"
+  if (p.credentials === 0) return "no credentials"
+  if (p.needsReauth) return `${creds} · needs reconnection`
+  if (p.cooling > 0) return `${creds} · ${p.cooling} cooling`
+  return creds
+}
+
+/**
+ * The graph as data, separate from the canvas that draws it.
+ *
+ * Exported because every rule worth testing — who gets an edge, how thick, and
+ * which returns can be placed — lives here rather than in the renderer.
+ */
+export function buildGraph(
+  aliases: FlowAlias[],
+  providers: FlowProvider[],
+  failovers: FlowFailover[],
+  failoverCount: number,
+  scale = 1,
+): { nodes: Node[]; edges: Edge[] } {
+  const served = providers.reduce((n, p) => n + p.requests, 0)
+  const at = (v: number) => Math.round(v * scale)
+  const row = (i: number) => at(rowY(i))
+  const routerY = at(rowY(Math.max(aliases.length, providers.length, 1) / 2) - 30)
+
+  const nodes: Node[] = [
+    ...aliases.map((a, i) => ({
+      id: `alias:${a.name}`,
+      type: "alias",
+      position: { x: GEOM.aliasX, y: row(i) },
+      data: { ...a, width: at(GEOM.aliasW) } as AliasData,
+      draggable: false,
+    })),
+    {
+      id: "router",
+      type: "router",
+      position: { x: at(GEOM.routerX), y: routerY },
+      // The router total is the same sum the provider column is a breakdown
+      // of, so the parts add up to the whole a reader can see beside them.
+      data: { total: served, failoverCount, width: at(GEOM.routerW) } as RouterData,
+      draggable: false,
+    },
+    ...providers.map((p, i) => ({
+      id: `provider:${p.id}`,
+      type: "provider",
+      position: { x: at(GEOM.providerX), y: row(i) },
+      data: {
+        ...p,
+        share: served > 0 ? p.requests / served : 0,
+        width: at(GEOM.providerW),
+      } as ProviderData,
+      draggable: false,
+    })),
+  ]
+
+  const edges: Edge[] = [
+    ...aliases.map((a) => ({
+      id: `in:${a.name}`,
+      source: `alias:${a.name}`,
+      target: "router",
+      className: "rf-edge-in",
+      // Inbound is plumbing, not a decision: the thinnest structural stroke.
+      style: { strokeWidth: 1 },
+    })),
+    ...providers
+      .filter((p) => p.candidate)
+      .map((p) => ({
+        id: `out:${p.id}`,
+        source: "router",
+        target: `provider:${p.id}`,
+        className: "rf-edge-out",
+        style: {
+          strokeWidth: Math.max(1, (served > 0 ? p.requests / served : 0) * MAX_EDGE),
+        },
+      })),
+    ...failovers
+      // A provider deleted since the window has no row to draw between.
+      .filter((f) => providers.some((p) => p.id === f.from) && providers.some((p) => p.id === f.to))
+      .map((f) => ({
+        id: `fo:${f.from}->${f.to}`,
+        source: `provider:${f.from}`,
+        target: `provider:${f.to}`,
+        sourceHandle: "fo-out",
+        targetHandle: "fo-in",
+        type: "failover" as const,
+        className: "rf-edge-fail",
+        // The magnitude is the whole point of a return: "some traffic moved"
+        // is not something an operator can act on.
+        label: `${f.count}`,
+        ariaLabel: `${f.count} requests failed over from ${f.from} to ${f.to}`,
+      })),
+  ]
+
+  return { nodes, edges }
+}
+
+/**
+ * A return: traffic that arrived at one provider because another refused it.
+ *
+ * Both ends leave the right-hand side of the column and the curve bows out
+ * past it, so a return reads as a return rather than as a line drawn through
+ * the rows between. The bow grows with the distance travelled, which keeps
+ * two returns over the same rows from landing on top of each other.
+ */
+function FailoverEdge({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  label,
+  markerEnd,
+}: EdgeProps) {
+  const bow = Math.min(96, 28 + Math.abs(targetY - sourceY) * 0.2)
+  const path = `M${sourceX} ${sourceY} C ${sourceX + bow} ${sourceY}, ${targetX + bow} ${targetY}, ${targetX} ${targetY}`
+  const labelX = Math.max(sourceX, targetX) + bow * 0.72
+  const labelY = (sourceY + targetY) / 2
+  return (
+    <>
+      <BaseEdge path={path} markerEnd={markerEnd} />
+      <EdgeLabelRenderer>
+        <div
+          className="rf-fo-label nodrag nopan"
+          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+        >
+          {label}
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
+function AliasNode({ data }: NodeProps) {
+  const d = data as AliasData
+  return (
+    <div className="rf-node rf-alias" style={{ width: d.width }}>
+      <span className="rf-name">{d.name}</span>
+      <span className="rf-vol">{d.requests.toLocaleString()}</span>
+      <Handle type="source" position={Position.Right} className="rf-handle" />
+    </div>
+  )
+}
+
+function RouterNode({ data }: NodeProps) {
+  const d = data as RouterData
+  return (
+    <div className="rf-node rf-router" style={{ width: d.width }}>
+      <Handle type="target" position={Position.Left} className="rf-handle" />
+      <p className="rf-router-label">router</p>
+      <span className="rf-router-total">{d.total.toLocaleString()}</span>
+      <span className="rf-router-unit">requests</span>
+      {d.failoverCount > 0 && (
+        <span className="rf-router-fo">{d.failoverCount} failed over</span>
+      )}
+      <Handle type="source" position={Position.Right} className="rf-handle" />
+    </div>
+  )
+}
+
+function ProviderNode({ data }: NodeProps) {
+  const p = data as ProviderData
+  return (
+    <div className={p.candidate ? "rf-node rf-provider" : "rf-node rf-provider rf-provider-idle"}>
+      <Handle type="target" position={Position.Left} className="rf-handle" />
+      <Link
+        to="/providers/$id"
+        params={{ id: p.id }}
+        className="rf-provider-link"
+        style={{ width: p.width }}
+      >
+        <span className="rf-prio">{p.priority}</span>
+        <span className="rf-pip" data-state={p.state} aria-hidden="true" />
+        <span className="rf-name">{p.name}</span>
+        <span className="rf-note">{providerNote(p)}</span>
+        <span className="rf-right">
+          {p.candidate ? (
+            <>
+              <span className="rf-count">{p.requests.toLocaleString()}</span>
+              <span className="rf-pct">{(p.share * 100).toFixed(1)}%</span>
+            </>
+          ) : (
+            <span className="rf-out">no traffic</span>
+          )}
+        </span>
+      </Link>
+      <Handle type="source" position={Position.Right} id="fo-out" className="rf-handle" />
+      <Handle type="target" position={Position.Right} id="fo-in" className="rf-handle" />
+    </div>
+  )
+}
+
+const nodeTypes = { alias: AliasNode, router: RouterNode, provider: ProviderNode }
+const edgeTypes = { failover: FailoverEdge }
+
+/** Refits when the canvas changes size. The `fitView` prop fits once, on
+ *  mount, so without this the graph keeps a width it no longer has — a
+ *  narrowed window leaves the provider column off the right-hand edge. */
+function FitOnResize({ target }: { target: RefObject<HTMLDivElement | null> }) {
+  const { fitView } = useReactFlow()
+  useEffect(() => {
+    const el = target.current
+    if (!el) return
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => void fitView())
+    })
+    observer.observe(el)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [fitView, target])
+  return null
 }
 
 export function FlowGraph({
   aliases,
   providers,
   failovers,
-  totalRequests,
   failoverCount,
 }: {
   aliases: FlowAlias[]
   providers: FlowProvider[]
   failovers: FlowFailover[]
-  totalRequests: number
   failoverCount: number
 }) {
+  const { fontSize } = useTheme()
+  const scale = TEXT_SCALE[fontSize] ?? 1
+  const { nodes, edges } = useMemo(
+    () => buildGraph(aliases, providers, failovers, failoverCount, scale),
+    [aliases, providers, failovers, failoverCount, scale],
+  )
   const rows = Math.max(aliases.length, providers.length, 1)
-  const height = Math.max(GEOM.minHeight, GEOM.top * 2 + rows * GEOM.rowGap)
-  const width = GEOM.providerX + GEOM.providerW + 40
-  const routerY = height / 2
-
-  const served = providers.reduce((n, p) => n + p.requests, 0) || 1
-  const providerY = new Map(providers.map((p, i) => [p.id, centreY(i)]))
+  const height = Math.min(
+    GEOM.maxHeight * scale,
+    Math.max(GEOM.minHeight, rows * GEOM.rowGap * scale + 48),
+  )
+  const wrap = useRef<HTMLDivElement>(null)
 
   return (
-    <div className="rf-wrap">
-      <div className="rf-graph" style={{ width, height }}>
-        <svg
-          className="rf-edges"
-          width={width}
-          height={height}
-          viewBox={`0 0 ${width} ${height}`}
-          fill="none"
-          aria-hidden="true"
-        >
-          {aliases.map((a, i) => (
-            <path
-              key={a.name}
-              className="rf-edge rf-edge-in"
-              d={edge(
-                GEOM.aliasX + GEOM.aliasW,
-                centreY(i),
-                GEOM.routerX,
-                routerY,
-              )}
-            />
-          ))}
-
-          {providers
-            .filter((p) => p.candidate)
-            .map((p) => (
-              <path
-                key={p.id}
-                className="rf-edge rf-edge-out"
-                // Share of the window, so a provider taking most of the
-                // traffic is visibly the one taking it.
-                style={{
-                  strokeWidth: Math.max(1, (p.requests / served) * MAX_EDGE),
-                }}
-                d={edge(
-                  GEOM.routerX + GEOM.routerW,
-                  routerY,
-                  GEOM.providerX,
-                  providerY.get(p.id) ?? routerY,
-                )}
-              />
-            ))}
-
-          {failovers.map((f) => {
-            const y1 = providerY.get(f.from)
-            const y2 = providerY.get(f.to)
-            if (y1 === undefined || y2 === undefined) return null
-            const x = GEOM.providerX + GEOM.providerW
-            return (
-              <path
-                key={`${f.from}->${f.to}`}
-                className="rf-edge rf-edge-fail"
-                // Bowed out past the column so a return is visible as a
-                // return rather than as a line through the nodes.
-                d={`M${x} ${y1} C ${x + 14} ${y1}, ${x + 14} ${y2}, ${x} ${y2}`}
-              />
-            )
-          })}
-        </svg>
-
-        {aliases.map((a, i) => (
-          <div
-            key={a.name}
-            className="rf-node rf-alias"
-            style={{
-              left: GEOM.aliasX,
-              top: centreY(i) - GEOM.nodeH / 2,
-              width: GEOM.aliasW,
-              height: GEOM.nodeH,
-            }}
-          >
-            <span className="mono rf-name">{a.name}</span>
-            <span className="micro rf-vol">{a.requests}</span>
-          </div>
-        ))}
-
-        <div
-          className="rf-node rf-router"
-          style={{
-            left: GEOM.routerX,
-            top: routerY - 44,
-            width: GEOM.routerW,
-            height: 88,
-          }}
-        >
-          <p className="legend-caps rf-router-label">router</p>
-          <span className="mono rf-router-total">{totalRequests}</span>
-          <span className="micro rf-router-unit">requests</span>
-          {failoverCount > 0 && (
-            <span className="micro rf-router-fo">{failoverCount} failed over</span>
-          )}
-        </div>
-
-        {providers.map((p, i) => (
-          // display: contents keeps the Link out of the box tree, so the
-          // absolutely-positioned node beneath it still measures against
-          // .rf-graph rather than against the anchor's own box.
-          <Link
-            key={p.id}
-            to="/providers/$id"
-            params={{ id: p.id }}
-            style={{ display: "contents" }}
-          >
-            <div
-              className={
-                p.candidate
-                  ? "rf-node rf-provider"
-                  : "rf-node rf-provider rf-provider-idle"
-              }
-              style={{
-                left: GEOM.providerX,
-                top: centreY(i) - GEOM.nodeH / 2,
-                width: GEOM.providerW,
-                height: GEOM.nodeH,
-              }}
-            >
-              <span className="micro rf-prio">{p.priority}</span>
-              <span className="mono rf-name">{p.name}</span>
-              {p.note && <span className="micro rf-note">{p.note}</span>}
-              <span className="rf-right">
-                <span className="mono rf-count">{p.requests}</span>
-                <span className="micro rf-pct">
-                  {p.candidate
-                    ? `${Math.round((p.requests / served) * 100)}%`
-                    : "not a candidate"}
-                </span>
-              </span>
-            </div>
-          </Link>
-        ))}
-      </div>
+    <div className="rf-wrap" style={{ height }} ref={wrap}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        fitView
+        // Asymmetric: the returns bow out past the right-hand column, and a
+        // uniform padding that made room for them would leave the same gap on
+        // the left where nothing is drawn.
+        fitViewOptions={{
+          padding: { top: "4%", right: "14%", bottom: "4%", left: "2%" },
+          minZoom: 0.4,
+          maxZoom: 1,
+        }}
+        minZoom={0.4}
+        maxZoom={1.5}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        // Scroll belongs to the page. A graph that eats the wheel traps an
+        // operator halfway down the screen they were scrolling.
+        zoomOnScroll={false}
+        panOnScroll={false}
+        preventScrolling={false}
+        aria-label="Routing flow: aliases, the router, and providers in priority order"
+      >
+        <FitOnResize target={wrap} />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="rf-bg" />
+        <Controls showInteractive={false} position="bottom-right" />
+      </ReactFlow>
     </div>
   )
 }
