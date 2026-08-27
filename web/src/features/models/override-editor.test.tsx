@@ -35,10 +35,49 @@ describe("the override editor", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("sends a PUT carrying only the fields that were set", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
-    )
+  it("resends the untouched loaded fields alongside the edited one", async () => {
+    // PUT replaces the whole row, so editing only surfaces must not erase
+    // the context window and capabilities the editor already loaded and is
+    // still displaying.
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      if ((init as RequestInit)?.method === "PUT") {
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+      }
+      return new Response(
+        JSON.stringify({
+          context_window: 64000,
+          capabilities: { tools: true },
+          surfaces: ["chat"],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
+    const surfaces = await screen.findByLabelText(/surfaces/i)
+    await waitFor(() => expect(surfaces).toHaveValue("chat"))
+    await userEvent.clear(surfaces)
+    await userEvent.type(surfaces, "chat, embedding")
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+      expect(put).toBeDefined()
+      const body = JSON.parse((put?.[1] as RequestInit).body as string)
+      expect(body).toEqual({
+        context_window: 64000,
+        capabilities: { tools: true, vision: false, reasoning: false },
+        surfaces: ["chat", "embedding"],
+      })
+    })
+  })
+
+  it("sends a full patch for a genuinely new override, with nothing to merge over", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      if ((init as RequestInit)?.method === "PUT") {
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+      }
+      return new Response("", { status: 404 })
+    })
     vi.stubGlobal("fetch", fetchMock)
     mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
     await userEvent.type(await screen.findByLabelText(/context window/i), "32000")
@@ -47,7 +86,11 @@ describe("the override editor", () => {
       const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
       expect(put).toBeDefined()
       const body = JSON.parse((put?.[1] as RequestInit).body as string)
-      expect(body).toEqual({ context_window: 32000 })
+      expect(body).toEqual({
+        context_window: 32000,
+        capabilities: { tools: false, vision: false, reasoning: false },
+        surfaces: [],
+      })
     })
   })
 })
