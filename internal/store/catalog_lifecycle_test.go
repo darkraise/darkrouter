@@ -36,7 +36,7 @@ func TestSuccessInsertsNewModels(t *testing.T) {
 	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{
 		{ModelID: "a", ContextWindow: 8192, MaxOutputTokens: 4096},
 		{ModelID: "b"},
-	}, t0); err != nil {
+	}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	if state, streak := modelState(t, db, "a"); state != "live" || streak != 0 {
@@ -63,7 +63,7 @@ func TestThreeFailuresMarkStaleAndNeverRemove(t *testing.T) {
 	// The case this whole asymmetry exists for: a provider that times out must
 	// not empty its catalog. Stale is still routable.
 	db, ctx := lifecycleDB(t)
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,11 +99,11 @@ func TestThreeFailuresMarkStaleAndNeverRemove(t *testing.T) {
 
 func TestThreeOmissionsRemoveButOneDoesNot(t *testing.T) {
 	db, ctx := lifecycleDB(t)
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}, {ModelID: "b"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}, {ModelID: "b"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 2; i++ {
-		if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+		if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 			t.Fatal(err)
 		}
 		state, streak := modelState(t, db, "b")
@@ -111,7 +111,7 @@ func TestThreeOmissionsRemoveButOneDoesNot(t *testing.T) {
 			t.Fatalf("after %d omissions b = (%q, %d)", i, state, streak)
 		}
 	}
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	if state, streak := modelState(t, db, "b"); state != "removed_upstream" || streak != 3 {
@@ -127,11 +127,11 @@ func TestReappearanceClearsBothCounters(t *testing.T) {
 	// again, and a provider that recovers must not carry its failure count
 	// into the next outage.
 	db, ctx := lifecycleDB(t)
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}, {ModelID: "b"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}, {ModelID: "b"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+		if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -142,7 +142,7 @@ func TestReappearanceClearsBothCounters(t *testing.T) {
 		t.Fatalf("setup failed: b = %q", state)
 	}
 
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}, {ModelID: "b"}}, t0.Add(time.Hour)); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}, {ModelID: "b"}}, 0, t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if state, streak := modelState(t, db, "b"); state != "live" || streak != 0 {
@@ -162,7 +162,7 @@ func TestReappearanceClearsBothCounters(t *testing.T) {
 
 func TestSuccessRestoresStaleModels(t *testing.T) {
 	db, ctx := lifecycleDB(t)
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
@@ -170,7 +170,7 @@ func TestSuccessRestoresStaleModels(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	if state, _ := modelState(t, db, "a"); state != "live" {
@@ -184,10 +184,10 @@ func TestFailureCountIsPerProvider(t *testing.T) {
 		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('q', 'openaicompat', 'http://y', 0)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordDiscoverySuccess(ctx, "q", []DiscoveredModel{{ModelID: "z"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "q", []DiscoveredModel{{ModelID: "z"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
@@ -212,7 +212,7 @@ func TestDiscoveredCapabilitiesAreRecordedAsDiscovered(t *testing.T) {
 	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{
 		{ModelID: "a", Capabilities: &ModelCapabilities{Tools: true}},
 		{ModelID: "b"},
-	}, t0); err != nil {
+	}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ := db.Models(ctx)
@@ -237,7 +237,7 @@ func TestSuccessDoesNotClobberSyncedMetadata(t *testing.T) {
 	// alone. Overwriting them with zeroes on every tick is a silent loss that
 	// only shows up as an empty price column.
 	db, ctx := lifecycleDB(t)
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.UpsertMetadata(ctx, []MetadataRow{{
@@ -247,7 +247,7 @@ func TestSuccessDoesNotClobberSyncedMetadata(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, t0.Add(time.Minute)); err != nil {
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{{ModelID: "a"}}, 0, t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ := db.Models(ctx)

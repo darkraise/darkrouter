@@ -235,7 +235,8 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// is what "discovery is not pretended" means in practice. The credential
 	// probe confirms reachability separately, on the operator's schedule.
 	if seeded := SeedFromPreset(preset, FallbackDoc()); len(seeded) > 0 {
-		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, now); err != nil {
+		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, priceLookup(preset))
+		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
 			log.Printf("discovery: %s: seed: %v", p.ID, err)
 		}
 		return
@@ -281,8 +282,27 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 		}
 		seen = append(seen, dm)
 	}
-	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, now); err != nil {
+	// The import filter, applied where omniroute applies its own: on the list
+	// the sweep just fetched, before any of it is recorded. Narrowing at
+	// routing time instead would leave the catalogue full of models the
+	// operator asked not to have.
+	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, priceLookup(preset))
+
+	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, dropped, now); err != nil {
 		log.Printf("discovery: %s: record success: %v", p.ID, err)
+	}
+}
+
+// priceLookup resolves a model id against models.dev through the preset's
+// join key. A preset with no key -- an uncatalogued provider -- yields nil,
+// and every model then rests on the `:free` suffix alone.
+func priceLookup(preset Preset) func(string) (Metadata, bool) {
+	if preset.ModelsDevID == "" {
+		return nil
+	}
+	doc := FallbackDoc()
+	return func(modelID string) (Metadata, bool) {
+		return doc.Metadata(preset.ModelsDevID, modelID)
 	}
 }
 

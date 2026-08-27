@@ -206,6 +206,9 @@ export type Provider = {
    *  provider: there is no key to type. */
   auth_style: string
   credentials: Credential[]
+  /** Narrows what the next discovery sweep imports to models it can show are
+   *  free. A filter on the catalogue, not on routing. */
+  free_models_only: boolean
 }
 
 export type Preset = {
@@ -295,6 +298,10 @@ export type DiscoveryHealthRow = {
   stale: number
   removed_upstream: number
   max_missing_streak: number
+  /** Models the last sweep dropped before recording it. Non-zero only under
+   *  the free-models filter, and the only thing that tells a provider serving
+   *  nothing apart from one serving nothing free. */
+  filtered_out: number
 }
 
 export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }

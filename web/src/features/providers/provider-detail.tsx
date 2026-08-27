@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Input,
   Label,
   Table,
@@ -35,6 +36,7 @@ import {
   accountSummary,
   capabilityCount,
   discoveryFraction,
+  discoveryNote,
   modelsFor,
   requestsByDay,
   totalRequests,
@@ -93,6 +95,12 @@ export function ProviderDetail() {
   const [accounts, setAccounts] = useState<AccountDraft>(emptyAccounts)
   const [addOpen, setAddOpen] = useState(false)
 
+  const saveFreeOnly = useApiMutation({
+    mutationFn: (next: boolean) =>
+      api.patch(`/api/providers/${id}`, { free_models_only: next }),
+    success: "Import filter updated",
+    invalidates: [keys.providers],
+  })
   const savePriority = useApiMutation({
     mutationFn: () =>
       api.patch(`/api/providers/${id}`, {
@@ -217,14 +225,13 @@ export function ProviderDetail() {
         <Stat
           caption="discovery"
           value={discovered ?? "—"}
-          note={
-            discoveryRow
-              ? discoveryRow.max_missing_streak > 0
-                ? `missing for ${discoveryRow.max_missing_streak} sweeps`
-                : "live of known"
-              : "never discovered"
+          note={discoveryNote(discoveryRow)}
+          tone={
+            discoveryRow &&
+            (discoveryRow.max_missing_streak > 0 || discoveryRow.total === 0)
+              ? "warning"
+              : "muted"
           }
-          tone={discoveryRow && discoveryRow.max_missing_streak > 0 ? "warning" : "muted"}
         />
       </div>
 
@@ -338,6 +345,24 @@ export function ProviderDetail() {
                     </Button>
                   </div>
                 )}
+              </div>
+
+              {/* The wizard asks this before the first sweep; this is where an
+                  operator changes their mind. It takes effect on the next
+                  sweep -- models already imported stay until then. */}
+              <div className="flex items-start gap-2 border-t pt-4">
+                <Checkbox
+                  id="provider-free-only"
+                  checked={provider.free_models_only}
+                  onCheckedChange={(next) => saveFreeOnly.mutate(next === true)}
+                />
+                <div className="flex flex-col">
+                  <Label htmlFor="provider-free-only">Import free models only</Label>
+                  <span className="text-sm text-[hsl(var(--legend))]">
+                    The next discovery sweep keeps only models priced at zero or
+                    tagged <span className="font-mono">:free</span>.
+                  </span>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-end gap-3 border-t pt-4">

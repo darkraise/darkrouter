@@ -4,6 +4,7 @@ import {
   accountSummary,
   capabilityCount,
   discoveryFraction,
+  discoveryNote,
   modelsFor,
   requestsByDay,
   totalRequests,
@@ -52,6 +53,7 @@ const provider = (credentials: Credential[]): Provider => ({
   priority: 10,
   enabled: true,
   auth_style: "bearer",
+  free_models_only: false,
   credentials,
 })
 
@@ -136,6 +138,32 @@ describe("the account summary", () => {
   })
 })
 
+describe("the discovery note", () => {
+  const row = (over: Partial<import("../../lib/api-types").DiscoveryHealthRow> = {}) => ({
+    provider_id: "groq", total: 9, live: 8, stale: 0, removed_upstream: 0,
+    max_missing_streak: 0, filtered_out: 0, ...over,
+  })
+
+  it("tells an all-paid provider apart from an empty one", () => {
+    // The whole point of the count. Both hold zero models; only one has a
+    // problem, and it is not the one the filter emptied.
+    expect(discoveryNote(row({ total: 0, live: 0, filtered_out: 40 }))).toBe(
+      "none free of 40 listed",
+    )
+    expect(discoveryNote(undefined)).toBe("never discovered")
+  })
+
+  it("reports a partial filter without alarm", () => {
+    expect(discoveryNote(row({ total: 3, live: 3, filtered_out: 37 }))).toBe(
+      "37 paid, not imported",
+    )
+  })
+
+  it("still reports a provider going missing", () => {
+    expect(discoveryNote(row({ max_missing_streak: 3 }))).toBe("missing for 3 sweeps")
+  })
+})
+
 describe("the discovery reading", () => {
   it("says nothing at all when no sweep has run", () => {
     // "0/0" would read as a sweep that ran and found nothing.
@@ -150,7 +178,7 @@ describe("the discovery reading", () => {
         live: 8,
         stale: 0,
         removed_upstream: 1,
-        max_missing_streak: 0,
+        max_missing_streak: 0, filtered_out: 0,
       }),
     ).toBe("8/9")
   })

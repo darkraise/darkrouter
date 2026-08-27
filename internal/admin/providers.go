@@ -60,6 +60,9 @@ type providerView struct {
 	// key form is useless for an oauth provider: there is no key to type.
 	AuthStyle   string           `json:"auth_style"`
 	Credentials []credentialView `json:"credentials"`
+	// FreeModelsOnly narrows what the next discovery sweep imports. The
+	// console shows it wherever it shows what a provider can serve.
+	FreeModelsOnly bool `json:"free_models_only"`
 }
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +77,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			ID: p.ID, Name: p.Name, Preset: p.Preset, Kind: p.Kind,
 			BaseURL: p.BaseURL, Priority: p.Priority, Enabled: p.Enabled,
 			AuthStyle: p.AuthStyle, Credentials: []credentialView{},
+			FreeModelsOnly: p.FreeModelsOnly,
 		}
 		if s.deps.Key != nil {
 			creds, cerr := s.deps.DB.Credentials(r.Context(), s.deps.Key, p.ID)
@@ -122,6 +126,10 @@ type createProviderBody struct {
 	Enabled   *bool  `json:"enabled"`
 	Region    string `json:"region"`
 	Project   string `json:"project"`
+	// FreeModelsOnly is settable at creation because the wizard asks for it
+	// before the first sweep runs, which is the only time the answer changes
+	// what the catalogue ever held.
+	FreeModelsOnly bool `json:"free_models_only"`
 	// Location is set at creation only: changing it moves every catalogued
 	// model to a different endpoint, which is a new provider rather than an
 	// edit to this one.
@@ -144,7 +152,8 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		Kind: body.Kind, BaseURL: body.BaseURL, AuthStyle: body.AuthStyle,
 		Priority: body.Priority,
 		Region:   body.Region, Project: body.Project, Location: body.Location,
-		Enabled: body.Enabled == nil || *body.Enabled,
+		Enabled:        body.Enabled == nil || *body.Enabled,
+		FreeModelsOnly: body.FreeModelsOnly,
 	}
 	// From a preset the operator supplies an id and a key and nothing else,
 	// which is the whole reason presets ship. Explicit values still win, so a
