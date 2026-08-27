@@ -96,6 +96,30 @@ describe("stackByDay", () => {
   })
 })
 
+describe("stackByDay with a nullable value", () => {
+  it("keeps a cell unknown when every contributing row is unpriced", () => {
+    // Unpriced is not free: a cost cell must not collapse to the same zero a
+    // key with no rows at all gets.
+    const out = stackByDay(
+      [at("2026-08-25", "groq", 1, null), at("2026-08-25", "groq", 1, null)],
+      ["groq"],
+      (r) => r.cost_micros,
+    )
+    expect(out[0]?.groq).toBeNull()
+  })
+
+  it("turns a cell real once any contributing row is priced", () => {
+    // Mirrors summarise: one priced row among unpriced ones makes the total
+    // real, if partial, rather than hiding money that was actually spent.
+    const out = stackByDay(
+      [at("2026-08-25", "groq", 1, null), at("2026-08-25", "groq", 1, 500)],
+      ["groq"],
+      (r) => r.cost_micros,
+    )
+    expect(out[0]?.groq).toBe(500)
+  })
+})
+
 describe("topKeys", () => {
   it("ranks by total volume and caps the series count", () => {
     // Five is the ramp's width. A sixth series would reuse a fill and two

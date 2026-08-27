@@ -1,5 +1,4 @@
 import "./chart-scope.css"
-import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
@@ -13,15 +12,10 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "darkraise-ui"
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "darkraise-ui/components/chart"
-import { Area, AreaChart, Line, LineChart, XAxis, YAxis } from "recharts"
 import { useUsage } from "../../lib/queries"
+import { useSearchFilters } from "../../lib/search-filters"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
+import { StackedAreaChart, CostLineChart } from "./usage-charts"
 
 const DIMENSIONS: { value: UsageDimension | "day"; label: string }[] = [
   { value: "day", label: "Total" },
@@ -44,6 +38,12 @@ export const RANGES = [
 // reuse a fill and two providers would render indistinguishably.
 const MAX_SERIES = 5
 
+// Dimension and range live in the URL rather than in component state, same
+// as every other filtered screen: this task's whole point is a click-through
+// that turns a chart into an investigation, and an investigation you cannot
+// paste to yourself is a weaker version of that.
+const FIELDS = ["dimension", "days"] as const
+
 /** The busiest keys in the window, capped at the ramp's width. */
 export function topKeys(rows: UsageRow[], n: number): string[] {
   const total = new Map<string, number>()
@@ -57,15 +57,29 @@ export function topKeys(rows: UsageRow[], n: number): string[] {
     .map(([k]) => k)
 }
 
-/** Rows pivoted into one column per key, zero-filled and day-ordered, for a
- *  recharts stacked series. A key silently missing on a day would render as a
- *  hole through the stack rather than as the zero it is. */
+/**
+ * Rows pivoted into one column per key, zero-filled and day-ordered, for a
+ * recharts stacked series.
+ *
+ * A key with no row at all on a day is a genuine zero. A key whose rows
+ * exist but are all unpriced (`value` returns null) stays unknown rather
+ * than collapsing to the same zero -- one priced row among them makes the
+ * cell real, if partial, mirroring `summarise`'s null-preserving sum. The
+ * two must not merge: a stacked area rendering a hole through the stack
+ * would misreport a missing key as traffic stopping, and a cost chart
+ * rendering unpriced as zero would misreport an unknown as free.
+ */
 export function stackByDay(
   rows: UsageRow[],
   keys: string[],
-  value: (r: UsageRow) => number,
-): Record<string, number | string>[] {
-  const byDay = new Map<string, Record<string, number | string>>()
+  value: (r: UsageRow) => number | null,
+): Record<string, number | string | null>[] {
+  const byDay = new Map<string, Record<string, number | string | null>>()
+  // Which keys have had at least one row on a given day -- distinct from the
+  // zero-fill placeholder, which marks "no row at all" rather than "a row
+  // whose value we don't know yet".
+  const seen = new Map<string, Set<string>>()
+
   for (const r of rows) {
     if (!r.key || !keys.includes(r.key)) continue
     let day = byDay.get(r.day)
@@ -73,8 +87,17 @@ export function stackByDay(
       day = { day: r.day }
       for (const k of keys) day[k] = 0
       byDay.set(r.day, day)
+      seen.set(r.day, new Set())
     }
-    day[r.key] = (day[r.key] as number) + value(r)
+    const seenKeys = seen.get(r.day)!
+    const v = value(r)
+    if (!seenKeys.has(r.key)) {
+      day[r.key] = v
+      seenKeys.add(r.key)
+    } else if (v !== null) {
+      const cur = day[r.key]
+      day[r.key] = (typeof cur === "number" ? cur : 0) + v
+    }
   }
   return [...byDay.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)))
 }
@@ -176,92 +199,14 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
   )
 }
 
-/** One `--color-<key>` per series, scoped to the container that renders this
- *  config -- see chart-scope.css for why every slot resolves to the same
- *  accent, differentiated by opacity rather than hue. */
-function chartConfig(keys: string[]): ChartConfig {
-  const config: ChartConfig = {}
-  keys.forEach((k, i) => {
-    config[k] = { label: k, color: `hsl(var(--chart-${(i % MAX_SERIES) + 1}))` }
-  })
-  return config
-}
-
-function StackedAreaChart({
-  data,
-  keys,
-}: {
-  data: Record<string, number | string>[]
-  keys: string[]
-}) {
-  return (
-    <div className="chart-scope h-56">
-      <ChartContainer config={chartConfig(keys)} className="h-full w-full">
-        <AreaChart data={data}>
-          <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={11} minTickGap={24} />
-          <YAxis tickLine={false} axisLine={false} fontSize={11} width={44} />
-          <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
-          {keys.map((k, i) => (
-            <Area
-              key={k}
-              dataKey={k}
-              type="monotone"
-              stackId="usage"
-              fill={`var(--color-${k})`}
-              stroke={`var(--color-${k})`}
-              // Fill, not hue, is what separates the series -- see chart-scope.css.
-              fillOpacity={1 - i * 0.15}
-            />
-          ))}
-        </AreaChart>
-      </ChartContainer>
-    </div>
-  )
-}
-
-function CostLineChart({
-  data,
-  keys,
-}: {
-  data: Record<string, number | string>[]
-  keys: string[]
-}) {
-  return (
-    <div className="chart-scope h-56">
-      <ChartContainer config={chartConfig(keys)} className="h-full w-full">
-        <LineChart data={data}>
-          <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={11} minTickGap={24} />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            fontSize={11}
-            width={64}
-            tickFormatter={(v: number) => formatCost(v)}
-          />
-          <ChartTooltip
-            content={<ChartTooltipContent indicator="line" formatter={(v) => formatCost(Number(v))} />}
-          />
-          {keys.map((k, i) => (
-            <Line
-              key={k}
-              dataKey={k}
-              type="monotone"
-              stroke={`var(--color-${k})`}
-              strokeWidth={2}
-              strokeOpacity={1 - i * 0.15}
-              dot={false}
-            />
-          ))}
-        </LineChart>
-      </ChartContainer>
-    </div>
-  )
-}
-
 export function UsageScreen() {
-  const [dimension, setDimension] = useState<UsageDimension | "day">("day")
-  const [range, setRange] = useState<(typeof RANGES)[number]["value"]>("30")
-  const days = RANGES.find((r) => r.value === range)?.days ?? 30
+  const [filters, setFilter] = useSearchFilters(FIELDS)
+  // "day" (Total) and 30 days are each the default, so they are dropped from
+  // the URL rather than written explicitly -- the same convention every
+  // other screen's useSearchFilters caller uses for its own default.
+  const dimension = (filters.dimension || "day") as UsageDimension | "day"
+  const rangeValue = (filters.days || "30") as (typeof RANGES)[number]["value"]
+  const days = RANGES.find((r) => r.value === rangeValue)?.days ?? 30
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
   const rows = summarise(usageRows)
@@ -285,7 +230,7 @@ export function UsageScreen() {
         <ToggleGroup
           type="single"
           value={dimension}
-          onValueChange={(v) => v && setDimension(v as UsageDimension | "day")}
+          onValueChange={(v) => v && setFilter("dimension", v === "day" ? "" : v)}
           variant="outline"
           size="sm"
         >
@@ -298,8 +243,8 @@ export function UsageScreen() {
 
         <ToggleGroup
           type="single"
-          value={range}
-          onValueChange={(v) => v && setRange(v as (typeof RANGES)[number]["value"])}
+          value={rangeValue}
+          onValueChange={(v) => v && setFilter("days", v === "30" ? "" : v)}
           variant="outline"
           size="sm"
         >
@@ -327,8 +272,9 @@ export function UsageScreen() {
       <Card className="mb-6 p-4">
         <h2 className="mb-2 text-sm font-medium">Cost</h2>
         <CostLineChart
-          data={stackByDay(usageRows, keys, (r) => r.cost_micros ?? 0)}
+          data={stackByDay(usageRows, keys, (r) => r.cost_micros)}
           keys={keys}
+          formatValue={formatCost}
         />
       </Card>
 
