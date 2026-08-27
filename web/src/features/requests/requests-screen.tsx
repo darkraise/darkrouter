@@ -1,25 +1,16 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useRouterState } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
-import {
-  Badge,
-  Button,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  ToggleGroup,
-  ToggleGroupItem,
-} from "darkraise-ui"
-import { ColumnHeader, DataTable, exportToCsv } from "darkraise-ui/data-table"
+import { Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+import { DataTable, exportToCsv } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
 import { useRequests } from "../../lib/queries"
 import { useSearchFilters, filterQuery } from "../../lib/search-filters"
-import type { RequestPage, RequestRow, SavedView } from "../../lib/api-types"
+import type { RequestPage, RequestRow } from "../../lib/api-types"
 import { TraceDrawer } from "./trace-drawer"
-import { deleteView, loadSavedViews, saveView } from "./saved-views"
+import { FilterSelect } from "./filter-select"
+import { SavedViewsBar } from "./saved-views-bar"
+import { buildColumns, facetRow, CSV_COLUMNS } from "./requests-columns"
 
 const FIELDS = [
   "provider",
@@ -30,6 +21,10 @@ const FIELDS = [
   "error_code",
   "since_ms",
   "until_ms",
+  // Which preset (1h/24h/7d/all) produced `since_ms`, so the time-range
+  // control can show the truth after a reload or a pasted link instead of
+  // going blank. UI bookkeeping only — see apiFilters below.
+  "range",
 ] as const
 
 const STATUS_OPTIONS = ["success", "error"]
@@ -65,156 +60,23 @@ export function optionsFrom(rows: RequestRow[], field: keyof RequestRow): string
   return [...seen].sort()
 }
 
-/** The scalar shape a DataTable facet needs. `attempts` already reports the
- *  count; this is the same fact restated as a fixed string, because a facet
- *  filters on exact values and the API has no `attempts` filter to delegate
- *  it to. */
-type TableRow = RequestRow & { failover: "failover" | "single" }
-
-function facetRow(r: RequestRow): TableRow {
-  return { ...r, failover: r.attempts > 1 ? "failover" : "single" }
-}
-
-const CSV_COLUMNS: { key: keyof TableRow; header: string }[] = [
-  { key: "ts_ms", header: "Time" },
-  { key: "surface", header: "Surface" },
-  { key: "model", header: "Model" },
-  { key: "provider", header: "Provider" },
-  { key: "status", header: "Status" },
-  { key: "attempts", header: "Attempts" },
-  { key: "tokens_in", header: "Tokens in" },
-  { key: "tokens_out", header: "Tokens out" },
-  { key: "total_ms", header: "Latency ms" },
-  { key: "path", header: "Path" },
-  { key: "failover", header: "Failover" },
-]
-
-// `darkraise-ui` bundles its own tanstack/react-table internally and does not
-// re-export its column types, so the shape is pulled from the component's own
-// signature rather than from a second, independently-versioned install of the
-// same package — the two do not agree on what a ColumnDef looks like.
-type Columns = Parameters<typeof DataTable<TableRow, unknown>>[0]["columns"]
-
-function buildColumns(onOpen: (id: string) => void): Columns {
-  return [
-    {
-      accessorKey: "ts_ms",
-      header: ({ column }) => <ColumnHeader column={column} title="Time" />,
-      cell: ({ row }) => (
-        <span className="whitespace-nowrap">
-          {new Date(row.original.ts_ms).toLocaleTimeString()}
-        </span>
-      ),
-    },
-    { accessorKey: "surface", header: "Surface" },
-    {
-      accessorKey: "model",
-      header: ({ column }) => <ColumnHeader column={column} title="Model" />,
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">
-          {row.original.alias ? `${row.original.alias} → ${row.original.model}` : row.original.model}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "provider",
-      header: ({ column }) => <ColumnHeader column={column} title="Provider" />,
-      cell: ({ row }) => row.original.provider || "—",
-    },
-    {
-      accessorKey: "status",
-      header: ({ column }) => <ColumnHeader column={column} title="Status" />,
-      cell: ({ row }) => (
-        <Badge variant={row.original.status === "success" ? "green" : "destructive"}>
-          {row.original.status}
-        </Badge>
-      ),
-    },
-    {
-      accessorKey: "attempts",
-      header: ({ column }) => <ColumnHeader column={column} title="Attempts" />,
-      // More than one attempt means a failover, which is the row an operator
-      // is usually looking for.
-      cell: ({ row }) =>
-        row.original.attempts > 1 ? (
-          <Badge variant="amber">{row.original.attempts}</Badge>
-        ) : (
-          row.original.attempts
-        ),
-    },
-    {
-      id: "tokens",
-      accessorFn: (r) => r.tokens_in + r.tokens_out,
-      header: ({ column }) => <ColumnHeader column={column} title="Tokens" />,
-      cell: ({ row }) => `${row.original.tokens_in}/${row.original.tokens_out}`,
-    },
-    {
-      accessorKey: "total_ms",
-      header: ({ column }) => <ColumnHeader column={column} title="Latency" />,
-      cell: ({ row }) => `${row.original.total_ms ?? "—"} ms`,
-    },
-    {
-      accessorKey: "path",
-      header: "Path",
-      cell: ({ row }) => {
-        const path = row.original.path
-        if (!path) return "—"
-        // Neutral, not accent: which renderer served is not a request
-        // outcome, so it does not earn a state colour.
-        return (
-          <Badge variant={path === "passthrough" ? "outline" : "secondary"}>
-            {path === "passthrough" ? "passthrough" : "translated"}
-          </Badge>
-        )
-      },
-    },
-    { accessorKey: "failover", header: "Failover" },
-    {
-      id: "actions",
-      header: "",
-      // The library has no row-click prop, so opening the trace lives here
-      // instead of on the row.
-      cell: ({ row }) => (
-        <Button variant="ghost" size="sm" onClick={() => onOpen(row.original.id)}>
-          Open
-        </Button>
-      ),
-    },
-  ]
-}
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: string
-  options: string[]
-  onChange: (v: string) => void
-}) {
-  return (
-    <Select value={value === "" ? "any" : value} onValueChange={(v) => onChange(v === "any" ? "" : v)}>
-      <SelectTrigger className="w-36">
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="any">Any {label.toLowerCase()}</SelectItem>
-        {options.map((o) => (
-          <SelectItem key={o} value={o}>
-            {o}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
+/** The filter set as the API understands it. `range` is display-only — the
+ *  handler has no such parameter, and forwarding it anyway would ride a
+ *  meaningless query param on every request and vary the react-query cache
+ *  key for no reason. */
+export function apiFilters(filters: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(filters)) {
+    if (k !== "range") out[k] = v
+  }
+  return out
 }
 
 export function RequestsScreen() {
-  const [filters, setFilter, clear] = useSearchFilters(FIELDS)
+  const [filters, , clear] = useSearchFilters(FIELDS)
   const router = useRouter()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const search = useRouterState({ select: (s) => s.location.searchStr })
 
   // Pages accumulate: the operator is scrolling a log, and a "next page" that
   // swapped the table would lose their place and make the cursor pointless.
@@ -225,46 +87,50 @@ export function RequestsScreen() {
   // "not yet loaded" — distinct from an empty result set, which would
   // otherwise look identical and re-freeze forever on every poll.
   const [held, setHeld] = useState<RequestRow[] | null>(null)
-  const [views, setViews] = useState<SavedView[]>(() => loadSavedViews())
-  const [savingName, setSavingName] = useState<string | null>(null)
 
-  const first = useRequests({ ...filters, limit: "50" })
+  const first = useRequests({ ...apiFilters(filters), limit: "50" })
 
   useEffect(() => {
     if (first.data && held === null) setHeld(first.data.requests)
   }, [first.data, held])
 
-  function onFilter(key: (typeof FIELDS)[number], value: string) {
+  function resetPaging() {
     // The cursor is rejected under different filters by design; resetting it
     // here is what keeps that rejection invisible in normal use.
     setOlder([])
     setCursor(null)
     setHeld(null)
-    setFilter(key, value)
   }
 
-  function applyView(view: SavedView) {
-    setOlder([])
-    setCursor(null)
-    setHeld(null)
-    // One write, not a loop of setFilter calls: each of those replaces the
-    // whole URL from the same stale search string, so only the last field in
-    // a loop would ever stick.
-    const merged = Object.fromEntries(FIELDS.map((f) => [f, view.filters[f] ?? ""]))
-    router.history.replace(`${pathname}${filterQuery(merged)}`)
+  /**
+   * The one place a filter change reaches the URL, for every control on this
+   * screen — a single Select, the time range, a saved view. Written as a
+   * direct URLSearchParams merge (mirroring useSearchFilters's own internal
+   * logic) rather than as repeated calls to that hook's single-key setter:
+   * each of those replaces the whole URL from the same stale search string
+   * captured at render time, so a handler needing more than one field at
+   * once would only ever see its last call stick.
+   */
+  function writeFilters(next: Record<string, string>) {
+    resetPaging()
+    const params = new URLSearchParams(search)
+    for (const [k, v] of Object.entries(next)) {
+      if (v === "") params.delete(k)
+      else params.set(k, v)
+    }
+    const str = params.toString()
+    router.history.replace(`${pathname}${str ? `?${str}` : ""}`)
   }
 
-  function confirmSave() {
-    if (!savingName) return
-    setViews(saveView(savingName, filters))
-    setSavingName(null)
+  function onFilter(key: (typeof FIELDS)[number], value: string) {
+    writeFilters({ [key]: value })
   }
 
   async function loadMore() {
     const from = cursor ?? first.data?.next_cursor
     if (!from) return
     const page = await api.get<RequestPage>(
-      `/api/requests${filterQuery({ ...filters, limit: "50", cursor: from })}`,
+      `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
     )
     setOlder((p) => [...p, ...page.requests])
     setCursor(page.next_cursor ?? null)
@@ -330,14 +196,17 @@ export function RequestsScreen() {
           type="single"
           variant="outline"
           size="sm"
+          // Controlled by the URL, not by click history: a reload, a pasted
+          // link, or an applied saved view must show the truth about
+          // since_ms rather than going blank while a window is still active.
+          value={filters.range || "all"}
           onValueChange={(v) => {
-            if (!v) return
-            if (v === "all") {
-              onFilter("since_ms", "")
+            if (!v || v === "all") {
+              writeFilters({ range: "", since_ms: "" })
               return
             }
             const window = TIME_WINDOWS.find((w) => w.value === v)
-            if (window) onFilter("since_ms", String(Date.now() - window.ms))
+            if (window) writeFilters({ range: v, since_ms: String(Date.now() - window.ms) })
           }}
         >
           {TIME_WINDOWS.map((w) => (
@@ -359,44 +228,7 @@ export function RequestsScreen() {
         )}
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        {views.map((v) => (
-          <div key={v.name} className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={() => applyView(v)}>
-              {v.name}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Delete saved view ${v.name}`}
-              onClick={() => setViews(deleteView(v.name))}
-            >
-              ×
-            </Button>
-          </div>
-        ))}
-        {savingName === null ? (
-          <Button variant="ghost" size="sm" onClick={() => setSavingName("")}>
-            Save this view
-          </Button>
-        ) : (
-          <>
-            <Input
-              autoFocus
-              placeholder="View name"
-              value={savingName}
-              onChange={(e) => setSavingName(e.target.value)}
-              className="w-40"
-            />
-            <Button size="sm" onClick={confirmSave}>
-              Save
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setSavingName(null)}>
-              Cancel
-            </Button>
-          </>
-        )}
-      </div>
+      <SavedViewsBar fields={FIELDS} filters={filters} onApply={writeFilters} />
 
       <DataTable
         columns={columns}

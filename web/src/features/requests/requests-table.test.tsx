@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { newerCount, optionsFrom } from "./requests-screen"
+import { apiFilters, newerCount, optionsFrom } from "./requests-screen"
 import type { RequestRow } from "../../lib/api-types"
 
 const row = (over: Partial<RequestRow> & { id: string }): RequestRow => ({
@@ -46,5 +46,21 @@ describe("filter options", () => {
     // A request nothing served has no provider, and an empty option would
     // filter on the empty string, which matches nothing.
     expect(optionsFrom([row({ id: "1" })], "provider")).toEqual([])
+  })
+})
+
+describe("api filters", () => {
+  it("excludes the UI-only time-range bookkeeping key from the request", () => {
+    // `range` records which preset produced `since_ms` for the toggle group
+    // to redisplay; the API has no such parameter, and sending it anyway
+    // would vary the query cache key for no reason.
+    expect(apiFilters({ provider: "groq", range: "1h", since_ms: "123" })).toEqual({
+      provider: "groq",
+      since_ms: "123",
+    })
+  })
+
+  it("passes through a filter set with no range untouched", () => {
+    expect(apiFilters({ provider: "groq" })).toEqual({ provider: "groq" })
   })
 })
