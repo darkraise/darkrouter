@@ -12,23 +12,48 @@
     />
     <script>
       ;(function () {
-        // Only the two axes an operator can change need restoring here. The
-        // rest are the identity and are stamped on <html> as static
-        // attributes, so the first paint already has them and there is nothing
-        // to mirror. The forty lines this replaces duplicated twelve
-        // axis-to-storage mappings and a preset-neutralisation table that both
-        // live in the library.
+        // Every axis the switcher offers is restored here, before first paint.
+        // The static attributes on <html> are the shipped identity; anything
+        // an operator has since changed lives in localStorage, and reading it
+        // after React mounts means one frame of the old theme first.
+        //
+        // Keys mirror darkraise-ui's own (LS_* in its theme store). A key it
+        // renames silently stops being restored, which shows up as a flash of
+        // the default on reload rather than as an error.
+        var root = document.documentElement
+
         var mode = localStorage.getItem("mode") || "system"
-        var resolved =
+        root.setAttribute(
+          "data-mode",
           mode === "system"
             ? window.matchMedia("(prefers-color-scheme: dark)").matches
               ? "dark"
               : "light"
-            : mode
-        document.documentElement.setAttribute("data-mode", resolved)
+            : mode,
+        )
 
-        var density = localStorage.getItem("theme-density")
-        if (density) document.documentElement.setAttribute("data-density", density)
+        // Accent and surface colour are not attributes: the library computes
+        // token values from them at runtime, so they cannot be pre-applied
+        // here and are left to the provider.
+        var axes = [
+          ["theme-density", "data-density"],
+          ["theme-radius", "data-radius"],
+          ["theme-elevation", "data-elevation"],
+          ["theme-button-elevation", "data-button-elevation"],
+          ["theme-control-depth", "data-control-depth"],
+          ["theme-surface-intensity", "data-surface-intensity"],
+          ["theme-font-size", "data-font-size"],
+          ["theme-bg-style", "data-background-style"],
+          ["theme-bg-intensity", "data-background-intensity"],
+          ["theme-gradient-pattern", "data-gradient-pattern"],
+          ["theme-outer-glow", "data-outer-glow"],
+          ["theme-inner-glow", "data-inner-glow"],
+          ["theme-preset", "data-preset"],
+        ]
+        for (var i = 0; i < axes.length; i++) {
+          var stored = localStorage.getItem(axes[i][0])
+          if (stored) root.setAttribute(axes[i][1], stored)
+        }
       })()
     </script>
   </head>
