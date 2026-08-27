@@ -10,7 +10,7 @@ than met.
 
 | # | Criterion | State | What backs it |
 |---|---|---|---|
-| 1 | Every screen in §6 renders against a real gateway in both modes | **Unverified** | Nine destinations exist and build; none has been rendered against a live gateway, and light mode has not been looked at once |
+| 1 | Every screen in §6 renders against a real gateway in both modes | **Still unverified** | Phase 14's gap-closure pass (`docs/ux/GAP-CLOSURE-DOD.md`) ran every static gate but could not perform its own UAT step either — no provider credential exists in that environment. So this remains exactly what it was after phase 13: nine-plus destinations exist and build, but none has been rendered against a live gateway, and light mode has not been looked at once |
 | 2 | `qa.py` and the frontend build pass | **Partly met** | Frontend build and 56 tests pass; `qa.py` gates the mockups, not the built console |
 | 3 | A failover is findable in three clicks, and its ladder explains every attempt and skipped candidate, with no colour needed | **Partly met** | Requests → row → trace is three clicks, and the ladder renders attempts and skips. Colour-independence is a design property of the marks, not something tested |
 | 4 | Route preview produces the same ordered candidate list the router produces | **Met** | `TestPreviewAgreesWithTheRouterExactly` compares position by position against `router.Resolve` over the same snapshot; the screen renders the response unsorted |

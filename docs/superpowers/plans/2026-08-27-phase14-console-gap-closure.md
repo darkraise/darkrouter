@@ -39,7 +39,7 @@ Each command names test functions this plan actually creates. A `-run` pattern t
 | D3 | Token count shows native versus estimated | `go test ./internal/admin/ -run 'TestCountRequestBuild\|TestTheCountEndpoint'`; UAT: `X-Darkrouter-Estimated` drives the marker text |
 | D4 | The six auxiliary surfaces are runnable from the Playground | `go test ./internal/admin/ -run 'TestAuxRequestBuild\|TestTheAuxEndpoint'`; UAT: embeddings returns a vector preview, transcription accepts a dropped file |
 | D5 | Discovery health is visible per provider | `go test ./internal/admin/ -run 'TestDiscoveryHealthRollsUp\|TestDiscoveryHealth'`; UAT: a provider with `missing_streak > 0` shows a degraded discovery line |
-| D6 | OAuth credential detail — kind, expiry, scope — is shown | `go test ./internal/admin/ -run 'TestACredentialViewCarriesOAuth\|TestLeak'`; UAT: an oauth credential row shows its expiry date |
+| D6 | OAuth credential detail — kind, expiry, scope — is shown | `go test ./internal/admin/ -run 'TestACredentialViewCarriesOAuth\|TestAStaticKeyOmits\|TestNoCredentialMaterial\|TestNoEndpointReturnsCredentialMaterial'`; UAT: an oauth credential row shows its expiry date |
 | D7 | Catalog rows carry pricing, publisher and provenance | `go test ./internal/admin/ -run 'TestAModelViewCarriesPricing\|TestAModelViewNamesItsSource'` |
 | D8 | Media inlining has a config switch | `go test ./internal/config/ ./internal/adapter/gemini/ -run 'TestMediaInline\|TestADisabledFetcher'`; UAT: switch off ⇒ a Gemini image-URL request warns and drops the block |
 | D9 | Preset browser adds a provider and a credential without touching a file | `cd web && npm test -- add-provider`; UAT full flow: browse → filter by surface → create → add credential → probe ok |

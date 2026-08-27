@@ -18,6 +18,7 @@ Last updated: 2026-08-26
 | 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
 | 11a — Cost, attempts and the usage dimension | ✅ | ✅ | **Complete.** 10 tasks; race-clean. Cost computed at commit time from catalog pricing, failed attempts counted, `usage_daily` keyed on alias. |
 | 11c — Cache tokens and coherence | ✅ | ✅ | **Complete.** 15 tasks; race-clean. `InputTokens` means one thing repo-wide, cache writes are priced, and the two cost surfaces agree. |
+| 14 — Console gap closure | ✅ | ✅ | **Static gate clean, live gate not performed.** 22 tasks close every phase 10–13 gap; full suite race-clean (26 packages), frontend 203/203, one cross-package regression found and fixed. UAT against a live gateway needs a provider credential this environment does not have — see `docs/ux/GAP-CLOSURE-DOD.md`. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -1310,6 +1311,44 @@ install otherwise shows a login that refuses everything and explains nothing.
 an endpoint no screen called, the alias editor could not create a chain, and
 the trace showed tokens but not cost. None would have been found by running the
 tests.
+
+## Phase 14 — console gap closure
+
+Eight backend additions and fourteen frontend tasks closing every gap between
+the phase 10 spec and the console phase 13 shipped: error-code filtering and
+serving-path labels on Requests, a multi-turn Playground that speaks all three
+dialects plus counting and the six auxiliary surfaces, discovery health,
+OAuth credential detail, catalog provenance, a media-inlining config switch,
+and on the frontend a preset provider browser, model overrides, a policy
+editor with drag-reorderable alias chains, saved views, an ops footer and
+failovers strip, connect snippets, settings, and the identity mark and
+first-run teaching states. Full results in `docs/ux/GAP-CLOSURE-DOD.md`.
+
+**The full suite caught a regression no task's own gate could.** The
+`media.inline` task gave `gemini.Fetcher` an `Inline bool`; a struct literal
+in `internal/golden/golden_test.go` took the zero value and silently stopped
+exercising the SSRF-refusal path it was recorded to cover. Fixed in `4aa7d53`.
+The task's own gate named four packages; only the plan-wide `./internal/...`
+gate in Task 23 caught it — the argument for never accepting a task's narrower
+gate as sufficient.
+
+**D6's own verification pattern was half-vacuous.** Its `-run` regex named a
+`TestLeak` function that does not exist, so it silently ran only half of what
+it claimed to check. Corrected in the plan and recorded in the gate document,
+rather than repaired quietly.
+
+**The live gate could not be performed.** No provider credential exists in
+this environment, so every UAT half of the Definition of Done — D1 through
+D18a — is unexercised, and `docs/ux/DONE-CRITERIA.md`'s first criterion
+remains exactly as unverified as it was after phase 13.
+
+**`store.RequestRecord.ResolvedAlias` has no production writer**, discovered
+while gating this phase. Every occurrence outside a test fixture only reads
+it; the handler path that builds a request record never sets it, so the
+Requests alias filter and column, Usage's alias dimension, the routing flow
+graph, and Overview's failover labels are all working off an always-empty
+field against a real gateway. Pre-existing, outside this plan's scope,
+recorded for follow-up.
 
 ## Review history
 
