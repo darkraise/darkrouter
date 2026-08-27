@@ -335,3 +335,68 @@ export const SOURCE_LABEL = {
   database: "database",
   default: "default",
 } as const
+
+/**
+ * The settings this console can actually change.
+ *
+ * Only `policy` and `aliases` are writable at all -- both moved into the
+ * database after the first run -- and aliases are a routing concept with
+ * their own editor. Everything else on the gateway comes from
+ * darkrouter.yaml and has no write endpoint, so listing it here would be a
+ * page of controls that refuse to move.
+ *
+ * `policy.timeout.connect` and `policy.timeout.first_byte` are absent for the
+ * same reason: both configure the one shared transport built at startup, and
+ * `PUT /api/policy` refuses a write that touches either.
+ */
+export type EditableSetting = {
+  field: string
+  name: string
+  description: string
+  group: "requests" | "failure"
+  kind: "duration" | "count"
+  placeholder: string
+}
+
+export const EDITABLE: EditableSetting[] = [
+  {
+    field: "policy.retry.max_attempts",
+    name: SETTINGS["policy.retry.max_attempts"]!.name,
+    description: SETTINGS["policy.retry.max_attempts"]!.description,
+    group: "requests",
+    kind: "count",
+    placeholder: "4",
+  },
+  {
+    field: "policy.timeout.total",
+    name: SETTINGS["policy.timeout.total"]!.name,
+    description: SETTINGS["policy.timeout.total"]!.description,
+    group: "requests",
+    kind: "duration",
+    placeholder: "10m",
+  },
+  {
+    field: "policy.timeout.idle",
+    name: SETTINGS["policy.timeout.idle"]!.name,
+    description: SETTINGS["policy.timeout.idle"]!.description,
+    group: "requests",
+    kind: "duration",
+    placeholder: "2m",
+  },
+  {
+    field: "policy.cooldown.trip_after",
+    name: SETTINGS["policy.cooldown.trip_after"]!.name,
+    description: SETTINGS["policy.cooldown.trip_after"]!.description,
+    group: "failure",
+    kind: "count",
+    placeholder: "3",
+  },
+  {
+    field: "policy.cooldown.max",
+    name: SETTINGS["policy.cooldown.max"]!.name,
+    description: SETTINGS["policy.cooldown.max"]!.description,
+    group: "failure",
+    kind: "duration",
+    placeholder: "15m",
+  },
+]

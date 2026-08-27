@@ -7,7 +7,6 @@ import { keys, useAliases, useProviders } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Aliases, RoutePreview } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
-import { PolicyEditor } from "./policy-editor"
 
 /**
  * Preview rows, in the order the endpoint returned them.
@@ -330,7 +329,6 @@ export function RoutingScreen() {
       )}
 
       <div className="mt-6">
-        <PolicyEditor />
       </div>
     </>
   )

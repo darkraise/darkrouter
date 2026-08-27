@@ -12,6 +12,8 @@ import {
   revokedText,
   SettingsScreen,
   syncMessage,
+  toDraft,
+  toWrite,
 } from "./settings-screen"
 import type { ConfigResponse } from "../../lib/api-types"
 
@@ -241,5 +243,38 @@ describe("a failed sync", () => {
     expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/models" && (i as RequestInit)?.method !== "POST")).toBe(
       false,
     )
+  })
+})
+
+describe("the policy draft", () => {
+  const policy = {
+    cooldown: { trip_after: 3, max: "15m" },
+    retry: { max_attempts: 4 },
+    timeout: { connect: "10s", first_byte: "1m", total: "10m", idle: "2m" },
+  }
+
+  it("fills the form from what the gateway is running", () => {
+    expect(toDraft(policy as never)["policy.retry.max_attempts"]).toBe("4")
+    expect(toDraft(policy as never)["policy.cooldown.max"]).toBe("15m")
+  })
+
+  it("survives a response missing a block rather than blanking the screen", () => {
+    // Reading through an absent block unguarded took the whole screen down
+    // with it, including the banners that would have said what was wrong.
+    expect(() => toDraft({} as never)).not.toThrow()
+    expect(toDraft({} as never)["policy.cooldown.max"]).toBe("")
+  })
+
+  it("omits the two restart-only timeouts from the write", () => {
+    const write = toWrite(toDraft(policy as never)) as Record<string, unknown>
+    expect(JSON.stringify(write)).not.toContain("connect")
+    expect(JSON.stringify(write)).not.toContain("first_byte")
+  })
+
+  it("omits an empty trip_after rather than sending zero", () => {
+    // Zero is a real value meaning "cool on the first failure", and sending
+    // it for an empty box would change behaviour nobody asked to change.
+    const write = toWrite({ ...toDraft(policy as never), "policy.cooldown.trip_after": "" })
+    expect("trip_after" in write.cooldown).toBe(false)
   })
 })
