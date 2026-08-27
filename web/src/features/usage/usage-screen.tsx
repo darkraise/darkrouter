@@ -15,6 +15,7 @@ import {
 import { useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
+import { EmptyLegend } from "../shell/empty-legend"
 import { StackedAreaChart, CostLineChart } from "./usage-charts"
 
 const DIMENSIONS: { value: UsageDimension | "day"; label: string }[] = [
@@ -256,72 +257,81 @@ export function UsageScreen() {
         </ToggleGroup>
       </div>
 
-      <Card className="mb-6 p-4">
-        <h2 className="mb-2 text-sm font-medium">Requests</h2>
-        <StackedAreaChart data={stackByDay(usageRows, keys, (r) => r.requests)} keys={keys} />
-      </Card>
-
-      <Card className="mb-6 p-4">
-        <h2 className="mb-2 text-sm font-medium">Tokens</h2>
-        <StackedAreaChart
-          data={stackByDay(usageRows, keys, (r) => r.tokens_in + r.tokens_out)}
-          keys={keys}
+      {usageRows.length === 0 ? (
+        <EmptyLegend
+          what="Usage rolls up daily once requests start arriving."
+          hint="Spend needs a priced model; unpriced ones show an em-dash."
         />
-      </Card>
+      ) : (
+        <>
+          <Card className="mb-6 p-4">
+            <h2 className="mb-2 text-sm font-medium">Requests</h2>
+            <StackedAreaChart data={stackByDay(usageRows, keys, (r) => r.requests)} keys={keys} />
+          </Card>
 
-      <Card className="mb-6 p-4">
-        <h2 className="mb-2 text-sm font-medium">Cost</h2>
-        <CostLineChart
-          data={stackByDay(usageRows, keys, (r) => r.cost_micros)}
-          keys={keys}
-          formatValue={formatCost}
-        />
-      </Card>
+          <Card className="mb-6 p-4">
+            <h2 className="mb-2 text-sm font-medium">Tokens</h2>
+            <StackedAreaChart
+              data={stackByDay(usageRows, keys, (r) => r.tokens_in + r.tokens_out)}
+              keys={keys}
+            />
+          </Card>
 
-      <Card className="mb-6 p-4">
-        <h2 className="mb-2 text-sm font-medium">Ranked by requests</h2>
-        <Bars rows={rows} />
-      </Card>
+          <Card className="mb-6 p-4">
+            <h2 className="mb-2 text-sm font-medium">Cost</h2>
+            <CostLineChart
+              data={stackByDay(usageRows, keys, (r) => r.cost_micros)}
+              keys={keys}
+              formatValue={formatCost}
+            />
+          </Card>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{dimension === "day" ? "Day" : dimension}</TableHead>
-            <TableHead>Requests</TableHead>
-            <TableHead>Attempts</TableHead>
-            <TableHead>Tokens in</TableHead>
-            <TableHead>Tokens out</TableHead>
-            <TableHead>Cost</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((r) => (
-            <TableRow key={r.key}>
-              <TableCell className="font-mono text-xs">
-                {clickable ? (
-                  <Link
-                    to="/requests"
-                    search={requestsSearch(dimension, r.key, days)}
-                    className="underline"
-                  >
-                    {r.key}
-                  </Link>
-                ) : (
-                  r.key
-                )}
-              </TableCell>
-              <TableCell className="tabular-nums">{r.requests}</TableCell>
-              {/* Attempts exceed requests exactly when something failed over,
-                  which is the column that explains a cost the request count
-                  does not. */}
-              <TableCell className="tabular-nums">{r.attempts}</TableCell>
-              <TableCell className="tabular-nums">{r.tokensIn}</TableCell>
-              <TableCell className="tabular-nums">{r.tokensOut}</TableCell>
-              <TableCell className="tabular-nums">{formatCost(r.cost)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          <Card className="mb-6 p-4">
+            <h2 className="mb-2 text-sm font-medium">Ranked by requests</h2>
+            <Bars rows={rows} />
+          </Card>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{dimension === "day" ? "Day" : dimension}</TableHead>
+                <TableHead>Requests</TableHead>
+                <TableHead>Attempts</TableHead>
+                <TableHead>Tokens in</TableHead>
+                <TableHead>Tokens out</TableHead>
+                <TableHead>Cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.key}>
+                  <TableCell className="font-mono text-xs">
+                    {clickable ? (
+                      <Link
+                        to="/requests"
+                        search={requestsSearch(dimension, r.key, days)}
+                        className="underline"
+                      >
+                        {r.key}
+                      </Link>
+                    ) : (
+                      r.key
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{r.requests}</TableCell>
+                  {/* Attempts exceed requests exactly when something failed over,
+                      which is the column that explains a cost the request count
+                      does not. */}
+                  <TableCell className="tabular-nums">{r.attempts}</TableCell>
+                  <TableCell className="tabular-nums">{r.tokensIn}</TableCell>
+                  <TableCell className="tabular-nums">{r.tokensOut}</TableCell>
+                  <TableCell className="tabular-nums">{formatCost(r.cost)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
     </>
   )
 }

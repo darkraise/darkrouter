@@ -7,6 +7,7 @@ import { api } from "../../lib/api"
 import { useRequests } from "../../lib/queries"
 import { useSearchFilters, filterQuery } from "../../lib/search-filters"
 import type { RequestPage, RequestRow } from "../../lib/api-types"
+import { EmptyLegend } from "../shell/empty-legend"
 import { TraceDrawer } from "./trace-drawer"
 import { FilterSelect } from "./filter-select"
 import { SavedViewsBar } from "./saved-views-bar"
@@ -236,6 +237,18 @@ export function RequestsScreen() {
         facets={["surface", "status", "failover"]}
         virtualize={{ rowHeight: 36, height: 640 }}
       />
+
+      {rows.length === 0 &&
+        (filtered ? (
+          <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
+            No requests match these filters.
+          </p>
+        ) : (
+          <EmptyLegend
+            what="Requests appear here as clients call the gateway."
+            hint="Point a client at Connect to see the first one."
+          />
+        ))}
 
       {more && (
         <Button variant="secondary" className="mt-4" onClick={() => void loadMore()}>

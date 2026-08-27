@@ -21,6 +21,7 @@ import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useConfig, useModels, useProxyTokens } from "../../lib/queries"
 import type { Model, ProxyToken } from "../../lib/api-types"
+import { EmptyLegend } from "../shell/empty-legend"
 import { baseUrlFor, snippetFor, TOOLS, type Tool } from "./snippets"
 
 const DIALECTS = ["anthropic", "openai", "gemini"] as const
@@ -215,9 +216,10 @@ export function ConnectScreen() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            No models are catalogued yet, so nothing is live to route to.
-          </p>
+          <EmptyLegend
+            what="No surfaces are live yet."
+            hint="The catalog fills in after the first discovery sweep."
+          />
         )}
       </Card>
 

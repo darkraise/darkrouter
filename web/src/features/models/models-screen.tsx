@@ -6,6 +6,7 @@ import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Model, Pricing } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
+import { EmptyLegend } from "../shell/empty-legend"
 import { OverrideEditor } from "./override-editor"
 
 const FIELDS = ["model", "provider"] as const
@@ -237,9 +238,10 @@ export function ModelsScreen() {
       />
 
       {models.length === 0 && (
-        <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
-          No models match these filters.
-        </p>
+        <EmptyLegend
+          what="Models appear here after a discovery sweep."
+          hint="Add a provider and probe it to trigger one."
+        />
       )}
 
       {editing && (
