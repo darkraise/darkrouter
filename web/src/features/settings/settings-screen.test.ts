@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { configRows, readValue } from "./settings-screen"
+import { configRows, passwordProblem, readValue, reloadMessage, revokedText } from "./settings-screen"
 import type { ConfigResponse } from "../../lib/api-types"
 
 const cfg = (): ConfigResponse => ({
@@ -66,5 +66,55 @@ describe("configRows", () => {
   it("orders fields so the table does not reshuffle between polls", () => {
     const rows = configRows(cfg()).map((r) => r.field)
     expect(rows).toEqual([...rows].sort((a, b) => a.localeCompare(b)))
+  })
+})
+
+describe("the password form", () => {
+  it("refuses a short password before spending a round trip", () => {
+    // The server's floor is twelve. Checking it here is a courtesy; the
+    // server stays the authority.
+    expect(passwordProblem("short", "short")).toMatch(/12 characters/)
+  })
+
+  it("refuses a mismatched confirmation", () => {
+    expect(passwordProblem("long-enough-passphrase", "long-enough-passphras")).toMatch(
+      /do not match/i,
+    )
+  })
+
+  it("accepts a long matching pair", () => {
+    expect(passwordProblem("long-enough-passphrase", "long-enough-passphrase")).toBeNull()
+  })
+})
+
+describe("the revocation notice", () => {
+  it("says how many other sessions were ended", () => {
+    // The operator has just logged every other browser out. Not saying so
+    // makes the next login failure elsewhere look like a fault.
+    expect(revokedText(3)).toMatch(/3 other sessions/)
+  })
+
+  it("says none rather than zero", () => {
+    expect(revokedText(0)).toMatch(/no other sessions/i)
+  })
+
+  it("says one session in the singular", () => {
+    expect(revokedText(1)).toMatch(/1 other session\b/)
+  })
+})
+
+describe("the reload result", () => {
+  it("reports an invalid file without claiming the gateway stopped", () => {
+    expect(
+      reloadMessage({ valid: false, error: "yaml: bad", serving: "the previous configuration is still serving" }),
+    ).toMatch(/previous configuration is still serving/)
+  })
+
+  it("carries the parse error so the operator knows what to fix", () => {
+    expect(reloadMessage({ valid: false, error: "yaml: line 4" })).toContain("yaml: line 4")
+  })
+
+  it("confirms a clean reload", () => {
+    expect(reloadMessage({ valid: true })).toMatch(/reloaded/i)
   })
 })
