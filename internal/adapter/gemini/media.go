@@ -39,6 +39,11 @@ type Fetcher struct {
 	MaxBytes int64
 	// Inline gates the outbound fetch. False drops a remote URL rather than
 	// retrieving it; everything that needs no request is unaffected.
+	//
+	// The zero value is false, so a Fetcher built as a struct literal instead
+	// of via NewFetcher silently disables inlining unless this is set
+	// explicitly — a fixture that meant to exercise the fetch path can end up
+	// exercising the disabled-inlining path instead.
 	Inline bool
 }
 

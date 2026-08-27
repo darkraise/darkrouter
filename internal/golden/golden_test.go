@@ -246,6 +246,7 @@ func warningStrings(ws []ir.Warning) []string {
 var offlineFetcher = geminiadapter.Fetcher{
 	Client:   &http.Client{Transport: refuseTransport{}},
 	MaxBytes: 0,
+	Inline:   true,
 }
 
 type refuseTransport struct{}
