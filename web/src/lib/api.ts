@@ -39,7 +39,36 @@ function loggedOut(): never {
   throw new ApiError(401, "not authenticated")
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+type RequestOptions = {
+  /**
+   * Some routes answer 401 for two unrelated reasons: the session died
+   * before the handler ran (requireSession, always "not authenticated"), or
+   * the handler itself rejected the request on its merits — the password
+   * endpoint answers 401 with exactly "invalid password" for a wrong current
+   * password, session very much intact. Naming that one message here is how
+   * a caller opts only *that* rejection out of the global logout; any other
+   * 401, including a session that actually died on this same call, still
+   * goes through loggedOut() same as every other request.
+   */
+  expectedRejection?: string
+}
+
+/** Peeks at a 401 body without consuming it, to tell the two reasons apart. */
+async function isExpectedRejection(res: Response, expected: string): Promise<boolean> {
+  try {
+    const parsed = (await res.clone().json()) as { error?: string }
+    return parsed.error === expected
+  } catch {
+    return false
+  }
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: RequestOptions,
+): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers["Content-Type"] = "application/json"
   if (method !== "GET") {
@@ -60,7 +89,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     credentials: "same-origin",
   })
 
-  if (res.status === 401) loggedOut()
+  if (res.status === 401) {
+    const expected = opts?.expectedRejection !== undefined && (await isExpectedRejection(res, opts.expectedRejection))
+    if (!expected) loggedOut()
+  }
   if (!res.ok) {
     let message = res.statusText
     try {
@@ -78,7 +110,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>("POST", path, body, opts),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),
