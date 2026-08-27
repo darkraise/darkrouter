@@ -208,6 +208,7 @@ export function ModelsScreen() {
   const catalog = useModels()
   const models = (catalog.data?.models ?? []).filter((m) => matches(m, filters))
   const [editing, setEditing] = useState<{ provider: string; model: string } | null>(null)
+  const filtered = Object.values(filters).some((v) => v !== "")
 
   return (
     <>
@@ -237,12 +238,17 @@ export function ModelsScreen() {
         virtualize={{ rowHeight: 40, height: 640 }}
       />
 
-      {models.length === 0 && (
-        <EmptyLegend
-          what="Models appear here after a discovery sweep."
-          hint="Add a provider and probe it to trigger one."
-        />
-      )}
+      {models.length === 0 &&
+        (filtered ? (
+          <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
+            No models match these filters.
+          </p>
+        ) : (
+          <EmptyLegend
+            what="Models appear here after a discovery sweep."
+            hint="Add a provider and probe it to trigger one."
+          />
+        ))}
 
       {editing && (
         <OverrideEditor
