@@ -92,7 +92,10 @@ export function RequestsScreen() {
   const first = useRequests({ ...apiFilters(filters), limit: "50" })
 
   useEffect(() => {
-    if (first.data && held === null) setHeld(first.data.requests)
+    // An empty first load must keep re-freezing on every poll, same as
+    // `null`: freezing `[]` once would leave the very first row that ever
+    // arrives uncounted and undisplayed until something else forced a reload.
+    if (first.data && (held === null || held.length === 0)) setHeld(first.data.requests)
   }, [first.data, held])
 
   function resetPaging() {
