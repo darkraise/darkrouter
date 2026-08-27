@@ -89,8 +89,10 @@ export function BodiesPanel({ bodies }: { bodies?: TraceBody[] }) {
   }
   return (
     <div className="flex flex-col gap-3">
-      {bodies.map((b) => (
-        <div key={b.kind}>
+      {bodies.map((b, i) => (
+        // Keyed on index too: nothing writes bodies today, but two of the
+        // same kind (e.g. two tool-call turns) would otherwise collide.
+        <div key={`${b.kind}-${i}`}>
           <p className="text-xs text-[hsl(var(--legend))]">{b.kind}</p>
           <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-xs">
             {b.content}
@@ -98,6 +100,36 @@ export function BodiesPanel({ bodies }: { bodies?: TraceBody[] }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * `capture.bodies`'s NOT NULL column forces an absent map to `{}` on write
+ * (internal/store/log.go), so `surface_meta` is present-but-empty for the
+ * overwhelming majority of requests. A truthy check on the object would pass
+ * for `{}` and draw a heading over an empty list, the same rendering-fault
+ * mistake the Bodies panel exists to avoid — so this checks key count and
+ * renders nothing, heading included, when there is nothing to show.
+ */
+export function SurfaceMetaSection({
+  meta,
+}: {
+  meta?: Record<string, unknown>
+}) {
+  const entries = Object.entries(meta ?? {})
+  if (entries.length === 0) return null
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-medium">Surface metadata</h3>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        {entries.map(([key, value]) => (
+          <Fragment key={key}>
+            <dt className="text-[hsl(var(--legend))]">{key}</dt>
+            <dd className="font-mono">{String(value)}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </section>
   )
 }
 
@@ -232,19 +264,7 @@ export function TraceDrawer({
               <BodiesPanel bodies={trace.data.bodies} />
             </section>
 
-            {trace.data.surface_meta && (
-              <section>
-                <h3 className="mb-2 text-sm font-medium">Surface metadata</h3>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                  {Object.entries(trace.data.surface_meta).map(([key, value]) => (
-                    <Fragment key={key}>
-                      <dt className="text-[hsl(var(--legend))]">{key}</dt>
-                      <dd className="font-mono">{String(value)}</dd>
-                    </Fragment>
-                  ))}
-                </dl>
-              </section>
-            )}
+            <SurfaceMetaSection meta={trace.data.surface_meta} />
           </div>
         )}
       </SheetContent>
