@@ -50,7 +50,7 @@ describe("model filtering", () => {
 describe("price rendering", () => {
   it("prints dollars per million tokens", () => {
     expect(priceLabel({ input_micros: 150000, output_micros: 600000 })).toBe(
-      "$0.15 / $0.60",
+      "$0.1500 / $0.6000",
     )
   })
 
@@ -58,6 +58,15 @@ describe("price rendering", () => {
     // Not $0.00: a model with no catalog price cost an unknown amount, and
     // zero would claim it was free.
     expect(priceLabel(null)).toBe("—")
+  })
+
+  it("does not round a real sub-cent price down to the unpriced string", () => {
+    // 4,000 micros is $0.004/MTok — a real, non-zero price. Two decimal
+    // places would print exactly "$0.00", the string this function reserves
+    // for a model with no catalog price at all.
+    expect(priceLabel({ input_micros: 4000, output_micros: 4000 })).toBe(
+      "$0.0040 / $0.0040",
+    )
   })
 })
 
