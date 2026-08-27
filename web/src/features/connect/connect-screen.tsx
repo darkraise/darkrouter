@@ -59,14 +59,14 @@ const TOOL_LABEL: Record<Tool, string> = {
  * trusted rather than rewritten.
  */
 export function originFor(
-  location: Pick<Location, "origin" | "hostname">,
+  location: Pick<Location, "origin" | "hostname" | "protocol">,
   proxyListen: string,
   adminListen: string,
 ): string {
   const portOf = (listen: string) => listen.slice(listen.lastIndexOf(":") + 1)
   return portOf(proxyListen) === portOf(adminListen)
     ? location.origin
-    : `http://${location.hostname}:${portOf(proxyListen)}`
+    : `${location.protocol}//${location.hostname}:${portOf(proxyListen)}`
 }
 
 /**
