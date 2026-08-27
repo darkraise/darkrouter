@@ -1,10 +1,10 @@
 import type { BreakerEntry, DiscoveryHealthRow, Provider } from "../../lib/api-types"
 
+export type ProviderState = "healthy" | "degraded" | "disabled" | "unconfigured"
+
 /** The four states the overview emits. `degraded` is not a synonym for
  *  `cooling`: a credential cools, a provider degrades. */
-export function providerState(
-  p: Provider,
-): "healthy" | "degraded" | "disabled" | "unconfigured" {
+export function providerState(p: Provider): ProviderState {
   if (!p.enabled) return "disabled"
   if (p.credentials.length === 0) return "unconfigured"
   if (p.credentials.some((c) => c.cooling)) return "degraded"
@@ -15,7 +15,11 @@ export const STATE_VARIANT = {
   healthy: "green",
   degraded: "amber",
   disabled: "secondary",
-  unconfigured: "destructive",
+  // Neutral, not destructive. The list holds every provider the release
+  // supports, so most rows are unconfigured at any moment -- and red across
+  // two hundred of them says something is broken when nothing is. Red is for
+  // a provider that failed, not for one nobody has set up.
+  unconfigured: "outline",
 } as const
 
 /** Breaker rows for one provider, so the panel sits beside its subject rather
