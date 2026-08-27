@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Button, Card, Input, Label } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 
@@ -33,7 +33,15 @@ export function AccountCard() {
   const problem = passwordProblem(next, confirm)
 
   const change = useApiMutation({
-    mutationFn: () => api.post<{ revoked: number }>("/api/auth/password", { current, new: next }),
+    mutationFn: () =>
+      // A wrong current password is a legitimate rejection, not a dead
+      // session — naming it here keeps the operator on this screen instead
+      // of bouncing them to login over their own typo.
+      api.post<{ revoked: number }>(
+        "/api/auth/password",
+        { current, new: next },
+        { expectedRejection: "invalid password" },
+      ),
     invalidates: [keys.sessions],
     success: (res) => revokedText(res.revoked),
     onSuccess: () => {
@@ -44,6 +52,13 @@ export function AccountCard() {
       setConfirm("")
     },
   })
+
+  // useApiMutation's own onError suppresses the toast for every 401 on the
+  // assumption that the global logout listener is already explaining itself.
+  // For this one rejection that assumption is false, so the message has to
+  // be read straight from the mutation's error state instead.
+  const wrongPassword =
+    change.error instanceof ApiError && change.error.status === 401 ? change.error.message : null
 
   return (
     <Card className="mb-6 p-4">
@@ -80,6 +95,9 @@ export function AccountCard() {
         </div>
         {problem && (
           <p className="text-sm text-[hsl(var(--destructive))]">{problem}</p>
+        )}
+        {!problem && wrongPassword && (
+          <p className="text-sm text-[hsl(var(--destructive))]">{wrongPassword}</p>
         )}
         <div>
           <Button
