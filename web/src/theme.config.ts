@@ -37,28 +37,34 @@ export const themeConfig: ThemeConfig = {
   },
   switcher: {
     enabled: true,
-    // Two axes, not seventeen. The rest are the identity: an operator who can
-    // change the accent can make the ladder's brand colour collide with the
-    // state colours it sits beside.
+    // Every axis is exposed. The identity still ships as the defaults above,
+    // so a console that has never been touched looks the way it was designed;
+    // what changed is that an operator is now trusted to change it.
+    //
+    // The one axis worth knowing about before turning it: accentColor. Coral
+    // is position and primary action only, and the routing ladder and the
+    // provider pips sit beside it in amber, green and red. An accent moved
+    // into that range makes "brand" and "state" the same colour, and the
+    // ladder is then legible only by shape.
     axes: {
       mode: true,
       density: true,
-      accentColor: false,
-      surfaceColor: false,
-      preset: false,
-      backgroundStyle: false,
-      backgroundIntensity: false,
-      gradientPattern: false,
-      elevation: false,
-      buttonElevation: false,
-      controlDepth: false,
-      surfaceIntensity: false,
-      radius: false,
-      fontSize: false,
-      accentIntensity: false,
-      outerGlow: false,
-      innerGlow: false,
-      presetAxes: false,
+      accentColor: true,
+      surfaceColor: true,
+      preset: true,
+      backgroundStyle: true,
+      backgroundIntensity: true,
+      gradientPattern: true,
+      elevation: true,
+      buttonElevation: true,
+      controlDepth: true,
+      surfaceIntensity: true,
+      radius: true,
+      fontSize: true,
+      accentIntensity: true,
+      outerGlow: true,
+      innerGlow: true,
+      presetAxes: true,
     },
   },
 }
