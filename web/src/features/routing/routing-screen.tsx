@@ -168,7 +168,7 @@ export function AliasEditor({
         {Object.entries(draft).map(([name, rows]) => (
           <div key={name} className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
-              <span className="w-32 shrink-0 font-mono text-xs">{name}</span>
+              <span className="w-32 shrink-0 font-mono text-sm">{name}</span>
               <Button
                 size="sm"
                 variant="ghost"
@@ -205,7 +205,7 @@ export function AliasEditor({
                     aria-label={`${name} target ${index + 1}`}
                     value={row.value}
                     onChange={(e) => updateTarget(name, row.id, e.target.value)}
-                    className="flex-1 font-mono text-xs"
+                    className="flex-1 font-mono text-sm"
                   />
                   <Button size="sm" variant="ghost" onClick={() => removeTarget(name, row.id)}>
                     Remove
@@ -227,7 +227,7 @@ export function AliasEditor({
               Add target
             </Button>
             {(problemsByChain[name] ?? []).length > 0 && (
-              <ul className="ml-4 flex flex-col gap-0.5 text-xs text-[hsl(var(--destructive))]">
+              <ul className="ml-4 flex flex-col gap-0.5 text-sm text-[hsl(var(--destructive))]">
                 {(problemsByChain[name] ?? []).map((problem) => (
                   <li key={problem}>{problem}</li>
                 ))}
@@ -241,7 +241,7 @@ export function AliasEditor({
           placeholder="new alias name"
           value={newChainName}
           onChange={(e) => setNewChainName(e.target.value)}
-          className="w-48 font-mono text-xs"
+          className="w-48 font-mono text-sm"
         />
         <Button
           size="sm"
@@ -301,7 +301,7 @@ export function RoutingScreen() {
             placeholder="alias or model"
             value={filters.alias}
             onChange={(e) => setFilter("alias", e.target.value)}
-            className="w-72 font-mono text-xs"
+            className="w-72 font-mono text-sm"
           />
           <Button size="sm" onClick={() => run.mutate(filters.alias)}>
             Preview

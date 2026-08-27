@@ -48,7 +48,7 @@ export function buildColumns(onOpen: (id: string) => void): Columns {
       accessorKey: "model",
       header: ({ column }) => <ColumnHeader column={column} title="Model" />,
       cell: ({ row }) => (
-        <span className="font-mono text-xs">
+        <span className="font-mono text-sm">
           {row.original.alias ? `${row.original.alias} → ${row.original.model}` : row.original.model}
         </span>
       ),

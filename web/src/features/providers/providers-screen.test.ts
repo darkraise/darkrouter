@@ -18,6 +18,7 @@ const provider = (over: Partial<Provider> = {}): Provider => ({
   preset: "groq",
   kind: "openaicompat",
   base_url: "https://x",
+  free_models_only: false,
   priority: 1,
   enabled: true,
   auth_style: "bearer",
@@ -80,7 +81,7 @@ describe("the discovery line", () => {
     expect(
       discoveryLine({
         provider_id: "groq", total: 40, live: 40, stale: 0,
-        removed_upstream: 0, max_missing_streak: 0,
+        removed_upstream: 0, max_missing_streak: 0, filtered_out: 0,
       }),
     ).toBe("40 of 40 live")
   })
@@ -90,7 +91,7 @@ describe("the discovery line", () => {
     // to a healthy one until something counts the sweeps that omitted it.
     const line = discoveryLine({
       provider_id: "groq", total: 40, live: 30, stale: 10,
-      removed_upstream: 0, max_missing_streak: 6,
+      removed_upstream: 0, max_missing_streak: 6, filtered_out: 0,
     })
     expect(line).toContain("10 stale")
     expect(line).toContain("6")

@@ -431,7 +431,7 @@ func TestNewRebuildsTheCatalogBeforeServing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.RecordDiscoverySuccess(ctx, "p",
-		[]store.DiscoveredModel{{ModelID: "already-known"}}, time.Now()); err != nil {
+		[]store.DiscoveredModel{{ModelID: "already-known"}}, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 

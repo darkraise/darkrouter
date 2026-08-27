@@ -80,7 +80,7 @@
   position: relative;
   min-width: 28px;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--text-sm);
   color: var(--lad-legend);
   text-align: right;
 }
@@ -184,7 +184,7 @@
   flex: 0 0 auto;
   margin-left: 4px;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
+  font-size: var(--text-sm);
   color: var(--lad-legend);
 }
 
@@ -217,13 +217,13 @@
 .reason-code {
   flex: 0 0 auto;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--text-sm);
   color: var(--lad-ink);
 }
 .reason-prose {
   min-width: 0;
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--lad-ink-muted);
 }
@@ -239,7 +239,7 @@
   flex: 0 0 auto;
   min-width: 230px;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--lad-ink);
   white-space: nowrap;
 }

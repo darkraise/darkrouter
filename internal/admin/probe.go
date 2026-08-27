@@ -64,7 +64,23 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "this provider has no credential to test")
 		return
 	}
+	// ?key= names one credential. Without it the first is tested, which is what
+	// the provider-level probe has always meant. The import path needs the
+	// narrow form: it is checking the key it just wrote, and creds[0] is
+	// whichever key happened to sort first.
 	cred := creds[0]
+	if want := r.URL.Query().Get("key"); want != "" {
+		found := false
+		for _, c := range creds {
+			if c.ID == want {
+				cred, found = c, true
+			}
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("no credential %q", want))
+			return
+		}
+	}
 
 	// One probe per provider at a time. Spec §4.3: a double-click must issue
 	// one probe, because two racing on the same credential produce two answers

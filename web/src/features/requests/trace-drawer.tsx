@@ -93,8 +93,8 @@ export function BodiesPanel({ bodies }: { bodies?: TraceBody[] }) {
         // Keyed on index too: nothing writes bodies today, but two of the
         // same kind (e.g. two tool-call turns) would otherwise collide.
         <div key={`${b.kind}-${i}`}>
-          <p className="text-xs text-[hsl(var(--legend))]">{b.kind}</p>
-          <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-xs">
+          <p className="text-sm text-[hsl(var(--legend))]">{b.kind}</p>
+          <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-sm">
             {b.content}
           </pre>
         </div>
@@ -220,7 +220,7 @@ export function TraceDrawer({
                 <div className="flex flex-col gap-2">
                   {waterfall.map((row) => (
                     <div key={row.label} className="flex flex-col gap-1">
-                      <p className="text-xs text-[hsl(var(--legend))]">
+                      <p className="text-sm text-[hsl(var(--legend))]">
                         {row.label} · {row.ms.toLocaleString()}ms
                       </p>
                       <div className="h-2 w-full rounded bg-[hsl(var(--muted))]">
@@ -240,7 +240,7 @@ export function TraceDrawer({
                 <h3 className="mb-2 text-sm font-medium">Skipped candidates</h3>
                 {/* The skips are why the ladder starts where it does. Without
                     them a first attempt at the third provider looks arbitrary. */}
-                <ul className="flex flex-col gap-1 font-mono text-xs text-[hsl(var(--legend))]">
+                <ul className="flex flex-col gap-1 font-mono text-sm text-[hsl(var(--legend))]">
                   {trace.data.skips.map((s) => (
                     <li key={s}>{s}</li>
                   ))}
@@ -251,7 +251,7 @@ export function TraceDrawer({
             {trace.data.warnings && trace.data.warnings.length > 0 && (
               <section>
                 <h3 className="mb-2 text-sm font-medium">Warnings</h3>
-                <ul className="flex flex-col gap-1 text-xs">
+                <ul className="flex flex-col gap-1 text-sm">
                   {trace.data.warnings.map((warning) => (
                     <li key={warning}>{warning}</li>
                   ))}

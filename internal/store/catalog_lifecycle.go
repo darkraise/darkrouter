@@ -81,7 +81,7 @@ func (d *DB) DiscoveryStates(ctx context.Context) (map[string]DiscoveryState, er
 // The whole update is one transaction: a crash between the upserts and the
 // omission sweep would otherwise leave models both listed and counted absent.
 func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
-	seen []DiscoveredModel, at time.Time) error {
+	seen []DiscoveredModel, filteredOut int, at time.Time) error {
 
 	ms := at.UTC().UnixMilli()
 	tx, err := d.Write.BeginTx(ctx, nil)
@@ -163,14 +163,17 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO provider_discovery (provider_id, consecutive_failures, last_attempt_at, last_success_at, last_error)
-		 VALUES (?, 0, ?, ?, '')
+		`INSERT INTO provider_discovery
+		     (provider_id, consecutive_failures, last_attempt_at, last_success_at,
+		      last_error, filtered_out)
+		 VALUES (?, 0, ?, ?, '', ?)
 		 ON CONFLICT(provider_id) DO UPDATE SET
 		     consecutive_failures = 0,
 		     last_attempt_at      = excluded.last_attempt_at,
 		     last_success_at      = excluded.last_success_at,
-		     last_error           = ''`,
-		providerID, ms, ms); err != nil {
+		     last_error           = '',
+		     filtered_out         = excluded.filtered_out`,
+		providerID, ms, ms, filteredOut); err != nil {
 		return fmt.Errorf("record discovery success: %w", err)
 	}
 	return tx.Commit()

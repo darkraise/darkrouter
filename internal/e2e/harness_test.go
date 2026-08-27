@@ -181,7 +181,7 @@ func (g *gateway) seedModel(t *testing.T, providerID, modelID, publisher string)
 		[]store.DiscoveredModel{{
 			ModelID: modelID, Publisher: publisher,
 			ContextWindow: 128000, MaxOutputTokens: 4096,
-		}}, time.Now()); err != nil {
+		}}, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.srv.Catalog().Rebuild(context.Background()); err != nil {

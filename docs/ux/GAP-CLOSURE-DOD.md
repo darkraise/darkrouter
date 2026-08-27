@@ -143,6 +143,10 @@ in a `_test.go` file). The production handler path that builds a
 This is a pre-existing gateway gap. It predates this plan, is outside this
 plan's scope, and none of the tests above would have caught it because they
 all seed `ResolvedAlias` through the same test fixture that masks the gap.
+
+**Closed since.** `exec.resolve` now records the alias from the same snapshot
+the router resolves against, via `router.MatchedAlias`, covered by
+`TestMatchedAliasNamesTheAliasARequestCameInUnder`.
 Recorded here for follow-up, not fixed on this pass.
 
 **`web/package.json` declares a `lint` script with no eslint config to run

@@ -179,7 +179,7 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
     <div className="chart-scope flex flex-col gap-2">
       {rows.slice(0, 10).map((r, i) => (
         <div key={r.key} className="flex items-center gap-3">
-          <span className="w-40 shrink-0 truncate font-mono text-xs">{r.key}</span>
+          <span className="w-40 shrink-0 truncate font-mono text-sm">{r.key}</span>
           <div className="h-4 flex-1 rounded-sm bg-[hsl(var(--muted))]">
             <div
               className="h-full rounded-sm"
@@ -191,7 +191,7 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
               }}
             />
           </div>
-          <span className="w-16 text-right font-mono text-xs tabular-nums">
+          <span className="w-16 text-right font-mono text-sm tabular-nums">
             {r.requests}
           </span>
         </div>
@@ -305,7 +305,7 @@ export function UsageScreen() {
             <TableBody>
               {rows.map((r) => (
                 <TableRow key={r.key}>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="font-mono text-sm">
                     {clickable ? (
                       <Link
                         to="/requests"

@@ -1,0 +1,211 @@
+import { Checkbox, Input, Label, Textarea, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+
+export type AccountDraft = {
+  mode: "single" | "bulk"
+  label: string
+  secret: string
+  bulk: string
+  /** Narrows what the first discovery sweep imports for this provider. */
+  freeModelsOnly: boolean
+  /** Probe each key as it is added and keep only the ones that answer. */
+  verifyKeys: boolean
+}
+
+export const emptyAccounts: AccountDraft = {
+  mode: "single",
+  label: "",
+  secret: "",
+  bulk: "",
+  freeModelsOnly: false,
+  verifyKeys: true,
+}
+
+export type ParsedAccount = { label: string; secret: string }
+
+/**
+ * One account per non-empty line, in `name|key` form.
+ *
+ * The name is optional: a line with no pipe is all key, which is what a
+ * column pasted out of a password manager looks like. A key containing a pipe
+ * survives, because only the first one splits.
+ *
+ * Duplicates are dropped by secret rather than by name: pasting a column
+ * twice is a slip, and two credentials holding one key cool and fail as one
+ * while presenting as two working accounts. Surrounding quotes and commas
+ * come off because a paste out of a CSV or a JSON array brings them along.
+ */
+export function parseBulkAccounts(text: string, prefix = "key"): ParsedAccount[] {
+  const seen = new Set<string>()
+  const out: ParsedAccount[] = []
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line === "") continue
+    const pipe = line.indexOf("|")
+    const clean = (v: string) =>
+      v.trim().replace(/,$/, "").replace(/^["']|["']$/g, "").trim()
+    const name = pipe === -1 ? "" : clean(line.slice(0, pipe))
+    const secret = clean(pipe === -1 ? line : line.slice(pipe + 1))
+    if (secret === "" || seen.has(secret)) continue
+    seen.add(secret)
+    out.push({ label: name || `${prefix}-${out.length + 1}`, secret })
+  }
+  return out
+}
+
+/** Enough to recognise a key in the preview, never enough to use one. */
+export function maskSecret(secret: string): string {
+  if (secret.length <= 8) return "•".repeat(secret.length)
+  return `${secret.slice(0, 4)}${"•".repeat(6)}${secret.slice(-4)}`
+}
+
+/** What the draft would create, in the order it will be written. */
+export function draftAccounts(draft: AccountDraft): ParsedAccount[] {
+  if (draft.mode === "single") {
+    const secret = draft.secret.trim()
+    return secret === "" ? [] : [{ label: draft.label.trim() || "default", secret }]
+  }
+  return parseBulkAccounts(draft.bulk, draft.label.trim() || "key")
+}
+
+/**
+ * The account step, shared by the wizard and the provider detail page.
+ *
+ * Single and bulk are one segmented control rather than two forms: they
+ * produce the same thing, and an operator with three keys should not have to
+ * find a different screen from the one with one key.
+ */
+export function AccountFields({
+  value,
+  onChange,
+  autoFocus,
+}: {
+  value: AccountDraft
+  onChange: (next: AccountDraft) => void
+  autoFocus?: boolean
+}) {
+  const parsed = parseBulkAccounts(value.bulk, value.label.trim() || "key")
+  return (
+    <div className="flex flex-col gap-4">
+      <ToggleGroup
+        type="single"
+        value={value.mode}
+        onValueChange={(mode) => {
+          // An empty value comes back when the pressed item is pressed again;
+          // a mode has to be one thing or the other, so that is ignored.
+          if (mode === "single" || mode === "bulk") onChange({ ...value, mode })
+        }}
+        aria-label="How many accounts to add"
+        className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
+      >
+        <ToggleGroupItem value="single">Single account</ToggleGroupItem>
+        <ToggleGroupItem value="bulk">Bulk import</ToggleGroupItem>
+      </ToggleGroup>
+
+      {value.mode === "single" ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="account-label">Label</Label>
+            <Input
+              id="account-label"
+              value={value.label}
+              onChange={(e) => onChange({ ...value, label: e.target.value })}
+              placeholder="default"
+              className="w-40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="account-secret">API key</Label>
+            <Input
+              id="account-secret"
+              type="password"
+              autoFocus={autoFocus}
+              value={value.secret}
+              onChange={(e) => onChange({ ...value, secret: e.target.value })}
+              placeholder="sk-…"
+              className="w-72"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="account-bulk">Accounts, one per line</Label>
+            <Textarea
+              id="account-bulk"
+              rows={12}
+              value={value.bulk}
+              onChange={(e) => onChange({ ...value, bulk: e.target.value })}
+              placeholder={"work|sk-aaa…\nspare|sk-bbb…\nsk-ccc…"}
+              className="font-mono text-sm"
+            />
+            <p className="text-sm text-[hsl(var(--legend))]">
+              <span className="font-mono">name|key</span>, or just the key on its own.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="account-bulk-label">Label prefix</Label>
+              <Input
+                id="account-bulk-label"
+                value={value.label}
+                onChange={(e) => onChange({ ...value, label: e.target.value })}
+                placeholder="key"
+                className="w-40"
+              />
+              <span className="text-sm text-[hsl(var(--legend))]">
+                For the lines that name no account.
+              </span>
+            </div>
+            {/* The count and the masked heads confirm the paste landed the way
+                it looked: a stray wrapped line shows up here as one account too
+                many, before anything is sent. */}
+            <p className="text-sm text-[hsl(var(--legend))]">
+              {parsed.length === 0
+                ? "Nothing to import yet"
+                : `${parsed.length} ${parsed.length === 1 ? "account" : "accounts"} · ${parsed
+                    .slice(0, 3)
+                    .map((a) => `${a.label} ${maskSecret(a.secret)}`)
+                    .join(", ")}${parsed.length > 3 ? " …" : ""}`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="account-free-only"
+            checked={value.freeModelsOnly}
+            onCheckedChange={(next) =>
+              onChange({ ...value, freeModelsOnly: next === true })
+            }
+          />
+          <div className="flex flex-col">
+            <Label htmlFor="account-free-only">Import free models only</Label>
+            <span className="text-sm text-[hsl(var(--legend))]">
+              A discovery sweep keeps only models priced at zero or tagged{" "}
+              <span className="font-mono">:free</span>. A model nobody has priced is
+              not imported — unpriced is not free.
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="account-verify"
+            checked={value.verifyKeys}
+            onCheckedChange={(next) => onChange({ ...value, verifyKeys: next === true })}
+          />
+          <div className="flex flex-col">
+            <Label htmlFor="account-verify">Check every key before keeping it</Label>
+            <span className="text-sm text-[hsl(var(--legend))]">
+              Each key is probed as it is added, and any the provider refuses is
+              removed again. Slower, and the only way a bad key is caught here rather
+              than by the first request that needed it.
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

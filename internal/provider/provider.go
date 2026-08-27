@@ -50,6 +50,12 @@ type Provider struct {
 	Region   string
 	Project  string
 	Location string
+
+	// FreeModelsOnly narrows what a discovery sweep imports to the models it
+	// can show are free. It is carried on the provider because the sweep is
+	// the only thing that reads it: routing never consults it, so a paid model
+	// already in the catalogue stays routable until the next sweep drops it.
+	FreeModelsOnly bool
 }
 
 type Source interface {

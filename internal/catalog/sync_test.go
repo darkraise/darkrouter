@@ -33,8 +33,7 @@ func syncFixture(t *testing.T) (*store.DB, *staticSource, *Store) {
 	}
 	// Discovery has already established what exists; the sync only enriches.
 	if err := db.RecordDiscoverySuccess(ctx, "p",
-		[]store.DiscoveredModel{{ModelID: "big"}, {ModelID: "cheap"}, {ModelID: "private"}},
-		time.Unix(0, 0)); err != nil {
+		[]store.DiscoveredModel{{ModelID: "big"}, {ModelID: "cheap"}, {ModelID: "private"}}, 0, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: "acme"}}}
@@ -199,7 +198,7 @@ func TestSyncDoesNotOverwriteDiscoveredCapabilities(t *testing.T) {
 	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
 		{ModelID: "big", Capabilities: &store.ModelCapabilities{Tools: false}},
 		{ModelID: "cheap"}, {ModelID: "private"},
-	}, time.Unix(1, 0)); err != nil {
+	}, 0, time.Unix(1, 0)); err != nil {
 		t.Fatal(err)
 	}
 	if err := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()}).
