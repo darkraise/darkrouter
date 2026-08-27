@@ -13,16 +13,26 @@ import (
 func resolveModel(name string, aliases map[string][]string,
 	providers map[string]bool, cat catalog.Reader) ([]target, string) {
 
-	if entries, ok := aliases[name]; ok {
+	if alias := aliasFor(name, aliases); alias != "" {
 		var out []target
-		for _, entry := range entries {
+		for _, entry := range aliases[alias] {
 			// Alias targets go through rules 2 and 3 only. Following a nested
 			// alias would need cycle detection for a feature nobody asked for.
 			out = append(out, resolveDirect(entry, providers, cat)...)
 		}
-		return out, name
+		return out, alias
 	}
 	return resolveDirect(name, providers, cat), ""
+}
+
+// aliasFor applies rule 1 alone: the exact-alias match. Split out because the
+// request log needs the same answer without the expansion, and a second copy
+// of the rule at that call site would be free to drift from this one.
+func aliasFor(name string, aliases map[string][]string) string {
+	if _, ok := aliases[name]; ok {
+		return name
+	}
+	return ""
 }
 
 // resolveDirect applies rules 2 and 3.

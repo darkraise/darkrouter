@@ -53,6 +53,10 @@ func (e *Executor) resolve(ctx context.Context, w http.ResponseWriter, ew errorW
 		return resolved{}, false
 	}
 	cat := snap.Catalog
+	// Recorded from the same snapshot the router resolves against, so the row
+	// names the alias that actually applied rather than one a later config
+	// reload introduced.
+	rec.ResolvedAlias = router.MatchedAlias(q.Model, snap)
 
 	cands, skips, rerr := router.Resolve(q, snap)
 	// Recorded before the error check: the skips are what explain an empty
