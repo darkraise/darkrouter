@@ -1,0 +1,16 @@
+/* The monogram tile for a preset with no brand mark.
+ *
+ * The hue is carried in as --pi-hue and the two modes mix it against their own
+ * ground rather than shipping one fixed pair: a tint that reads as a quiet
+ * label on white is a glowing chip on the dark canvas, and 112 of the 197
+ * presets wear this tile.
+ */
+.provider-monogram {
+  background: hsl(var(--pi-hue) 45% 92%);
+  color: hsl(var(--pi-hue) 55% 30%);
+}
+
+[data-mode="dark"] .provider-monogram {
+  background: hsl(var(--pi-hue) 30% 22%);
+  color: hsl(var(--pi-hue) 55% 78%);
+}

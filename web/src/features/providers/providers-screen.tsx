@@ -11,52 +11,30 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  ToggleGroup,
+  ToggleGroupItem,
 } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useDiscoveryHealth, useProviderHealth, useProviders } from "../../lib/queries"
-import type { BreakerEntry, DiscoveryHealthRow, Provider } from "../../lib/api-types"
-import { AddProviderDialog } from "./add-provider-dialog"
+import { AddAccountsDialog } from "./add-accounts-dialog"
+import { ProviderCard } from "./provider-card"
+import { ProviderIcon } from "./provider-icon"
+import { STATE_VARIANT, breakersFor, discoveryLine, providerState } from "./provider-state"
 
-/** The four states the overview emits. `degraded` is not a synonym for
- *  `cooling`: a credential cools, a provider degrades. */
-export function providerState(
-  p: Provider,
-): "healthy" | "degraded" | "disabled" | "unconfigured" {
-  if (!p.enabled) return "disabled"
-  if (p.credentials.length === 0) return "unconfigured"
-  if (p.credentials.some((c) => c.cooling)) return "degraded"
-  return "healthy"
-}
+export { breakersFor, discoveryLine, providerState } from "./provider-state"
 
-const VARIANT = {
-  healthy: "green",
-  degraded: "amber",
-  disabled: "secondary",
-  unconfigured: "destructive",
-} as const
+export type ProviderView = "list" | "grid"
 
-/** Breaker rows for one provider, so the panel sits beside its subject rather
- *  than on a destination of its own. */
-export function breakersFor(
-  entries: BreakerEntry[],
-  providerID: string,
-): BreakerEntry[] {
-  return entries.filter((e) => e.provider_id === providerID && e.cooling_until)
-}
+const VIEW_KEY = "providers-view"
 
-/** One provider's discovery health, reduced to what the table cell shows. */
-export function discoveryLine(row: DiscoveryHealthRow | undefined): string {
-  // Absence is the signal: "0 of 0 live" would read as a sweep that ran and
-  // found nothing, which is a different fact from one that never ran.
-  if (!row) return "never discovered"
-  const parts = [`${row.live} of ${row.total} live`]
-  if (row.stale > 0) parts.push(`${row.stale} stale`)
-  if (row.removed_upstream > 0) parts.push(`${row.removed_upstream} removed upstream`)
-  if (row.max_missing_streak > 0) {
-    parts.push(`missing for ${row.max_missing_streak} sweeps`)
-  }
-  return parts.join(" · ")
+/** Which layout an operator last chose.
+ *
+ *  Persisted because it is a preference about how they read this screen, not
+ *  a filter: coming back tomorrow to the other layout would be the console
+ *  forgetting something it was told. */
+export function readView(store: Pick<Storage, "getItem">): ProviderView {
+  return store.getItem(VIEW_KEY) === "grid" ? "grid" : "list"
 }
 
 export function ProvidersScreen() {
@@ -65,6 +43,14 @@ export function ProvidersScreen() {
   const discovery = useDiscoveryHealth()
   const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
+  const [view, setView] = useState<ProviderView>(() => readView(localStorage))
+
+  // The row is the way into a provider. It had none before: the detail page
+  // existed but only the command palette and the overview's routing graph
+  // ever linked to it.
+  function open(id: string) {
+    void navigate({ to: "/providers/$id", params: { id } })
+  }
 
   const reset = useApiMutation({
     mutationFn: (id: string) =>
@@ -83,101 +69,156 @@ export function ProvidersScreen() {
     invalidates: [keys.providers, keys.health],
   })
 
+  const rows = providers.data?.providers ?? []
+
   return (
     <>
       <PageHeader
         title="Providers"
         description="What it can route to, and whether it is answering"
         actions={
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            Add provider
-          </Button>
+          <div className="flex items-center gap-2">
+            <ToggleGroup
+              type="single"
+              value={view}
+              onValueChange={(next) => {
+                if (next !== "list" && next !== "grid") return
+                setView(next)
+                localStorage.setItem(VIEW_KEY, next)
+              }}
+              aria-label="Provider layout"
+            >
+              <ToggleGroupItem value="list" aria-label="List view">
+                <ListGlyph />
+                List
+              </ToggleGroupItem>
+              <ToggleGroupItem value="grid" aria-label="Grid view">
+                <GridGlyph />
+                Grid
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              Add accounts
+            </Button>
+          </div>
         }
       />
 
-      <AddProviderDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        onCreated={(id) => void navigate({ to: `/providers/${id}` })}
-      />
+      <AddAccountsDialog open={addOpen} onOpenChange={setAddOpen} onDone={(id) => open(id)} />
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Provider</TableHead>
-            <TableHead>Kind</TableHead>
-            <TableHead>Priority</TableHead>
-            <TableHead>Credentials</TableHead>
-            <TableHead>Discovery</TableHead>
-            <TableHead>State</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {(providers.data?.providers ?? []).map((p) => {
-            const state = providerState(p)
-            const cooling = breakersFor(health.data ?? [], p.id)
-            const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === p.id)
-            return (
-              <TableRow key={p.id}>
-                <TableCell>
-                  <span className="font-medium">{p.name}</span>
-                  <span className="ml-2 font-mono text-xs text-[hsl(var(--legend))]">
-                    {p.id}
-                  </span>
-                </TableCell>
-                <TableCell className="font-mono text-xs">{p.kind}</TableCell>
-                <TableCell className="tabular-nums">{p.priority}</TableCell>
-                <TableCell>
-                  {p.credentials.length}
-                  {cooling.length > 0 && (
-                    <span className="ml-2 text-xs text-[hsl(var(--warning))]">
-                      {cooling.length} cooling
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell
-                  className={
-                    discoveryRow && discoveryRow.max_missing_streak > 0
-                      ? "text-xs text-[hsl(var(--warning))]"
-                      : "text-xs text-[hsl(var(--legend))]"
-                  }
+      {view === "grid" ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((p) => (
+            <ProviderCard
+              key={p.id}
+              provider={p}
+              cooling={breakersFor(health.data ?? [], p.id)}
+              onOpen={() => open(p.id)}
+            />
+          ))}
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Provider</TableHead>
+              <TableHead>Kind</TableHead>
+              <TableHead>Priority</TableHead>
+              <TableHead>Accounts</TableHead>
+              <TableHead>Discovery</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((p) => {
+              const state = providerState(p)
+              const cooling = breakersFor(health.data ?? [], p.id)
+              const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === p.id)
+              return (
+                <TableRow
+                  key={p.id}
+                  onClick={() => open(p.id)}
+                  tabIndex={0}
+                  role="button"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      open(p.id)
+                    }
+                  }}
+                  className="cursor-pointer hover:bg-[hsl(var(--muted))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))] focus-visible:-outline-offset-2"
                 >
-                  {discoveryLine(discoveryRow)}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={VARIANT[state]}>{state}</Badge>
-                </TableCell>
-                <TableCell className="flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => probe.mutate(p.id)}>
-                    Probe
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => discover.mutate(p.id)}
+                  <TableCell>
+                    <span className="flex items-center gap-2">
+                      <ProviderIcon preset={p.preset} id={p.id} name={p.name} size={24} />
+                      <span className="font-medium">{p.name}</span>
+                      <span className="font-mono text-sm text-[hsl(var(--legend))]">{p.id}</span>
+                    </span>
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">{p.kind}</TableCell>
+                  <TableCell className="tabular-nums">{p.priority}</TableCell>
+                  <TableCell>
+                    {p.credentials.length}
+                    {cooling.length > 0 && (
+                      <span className="ml-2 text-sm text-[hsl(var(--warning))]">
+                        {cooling.length} cooling
+                      </span>
+                    )}
+                  </TableCell>
+                  {/* One line with the rest on hover: the full sentence wraps
+                      to four lines in this column and makes the row taller
+                      than the eight around it. The Health tab carries it in
+                      full. */}
+                  <TableCell
+                    title={discoveryLine(discoveryRow)}
+                    className={
+                      discoveryRow && discoveryRow.max_missing_streak > 0
+                        ? "max-w-[11rem] truncate text-sm text-[hsl(var(--warning))]"
+                        : "max-w-[11rem] truncate text-sm text-[hsl(var(--legend))]"
+                    }
                   >
-                    Discover
-                  </Button>
-                  {/* Only offered when there is something to clear: a reset
-                      button on a healthy provider invites a click that does
-                      nothing and teaches the operator to distrust it. */}
-                  {cooling.length > 0 && (
-                    <Button size="sm" variant="ghost" onClick={() => reset.mutate(p.id)}>
-                      Reset breaker
+                    {discoveryLine(discoveryRow)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={STATE_VARIANT[state]}>{state}</Badge>
+                  </TableCell>
+                  {/* The row opens the provider; these act on it in place, so
+                      they must not also open it. */}
+                  <TableCell
+                    className="flex gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Button size="sm" variant="ghost" onClick={() => probe.mutate(p.id)}>
+                      Probe
                     </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => discover.mutate(p.id)}
+                    >
+                      Discover
+                    </Button>
+                    {/* Only offered when there is something to clear: a reset
+                        button on a healthy provider invites a click that does
+                        nothing and teaches the operator to distrust it. */}
+                    {cooling.length > 0 && (
+                      <Button size="sm" variant="ghost" onClick={() => reset.mutate(p.id)}>
+                        Reset breaker
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      )}
 
       {(health.data ?? []).some((e) => e.cooling_until) && (
         <Card className="mt-6 p-4">
           <h2 className="mb-2 text-sm font-medium">Cooling credentials</h2>
-          <ul className="flex flex-col gap-1 font-mono text-xs">
+          <ul className="flex flex-col gap-1 font-mono text-sm">
             {(health.data ?? [])
               .filter((e) => e.cooling_until)
               .map((e) => (
@@ -191,5 +232,29 @@ export function ProvidersScreen() {
         </Card>
       )}
     </>
+  )
+}
+
+function ListGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M2 4h12M2 8h12M2 12h12"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function GridGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   )
 }
