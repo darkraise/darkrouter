@@ -8,7 +8,7 @@ export function EmptyLegend({ what, hint }: { what: string; hint: string }) {
   return (
     <div className="mt-4 rounded border border-dashed p-6 text-center">
       <p className="text-sm">{what}</p>
-      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{hint}</p>
+      <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{hint}</p>
     </div>
   )
 }

@@ -97,7 +97,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       accessorKey: "model",
       header: ({ column }) => <ColumnHeader column={column} title="Model" />,
       cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.model}</span>
+        <span className="font-mono text-sm">{row.original.model}</span>
       ),
     },
     {
@@ -149,7 +149,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       accessorKey: "surface_list",
       header: ({ column }) => <ColumnHeader column={column} title="Surfaces" />,
       cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.surface_list || "—"}</span>
+        <span className="font-mono text-sm">{row.original.surface_list || "—"}</span>
       ),
     },
     {
@@ -171,13 +171,13 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     {
       accessorKey: "state",
       header: ({ column }) => <ColumnHeader column={column} title="State" />,
-      cell: ({ row }) => <span className="font-mono text-xs">{row.original.state}</span>,
+      cell: ({ row }) => <span className="font-mono text-sm">{row.original.state}</span>,
     },
     {
       accessorKey: "merge_source",
       header: ({ column }) => <ColumnHeader column={column} title="Source" />,
       cell: ({ row }) => (
-        <Badge variant="outline" className="font-mono text-[10px]">
+        <Badge variant="outline" className="font-mono text-sm">
           {row.original.merge_source}
         </Badge>
       ),
