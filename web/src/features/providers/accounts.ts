@@ -1,16 +1,14 @@
 import { toast } from "darkraise-ui"
 import { api } from "../../lib/api"
-import { type AccountDraft, parseBulkSecrets } from "./account-fields"
+import { type AccountDraft, draftAccounts } from "./account-fields"
+import type { ProbeResult } from "../../lib/api-types"
 
-export type AddResult = { added: number; failed: { label: string; error: string }[] }
+export type AddFailure = { label: string; error: string }
+export type AddResult = { added: number; failed: AddFailure[]; rejected: AddFailure[] }
 
 /** How many accounts the draft would create. */
 export function countAccounts(draft: AccountDraft): number {
-  return draft.mode === "single"
-    ? draft.secret.trim() === ""
-      ? 0
-      : 1
-    : parseBulkSecrets(draft.bulk).length
+  return draftAccounts(draft).length
 }
 
 /** The label on the button that submits the draft, so it says what will
@@ -20,50 +18,83 @@ export function addAccountsLabel(n: number): string {
 }
 
 /**
- * Posts one credential per secret.
+ * Posts one credential per account, and optionally proves each one works.
  *
- * `POST /keys` takes a single secret, so a bulk paste is N calls. They run in
- * sequence rather than at once: the handler reloads the provider set on every
- * success, and twenty concurrent reloads is a self-inflicted thundering herd.
- * A failure does not abort the rest — one rejected key out of twenty should
- * cost that key, not the other nineteen.
+ * `POST /keys` takes a single secret, so a paste of twenty is twenty calls.
+ * They run in sequence rather than at once: the handler reloads the provider
+ * set on every success, and twenty concurrent reloads is a self-inflicted
+ * thundering herd. A failure does not abort the rest — one rejected key out of
+ * twenty should cost that key, not the other nineteen.
+ *
+ * Verification is add-then-probe-then-remove rather than probe-then-add: the
+ * gateway can only reach a provider through a stored credential, so a key has
+ * to exist for a moment to be testable. A key that fails is deleted again, so
+ * what survives is what works.
  */
 export async function addCredentials(
   providerId: string,
   draft: AccountDraft,
 ): Promise<AddResult> {
-  const items =
-    draft.mode === "single"
-      ? [{ label: draft.label.trim() || "default", secret: draft.secret.trim() }]
-      : parseBulkSecrets(draft.bulk).map((secret, i) => ({
-          label: `${draft.label.trim() || "key"}-${i + 1}`,
-          secret,
-        }))
-
-  const failed: AddResult["failed"] = []
+  const failed: AddFailure[] = []
+  const rejected: AddFailure[] = []
   let added = 0
-  for (const item of items) {
+
+  for (const item of draftAccounts(draft)) {
+    let created: { id: string }
     try {
-      await api.post(`/api/providers/${providerId}/keys`, item)
-      added++
+      created = await api.post<{ id: string }>(`/api/providers/${providerId}/keys`, item)
     } catch (err) {
       failed.push({ label: item.label, error: err instanceof Error ? err.message : "failed" })
+      continue
+    }
+
+    if (!draft.verifyKeys) {
+      added++
+      continue
+    }
+
+    try {
+      const probe = await api.post<ProbeResult>(
+        `/api/providers/${providerId}/test?key=${encodeURIComponent(created.id)}`,
+        {},
+      )
+      if (probe.ok) {
+        added++
+        continue
+      }
+      // The provider answered and refused it. Keeping it would leave a key
+      // that fails every request it is ever chosen for.
+      await api.del(`/api/providers/${providerId}/keys/${created.id}`)
+      rejected.push({ label: item.label, error: probe.error || "the provider refused it" })
+    } catch (err) {
+      // The probe itself could not run. The key is kept: an unreachable
+      // gateway is not evidence the key is bad, and deleting it would lose a
+      // secret the operator may not have anywhere else.
+      added++
+      failed.push({
+        label: item.label,
+        error: `kept unverified: ${err instanceof Error ? err.message : "probe failed"}`,
+      })
     }
   }
-  return { added, failed }
+  return { added, failed, rejected }
 }
 
 export function reportAdded(result: AddResult) {
-  if (result.failed.length === 0) {
-    toast.success(result.added === 1 ? "Account added" : `${result.added} accounts added`)
+  const { added, failed, rejected } = result
+  if (failed.length === 0 && rejected.length === 0) {
+    toast.success(added === 1 ? "Account added" : `${added} accounts added`)
     return
   }
-  // Naming the ones that failed, because "18 of 20" without saying which two
-  // leaves the operator to diff the list by hand.
-  const names = result.failed.map((f) => f.label).join(", ")
-  if (result.added === 0) {
-    toast.error(`No accounts added. ${names} failed: ${result.failed[0]?.error}`)
+  // Naming the ones that did not make it, because "18 of 20" without saying
+  // which two leaves the operator to diff the list by hand.
+  const names = (list: AddFailure[]) => list.map((f) => f.label).join(", ")
+  if (rejected.length > 0 && added === 0 && failed.length === 0) {
+    toast.error(`No account kept. ${names(rejected)} — ${rejected[0]?.error}`)
     return
   }
-  toast.warning(`${result.added} added, ${result.failed.length} failed: ${names}`)
+  const parts = [`${added} added`]
+  if (rejected.length > 0) parts.push(`${rejected.length} refused (${names(rejected)})`)
+  if (failed.length > 0) parts.push(`${failed.length} failed (${names(failed)})`)
+  toast.warning(parts.join(", "))
 }
