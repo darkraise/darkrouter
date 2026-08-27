@@ -1,6 +1,41 @@
-import { describe, it, expect } from "vitest"
-import { configRows, passwordProblem, readValue, reloadMessage, revokedText } from "./settings-screen"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { RouterAdapterProvider } from "darkraise-ui/router"
+import type { RouterAdapter } from "darkraise-ui/router"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  configRows,
+  passwordProblem,
+  readValue,
+  reloadMessage,
+  revokedText,
+  SettingsScreen,
+  syncMessage,
+} from "./settings-screen"
 import type { ConfigResponse } from "../../lib/api-types"
+
+// PageHeader calls useRouterAdapter unconditionally even without breadcrumbs
+// or tabs, so anything rendering it needs a provider — Settings never uses
+// Link, so a stub satisfying the interface is enough.
+const stubRouterAdapter: RouterAdapter = {
+  Link: ({ children }) => <>{children}</>,
+  useNavigate: () => () => {},
+  usePathname: () => "/settings",
+  useBack: () => () => {},
+  useInvalidate: () => () => {},
+}
+
+function mount(ui: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterAdapterProvider value={stubRouterAdapter}>{ui}</RouterAdapterProvider>
+    </QueryClientProvider>,
+  )
+}
+
+beforeEach(() => vi.unstubAllGlobals())
 
 const cfg = (): ConfigResponse => ({
   valid: true,
@@ -116,5 +151,95 @@ describe("the reload result", () => {
 
   it("confirms a clean reload", () => {
     expect(reloadMessage({ valid: true })).toMatch(/reloaded/i)
+  })
+})
+
+describe("the sync result", () => {
+  it("reports a failed sync without claiming the catalog is empty", () => {
+    expect(
+      syncMessage({ synced: false, error: "models.dev unreachable", serving: "the previous metadata is still serving" }),
+    ).toMatch(/previous metadata is still serving/)
+  })
+
+  it("carries the sync error so the operator knows what failed", () => {
+    expect(syncMessage({ synced: false, error: "timeout after 30s" })).toContain("timeout after 30s")
+  })
+
+  it("says synced rather than started, since SyncOnce already finished", () => {
+    expect(syncMessage({ synced: true })).toMatch(/synced/i)
+  })
+})
+
+function stubSettingsFetch(overrides: {
+  reload?: { valid: boolean; error?: string; serving?: string }
+  sync?: { synced: boolean; error?: string; serving?: string }
+}) {
+  let configFetches = 0
+  const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+    const method = (init as RequestInit | undefined)?.method ?? "GET"
+    if (url === "/api/config" && method === "GET") {
+      configFetches += 1
+      return new Response(JSON.stringify(cfg()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    if (url === "/api/sessions" && method === "GET") {
+      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })
+    }
+    if (url === "/api/config/reload" && method === "POST") {
+      return new Response(JSON.stringify(overrides.reload ?? { valid: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    if (url === "/api/catalog/sync" && method === "POST") {
+      return new Response(JSON.stringify(overrides.sync ?? { synced: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+  })
+  vi.stubGlobal("fetch", fetchMock)
+  return { fetchMock, configFetches: () => configFetches }
+}
+
+describe("a failed reload", () => {
+  it("shows one banner instead of stacking a second from a needless refetch", async () => {
+    // GET /api/config reports valid: false too — reload just set that error,
+    // so a refetch would faithfully repeat it, not correct it.
+    const { configFetches } = stubSettingsFetch({
+      reload: { valid: false, error: "yaml: bad", serving: "the previous configuration is still serving" },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    await user.click(await screen.findByRole("button", { name: /reload config/i }))
+
+    expect(await screen.findByText(/the reloaded configuration is invalid/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^the configuration file is invalid\.$/i)).not.toBeInTheDocument()
+    // Only the initial load fetched it; the failed reload did not trigger a
+    // second GET for the same answer.
+    await waitFor(() => expect(configFetches()).toBe(1))
+  })
+})
+
+describe("a failed sync", () => {
+  it("gets a durable banner rather than a toast that can vanish unread", async () => {
+    const { fetchMock } = stubSettingsFetch({
+      sync: { synced: false, error: "models.dev unreachable", serving: "the previous metadata is still serving" },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
+
+    expect(await screen.findByText(/models.dev unreachable/i)).toBeInTheDocument()
+    expect(screen.getByText(/the previous metadata is still serving/i)).toBeInTheDocument()
+    // A failed sync changed nothing the catalog cache needs to hear about.
+    expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/models" && (i as RequestInit)?.method !== "POST")).toBe(
+      false,
+    )
   })
 })
