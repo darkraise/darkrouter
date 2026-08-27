@@ -6,10 +6,10 @@
  * candidate has no edge at all, which is the fastest way to see that a
  * disabled or unconfigured provider is not quietly absorbing work.
  *
- * Nodes are HTML positioned over an SVG edge layer, so text is real text at
- * real weights rather than <text> that ignores the type scale. Coordinates are
- * fixed px and the viewBox matches them 1:1, so the graph scrolls rather than
- * scales: a scaled graph distorts stroke widths, and stroke width is data.
+ * The canvas is @xyflow/react; nodes are ordinary HTML, so text is real text
+ * at real weights rather than <text> that ignores the type scale. xyflow's own
+ * chrome is restyled from the same tokens as everything else, because a
+ * library's default panel in a themed console reads as a foreign object.
  *
  * Tokens are prefixed and resolved once from darkraise-ui's, for the same
  * reason the ladder's are -- the mockups' names collide with the library's.
@@ -24,62 +24,111 @@
   --rf-shadow: 0 1px 2px hsl(var(--foreground) / 0.06);
 
   /* The router's verdict colour, not the brand. Coral is position and primary
-     action only, so it never draws a routing decision. */
-  --rf-trace: hsl(var(--primary));
+     action only, so it never draws a routing decision -- --info is the cool
+     hue the language reserves for what the router decided. */
+  --rf-trace: hsl(var(--info));
 
   /* The one node that is the product rather than a participant, so it is the
      one node allowed the accent border. */
   --rf-accent: hsl(var(--primary));
   --rf-accent-ink: hsl(var(--primary));
+
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--rf-border);
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  overflow: hidden;
 }
 
-.rf-wrap { overflow-x: auto; }
+/* --- the canvas ------------------------------------------------------- */
 
-.rf-graph { position: relative; }
-
-.rf-edges {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+.rf-wrap .react-flow__background {
+  color: var(--rf-border);
 }
 
-.rf-edge { fill: none; stroke-linecap: round; }
+.rf-wrap .react-flow__edge-path {
+  fill: none;
+  stroke-linecap: round;
+}
 /* Inbound is plumbing, not a decision: the thinnest structural stroke. */
-.rf-edge-in { stroke: var(--rf-border); stroke-width: 1; }
+.rf-wrap .rf-edge-in .react-flow__edge-path {
+  stroke: var(--rf-border);
+}
 /* Outbound is the router's verdict, so it takes --trace and its width is
    share of the window. */
-.rf-edge-out { stroke: var(--rf-trace); opacity: 0.55; }
+.rf-wrap .rf-edge-out .react-flow__edge-path {
+  stroke: var(--rf-trace);
+  opacity: 0.55;
+}
 /* Traffic that landed here because somewhere else refused it. Dashed for the
    same reason the ladder dashes an attempted-and-failed stub. */
-.rf-edge-fail {
+.rf-wrap .rf-edge-fail .react-flow__edge-path {
   stroke: var(--rf-trace);
   stroke-width: 1.5;
   stroke-dasharray: 3 3;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 .rf-fo-label {
-  fill: var(--rf-legend);
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 10px;
+  position: absolute;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: hsl(var(--background));
+  color: var(--rf-legend);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
+/* Handles are anchors, not controls: nothing here is connectable. */
+.rf-wrap .react-flow__handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+}
+
+/* --- nodes ------------------------------------------------------------ */
+
 .rf-node {
-  position: absolute;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 12px;
+  /* In em, so the box grows with the text the axis just resized. A pixel
+     height here clipped the router's own label at extra-large. */
+  height: 3.3em;
   border: 1px solid var(--rf-border);
   border-radius: var(--rf-radius);
   background: var(--rf-surface);
   box-shadow: var(--rf-shadow);
-  /* A node is a fixed box: nothing inside it may escape to the right, or a
-     count lands on top of the failover arcs drawn beside the column. */
-  overflow: hidden;
+  font-size: var(--text-sm);
 }
 
-.rf-alias { justify-content: space-between; }
-.rf-alias .rf-vol { color: var(--rf-legend); }
+.rf-name {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  white-space: nowrap;
+}
+
+.rf-alias {
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+.rf-alias .rf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rf-alias .rf-vol {
+  flex: 0 0 auto;
+  color: var(--rf-legend);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
 
 /* The one node that is the product rather than a participant, so it is the
    one node allowed to carry the accent border. It does NOT take
@@ -88,25 +137,99 @@
 .rf-router {
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
+  height: 8.3em;
+  box-sizing: border-box;
   border-color: var(--rf-accent);
-  background: var(--rf-surface);
-  box-shadow: var(--rf-shadow);
 }
-.rf-router-label { margin: 0; color: var(--rf-accent-ink); }
+.rf-router-label {
+  margin: 0;
+  color: var(--rf-accent-ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 /* The readout role, not a new size: a router total is a primary reading. */
-.rf-router-total { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; }
+.rf-router-total {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
 .rf-router-unit,
-.rf-router-fo { color: var(--rf-legend); }
-.rf-router-fo { margin-top: 4px; }
+.rf-router-fo {
+  color: var(--rf-legend);
+  font-size: var(--text-sm);
+}
+
+/* --- provider rows ---------------------------------------------------- */
+
+.rf-provider {
+  padding: 0;
+}
+/* The row is the link, so the whole box is the target and the focus ring
+   traces the box rather than a word inside it. */
+.rf-provider-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 12px;
+  border-radius: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+.rf-provider:hover {
+  border-color: var(--rf-accent);
+}
+.rf-provider-link:focus-visible {
+  outline: 2px solid hsl(var(--focus-ring));
+  outline-offset: 2px;
+}
 
 .rf-prio {
-  min-width: 22px;
+  min-width: 18px;
   text-align: right;
   color: var(--rf-legend);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
-.rf-name { flex: 0 0 auto; }
+
+/* State as shape first and colour second: a pip that only differs by hue
+   says nothing in greyscale, and the state it reports is the reason an
+   operator opened this screen. */
+.rf-pip {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rf-ink-muted);
+  background: var(--rf-ink-muted);
+}
+.rf-pip[data-state="healthy"] {
+  border-color: hsl(var(--success));
+  background: hsl(var(--success));
+}
+.rf-pip[data-state="degraded"] {
+  border-color: hsl(var(--warning));
+  /* Half-filled: degraded is not failed, and the shape says so without the
+     amber having to. */
+  background: linear-gradient(to right, hsl(var(--warning)) 50%, transparent 50%);
+}
+.rf-pip[data-state="disabled"] {
+  border-color: var(--rf-ink-muted);
+  background: transparent;
+}
+.rf-pip[data-state="unconfigured"] {
+  border-style: dashed;
+  border-color: var(--rf-ink-muted);
+  background: transparent;
+}
+
 .rf-note {
   /* The note takes the slack and the bar is fixed, not the other way round:
      "1 cooling" is the reason a row is degraded and must not be the thing
@@ -114,6 +237,7 @@
   flex: 1 1 auto;
   min-width: 0;
   color: var(--rf-legend);
+  font-size: var(--text-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -127,14 +251,22 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 1px;
+  justify-content: center;
+  gap: 0;
   margin-left: auto;
   flex: 0 0 auto;
-  min-width: 76px;
+  min-width: 74px;
+  line-height: 1.25;
 }
-.rf-count { font-variant-numeric: tabular-nums; }
-.rf-pct, .rf-out { color: var(--rf-legend); }
-.rf-fo { color: var(--rf-trace); }
+.rf-count {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}
+.rf-pct,
+.rf-out {
+  color: var(--rf-legend);
+  font-size: var(--text-sm);
+}
 
 /* Not a candidate. The node stays legible — it is still configured — but it
    reads as out of the path, which is exactly what it is. */
@@ -143,4 +275,45 @@
   border-style: dashed;
   box-shadow: none;
 }
-.rf-provider-idle .rf-name { color: var(--rf-ink-muted); }
+.rf-provider-idle .rf-name {
+  color: var(--rf-ink-muted);
+}
+
+/* --- xyflow chrome ---------------------------------------------------- */
+
+.rf-wrap .react-flow__controls {
+  box-shadow: var(--rf-shadow);
+  border: 1px solid var(--rf-border);
+  border-radius: var(--rf-radius);
+  overflow: hidden;
+}
+.rf-wrap .react-flow__controls-button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-bottom: 1px solid var(--rf-border);
+  background: var(--rf-surface);
+  color: hsl(var(--foreground));
+}
+.rf-wrap .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+.rf-wrap .react-flow__controls-button:hover {
+  background: var(--rf-ground-alt);
+}
+.rf-wrap .react-flow__controls-button svg {
+  fill: currentColor;
+}
+.rf-wrap .react-flow__attribution {
+  background: transparent;
+}
+.rf-wrap .react-flow__attribution a {
+  color: var(--rf-legend);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-wrap .react-flow__edge-path {
+    animation: none;
+  }
+}
