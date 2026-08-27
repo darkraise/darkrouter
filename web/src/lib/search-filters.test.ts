@@ -15,4 +15,10 @@ describe("filterQuery", () => {
   it("encodes values that need it", () => {
     expect(filterQuery({ model: "a/b c" })).toBe("?model=a%2Fb+c")
   })
+
+  it("keeps the query string free of empty filters", () => {
+    expect(filterQuery({ provider: "groq", model: "", status: "error" })).toBe(
+      "?provider=groq&status=error",
+    )
+  })
 })

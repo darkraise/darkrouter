@@ -1,0 +1,50 @@
+import { describe, expect, it } from "vitest"
+import { newerCount, optionsFrom } from "./requests-screen"
+import type { RequestRow } from "../../lib/api-types"
+
+const row = (over: Partial<RequestRow> & { id: string }): RequestRow => ({
+  ts_ms: 0, dialect: "openai", surface: "llm", model: "m", status: "success",
+  tokens_in: 0, tokens_out: 0, cache_read_tokens: 0,
+  cost_micros: null, ttft_ms: null, total_ms: null, attempts: 1,
+  ...over,
+})
+
+describe("the newer pill", () => {
+  it("counts rows ahead of the one the reader is anchored to", () => {
+    // The poll must not shift the scroll position out from under a reader,
+    // so new rows are counted and held rather than inserted.
+    const page = [row({ id: "c" }), row({ id: "b" }), row({ id: "a" })]
+    expect(newerCount(page, "a")).toBe(2)
+  })
+
+  it("counts nothing when the anchor is still the newest", () => {
+    expect(newerCount([row({ id: "a" })], "a")).toBe(0)
+  })
+
+  it("counts nothing before the first page has an anchor", () => {
+    expect(newerCount([row({ id: "a" })], "")).toBe(0)
+  })
+
+  it("counts the whole page when the anchor has aged out of it", () => {
+    // Retention or a long absence: the anchor is gone, and claiming zero new
+    // rows would be the one answer that is certainly wrong.
+    expect(newerCount([row({ id: "c" }), row({ id: "b" })], "gone")).toBe(2)
+  })
+})
+
+describe("filter options", () => {
+  it("offers each distinct value once, sorted", () => {
+    const rows = [
+      row({ id: "1", provider: "nebius" }),
+      row({ id: "2", provider: "groq" }),
+      row({ id: "3", provider: "groq" }),
+    ]
+    expect(optionsFrom(rows, "provider")).toEqual(["groq", "nebius"])
+  })
+
+  it("omits rows where the field is absent", () => {
+    // A request nothing served has no provider, and an empty option would
+    // filter on the empty string, which matches nothing.
+    expect(optionsFrom([row({ id: "1" })], "provider")).toEqual([])
+  })
+})

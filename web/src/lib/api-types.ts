@@ -340,6 +340,12 @@ export type AuxBody = {
  *  server claim. */
 export type CountResult = { tokens: number; estimated: boolean }
 
+/** A named filter set for the requests screen. Lives in localStorage, not on
+ *  the server, so it is declared here rather than mirrored from Go — shared
+ *  between the screen and its persistence module, and a second definition of
+ *  the same shape is exactly how the two would drift. */
+export type SavedView = { name: string; filters: Record<string, string> }
+
 // --- config ---
 
 /** Where a value came from. `database` means editing the YAML has no effect,
