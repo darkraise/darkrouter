@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { render } from "@testing-library/react"
 import { describe, it, expect } from "vitest"
 import { Ladder } from "./ladder"
@@ -74,5 +77,43 @@ describe("the routing ladder", () => {
       />,
     )
     expect(container.querySelector(".mark")).toHaveClass("mark-catalog")
+  })
+})
+
+/** One mark rule's declarations, as written. */
+function markRule(css: string, mark: string): string {
+  const match = css.match(new RegExp(`\\.mark-${mark}\\s*\\{([^}]*)\\}`))
+  return match?.[1] ?? ""
+}
+
+describe("the marks read without colour", () => {
+  // Fill, stroke weight, a centre dot and silhouette size are the channels
+  // that survive greyscale. Colour is a fifth, and must never be the only one.
+  const testFile = fileURLToPath(import.meta.url)
+  const css = readFileSync(path.resolve(path.dirname(testFile), "../../styles/ladder.css"), "utf8")
+
+  it("separates a hollow skip from a filled attempt by fill", () => {
+    expect(markRule(css, "skipped")).toMatch(/background:\s*transparent/)
+    expect(markRule(css, "failed")).toMatch(/background:\s*var\(/)
+    expect(markRule(css, "served")).toMatch(/background:\s*var\(/)
+  })
+
+  it("gives cooling a second channel beyond its stroke weight", () => {
+    // 1px against 2px is the weakest pairing in the greyscale proof, so
+    // cooling also carries a centre dot.
+    expect(markRule(css, "cooling")).toMatch(/border:\s*2px/)
+    expect(css).toMatch(/\.mark-cooling::after\s*\{/)
+  })
+
+  it("makes a terminated mark a smaller silhouette, not a paler one", () => {
+    const rule = markRule(css, "terminated")
+    expect(rule).toMatch(/width:\s*6px/)
+    expect(rule).toMatch(/background:\s*transparent/)
+  })
+
+  it("gives all five states a rule of their own", () => {
+    for (const mark of ["skipped", "cooling", "failed", "served", "terminated"]) {
+      expect(markRule(css, mark)).not.toBe("")
+    }
   })
 })

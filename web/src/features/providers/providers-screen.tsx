@@ -1,3 +1,5 @@
+import { useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
   Badge,
@@ -12,8 +14,9 @@ import {
 } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useProviderHealth, useProviders } from "../../lib/queries"
-import type { BreakerEntry, Provider } from "../../lib/api-types"
+import { keys, useDiscoveryHealth, useProviderHealth, useProviders } from "../../lib/queries"
+import type { BreakerEntry, DiscoveryHealthRow, Provider } from "../../lib/api-types"
+import { AddProviderDialog } from "./add-provider-dialog"
 
 /** The four states the overview emits. `degraded` is not a synonym for
  *  `cooling`: a credential cools, a provider degrades. */
@@ -42,9 +45,26 @@ export function breakersFor(
   return entries.filter((e) => e.provider_id === providerID && e.cooling_until)
 }
 
+/** One provider's discovery health, reduced to what the table cell shows. */
+export function discoveryLine(row: DiscoveryHealthRow | undefined): string {
+  // Absence is the signal: "0 of 0 live" would read as a sweep that ran and
+  // found nothing, which is a different fact from one that never ran.
+  if (!row) return "never discovered"
+  const parts = [`${row.live} of ${row.total} live`]
+  if (row.stale > 0) parts.push(`${row.stale} stale`)
+  if (row.removed_upstream > 0) parts.push(`${row.removed_upstream} removed upstream`)
+  if (row.max_missing_streak > 0) {
+    parts.push(`missing for ${row.max_missing_streak} sweeps`)
+  }
+  return parts.join(" · ")
+}
+
 export function ProvidersScreen() {
   const providers = useProviders()
   const health = useProviderHealth()
+  const discovery = useDiscoveryHealth()
+  const navigate = useNavigate()
+  const [addOpen, setAddOpen] = useState(false)
 
   const reset = useApiMutation({
     mutationFn: (id: string) =>
@@ -68,6 +88,17 @@ export function ProvidersScreen() {
       <PageHeader
         title="Providers"
         description="What it can route to, and whether it is answering"
+        actions={
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            Add provider
+          </Button>
+        }
+      />
+
+      <AddProviderDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onCreated={(id) => void navigate({ to: `/providers/${id}` })}
       />
 
       <Table>
@@ -77,6 +108,7 @@ export function ProvidersScreen() {
             <TableHead>Kind</TableHead>
             <TableHead>Priority</TableHead>
             <TableHead>Credentials</TableHead>
+            <TableHead>Discovery</TableHead>
             <TableHead>State</TableHead>
             <TableHead />
           </TableRow>
@@ -85,6 +117,7 @@ export function ProvidersScreen() {
           {(providers.data?.providers ?? []).map((p) => {
             const state = providerState(p)
             const cooling = breakersFor(health.data ?? [], p.id)
+            const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === p.id)
             return (
               <TableRow key={p.id}>
                 <TableCell>
@@ -102,6 +135,15 @@ export function ProvidersScreen() {
                       {cooling.length} cooling
                     </span>
                   )}
+                </TableCell>
+                <TableCell
+                  className={
+                    discoveryRow && discoveryRow.max_missing_streak > 0
+                      ? "text-xs text-[hsl(var(--warning))]"
+                      : "text-xs text-[hsl(var(--legend))]"
+                  }
+                >
+                  {discoveryLine(discoveryRow)}
                 </TableCell>
                 <TableCell>
                   <Badge variant={VARIANT[state]}>{state}</Badge>

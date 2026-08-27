@@ -181,7 +181,7 @@ func testServerWithExecutor(t *testing.T, upstreamURL, model string) *Server {
 	cat := &catalog.Store{}
 	cat.Set(catalog.NewSnapshot([]catalog.Model{{
 		ProviderID: "p", ModelID: model, State: catalog.StateLive,
-		Surfaces: []ir.Surface{ir.SurfaceLLM},
+		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
 	}}, []string{"p"}))
 
 	ex := exec.New(cfg, provider.NewYAMLSource(cfg),

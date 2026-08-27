@@ -5,8 +5,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "darkraise-ui"
+import { Fragment } from "react"
+import { Link } from "@tanstack/react-router"
 import { useTrace } from "../../lib/queries"
-import type { TraceAttempt } from "../../lib/api-types"
+import type { RequestTrace, TraceAttempt, TraceBody } from "../../lib/api-types"
 import { Ladder, type LadderRow, type RetrospectiveMark } from "../ladder/ladder"
 
 /** The widest a latency bar may be drawn, in pixels. Bars are relative to the
@@ -48,6 +50,89 @@ export function ladderRows(
   }))
 }
 
+/**
+ * The request-level waterfall.
+ *
+ * §6.3 describes connect, first-token and total per attempt. Only the request
+ * carries a first-token measurement and nothing records connect timing at all,
+ * so this draws the two facts that exist; per-attempt duration stays on the
+ * ladder rows, which is where it already is.
+ */
+export function waterfallRows(
+  trace: Pick<RequestTrace, "ttft_ms" | "total_ms">,
+): { label: string; ms: number; fraction: number }[] {
+  const total = trace.total_ms
+  if (total === null || total <= 0) return []
+  const rows: { label: string; ms: number; fraction: number }[] = []
+  if (trace.ttft_ms !== null) {
+    rows.push({
+      label: "time to first token",
+      ms: trace.ttft_ms,
+      // Clamped: the two measurements can skew, and a fraction above one
+      // draws a bar outside its own track.
+      fraction: Math.min(1, trace.ttft_ms / total),
+    })
+  }
+  rows.push({ label: "total", ms: total, fraction: 1 })
+  return rows
+}
+
+export function BodiesPanel({ bodies }: { bodies?: TraceBody[] }) {
+  if (bodies === undefined || bodies.length === 0) {
+    return (
+      <p className="text-sm text-[hsl(var(--muted-foreground))]">
+        Bodies were not captured. <code>capture.bodies</code> has a retention
+        sweep and no writer, so nothing in the gateway records them yet — this
+        panel is empty for every request, not just this one.
+      </p>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {bodies.map((b, i) => (
+        // Keyed on index too: nothing writes bodies today, but two of the
+        // same kind (e.g. two tool-call turns) would otherwise collide.
+        <div key={`${b.kind}-${i}`}>
+          <p className="text-xs text-[hsl(var(--legend))]">{b.kind}</p>
+          <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--muted))] p-3 font-mono text-xs">
+            {b.content}
+          </pre>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * `capture.bodies`'s NOT NULL column forces an absent map to `{}` on write
+ * (internal/store/log.go), so `surface_meta` is present-but-empty for the
+ * overwhelming majority of requests. A truthy check on the object would pass
+ * for `{}` and draw a heading over an empty list, the same rendering-fault
+ * mistake the Bodies panel exists to avoid — so this checks key count and
+ * renders nothing, heading included, when there is nothing to show.
+ */
+export function SurfaceMetaSection({
+  meta,
+}: {
+  meta?: Record<string, unknown>
+}) {
+  const entries = Object.entries(meta ?? {})
+  if (entries.length === 0) return null
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-medium">Surface metadata</h3>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        {entries.map(([key, value]) => (
+          <Fragment key={key}>
+            <dt className="text-[hsl(var(--legend))]">{key}</dt>
+            <dd className="font-mono">{String(value)}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 export function TraceDrawer({
   id,
   onClose,
@@ -56,12 +141,24 @@ export function TraceDrawer({
   onClose: () => void
 }) {
   const trace = useTrace(id ?? "", { enabled: id !== null })
+  const waterfall = trace.data ? waterfallRows(trace.data) : []
 
   return (
     <Sheet open={id !== null} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="w-full max-w-3xl overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="font-mono text-sm">{id}</SheetTitle>
+          <SheetTitle className="flex items-center gap-4 font-mono text-sm">
+            {id}
+            {trace.data && (
+              <Link
+                to="/playground"
+                search={{ seed: trace.data.id }}
+                className="text-sm underline"
+              >
+                Open in playground
+              </Link>
+            )}
+          </SheetTitle>
         </SheetHeader>
 
         {trace.isError && (
@@ -117,6 +214,27 @@ export function TraceDrawer({
               <Ladder mode="retrospective" rows={ladderRows(trace.data.attempts)} />
             </section>
 
+            {waterfall.length > 0 && (
+              <section>
+                <h3 className="mb-2 text-sm font-medium">Latency</h3>
+                <div className="flex flex-col gap-2">
+                  {waterfall.map((row) => (
+                    <div key={row.label} className="flex flex-col gap-1">
+                      <p className="text-xs text-[hsl(var(--legend))]">
+                        {row.label} · {row.ms.toLocaleString()}ms
+                      </p>
+                      <div className="h-2 w-full rounded bg-[hsl(var(--muted))]">
+                        <div
+                          className="h-2 rounded bg-[hsl(var(--legend))]"
+                          style={{ width: `${row.fraction * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {trace.data.skips.length > 0 && (
               <section>
                 <h3 className="mb-2 text-sm font-medium">Skipped candidates</h3>
@@ -140,6 +258,13 @@ export function TraceDrawer({
                 </ul>
               </section>
             )}
+
+            <section>
+              <h3 className="mb-2 text-sm font-medium">Bodies</h3>
+              <BodiesPanel bodies={trace.data.bodies} />
+            </section>
+
+            <SurfaceMetaSection meta={trace.data.surface_meta} />
           </div>
         )}
       </SheetContent>
