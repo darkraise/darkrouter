@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { compressedRows, priceLabel, priceBand, facetRow } from "./models-screen"
+import { compressedRows, matches, priceLabel, priceBand, facetRow } from "./models-screen"
 import type { Model } from "../../lib/api-types"
 
 const model = (over: Partial<Model> & { model: string }): Model => ({
@@ -27,6 +27,23 @@ describe("the compressed ladder", () => {
   it("keeps catalog order, which is the order the router would walk", () => {
     const rows = compressedRows(model({ model: "m", providers: ["first", "second"] }))
     expect(rows.map((r) => r.target)).toEqual(["first/m", "second/m"])
+  })
+})
+
+describe("model filtering", () => {
+  it("matches a model by substring, case-insensitively", () => {
+    expect(matches(model({ model: "GPT-OSS-120b" }), { model: "oss" })).toBe(true)
+    expect(matches(model({ model: "llama" }), { model: "oss" })).toBe(false)
+  })
+
+  it("matches any provider that serves the model", () => {
+    const m = model({ model: "m", providers: ["groq", "together"] })
+    expect(matches(m, { provider: "together" })).toBe(true)
+    expect(matches(m, { provider: "openai" })).toBe(false)
+  })
+
+  it("treats an absent filter as no filter", () => {
+    expect(matches(model({ model: "m" }), {})).toBe(true)
   })
 })
 

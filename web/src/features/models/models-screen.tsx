@@ -1,11 +1,14 @@
 import { useState } from "react"
 import { PageHeader } from "darkraise-ui/layout"
-import { Badge, Button } from "darkraise-ui"
+import { Badge, Button, Input } from "darkraise-ui"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
+import { useSearchFilters } from "../../lib/search-filters"
 import type { Model, Pricing } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { OverrideEditor } from "./override-editor"
+
+const FIELDS = ["model", "provider"] as const
 
 /**
  * The compressed ladder for one model: every provider that serves it, in
@@ -20,6 +23,25 @@ export function compressedRows(m: Model): LadderRow<PredictiveMark>[] {
     mark: "skipped",
     target: `${provider}/${m.model}`,
   }))
+}
+
+/**
+ * URL-backed prefilter, applied before the catalog reaches DataTable.
+ *
+ * DataTable's own search/facets narrow whatever data it is handed, but that
+ * state is private to the component — nothing controls it and nothing reads
+ * it back out. A reload or a pasted link would silently drop the filter, so
+ * "which models am I even looking at" has to live in the URL instead, the
+ * same way Requests keeps FilterSelect in the URL and layers its own facets
+ * on top of the already-filtered page.
+ */
+export function matches(m: Model, filters: Record<string, string>): boolean {
+  const model = filters.model?.toLowerCase() ?? ""
+  const provider = filters.provider?.toLowerCase() ?? ""
+  if (model && !m.model.toLowerCase().includes(model)) return false
+  if (provider && !m.providers.some((p) => p.toLowerCase().includes(provider)))
+    return false
+  return true
 }
 
 export function priceLabel(p: Pricing | null): string {
@@ -181,8 +203,9 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
 }
 
 export function ModelsScreen() {
+  const [filters, setFilter] = useSearchFilters(FIELDS)
   const catalog = useModels()
-  const models = catalog.data?.models ?? []
+  const models = (catalog.data?.models ?? []).filter((m) => matches(m, filters))
   const [editing, setEditing] = useState<{ provider: string; model: string } | null>(null)
 
   return (
@@ -192,6 +215,18 @@ export function ModelsScreen() {
         description="What it can route to, and which providers serve each one"
       />
 
+      <div className="mb-4 flex flex-wrap gap-2">
+        {FIELDS.map((field) => (
+          <Input
+            key={field}
+            placeholder={field}
+            value={filters[field]}
+            onChange={(e) => setFilter(field, e.target.value)}
+            className="w-48"
+          />
+        ))}
+      </div>
+
       <DataTable
         data={models.map(facetRow)}
         columns={buildColumns((provider, model) => setEditing({ provider, model }))}
@@ -200,6 +235,12 @@ export function ModelsScreen() {
         searchPlaceholder="Search models"
         virtualize={{ rowHeight: 40, height: 640 }}
       />
+
+      {models.length === 0 && (
+        <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
+          No models match these filters.
+        </p>
+      )}
 
       {editing && (
         <OverrideEditor
