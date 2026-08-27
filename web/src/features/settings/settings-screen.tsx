@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { PageHeader } from "darkraise-ui/layout"
 import {
   Badge,
@@ -54,6 +55,15 @@ export function reloadMessage(res: ReloadResult): string {
     .join(" — ")
 }
 
+export function syncMessage(res: SyncResult): string {
+  // SyncOnce runs synchronously and this response is its result, not an
+  // acknowledgement — the sync is done, not started.
+  if (res.synced) return "Catalog synced."
+  return [res.error, res.serving ?? "the previous metadata is still serving"]
+    .filter(Boolean)
+    .join(" — ")
+}
+
 const SOURCE_NOTE = {
   file: "from darkrouter.yaml",
   // §8.1 requires the config view to say this at the point of display: after
@@ -65,6 +75,7 @@ const SOURCE_NOTE = {
 export function SettingsScreen() {
   const config = useConfig()
   const sessions = useSessions()
+  const queryClient = useQueryClient()
 
   const revoke = useApiMutation({
     mutationFn: (id: string) => api.del(`/api/sessions/${id}`),
@@ -74,23 +85,31 @@ export function SettingsScreen() {
 
   const reload = useApiMutation({
     mutationFn: () => api.post<ReloadResult>("/api/config/reload"),
-    invalidates: [keys.config],
     onSuccess: (res) => {
       // Only the good outcome toasts. A toast for a config that is still
       // broken disappears before it can be acted on — that one gets the
       // banner below instead, which stays up until the next reload attempt.
-      if (res.valid) toast.success(reloadMessage(res))
+      if (res.valid) {
+        toast.success(reloadMessage(res))
+        // Refetching on failure would pull back the same invalid config this
+        // response already describes, stacking a second banner beside this
+        // one for no new information.
+        void queryClient.invalidateQueries({ queryKey: keys.config })
+      }
     },
   })
 
   const sync = useApiMutation({
     mutationFn: () => api.post<SyncResult>("/api/catalog/sync"),
-    invalidates: [keys.models],
     onSuccess: (res) => {
       // Sync shares the reload endpoint's shape: a 200 with synced:false is
-      // an outcome, not a failed request, so a flat success toast would lie.
-      if (res.synced) toast.success("Catalog sync started.")
-      else toast.error(`Catalog sync failed: ${res.error ?? "unknown error"}`)
+      // an outcome, not a failed request. Treated the same way as reload's
+      // failure — a durable banner, not a toast that can vanish before it's
+      // read — and the same reason not to refetch a catalog that didn't change.
+      if (res.synced) {
+        toast.success(syncMessage(res))
+        void queryClient.invalidateQueries({ queryKey: keys.models })
+      }
     },
   })
 
@@ -116,6 +135,15 @@ export function SettingsScreen() {
           <p className="text-sm font-medium">The reloaded configuration is invalid.</p>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             {reloadMessage(reload.data)}
+          </p>
+        </Card>
+      )}
+
+      {sync.data && !sync.data.synced && (
+        <Card className="mb-6 border-[hsl(var(--destructive))] p-4">
+          <p className="text-sm font-medium">The catalog sync failed.</p>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            {syncMessage(sync.data)}
           </p>
         </Card>
       )}
