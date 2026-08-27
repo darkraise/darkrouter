@@ -268,6 +268,14 @@ export function Chat() {
           placeholder="Message"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          // Enter submits like every other chat surface; Shift+Enter is left
+          // alone since this is a single-line Input, not a Textarea, so
+          // there is no newline for it to insert anyway.
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || busy || state.model === "" || draft === "" || toolsError !== undefined) return
+            e.preventDefault()
+            void send()
+          }}
         />
         <Button
           onClick={() => void send()}
