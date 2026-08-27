@@ -44,7 +44,7 @@ export function ProviderCard({
           </dd>
           <dt className="text-[hsl(var(--legend))]">Accounts</dt>
           <dd className="text-right tabular-nums">
-            {row.configured ? (
+            {row.accounts > 0 ? (
               <>
                 {row.accounts}
                 {cooling.length > 0 && (

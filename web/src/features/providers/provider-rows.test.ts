@@ -114,6 +114,22 @@ describe("filterProviderRows", () => {
     ])
   })
 
+  it("drops a provider whose last account was deleted", () => {
+    // The reported bug: the row survives its keys, and keying the filter on
+    // the row rather than on the accounts made "Configured only" keep a
+    // provider the badge beside it called unconfigured.
+    const emptied = mergeProviderRows(
+      [preset("groq"), preset("cerebras")],
+      [provider("groq", { credentials: [] })],
+    )
+    expect(filterProviderRows(emptied, { configuredOnly: true })).toEqual([])
+    // And it is still in the full list, still openable, because its row --
+    // and the priority and import settings on it -- are still there.
+    expect(emptied.map((r) => r.id)).toEqual(["groq", "cerebras"])
+    expect(emptied[0]?.provider).toBeDefined()
+    expect(emptied[0]?.state).toBe("unconfigured")
+  })
+
   it("narrows by state", () => {
     expect(filterProviderRows(rows, { state: "disabled" }).map((r) => r.id)).toEqual(["cerebras"])
   })

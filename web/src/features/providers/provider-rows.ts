@@ -22,9 +22,19 @@ export type ProviderRow = {
   /** Null until the provider has a row, because priority is a property of
    *  the configuration rather than of the catalogue. */
   priority: number | null
+  /**
+   * Whether the router can pick this provider — that is, whether it has an
+   * account. NOT whether it has a database row: a provider keeps its row
+   * after its last key is deleted, and calling that "configured" made the
+   * filter disagree with the state badge beside it on the same line.
+   *
+   * `provider` is what says a row exists, and it is what the detail page and
+   * the per-row actions key on.
+   */
   configured: boolean
   freeTier: boolean
-  /** Present only when configured; the list's actions need the real thing. */
+  /** Present when the provider has a database row, with or without accounts.
+   *  The detail page and the per-row actions need the real thing. */
   provider?: Provider
 }
 
@@ -51,7 +61,7 @@ function rowFromProvider(p: Provider, preset: Preset | undefined): ProviderRow {
     state: providerState(p),
     accounts: p.credentials.length,
     priority: p.priority,
-    configured: true,
+    configured: p.credentials.length > 0,
     freeTier: preset?.free_tier ?? false,
     provider: p,
   }
