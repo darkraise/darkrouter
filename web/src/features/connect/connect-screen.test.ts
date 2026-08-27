@@ -37,7 +37,11 @@ describe("originFor", () => {
     // A single combined listener behind a reverse proxy should not be
     // second-guessed by rewriting a port the operator already fronted.
     expect(
-      originFor({ origin: "http://gateway:8080", hostname: "gateway" }, ":8080", ":8080"),
+      originFor(
+        { origin: "http://gateway:8080", hostname: "gateway", protocol: "http:" },
+        ":8080",
+        ":8080",
+      ),
     ).toBe("http://gateway:8080")
   })
 
@@ -46,8 +50,24 @@ describe("originFor", () => {
     // proxy port — the whole reason this function exists rather than a
     // bare `window.location.origin` reference in the component.
     expect(
-      originFor({ origin: "http://gateway:8081", hostname: "gateway" }, ":8080", ":8081"),
+      originFor(
+        { origin: "http://gateway:8081", hostname: "gateway", protocol: "http:" },
+        ":8080",
+        ":8081",
+      ),
     ).toBe("http://gateway:8080")
+  })
+
+  it("carries the page's own scheme rather than hardcoding http", () => {
+    // A console served over https behind a reverse proxy with split
+    // admin/proxy ports must not emit an http:// URL for a client to copy.
+    expect(
+      originFor(
+        { origin: "https://gateway:8081", hostname: "gateway", protocol: "https:" },
+        ":8080",
+        ":8081",
+      ),
+    ).toBe("https://gateway:8080")
   })
 })
 
