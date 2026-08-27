@@ -10,7 +10,7 @@ function mount(ui: React.ReactNode) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
-function stub(presets: Preset[], providers: Provider[] = []) {
+function stub(presets: Preset[], providers: Provider[] = [], probeOk = true) {
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), {
@@ -22,6 +22,10 @@ function stub(presets: Preset[], providers: Provider[] = []) {
       return json({ providers })
     }
     if (url === "/api/providers") return json({ id: "groq" }, 201)
+    if (String(url).includes("/test")) {
+      return json({ ok: probeOk, probe: "models", latency_ms: 12, error: probeOk ? "" : "401" })
+    }
+    if (String(url).endsWith("/keys")) return json({ id: "cred-1", label: "x" }, 201)
     return json({})
   })
   vi.stubGlobal("fetch", fetchMock)
@@ -38,7 +42,7 @@ const preset = (over: Partial<Preset> & { id: string }): Preset => ({
 
 const provider = (id: string, credentials: Credential[] = []): Provider => ({
   id, name: id, preset: id, kind: "openaicompat", base_url: "https://x.example",
-  priority: 10, enabled: true, auth_style: "bearer", credentials,
+  priority: 10, enabled: true, auth_style: "bearer", free_models_only: false, credentials,
 })
 
 const cred = (id: string): Credential => ({
@@ -107,9 +111,11 @@ describe("the wizard", () => {
       const posts = fetchMock.mock.calls.filter(
         ([, init]) => (init as RequestInit)?.method === "POST",
       )
+      // The provider row, the key, then the probe that proves the key works.
       expect(posts.map(([url]) => String(url))).toEqual([
         "/api/providers",
         "/api/providers/groq/keys",
+        "/api/providers/groq/test?key=cred-1",
       ])
     })
   })
@@ -127,9 +133,12 @@ describe("the wizard", () => {
       const posts = fetchMock.mock.calls.filter(
         ([, init]) => (init as RequestInit)?.method === "POST",
       )
-      // Only the key: a second POST /api/providers would 409 against the row
-      // that is already there.
-      expect(posts.map(([url]) => String(url))).toEqual(["/api/providers/groq/keys"])
+      // No second POST /api/providers: it would 409 against the row that is
+      // already there.
+      expect(posts.map(([url]) => String(url))).toEqual([
+        "/api/providers/groq/keys",
+        "/api/providers/groq/test?key=cred-1",
+      ])
     })
   })
 
@@ -140,13 +149,71 @@ describe("the wizard", () => {
     expect(screen.getByRole("button", { name: /review/i })).toBeDisabled()
   })
 
-  it("writes one key per pasted line", async () => {
+  it("removes a key the provider refuses", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])], false)
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-bad")
+    await userEvent.click(screen.getByRole("button", { name: /review/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      // Only what works survives: the key is written, probed, and taken back.
+      const deletes = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "DELETE",
+      )
+      expect(deletes.map(([url]) => String(url))).toEqual([
+        "/api/providers/groq/keys/cred-1",
+      ])
+    })
+  })
+
+  it("keeps every key when the check is turned off", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])], false)
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-unchecked")
+    await userEvent.click(screen.getByRole("checkbox", { name: /check every key/i }))
+    await userEvent.click(screen.getByRole("button", { name: /review/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "POST",
+      )
+      expect(posts.map(([url]) => String(url))).toEqual(["/api/providers/groq/keys"])
+    })
+  })
+
+  it("carries the free-models choice into the provider it creates", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-aaaa")
+    await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
+    await userEvent.click(screen.getByRole("button", { name: /review/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      const create = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+      )
+      expect(JSON.parse((create?.[1] as RequestInit).body as string)).toEqual({
+        id: "groq", preset: "groq", free_models_only: true,
+      })
+    })
+  })
+
+  it("names each pasted account from its own line", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
-    await userEvent.type(screen.getByLabelText(/one per line/i), "sk-aaa\nsk-bbb")
+    await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nsk-bbb")
     await userEvent.click(screen.getByRole("button", { name: /review/i }))
     await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))
 
@@ -157,7 +224,10 @@ describe("the wizard", () => {
       )
       expect(keyPosts).toHaveLength(2)
       expect(JSON.parse((keyPosts[0]?.[1] as RequestInit).body as string)).toEqual({
-        label: "key-1", secret: "sk-aaa",
+        label: "work", secret: "sk-aaa",
+      })
+      expect(JSON.parse((keyPosts[1]?.[1] as RequestInit).body as string)).toEqual({
+        label: "key-2", secret: "sk-bbb",
       })
     })
   })

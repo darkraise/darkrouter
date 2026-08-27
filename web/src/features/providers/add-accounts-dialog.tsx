@@ -15,8 +15,8 @@ import { useApiMutation } from "../../lib/mutations"
 import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
-import { AccountFields, type AccountDraft, emptyAccounts, maskSecret, parseBulkSecrets } from "./account-fields"
-import { addCredentials, countAccounts, reportAdded } from "./accounts"
+import { AccountFields, type AccountDraft, draftAccounts, emptyAccounts, maskSecret } from "./account-fields"
+import { addCredentials, reportAdded } from "./accounts"
 import { ProviderIcon } from "./provider-icon"
 
 export function filterPresets(
@@ -183,6 +183,7 @@ export function AddAccountsDialog({
         await api.post<{ id: string }>("/api/providers", {
           id: selected.id,
           preset: selected.id,
+          free_models_only: accounts.freeModelsOnly,
         })
       }
       return addCredentials(selected.id, accounts)
@@ -201,8 +202,8 @@ export function AddAccountsDialog({
   const filtered = filterPresets(all, { q, surface, authKind, freeTier })
   const surfaceOptions = distinctSorted(all.flatMap((p) => p.surfaces))
   const authKindOptions = distinctSorted(all.map((p) => p.auth_kind))
-  const count = countAccounts(accounts)
-  const secrets = accounts.mode === "bulk" ? parseBulkSecrets(accounts.bulk) : []
+  const planned = draftAccounts(accounts)
+  const count = planned.length
 
   return (
     <Dialog
@@ -275,6 +276,12 @@ export function AddAccountsDialog({
                 </span>
               </span>
             </div>
+
+            {/* Inset rather than full width: it marks a break inside one panel
+                -- which provider, then what to give it -- rather than the edge
+                between two. */}
+            <div className="ml-12 border-t" aria-hidden="true" />
+
             <AccountFields value={accounts} onChange={setAccounts} autoFocus />
           </div>
         )}
@@ -298,18 +305,25 @@ export function AddAccountsDialog({
 
             {/* The masked keys, in the order they will be written. This is the
                 last point at which a stray line is cheap to notice. */}
-            <ul className="flex flex-col gap-1 rounded-[var(--radius)] border p-3 font-mono text-sm">
-              {accounts.mode === "single" ? (
-                <li>
-                  {accounts.label.trim() || "default"} · {maskSecret(accounts.secret.trim())}
+            <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto rounded-[var(--radius)] border p-3 font-mono text-sm">
+              {planned.map((a) => (
+                <li key={a.secret}>
+                  {a.label} · {maskSecret(a.secret)}
                 </li>
-              ) : (
-                secrets.map((s, i) => (
-                  <li key={s}>
-                    {`${accounts.label.trim() || "key"}-${i + 1}`} · {maskSecret(s)}
-                  </li>
-                ))
-              )}
+              ))}
+            </ul>
+
+            <ul className="flex flex-col gap-1 text-sm text-[hsl(var(--legend))]">
+              <li>
+                {accounts.freeModelsOnly
+                  ? "Discovery will import only models it can show are free."
+                  : "Discovery will import every model the provider lists."}
+              </li>
+              <li>
+                {accounts.verifyKeys
+                  ? "Each key is probed, and any the provider refuses is removed again."
+                  : "Keys are stored without being checked."}
+              </li>
             </ul>
           </div>
         )}
