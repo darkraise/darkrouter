@@ -1,5 +1,13 @@
 import { useState } from "react"
-import { Button, Card, Input, Label } from "darkraise-ui"
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+} from "darkraise-ui"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
@@ -21,21 +29,45 @@ export function revokedText(revoked: number): string {
 }
 
 /**
- * The current password, even though the caller already holds a session:
- * the server refuses the write without it, so asking for it here is not
- * optional friction.
+ * Changing the console password, from the user menu.
+ *
+ * It asks for the current password even though the caller already holds a
+ * session: the server refuses the write without it, so this is not optional
+ * friction.
+ *
+ * A dialog rather than a panel on a screen. It belongs to whoever is signed
+ * in rather than to the gateway's configuration, and it is reached from the
+ * same menu as signing out.
  */
-export function AccountCard() {
+export function ChangePasswordDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const [current, setCurrent] = useState("")
   const [next, setNext] = useState("")
   const [confirm, setConfirm] = useState("")
 
-  const problem = passwordProblem(next, confirm)
+  // Nothing is typed yet, so nothing is wrong yet: showing "at least 12
+  // characters" over an untouched form scolds before the operator has done
+  // anything.
+  const touched = next !== "" || confirm !== ""
+  const problem = touched ? passwordProblem(next, confirm) : null
+
+  function clear() {
+    // Plaintext in state past the moment it is needed is a liability with no
+    // upside; clearing also leaves the form ready for another change.
+    setCurrent("")
+    setNext("")
+    setConfirm("")
+  }
 
   const change = useApiMutation({
     mutationFn: () =>
       // A wrong current password is a legitimate rejection, not a dead
-      // session — naming it here keeps the operator on this screen instead
+      // session — naming it here keeps the operator on this dialog instead
       // of bouncing them to login over their own typo.
       api.post<{ revoked: number }>(
         "/api/auth/password",
@@ -45,11 +77,8 @@ export function AccountCard() {
     invalidates: [keys.sessions],
     success: (res) => revokedText(res.revoked),
     onSuccess: () => {
-      // Plaintext in state past the moment it's needed is a liability with
-      // no upside; clearing it also leaves the form ready for another change.
-      setCurrent("")
-      setNext("")
-      setConfirm("")
+      clear()
+      onOpenChange(false)
     },
   })
 
@@ -61,15 +90,34 @@ export function AccountCard() {
     change.error instanceof ApiError && change.error.status === 401 ? change.error.message : null
 
   return (
-    <Card className="mb-6 p-4">
-      <h2 className="mb-3 text-sm font-medium">Account</h2>
-      <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-3 gap-3">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) clear()
+        onOpenChange(nextOpen)
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          {/* "Account", not "Change password": darkraise-ui's UserMenu
+              hardcodes its item labels, and the one that opens this reads
+              "Profile". A dialog titled for the button that did not open it
+              is a worse mismatch than a broader title. */}
+          <DialogTitle>Account</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <h3 className="text-sm font-medium">Change password</h3>
+          <p className="-mt-2 text-sm text-[hsl(var(--muted-foreground))]">
+            Every other signed-in browser is signed out when the password changes.
+          </p>
+
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="account-current-password">Current password</Label>
             <Input
               id="account-current-password"
               type="password"
+              autoComplete="current-password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
             />
@@ -79,6 +127,7 @@ export function AccountCard() {
             <Input
               id="account-new-password"
               type="password"
+              autoComplete="new-password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
             />
@@ -88,27 +137,31 @@ export function AccountCard() {
             <Input
               id="account-confirm-password"
               type="password"
+              autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
             />
           </div>
+
+          {problem && <p className="text-sm text-[hsl(var(--destructive))]">{problem}</p>}
+          {!problem && wrongPassword && (
+            <p className="text-sm text-[hsl(var(--destructive))]">{wrongPassword}</p>
+          )}
+
+          <div className="flex items-center gap-2 border-t pt-3">
+            <Button
+              size="sm"
+              disabled={current === "" || !touched || problem !== null || change.isPending}
+              onClick={() => change.mutate()}
+            >
+              Change password
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+          </div>
         </div>
-        {problem && (
-          <p className="text-sm text-[hsl(var(--destructive))]">{problem}</p>
-        )}
-        {!problem && wrongPassword && (
-          <p className="text-sm text-[hsl(var(--destructive))]">{wrongPassword}</p>
-        )}
-        <div>
-          <Button
-            size="sm"
-            disabled={problem !== null || change.isPending}
-            onClick={() => change.mutate()}
-          >
-            Change password
-          </Button>
-        </div>
-      </div>
-    </Card>
+      </DialogContent>
+    </Dialog>
   )
 }

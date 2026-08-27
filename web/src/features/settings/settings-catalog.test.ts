@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import type { ConfigResponse } from "../../lib/api-types"
 import {
+  EDITABLE,
   SETTINGS,
   formatBytes,
   formatDuration,
@@ -148,5 +149,29 @@ describe("settingGroups", () => {
     // Every named setting still renders even with no field metadata, so the
     // groups that survive are the ones the catalogue names.
     expect(groups.every((g) => g.rows.length > 0)).toBe(true)
+  })
+})
+
+describe("the editable set", () => {
+  it("holds only settings the API will accept a write for", () => {
+    // policy and aliases are the only writable blocks, and aliases have their
+    // own editor on Routing. Anything else would be a control that refuses to
+    // move.
+    expect(EDITABLE.every((s) => s.field.startsWith("policy."))).toBe(true)
+  })
+
+  it("leaves out the two timeouts a reload cannot apply", () => {
+    // Both configure the one shared transport built at startup, and
+    // PUT /api/policy refuses a write that touches either.
+    const fields = EDITABLE.map((s) => s.field)
+    expect(fields).not.toContain("policy.timeout.connect")
+    expect(fields).not.toContain("policy.timeout.first_byte")
+  })
+
+  it("takes its names from the same catalogue the rest of the console uses", () => {
+    for (const setting of EDITABLE) {
+      expect(setting.name).toBe(SETTINGS[setting.field]?.name)
+      expect(setting.description).toBeTruthy()
+    }
   })
 })

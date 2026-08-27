@@ -7,6 +7,7 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router"
+import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
@@ -14,6 +15,8 @@ import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { OverviewScreen } from "../features/overview/overview-screen"
 import { nav, settingsItem } from "../features/shell/nav"
+import { ChangePasswordDialog } from "../features/settings/change-password-dialog"
+import { api } from "./api"
 import { UsageScreen } from "../features/usage/usage-screen"
 import { ProvidersScreen } from "../features/providers/providers-screen"
 import { ProviderDetail } from "../features/providers/provider-detail"
@@ -95,11 +98,25 @@ export const routerAdapter: RouterAdapter = {
  * would be reaching for a router context that does not exist yet.
  */
 function RootShell() {
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const navigate = useNavigate()
   return (
     <RouterAdapterProvider value={routerAdapter}>
+      <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
       <SidebarLayout
         nav={nav}
         showThemeSwitcher
+        // The password belongs to whoever is signed in rather than to the
+        // gateway's configuration, so it is reached from the same menu as
+        // signing out.
+        user={{ name: "Administrator", email: "" }}
+        onProfile={() => setPasswordOpen(true)}
+        onSettings={() => void navigate({ to: "/settings" })}
+        onLogout={() => {
+          // The 401 the next request gets is what the app's global listener
+          // turns into the login screen, so this only has to end the session.
+          void api.post("/api/auth/logout", {}).finally(() => window.location.reload())
+        }}
         sidebarFooter={
           <SidebarNav nav={[{ items: [settingsItem] }]} />
         }
