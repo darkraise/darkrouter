@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { parseTools, chatBody, seedFromTrace } from "./chat"
+import { parseTools, chatBody, seedFromTrace, drainSSE, extractUnaryText } from "./chat"
 import type { RequestTrace } from "../../lib/api-types"
 
 describe("parseTools", () => {
@@ -88,5 +88,99 @@ describe("seedFromTrace", () => {
     // wire, which this screen has no control for.
     const seeded = seedFromTrace({ id: "r1", model: "m", dialect: "responses" } as RequestTrace)
     expect(seeded.dialect).toBe("openai")
+  })
+})
+
+// Fixtures below mirror the exact wire shapes internal/edge/{openai,
+// anthropic,gemini}/stream.go and write.go emit — not a guessed shape.
+
+describe("drainSSE", () => {
+  it("reads an openai chunk's choices[0].delta.content", () => {
+    const frame = 'data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n\n'
+    expect(drainSSE(frame, "openai").text).toBe("Hi")
+  })
+
+  it("ignores the openai [DONE] sentinel", () => {
+    expect(drainSSE("data: [DONE]\n\n", "openai")).toEqual({ text: "", rest: "" })
+  })
+
+  it("reads text only from an anthropic content_block_delta frame", () => {
+    // message_start and content_block_start carry no delta text and must be
+    // skipped rather than crashing the parse.
+    const buffer =
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"m1"}}\n\n' +
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}\n\n' +
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+    expect(drainSSE(buffer, "anthropic").text).toBe("Hello")
+  })
+
+  it("ignores an anthropic thinking_delta, which carries no `text`", () => {
+    const frame =
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reasoning..."}}\n\n'
+    expect(drainSSE(frame, "anthropic").text).toBe("")
+  })
+
+  it("reads text parts from a gemini candidate chunk", () => {
+    const frame =
+      'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"index":0}],"modelVersion":"m"}\n\n'
+    expect(drainSSE(frame, "gemini").text).toBe("Hi")
+  })
+
+  it("excludes a gemini thought part from the rendered text", () => {
+    // A thought part carries thought: true alongside its own text field, and
+    // is not the answer.
+    const frame =
+      'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"thinking","thought":true},{"text":"answer"}]},"index":0}]}\n\n'
+    expect(drainSSE(frame, "gemini").text).toBe("answer")
+  })
+
+  it("holds an incomplete frame back for the next chunk", () => {
+    const { text, rest } = drainSSE('data: {"choices":[{"delta":{"content":"Hi"}}]}\n\ndata: {"choi', "openai")
+    expect(text).toBe("Hi")
+    expect(rest).toBe('data: {"choi')
+  })
+})
+
+describe("extractUnaryText", () => {
+  it("reads an openai unary response's choices[0].message.content", () => {
+    const body = JSON.stringify({
+      id: "chatcmpl-1", object: "chat.completion", model: "m",
+      choices: [{ index: 0, message: { role: "assistant", content: "Hello" }, finish_reason: "stop" }],
+    })
+    expect(extractUnaryText("openai", body)).toBe("Hello")
+  })
+
+  it("reads a null openai content as no text rather than throwing", () => {
+    const body = JSON.stringify({ choices: [{ message: { role: "assistant", content: null } }] })
+    expect(extractUnaryText("openai", body)).toBe("")
+  })
+
+  it("reads an anthropic unary response's text content blocks", () => {
+    const body = JSON.stringify({
+      id: "msg_1", type: "message", role: "assistant", model: "m",
+      content: [{ type: "text", text: "Hello" }],
+      stop_reason: "end_turn", stop_sequence: null,
+    })
+    expect(extractUnaryText("anthropic", body)).toBe("Hello")
+  })
+
+  it("skips an anthropic tool_use block, which carries no text", () => {
+    const body = JSON.stringify({
+      content: [
+        { type: "tool_use", id: "t1", name: "lookup", input: {} },
+        { type: "text", text: "done" },
+      ],
+    })
+    expect(extractUnaryText("anthropic", body)).toBe("done")
+  })
+
+  it("reads a gemini unary response's candidate parts", () => {
+    const body = JSON.stringify({
+      candidates: [{ content: { role: "model", parts: [{ text: "Hello" }] }, finishReason: "STOP", index: 0 }],
+      modelVersion: "m", responseId: "r1",
+    })
+    expect(extractUnaryText("gemini", body)).toBe("Hello")
   })
 })
