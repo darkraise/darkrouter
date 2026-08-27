@@ -146,15 +146,30 @@ export async function* stream(
     body: JSON.stringify(body),
     credentials: "same-origin",
   })
-  if (res.status === 401) loggedOut()
   if (!res.ok || !res.body) {
     let message = res.statusText
+    // A 401 here is ambiguous in a way request() never sees: this path also
+    // carries a live executor run, and a bad credential answers 401 too —
+    // that is the playground's whole reason to exist. Every admin-issued
+    // rejection (a dead session included) shapes its body as {"error":
+    // "<string>"}; only a body that reached a dialect writer nests an object
+    // there instead, which means the request cleared the session check and
+    // the 401 is the provider calling the credential bad, not the console.
+    let sessionDead = res.status === 401
     try {
-      const parsed = (await res.json()) as { error?: string }
-      if (parsed.error) message = parsed.error
+      const parsed = (await res.json()) as { error?: unknown }
+      if (typeof parsed.error === "string") {
+        message = parsed.error
+      } else if (parsed.error && typeof parsed.error === "object") {
+        sessionDead = false
+        const nested = parsed.error as { message?: string }
+        if (nested.message) message = nested.message
+      }
     } catch {
-      // Same reasoning as above.
+      // A non-JSON error body means something upstream of the API answered.
+      // The status line is all there is to report.
     }
+    if (sessionDead) loggedOut()
     throw new ApiError(res.status, message)
   }
   onStart?.({ requestId: res.headers.get("X-Darkrouter-Request") ?? "" })
