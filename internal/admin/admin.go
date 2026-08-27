@@ -139,6 +139,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/oauth/callback", s.requireSession(s.handleOAuthCallback))
 
 	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
+	s.mux.HandleFunc("POST /api/playground/count", s.requireCSRF(s.handlePlaygroundCount))
+	s.mux.HandleFunc("POST /api/playground/aux", s.requireCSRF(s.handlePlaygroundAux))
 
 	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
 	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
@@ -150,6 +152,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/config", s.requireCSRF(s.handleConfigPut))
 
 	s.mux.HandleFunc("GET /api/health/providers", s.requireSession(s.handleHealthProviders))
+	s.mux.HandleFunc("GET /api/health/discovery", s.requireSession(s.handleDiscoveryHealth))
 	s.mux.HandleFunc("POST /api/providers/{id}/breaker/reset", s.requireCSRF(s.handleBreakerReset))
 	s.mux.HandleFunc("POST /api/providers/{id}/discover", s.requireCSRF(s.handleForceDiscover))
 	s.mux.HandleFunc("POST /api/catalog/sync", s.requireCSRF(s.handleForceCatalogSync))

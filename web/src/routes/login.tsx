@@ -3,6 +3,7 @@ import { Button } from "darkraise-ui/components/button"
 import { Card } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
 import { api, setCsrfToken } from "../lib/api"
+import { IdentityMark } from "../features/shell/identity-mark"
 
 export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [password, setPassword] = useState("")
@@ -34,7 +35,10 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-sm p-6">
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <h1 className="text-xl font-medium">Darkrouter</h1>
+          <div className="flex flex-col items-center gap-2">
+            <IdentityMark size={72} />
+            <h1 className="text-xl font-medium">darkrouter</h1>
+          </div>
           <Input
             type="password"
             autoFocus

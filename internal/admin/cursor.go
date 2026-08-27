@@ -16,13 +16,14 @@ import (
 // and so a new filter is a compile error at every call site rather than a
 // silently ignored query parameter.
 type RequestFilters struct {
-	Provider string
-	Model    string
-	Status   string
-	Alias    string
-	Surface  string
-	SinceMs  int64
-	UntilMs  int64
+	Provider  string
+	Model     string
+	Status    string
+	Alias     string
+	Surface   string
+	ErrorCode string
+	SinceMs   int64
+	UntilMs   int64
 }
 
 // Hash identifies the filter set a cursor was minted under.
@@ -33,7 +34,7 @@ type RequestFilters struct {
 // scroll.
 func (f RequestFilters) Hash() string {
 	h := sha256.New()
-	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface} {
+	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface, f.ErrorCode} {
 		h.Write([]byte(s))
 		// A separator, so {Provider:"ab"} and {Provider:"a", Model:"b"} differ.
 		h.Write([]byte{0})

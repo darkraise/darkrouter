@@ -33,13 +33,83 @@ export class ApiError extends Error {
   }
 }
 
-function loggedOut(): never {
+// Exported so a caller that talks to the executor with its own fetch — the
+// playground's aux and count calls, which need response headers request()
+// does not expose — can trigger the same shared side effect stream() does,
+// rather than growing a second notion of "the session died".
+export function loggedOut(): never {
   csrfToken = ""
   unauthorizedListeners.forEach((fn) => fn())
   throw new ApiError(401, "not authenticated")
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/**
+ * Classifies a non-OK response from the executor and throws — either as a
+ * session death (also firing the shared logout side effect) or as an
+ * ordinary ApiError carrying the response's own message.
+ *
+ * Every admin-issued rejection (a dead session included) shapes its body as
+ * {"error": "<string>"}; only a body that reached a dialect writer nests an
+ * object there instead, which means the request cleared the session check
+ * and something downstream — a provider, or the executor itself — is
+ * calling the request bad, not the console logging the operator out.
+ *
+ * Shared by stream() and by any caller that talks to the executor with its
+ * own fetch instead of request() — the playground's aux and count calls,
+ * which need response headers request() cannot expose. They hit the same
+ * dialect-writer error shape stream() was fixed for, so the classification
+ * lives once here rather than as two hand-synced copies.
+ */
+export async function throwOnExecutorError(res: Response): Promise<never> {
+  let message = res.statusText
+  let sessionDead = res.status === 401
+  try {
+    const parsed = (await res.json()) as { error?: unknown }
+    if (typeof parsed.error === "string") {
+      message = parsed.error
+    } else if (parsed.error && typeof parsed.error === "object") {
+      sessionDead = false
+      const nested = parsed.error as { message?: string }
+      if (nested.message) message = nested.message
+    }
+  } catch {
+    // A non-JSON error body means something upstream of the API answered.
+    // The status line is all there is to report.
+  }
+  if (sessionDead) loggedOut()
+  throw new ApiError(res.status, message)
+}
+
+type RequestOptions = {
+  /**
+   * Some routes answer 401 for two unrelated reasons: the session died
+   * before the handler ran (requireSession, always "not authenticated"), or
+   * the handler itself rejected the request on its merits — the password
+   * endpoint answers 401 with exactly "invalid password" for a wrong current
+   * password, session very much intact. Naming that one message here is how
+   * a caller opts only *that* rejection out of the global logout; any other
+   * 401, including a session that actually died on this same call, still
+   * goes through loggedOut() same as every other request.
+   */
+  expectedRejection?: string
+}
+
+/** Peeks at a 401 body without consuming it, to tell the two reasons apart. */
+async function isExpectedRejection(res: Response, expected: string): Promise<boolean> {
+  try {
+    const parsed = (await res.clone().json()) as { error?: string }
+    return parsed.error === expected
+  } catch {
+    return false
+  }
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: RequestOptions,
+): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers["Content-Type"] = "application/json"
   if (method !== "GET") {
@@ -60,7 +130,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     credentials: "same-origin",
   })
 
-  if (res.status === 401) loggedOut()
+  if (res.status === 401) {
+    const expected = opts?.expectedRejection !== undefined && (await isExpectedRejection(res, opts.expectedRejection))
+    if (!expected) loggedOut()
+  }
   if (!res.ok) {
     let message = res.statusText
     try {
@@ -78,7 +151,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>("POST", path, body, opts),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),
@@ -114,16 +187,12 @@ export async function* stream(
     body: JSON.stringify(body),
     credentials: "same-origin",
   })
-  if (res.status === 401) loggedOut()
   if (!res.ok || !res.body) {
-    let message = res.statusText
-    try {
-      const parsed = (await res.json()) as { error?: string }
-      if (parsed.error) message = parsed.error
-    } catch {
-      // Same reasoning as above.
-    }
-    throw new ApiError(res.status, message)
+    // A 401 here is ambiguous in a way request() never sees: this path also
+    // carries a live executor run, and a bad credential answers 401 too —
+    // that is the playground's whole reason to exist. throwOnExecutorError
+    // tells the two apart.
+    return await throwOnExecutorError(res)
   }
   onStart?.({ requestId: res.headers.get("X-Darkrouter-Request") ?? "" })
 

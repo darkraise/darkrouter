@@ -1,30 +1,66 @@
 import { useState } from "react"
-import { useParams } from "@tanstack/react-router"
+import { useNavigate, useParams } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
   Badge,
   Button,
   Card,
   Input,
   Table,
   TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  toast,
 } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useProviderHealth, useProviders } from "../../lib/queries"
 import { breakersFor, providerState } from "./providers-screen"
+import { CredentialRow } from "./credential-row"
+import { DiscoveryPanel } from "./discovery-panel"
+import { ProbePanel } from "./probe-panel"
+
+/**
+ * Only the touched half of the region/project patch.
+ *
+ * Both are pointer fields on the backend (`store.ProviderPatch.Region` /
+ * `.Project`): a key present with value "" means "set this to empty", not
+ * "leave alone". `GET /api/providers` never returns either field, so the
+ * inputs here start with nothing to prefill — null distinguishes "never
+ * touched" from "touched and cleared", which "" alone cannot.
+ */
+export function locationPatch(
+  region: string | null,
+  project: string | null,
+): Record<string, string> {
+  const patch: Record<string, string> = {}
+  if (region !== null) patch.region = region
+  if (project !== null) patch.project = project
+  return patch
+}
 
 export function ProviderDetail() {
   const { id } = useParams({ from: "/providers/$id" })
+  const navigate = useNavigate()
   const providers = useProviders()
   const health = useProviderHealth()
   const provider = providers.data?.providers.find((p) => p.id === id)
   const [draftName, setDraftName] = useState<string | null>(null)
   const [draftPriority, setDraftPriority] = useState<string | null>(null)
+  const [draftRegion, setDraftRegion] = useState<string | null>(null)
+  const [draftProject, setDraftProject] = useState<string | null>(null)
+  const [newCredLabel, setNewCredLabel] = useState("")
+  const [newCredSecret, setNewCredSecret] = useState("")
 
   const rename = useApiMutation({
     mutationFn: (vars: { name: string; priority: number }) =>
@@ -37,14 +73,41 @@ export function ProviderDetail() {
     success: "Provider updated",
     invalidates: [keys.providers, keys.overview],
   })
-
-  const patch = useApiMutation({
-    mutationFn: (vars: { keyId: string; enabled: boolean }) =>
-      api.patch(`/api/providers/${id}/keys/${vars.keyId}`, {
-        enabled: vars.enabled,
-      }),
-    success: "Credential updated",
+  const saveLocation = useApiMutation({
+    mutationFn: (vars: Record<string, string>) => api.patch(`/api/providers/${id}`, vars),
+    success: "Provider updated",
+    invalidates: [keys.providers],
+    onSuccess: () => {
+      setDraftRegion(null)
+      setDraftProject(null)
+    },
+  })
+  const addCredential = useApiMutation({
+    mutationFn: (vars: { label: string; secret: string }) =>
+      api.post(`/api/providers/${id}/keys`, vars),
+    success: "Credential added",
     invalidates: [keys.providers, keys.health],
+    onSuccess: () => {
+      setNewCredLabel("")
+      setNewCredSecret("")
+    },
+  })
+  const del = useApiMutation({
+    mutationFn: () => api.del<{ id: string; dangling_aliases: string[] }>(`/api/providers/${id}`),
+    invalidates: [keys.providers],
+    onSuccess: (data) => {
+      // An alias pointing at nothing is the consequence the operator needs
+      // to see at the moment they cause it, not buried in a log they were
+      // not looking at.
+      if (data.dangling_aliases.length > 0) {
+        toast.warning(
+          `Deleted ${data.id}. Now-dangling aliases: ${data.dangling_aliases.join(", ")}`,
+        )
+      } else {
+        toast.success("Provider deleted")
+      }
+      void navigate({ to: "/providers" })
+    },
   })
 
   if (providers.isSuccess && !provider) {
@@ -125,6 +188,33 @@ export function ProviderDetail() {
         </div>
       </Card>
 
+      <Card className="mb-6 p-4">
+        <h2 className="mb-3 text-sm font-medium">Region and project</h2>
+        {/* Blank rather than prefilled: GET /api/providers does not return
+            either field, so there is no current value here to show. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={draftRegion ?? ""}
+            onChange={(e) => setDraftRegion(e.target.value)}
+            placeholder="region"
+            className="w-40"
+          />
+          <Input
+            value={draftProject ?? ""}
+            onChange={(e) => setDraftProject(e.target.value)}
+            placeholder="project"
+            className="w-40"
+          />
+          <Button
+            size="sm"
+            disabled={draftRegion === null && draftProject === null}
+            onClick={() => saveLocation.mutate(locationPatch(draftRegion, draftProject))}
+          >
+            Save
+          </Button>
+        </div>
+      </Card>
+
       <h2 className="mb-2 text-sm font-medium">Credentials</h2>
       <Table>
         <TableHeader>
@@ -132,42 +222,49 @@ export function ProviderDetail() {
             <TableHead>Label</TableHead>
             <TableHead>Secret</TableHead>
             <TableHead>State</TableHead>
+            <TableHead>Auth</TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {provider.credentials.map((c) => (
-            <TableRow key={c.id}>
-              <TableCell>{c.label}</TableCell>
-              {/* Enough to recognise, never enough to use. */}
-              <TableCell className="font-mono text-xs">{c.masked}</TableCell>
-              <TableCell>
-                {c.cooling ? (
-                  <Badge variant="amber">cooling</Badge>
-                ) : c.enabled ? (
-                  <Badge variant="green">enabled</Badge>
-                ) : (
-                  <Badge variant="secondary">disabled</Badge>
-                )}
-              </TableCell>
-              <TableCell>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    patch.mutate({ keyId: c.id, enabled: !c.enabled })
-                  }
-                >
-                  {c.enabled ? "Disable" : "Enable"}
-                </Button>
-              </TableCell>
-            </TableRow>
+            <CredentialRow key={c.id} providerId={provider.id} credential={c} />
           ))}
         </TableBody>
       </Table>
 
+      <Card className="mb-6 mt-3 p-4">
+        <h2 className="mb-3 text-sm font-medium">Add credential</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={newCredLabel}
+            onChange={(e) => setNewCredLabel(e.target.value)}
+            placeholder="label"
+            className="w-40"
+          />
+          <Input
+            value={newCredSecret}
+            onChange={(e) => setNewCredSecret(e.target.value)}
+            placeholder="secret"
+            type="password"
+            className="w-64"
+          />
+          <Button
+            size="sm"
+            disabled={newCredSecret === ""}
+            onClick={() => addCredential.mutate({ label: newCredLabel, secret: newCredSecret })}
+          >
+            Add
+          </Button>
+        </div>
+      </Card>
+
+      <ProbePanel providerId={provider.id} />
+
+      <DiscoveryPanel providerId={provider.id} />
+
       {cooling.length > 0 && (
-        <Card className="mt-6 p-4">
+        <Card className="mb-6 p-4">
           <h2 className="mb-2 text-sm font-medium">Cooling</h2>
           <ul className="flex flex-col gap-1 font-mono text-xs">
             {cooling.map((e) => (
@@ -179,6 +276,30 @@ export function ProviderDetail() {
           </ul>
         </Card>
       )}
+
+      <Card className="p-4">
+        <h2 className="mb-3 text-sm font-medium">Danger zone</h2>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button size="sm" variant="destructive">
+              Delete provider
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {provider.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Its credentials go with it. Any alias that routes here is left dangling — the
+                delete still completes, and the console will say which aliases those were.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => del.mutate(undefined)}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Card>
     </>
   )
 }

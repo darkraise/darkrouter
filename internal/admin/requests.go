@@ -10,11 +10,12 @@ import (
 func filtersFrom(r *http.Request) RequestFilters {
 	q := r.URL.Query()
 	f := RequestFilters{
-		Provider: q.Get("provider"),
-		Model:    q.Get("model"),
-		Status:   q.Get("status"),
-		Alias:    q.Get("alias"),
-		Surface:  q.Get("surface"),
+		Provider:  q.Get("provider"),
+		Model:     q.Get("model"),
+		Status:    q.Get("status"),
+		Alias:     q.Get("alias"),
+		Surface:   q.Get("surface"),
+		ErrorCode: q.Get("error_code"),
 	}
 	f.SinceMs, _ = strconv.ParseInt(q.Get("since_ms"), 10, 64)
 	f.UntilMs, _ = strconv.ParseInt(q.Get("until_ms"), 10, 64)
@@ -39,13 +40,17 @@ type requestView struct {
 	TotalMs         *int64 `json:"total_ms"`
 	ErrorCode       string `json:"error_code,omitempty"`
 	Attempts        int    `json:"attempts"`
+	// Which rendering served: "passthrough" when the fast path carried the
+	// body through untouched, "ir" when it was translated. Empty when nothing
+	// served at all.
+	Path string `json:"path,omitempty"`
 }
 
 func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	f := filtersFrom(r)
 	q := store.RequestQuery{
 		Provider: f.Provider, Model: f.Model, Status: f.Status,
-		Alias: f.Alias, Surface: f.Surface,
+		Alias: f.Alias, Surface: f.Surface, ErrorCode: f.ErrorCode,
 		SinceMs: f.SinceMs, UntilMs: f.UntilMs,
 	}
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
@@ -77,7 +82,7 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 			Status: row.Status, TokensIn: row.TokensIn, TokensOut: row.TokensOut,
 			CacheReadTokens: row.CacheReadTokens,
 			CostMicros:      row.CostMicros, TTFTMs: row.TTFTMs, TotalMs: row.TotalMs,
-			ErrorCode: row.ErrorCode, Attempts: row.Attempts,
+			ErrorCode: row.ErrorCode, Attempts: row.Attempts, Path: row.Path,
 		})
 	}
 
