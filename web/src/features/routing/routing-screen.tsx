@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { PageHeader } from "darkraise-ui/layout"
 import { Button, Card, Input } from "darkraise-ui"
 import { api } from "../../lib/api"
@@ -72,14 +72,48 @@ export function validateChain(targets: string[], knownProviders: string[]): stri
   return problems
 }
 
-function AliasEditor({
+/** One target, tagged with an id that survives both a reorder and an edit.
+ *  The target text alone cannot key the row: two targets can hold the same
+ *  text, and reliably do while one is a blank the operator hasn't typed into
+ *  yet — keying on text there would collapse two rows onto one DOM node. */
+type DraftRow = { id: string; value: string }
+
+function toDraftRows(aliases: Aliases, makeId: () => string): Record<string, DraftRow[]> {
+  return Object.fromEntries(
+    Object.entries(aliases).map(([name, targets]) => [
+      name,
+      targets.map((value) => ({ id: makeId(), value })),
+    ]),
+  )
+}
+
+/** Reorders rows by id rather than by splicing values in place, so the row a
+ *  reorder carries past the operator's cursor is still the row they were
+ *  looking at — not whatever text a plain index-keyed list would have swapped
+ *  into that screen position. Delegates the actual reordering to moveTarget,
+ *  operating on the id list rather than the values. */
+function reorderRows(rows: DraftRow[], from: number, to: number): DraftRow[] {
+  const valueById = new Map(rows.map((r) => [r.id, r.value]))
+  return moveTarget(
+    rows.map((r) => r.id),
+    from,
+    to,
+  ).map((id) => ({ id, value: valueById.get(id) ?? "" }))
+}
+
+export function AliasEditor({
   aliases,
   knownProviders,
 }: {
   aliases: Aliases
   knownProviders: string[]
 }) {
-  const [draft, setDraft] = useState<Aliases>(aliases)
+  const idCounter = useRef(0)
+  const makeId = () => `row-${idCounter.current++}`
+
+  const [draft, setDraft] = useState<Record<string, DraftRow[]>>(() =>
+    toDraftRows(aliases, makeId),
+  )
   const [newChainName, setNewChainName] = useState("")
   const [dragTarget, setDragTarget] = useState<{ name: string; index: number } | null>(null)
 
@@ -93,9 +127,9 @@ function AliasEditor({
   // and what validateChain should judge — an empty row mid-edit is not yet a
   // chain with no targets, it is a chain with one target not typed yet.
   const cleaned: Aliases = Object.fromEntries(
-    Object.entries(draft).map(([name, targets]) => [
+    Object.entries(draft).map(([name, rows]) => [
       name,
-      targets.map((t) => t.trim()).filter(Boolean),
+      rows.map((r) => r.value.trim()).filter(Boolean),
     ]),
   )
   const problemsByChain = Object.fromEntries(
@@ -106,22 +140,22 @@ function AliasEditor({
   )
   const hasProblems = Object.values(problemsByChain).some((p) => p.length > 0)
 
-  function updateTarget(name: string, index: number, value: string) {
+  function updateTarget(name: string, id: string, value: string) {
     setDraft((d) => ({
       ...d,
-      [name]: (d[name] ?? []).map((t, i) => (i === index ? value : t)),
+      [name]: (d[name] ?? []).map((r) => (r.id === id ? { ...r, value } : r)),
     }))
   }
 
-  function removeTarget(name: string, index: number) {
-    setDraft((d) => ({ ...d, [name]: (d[name] ?? []).filter((_, i) => i !== index) }))
+  function removeTarget(name: string, id: string) {
+    setDraft((d) => ({ ...d, [name]: (d[name] ?? []).filter((r) => r.id !== id) }))
   }
 
   function drop(name: string, toIndex: number) {
     if (dragTarget && dragTarget.name === name) {
       setDraft((d) => ({
         ...d,
-        [name]: moveTarget(d[name] ?? [], dragTarget.index, toIndex),
+        [name]: reorderRows(d[name] ?? [], dragTarget.index, toIndex),
       }))
     }
     setDragTarget(null)
@@ -131,7 +165,7 @@ function AliasEditor({
     <Card className="p-4">
       <h2 className="mb-3 text-sm font-medium">Alias chains</h2>
       <div className="flex flex-col gap-4">
-        {Object.entries(draft).map(([name, targets]) => (
+        {Object.entries(draft).map(([name, rows]) => (
           <div key={name} className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
               <span className="w-32 shrink-0 font-mono text-xs">{name}</span>
@@ -150,11 +184,14 @@ function AliasEditor({
               </Button>
             </div>
             {/* The chain order is the fallback order, so it is edited as an
-                ordered, draggable list rather than as a set. */}
+                ordered, draggable list rather than as a set. Keyed by the
+                row's own id, not its position — a reorder moves the id's DOM
+                node with it, so an in-progress edit or focus stays on the
+                target the operator was looking at. */}
             <ul className="flex flex-col gap-1 pl-4">
-              {targets.map((target, index) => (
+              {rows.map((row, index) => (
                 <li
-                  key={index}
+                  key={row.id}
                   draggable
                   onDragStart={() => setDragTarget({ name, index })}
                   onDragOver={(e) => e.preventDefault()}
@@ -166,11 +203,11 @@ function AliasEditor({
                   </span>
                   <Input
                     aria-label={`${name} target ${index + 1}`}
-                    value={target}
-                    onChange={(e) => updateTarget(name, index, e.target.value)}
+                    value={row.value}
+                    onChange={(e) => updateTarget(name, row.id, e.target.value)}
                     className="flex-1 font-mono text-xs"
                   />
-                  <Button size="sm" variant="ghost" onClick={() => removeTarget(name, index)}>
+                  <Button size="sm" variant="ghost" onClick={() => removeTarget(name, row.id)}>
                     Remove
                   </Button>
                 </li>
@@ -180,7 +217,12 @@ function AliasEditor({
               size="sm"
               variant="ghost"
               className="ml-4 self-start"
-              onClick={() => setDraft((d) => ({ ...d, [name]: [...(d[name] ?? []), ""] }))}
+              onClick={() =>
+                setDraft((d) => ({
+                  ...d,
+                  [name]: [...(d[name] ?? []), { id: makeId(), value: "" }],
+                }))
+              }
             >
               Add target
             </Button>
@@ -221,7 +263,11 @@ function AliasEditor({
         <Button size="sm" disabled={hasProblems} onClick={() => save.mutate(cleaned)}>
           Save
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setDraft(aliases)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setDraft(toDraftRows(aliases, makeId))}
+        >
           Revert
         </Button>
       </div>
