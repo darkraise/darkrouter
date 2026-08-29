@@ -9,11 +9,7 @@
 -- The unique index on name is what lets the save dialog offer to overwrite:
 -- the clash is detected before the insert, so the operator is asked rather
 -- than shown a constraint error.
---
--- Guarded with IF NOT EXISTS because rewinding a database's recorded version
--- replays every migration above it, this one included, and an unguarded CREATE
--- would turn that replay into a hard error.
-CREATE TABLE IF NOT EXISTS playground_presets (
+CREATE TABLE playground_presets (
   id         TEXT PRIMARY KEY,
   name       TEXT    NOT NULL,
   dialect    TEXT    NOT NULL,
@@ -23,4 +19,4 @@ CREATE TABLE IF NOT EXISTS playground_presets (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_playground_presets_name ON playground_presets(name);
+CREATE UNIQUE INDEX idx_playground_presets_name ON playground_presets(name);
