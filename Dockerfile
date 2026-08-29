@@ -32,9 +32,32 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags="-s -w -X github.com/darkraise/darkrouter/internal/server.Version=${VERSION}" \
       -o /out/darkrouter ./cmd/darkrouter
 
+# Augment publishes no HTTP endpoint at all: the provider in internal/localcli
+# reaches it by running the `auggie` CLI. The image carries it rather than
+# expecting it on the host, because a provider that works only where somebody
+# remembered to install something is a provider that breaks on the next machine.
+FROM node:24-alpine AS auggie
+# Pinned for the reason web/ uses npm ci: an image is meant to be reproducible,
+# and an unpinned CLI would change under a rebuild that touched nothing else.
+ARG AUGGIE_VERSION=0.36.0
+RUN npm install -g --prefix /opt/auggie @augmentcode/auggie@${AUGGIE_VERSION}
+
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 darkrouter
+# nodejs is here for auggie alone — the gateway itself is a static binary and
+# needs no runtime. It is the cost of a vendor who ships a CLI instead of an API.
+RUN apk add --no-cache ca-certificates wget nodejs && adduser -D -u 10001 darkrouter
 COPY --from=build /out/darkrouter /usr/local/bin/darkrouter
+COPY --from=auggie /opt/auggie /opt/auggie
+# On PATH under its own name, which is how internal/localcli finds it when
+# AUGGIE_BIN is unset. The state directory is created here so that a volume
+# mounted over it inherits the unprivileged user's ownership instead of arriving
+# owned by root and unwritable — which is where `auggie login` would fail.
+RUN ln -s /opt/auggie/bin/auggie /usr/local/bin/auggie \
+    && install -d -o darkrouter -g darkrouter /home/darkrouter/.augment
+# The notices travel with the artifact rather than only with the repository:
+# Apache-2.0 asks for them to reach whoever receives the binary, and an image
+# is how most people receive this one.
+COPY THIRD_PARTY_NOTICES.md /usr/share/doc/darkrouter/THIRD_PARTY_NOTICES.md
 USER darkrouter
 WORKDIR /data
 EXPOSE 8080 8081
