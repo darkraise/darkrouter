@@ -87,6 +87,21 @@ func TestPlaygroundPresetRejectsABlobThatIsNotAnObject(t *testing.T) {
 	}
 }
 
+func TestPlaygroundPresetRejectsAnUnknownDialect(t *testing.T) {
+	// The admin API is operator-facing: a row can be written by hand with
+	// curl, not only by the console. dialect-support.ts has no fallback case
+	// for an unknown dialect, so a stored value outside the three the console
+	// knows would crash the config pane's render the moment it loads.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	for _, dialect := range []string{"responses", "OpenAI", "", "chatml"} {
+		body := `{"name":"n","dialect":"` + dialect + `","model":"m","config":{}}`
+		if w := do(t, s, cookie, token, "POST", "/api/playground/presets", body); w.Code != 400 {
+			t.Errorf("dialect %q = %d, want 400", dialect, w.Code)
+		}
+	}
+}
+
 func TestPlaygroundPresetUpdateAndDeleteAnswer404ForAnUnknownID(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)

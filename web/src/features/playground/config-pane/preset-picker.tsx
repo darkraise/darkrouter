@@ -8,7 +8,7 @@ import { api } from "../../../lib/api"
 import { useApiMutation } from "../../../lib/mutations"
 import { keys, usePlaygroundPresets } from "../../../lib/queries"
 import { mergeStoredConfig, toStoredConfig } from "../preset-config"
-import type { PlaygroundConfig } from "../config"
+import { DIALECTS, type PlaygroundConfig } from "../config"
 import type { PlaygroundPreset } from "../../../lib/api-types"
 
 /** What a save sends. model and dialect are columns; the rest is the blob. */
@@ -44,7 +44,7 @@ export function PresetPicker({
   config: PlaygroundConfig
   onChange: (next: PlaygroundConfig) => void
 }) {
-  const { data: presets } = usePlaygroundPresets()
+  const { data: playgroundPresets } = usePlaygroundPresets()
   const [open, setOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [name, setName] = useState("")
@@ -57,7 +57,7 @@ export function PresetPicker({
   // The clash is found in the list already on screen rather than by sending a
   // save and reading the rejection: ApiError carries a status and a message
   // and no body, so a 409's id could not be recovered from it anyway.
-  const clash = (presets ?? []).find((preset) => preset.name === name.trim())
+  const clash = (playgroundPresets ?? []).find((preset) => preset.name === name.trim())
 
   const save = useApiMutation<PlaygroundPreset, { name: string }>({
     mutationFn: (vars) => api.post<PlaygroundPreset>("/api/playground/presets", bodyFor(vars.name, config)),
@@ -81,7 +81,12 @@ export function PresetPicker({
   })
 
   function load(preset: PlaygroundPreset) {
-    onChange(mergeStoredConfig(preset.config, preset.model, preset.dialect))
+    // A row can be written by hand with curl, so the dialect column is a wire
+    // value like any other: dialect-support.ts has no fallback case for one
+    // outside the three it knows, so an unrecognized value crashes the pane's
+    // render rather than degrading like the rest of the blob does.
+    const dialect = DIALECTS.includes(preset.dialect) ? preset.dialect : "openai"
+    onChange(mergeStoredConfig(preset.config, preset.model, dialect))
   }
 
   return (
@@ -91,7 +96,7 @@ export function PresetPicker({
         <Select
           value=""
           onValueChange={(id) => {
-            const found = (presets ?? []).find((p) => p.id === id)
+            const found = (playgroundPresets ?? []).find((p) => p.id === id)
             if (found) load(found)
           }}
         >
@@ -99,7 +104,7 @@ export function PresetPicker({
             <SelectValue placeholder="Load a preset" />
           </SelectTrigger>
           <SelectContent>
-            {(presets ?? []).map((preset) => (
+            {(playgroundPresets ?? []).map((preset) => (
               <SelectItem key={preset.id} value={preset.id}>
                 {preset.name}
               </SelectItem>
@@ -176,9 +181,9 @@ export function PresetPicker({
             <DialogDescription>Delete a saved preset. This cannot be undone.</DialogDescription>
           </DialogHeader>
 
-          {(presets ?? []).length > 0 ? (
+          {(playgroundPresets ?? []).length > 0 ? (
             <ul className="flex flex-col gap-1">
-              {(presets ?? []).map((preset) => (
+              {(playgroundPresets ?? []).map((preset) => (
                 <li key={preset.id} className="flex items-center gap-2 text-sm">
                   <span className="flex-1 truncate">{preset.name}</span>
                   <button

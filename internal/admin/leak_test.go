@@ -35,6 +35,7 @@ func TestNoEndpointReturnsCredentialMaterial(t *testing.T) {
 	for _, ep := range []struct{ method, path, body string }{
 		{"GET", "/api/providers", ""},
 		{"GET", "/api/presets", ""},
+		{"GET", "/api/playground/presets", ""},
 		{"GET", "/api/overview", ""},
 		{"GET", "/api/models", ""},
 		{"GET", "/api/requests", ""},
