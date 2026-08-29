@@ -22,7 +22,7 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 		"providers", "provider_keys", "models", "model_overrides",
 		"requests", "request_attempts", "request_bodies",
 		"health", "usage_daily", "sessions", "settings", "aliases",
-		"proxy_tokens",
+		"proxy_tokens", "playground_presets",
 	}
 	for _, table := range want {
 		var name string
@@ -38,8 +38,34 @@ func TestMigrationRealignsTheProvidersShippedAsKeylessThatAreNot(t *testing.T) {
 	// The correction has to reach a provider the operator already added: the
 	// row holds the style, so a fixed preset alone would leave it in the No
 	// auth group failing every request.
-	db := migrated(t)
+	db := openTest(t)
 	ctx := context.Background()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Build a database that stops short of this migration, rather than a
+	// current one wearing an older version number. That is the situation the
+	// migration exists for -- rows written by an older binary, then a deploy --
+	// and it keeps every migration applied exactly once, so none of them has to
+	// be safe to run twice.
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version > 12 {
+			continue
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("apply %04d: %v", m.version, err)
+		}
+	}
+
 	for _, p := range []struct{ id, preset, style string }{
 		{"stale", "hackclub", "optional"},      // the copy the old preset wrote
 		{"keyed", "naga-ac", "bearer"},         // already corrected by hand
@@ -53,14 +79,7 @@ func TestMigrationRealignsTheProvidersShippedAsKeylessThatAreNot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Rewind past this migration and run it again, which is the situation it
-	// exists for: rows written by an older binary, then a deploy. Pinned to the
-	// version below this migration rather than to the head, so that adding a
-	// later migration does not silently leave this one unexercised.
-	if _, err := db.Write.ExecContext(ctx,
-		`UPDATE schema_version SET version = 12`); err != nil {
-		t.Fatal(err)
-	}
+
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
