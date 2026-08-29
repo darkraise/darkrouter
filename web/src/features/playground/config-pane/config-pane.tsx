@@ -12,6 +12,7 @@ import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
 import { DIALECTS, type PlaygroundConfig } from "../config"
 import { parseTools } from "../lib/request"
 import type { PlaygroundDialect } from "../../../lib/api-types"
+import { PresetPicker } from "./preset-picker"
 import { Sampling } from "./sampling"
 import { Reasoning } from "./reasoning"
 import { StructuredOutput } from "./structured-output"
@@ -41,6 +42,8 @@ export function ConfigPane({
           Sampling and the prompt scaffolding are set once a session and fold
           away — the transcript needs the height more than they do. */}
       <h2 className="text-sm font-medium">Request</h2>
+
+      <PresetPicker config={config} onChange={onChange} />
 
       <ModelCombobox
         label="Model or alias"
