@@ -38,11 +38,6 @@ export function metricsFromTrace(m: StreamMetrics, trace: RequestTrace): StreamM
   return { ...m, tokensIn: trace.tokens_in, tokensOut: trace.tokens_out }
 }
 
-function reading(value: number | null, unit: string, digits = 0): string {
-  if (value === null) return "—"
-  return `${value.toFixed(digits)} ${unit}`
-}
-
 /** One reading and its name. Wide enough that a number appearing does not
  *  shift the strip, because a row that reflows on every run is unreadable. */
 function Cell({ label, value }: { label: string; value: string }) {
@@ -54,38 +49,109 @@ function Cell({ label, value }: { label: string; value: string }) {
   )
 }
 
+/**
+ * The last run, read at a glance.
+ *
+ * The numbers were always here; what was missing is their shape. Time to
+ * first token against total is the reading that separates a slow provider
+ * from a slow generation, and it is a proportion — so it is drawn as one.
+ * The bare figures stay beside it, because a bar cannot be quoted in a bug
+ * report.
+ */
 export function MetricsStrip({ metrics }: { metrics: StreamMetrics }) {
   const tps = tokensPerSecond(metrics)
   return (
-    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 border-b px-6 py-3">
-      <Cell
-        label="first token"
-        value={
-          metrics.ttftMs === null
-            ? "—"
-            : metrics.ttftMs >= 1000
-              ? reading(metrics.ttftMs / 1000, "s", 1)
-              : reading(metrics.ttftMs, "ms")
-        }
-      />
-      <Cell
-        label="total"
-        value={
-          metrics.totalMs === null
-            ? "—"
-            : metrics.totalMs >= 1000
-              ? reading(metrics.totalMs / 1000, "s", 1)
-              : reading(metrics.totalMs, "ms")
-        }
-      />
-      <Cell label="tokens in" value={metrics.tokensIn === null ? "—" : String(metrics.tokensIn)} />
-      <Cell
-        label="tokens out"
-        value={metrics.tokensOut === null ? "—" : String(metrics.tokensOut)}
-      />
+    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-b px-6 py-3">
+      <LatencySplit ttftMs={metrics.ttftMs} totalMs={metrics.totalMs} />
+      <TokenSplit tokensIn={metrics.tokensIn} tokensOut={metrics.tokensOut} />
       <Cell label="tokens/s" value={tps === null ? "—" : tps.toFixed(1)} />
     </div>
   )
+}
+
+/** Duration in the unit that keeps it readable: milliseconds until a second,
+ *  then seconds. A four-figure millisecond count is a number nobody parses. */
+export function duration(ms: number | null): string {
+  if (ms === null) return "—"
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms.toFixed(0)} ms`
+}
+
+/**
+ * Waiting against generating.
+ *
+ * One bar, split where the first token arrived. A provider that took two
+ * seconds to start and one to answer, and one that started at once and took
+ * three, are the same total and completely different problems.
+ */
+function LatencySplit({ ttftMs, totalMs }: { ttftMs: number | null; totalMs: number | null }) {
+  const known = ttftMs !== null && totalMs !== null && totalMs > 0
+  const waitPct = known ? Math.min(100, (ttftMs / totalMs) * 100) : 0
+  return (
+    <div className="flex min-w-56 flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-sm text-[hsl(var(--legend))]">first token</span>
+        <span className="text-sm tabular-nums">{duration(ttftMs)}</span>
+      </div>
+      <div
+        className="flex h-1.5 overflow-hidden rounded-full bg-[hsl(var(--muted))]"
+        role="img"
+        aria-label={
+          known
+            ? `${duration(ttftMs)} waiting, then ${duration(totalMs - ttftMs)} generating`
+            : "No timing yet"
+        }
+      >
+        {known ? (
+          <>
+            <span className="bg-[hsl(var(--primary))]" style={{ width: `${waitPct}%` }} />
+            <span className="bg-[hsl(var(--legend))] opacity-40" style={{ width: `${100 - waitPct}%` }} />
+          </>
+        ) : null}
+      </div>
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-sm text-[hsl(var(--legend))]">total</span>
+        <span className="text-sm tabular-nums">{duration(totalMs)}</span>
+      </div>
+    </div>
+  )
+}
+
+/** What went up against what came back. The ratio is the thing an operator
+ *  is watching when a prompt grows: context in, answer out. */
+function TokenSplit({ tokensIn, tokensOut }: { tokensIn: number | null; tokensOut: number | null }) {
+  const known = tokensIn !== null && tokensOut !== null && tokensIn + tokensOut > 0
+  const inPct = known ? (tokensIn / (tokensIn + tokensOut)) * 100 : 0
+  return (
+    <div className="flex min-w-56 flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-sm text-[hsl(var(--legend))]">tokens in</span>
+        <span className="text-sm tabular-nums">{tokensIn === null ? "—" : tokensIn}</span>
+      </div>
+      <div
+        className="flex h-1.5 overflow-hidden rounded-full bg-[hsl(var(--muted))]"
+        role="img"
+        aria-label={known ? `${tokensIn} tokens in, ${tokensOut} out` : "No token counts yet"}
+      >
+        {known ? (
+          <>
+            <span className="bg-[hsl(var(--legend))] opacity-40" style={{ width: `${inPct}%` }} />
+            <span className="bg-[hsl(var(--success))]" style={{ width: `${100 - inPct}%` }} />
+          </>
+        ) : null}
+      </div>
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-sm text-[hsl(var(--legend))]">tokens out</span>
+        <span className="text-sm tabular-nums">{tokensOut === null ? "—" : tokensOut}</span>
+      </div>
+    </div>
+  )
+}
+
+/** Whether the strip has anything to say yet. An instrument row of em dashes
+ *  above an empty chat is furniture; it appears when a run has produced a
+ *  reading and stays for the rest of the session. */
+export function hasReadings(m: StreamMetrics): boolean {
+  return m.ttftMs !== null || m.totalMs !== null || m.tokensIn !== null || m.tokensOut !== null
 }
 
 /** How long to keep asking for the trace of a request that just finished.

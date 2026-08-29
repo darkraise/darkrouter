@@ -1,0 +1,112 @@
+import { render, screen } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import { AssistantTurn, UserTurn, formatCost, routeFromTrace, type TurnRoute } from "./message"
+import type { RequestTrace, TraceAttempt } from "../../lib/api-types"
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, ...rest }: { children: React.ReactNode }) => <a {...rest}>{children}</a>,
+}))
+
+const attempt = (provider: string, extra: Partial<TraceAttempt> = {}): TraceAttempt => ({
+  seq: 0, provider, key_label: "", model: "m", outcome: "success", status_code: 200,
+  latency_ms: 10, error: "", path: "passthrough", tokens_in: 0, tokens_out: 0,
+  cost_micros: null, ...extra,
+})
+
+const trace = (over: Partial<RequestTrace> = {}): RequestTrace =>
+  ({
+    id: "01ABC", dialect: "openai", model: "fast", surface: "llm", status: "success",
+    ts_ms: 0, tokens_in: 12, tokens_out: 30, cost_micros: null, ttft_ms: 100,
+    total_ms: 900, attempts: [attempt("groq")], candidates: [], skips: [],
+    ...over,
+  }) as RequestTrace
+
+const route = (over: Partial<TurnRoute> = {}): TurnRoute => ({
+  requestId: "01ABC", provider: "groq", model: "llama-3.3", totalMs: 900,
+  tokensIn: 12, tokensOut: 30, costMicros: null, failedOver: [], ...over,
+})
+
+describe("reading the route off a trace", () => {
+  it("names the provider that answered, not the one asked for", () => {
+    // The client asks for an alias or a bare model. Which provider served is
+    // the routing decision, and it is the reason to look at all.
+    const r = routeFromTrace(trace({ model: "fast", final_model: "llama-3.3" }))
+    expect(r.provider).toBe("groq")
+    expect(r.model).toBe("llama-3.3")
+  })
+
+  it("records what was tried before the one that answered", () => {
+    const r = routeFromTrace(
+      trace({ attempts: [attempt("hackclub", { outcome: "retryable_credential", status_code: 401 }), attempt("groq")] }),
+    )
+    expect(r.failedOver).toEqual(["hackclub"])
+    expect(r.provider).toBe("groq")
+  })
+
+  it("survives a trace with no attempts at all", () => {
+    // A request refused before it reached a provider still writes a row.
+    const r = routeFromTrace(trace({ attempts: [], provider: undefined }))
+    expect(r.provider).toBe("")
+    expect(r.failedOver).toEqual([])
+  })
+})
+
+describe("an answered turn", () => {
+  it("shows who answered and what it took", () => {
+    render(<AssistantTurn text="hello" route={route()} />)
+    expect(screen.getByText(/groq/)).toBeInTheDocument()
+    expect(screen.getByText(/llama-3.3/)).toBeInTheDocument()
+    expect(screen.getByText(/900ms/)).toBeInTheDocument()
+    expect(screen.getByText(/12 in · 30 out/)).toBeInTheDocument()
+  })
+
+  it("calls out a failover rather than filing it as a number", () => {
+    // The most interesting thing that can happen to a request.
+    render(<AssistantTurn text="hi" route={route({ failedOver: ["hackclub", "naga-ac"] })} />)
+    expect(screen.getByText(/failed over from hackclub, naga-ac/)).toBeInTheDocument()
+  })
+
+  it("renders the answer as markdown", () => {
+    const { container } = render(<AssistantTurn text={"# Title\n\n`code`"} route={route()} />)
+    expect(container.querySelector("h1")?.textContent).toBe("Title")
+    expect(container.querySelector("code")?.textContent).toBe("code")
+  })
+
+  it("waits visibly before the first token, with no empty bubble", () => {
+    render(<AssistantTurn text="" streaming />)
+    expect(screen.getByLabelText("Waiting for the first token")).toBeInTheDocument()
+  })
+
+  it("offers no copy button until there is something to copy", () => {
+    const { rerender } = render(<AssistantTurn text="" streaming />)
+    expect(screen.queryByLabelText("Copy this answer")).toBeNull()
+    rerender(<AssistantTurn text="done" route={route()} />)
+    expect(screen.getByLabelText("Copy this answer")).toBeInTheDocument()
+  })
+
+  it("keeps the gutter before the trace lands", () => {
+    // The route arrives a beat after the answer. The column must not resize
+    // under the reader when it does.
+    const { container } = render(<AssistantTurn text="hi" />)
+    expect(container.querySelector(".size-7")).not.toBeNull()
+  })
+})
+
+describe("a typed turn", () => {
+  it("keeps the operator's line breaks and does not render their markdown", () => {
+    // What they typed is what was sent. Rendering it would show something
+    // other than the prompt the provider received.
+    const { container } = render(<UserTurn text={"one\ntwo **kept**"} />)
+    expect(container.querySelector("strong")).toBeNull()
+    expect(container.textContent).toContain("two **kept**")
+    expect(container.querySelector("p")?.className).toContain("whitespace-pre-wrap")
+  })
+})
+
+describe("cost", () => {
+  it("keeps a fraction of a cent legible instead of rounding it to free", () => {
+    expect(formatCost(2_500_000)).toBe("$2.50")
+    expect(formatCost(3_400)).toBe("$0.0034")
+    expect(formatCost(12)).toBe("<$0.0001")
+  })
+})
