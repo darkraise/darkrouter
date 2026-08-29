@@ -8,6 +8,7 @@ import type {
   DiscoveryHealthResponse,
   Healthz,
   Overview,
+  PlaygroundPreset,
   PolicyBlock,
   PresetsResponse,
   ProvidersResponse,
@@ -34,6 +35,7 @@ export const keys = {
     ["usage", dimension ?? "day", days ?? 0] as const,
   providers: ["providers"] as const,
   presets: ["presets"] as const,
+  playgroundPresets: ["playground-presets"] as const,
   models: ["models"] as const,
   aliases: ["aliases"] as const,
   config: ["config"] as const,
@@ -125,6 +127,14 @@ export function usePresets(extra?: Extra<PresetsResponse>) {
     queryFn: () => api.get<PresetsResponse>("/api/presets"),
     // Shipped with the binary: it cannot change while the tab is open.
     staleTime: Infinity,
+    ...extra,
+  })
+}
+
+export function usePlaygroundPresets(extra?: Extra<PlaygroundPreset[]>) {
+  return useQuery({
+    queryKey: keys.playgroundPresets,
+    queryFn: () => api.get<PlaygroundPreset[]>("/api/playground/presets"),
     ...extra,
   })
 }

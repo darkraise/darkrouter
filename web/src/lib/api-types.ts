@@ -349,6 +349,19 @@ export type PlaygroundChatBody = {
   dialect?: PlaygroundDialect
 }
 
+/** A saved request configuration. Distinct from `Preset`, which is a provider
+ *  preset shipped with the binary and never written by an operator. */
+export type PlaygroundPreset = {
+  id: string
+  name: string
+  dialect: PlaygroundDialect
+  model: string
+  /** The console's own settings, stored and returned untouched. */
+  config: unknown
+  created_at: string
+  updated_at: string
+}
+
 export type AuxBody = {
   surface: AuxSurface
   model?: string
