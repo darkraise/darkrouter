@@ -47,6 +47,7 @@ export function ConfigPane({
         onChange={(model) => set("model", model)}
         candidates={candidates}
         loading={loading}
+        className="w-full"
       />
 
       <div className="flex flex-col gap-1.5">
