@@ -338,6 +338,12 @@ export type PlaygroundChatBody = {
   messages?: PlaygroundMessage[]
   temperature?: number
   max_tokens?: number
+  top_p?: number
+  top_k?: number
+  stop?: string[]
+  response_schema?: unknown
+  reasoning_effort?: string
+  reasoning_budget?: number
   tools?: Record<string, unknown>[]
   stream?: boolean
   dialect?: PlaygroundDialect
