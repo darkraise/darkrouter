@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { Check, Copy, CornerDownRight } from "lucide-react"
+import { Check, Copy, CornerDownRight, TriangleAlert } from "lucide-react"
 import { Badge } from "darkraise-ui"
 import { ProviderIcon } from "../providers/provider-icon"
 import { Markdown } from "./markdown"
@@ -24,6 +24,10 @@ export type TurnRoute = {
   costMicros: number | null
   /** Providers tried before the one that answered, in the order tried. */
   failedOver: string[]
+  /** What an adapter accepted and then dropped, in the gateway's own wording.
+   *  Flat strings rather than a triple: ir.Warning.String() owns the format,
+   *  and re-splitting it here would break on any reason containing " -> ". */
+  warnings: string[]
 }
 
 export function routeFromTrace(trace: RequestTrace): TurnRoute {
@@ -41,6 +45,7 @@ export function routeFromTrace(trace: RequestTrace): TurnRoute {
     tokensOut: trace.tokens_out ?? null,
     costMicros: trace.cost_micros ?? null,
     failedOver: attempts.slice(0, -1).map((a) => a.provider),
+    warnings: trace.warnings ?? [],
   }
 }
 
@@ -100,6 +105,7 @@ export function AssistantTurn({
           </div>
         )}
         {route ? <RouteLine route={route} /> : null}
+        {route && route.warnings.length > 0 ? <TurnWarnings warnings={route.warnings} /> : null}
       </div>
 
       {!streaming && text !== "" ? <CopyTurn text={text} /> : null}
@@ -179,6 +185,29 @@ function RouteLine({ route }: { route: TurnRoute }) {
         </Link>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * Parameters the provider would not take.
+ *
+ * Distinct from an error: the request succeeded, and this is the part of it
+ * that did not survive the trip. Drawn quietly, because a run with warnings is
+ * still a run that worked.
+ */
+function TurnWarnings({ warnings }: { warnings: string[] }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {warnings.map((w, i) => (
+        <li key={i} className="flex items-start gap-1.5 text-sm text-[hsl(var(--legend))]">
+          <TriangleAlert
+            className="mt-0.5 size-[var(--icon-size,1rem)] shrink-0"
+            aria-hidden="true"
+          />
+          <span className="font-mono">{w}</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

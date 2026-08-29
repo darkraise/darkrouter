@@ -23,7 +23,7 @@ const trace = (over: Partial<RequestTrace> = {}): RequestTrace =>
 
 const route = (over: Partial<TurnRoute> = {}): TurnRoute => ({
   requestId: "01ABC", provider: "groq", model: "llama-3.3", totalMs: 900,
-  tokensIn: 12, tokensOut: 30, costMicros: null, failedOver: [], ...over,
+  tokensIn: 12, tokensOut: 30, costMicros: null, failedOver: [], warnings: [], ...over,
 })
 
 describe("reading the route off a trace", () => {
@@ -108,5 +108,45 @@ describe("cost", () => {
     expect(formatCost(2_500_000)).toBe("$2.50")
     expect(formatCost(3_400)).toBe("$0.0034")
     expect(formatCost(12)).toBe("<$0.0001")
+  })
+})
+
+describe("what the provider dropped", () => {
+  it("carries the trace's warnings onto the turn", () => {
+    const r = routeFromTrace(trace({ warnings: ["top_k -> openai: not expressible"] }))
+    expect(r.warnings).toEqual(["top_k -> openai: not expressible"])
+  })
+
+  it("treats a trace without warnings as none, not as unknown", () => {
+    // The field is optional on the wire; a run that dropped nothing simply
+    // omits it.
+    expect(routeFromTrace(trace()).warnings).toEqual([])
+  })
+
+  it("shows each warning under the answer it belongs to", () => {
+    // A control the dialect accepted can still be dropped by the provider --
+    // temperature alongside thinking, say. Silence there is the same lie the
+    // dialect gating exists to prevent.
+    render(
+      <AssistantTurn
+        text="an answer"
+        route={route({ warnings: ["temperature -> anthropic: rejected alongside thinking"] })}
+      />,
+    )
+    expect(screen.getByText(/rejected alongside thinking/i)).toBeInTheDocument()
+  })
+
+  it("renders the warning as sent, without re-splitting it", () => {
+    // The string is the Go side's format. Parsing it back into field, target
+    // and reason would mis-split any reason containing the separator.
+    const odd = "stop -> gemini: not expressible -> see the adapter notes"
+    render(<AssistantTurn text="a" route={route({ warnings: [odd] })} />)
+    expect(screen.getByText(odd)).toBeInTheDocument()
+  })
+
+  it("says nothing when there are no warnings", () => {
+    const { container } = render(<AssistantTurn text="a" route={route({ warnings: [] })} />)
+    expect(container.textContent).not.toMatch(/dropped/i)
+    expect(container.textContent).not.toMatch(/not expressible/i)
   })
 })
