@@ -40,9 +40,11 @@ been able to demonstrate.
 
 **In:** a two-mode playground — Chat and Lab — replacing the four-tab screen; a full-height layout;
 a conversation history rail with server-side persistence; named request presets with server-side
-persistence; sampling controls covering every parameter the IR actually carries, gated per dialect;
-a structured-output schema editor; reasoning controls; Compare grown from two fixed panels to N
-columns; new mockup fragments; the admin endpoints and migration the two persisted features need.
+persistence; sampling controls covering every sampling parameter the IR actually carries, gated per
+dialect (§6.1 names the two IR fields deliberately excluded); the adapter warnings that say when a
+parameter was accepted and then dropped upstream; a structured-output schema editor; reasoning
+controls; Compare grown from two fixed panels to N columns; new mockup fragments; the admin
+endpoints, migration and settings key the two persisted features need.
 
 **Out:** code export (curl/Python/TypeScript snippets). Considered and deliberately dropped — the
 Connect screen already generates client snippets against the router's base URL, and a second
@@ -79,8 +81,9 @@ retrievable history is a scratchpad, and nobody keeps a scratchpad.
 
 **The transcript**, centre, `max-w-3xl` and centred within its column, scrolling in its own
 container. Above it sits a slim strip carrying the model pill — a button that opens the existing
-`ModelCombobox` in a popover — the conversation title, inline-editable, and an overflow menu holding
-rename, delete, and *open this configuration in Lab*.
+`ModelCombobox` in a popover, with the dialect select beside it — the conversation title,
+inline-editable, and an overflow menu holding *edit the system prompt*, *open this configuration in
+Lab*, rename and delete.
 
 **The composer**, pinned to the foot of the region rather than sticky within a scrolling page. The
 existing auto-growing `Textarea`, Enter-to-send and Shift+Enter-for-newline behaviour is kept
@@ -118,6 +121,12 @@ component library blocks a full-height screen; the playground simply never asked
 own `min-h-0 overflow-y-auto` container. The consequence worth stating: `main` stops scrolling and
 the transcript starts, which is what makes a pinned composer and a pinned metrics strip possible at
 all.
+
+One detail that will otherwise be discovered as a mystery gap: `.dr-sidebar-layout-content` carries
+its own `p-6`. A composer "pinned to the foot of the region" sits 24px above the visual bottom
+unless the screen negates that padding. The current `chat.tsx` composer already does this with
+`-mx-6 -mb-6` and a comment explaining it; the new layout should negate the padding once, at the
+screen root, rather than at each pinned edge.
 
 Below `lg`, the config pane moves from a right column to a `Sheet`, and the Chat history rail from
 a left column to a `Sheet`. A 320px pane and a 260px rail either side of a transcript is three
@@ -161,11 +170,18 @@ Verified by reading `internal/ir/ir.go:204`, `internal/edge/openai/parse.go`,
 | Top P | `TopP` | `top_p` | `top_p` | `topP` |
 | Top K | `TopK` | — not read | `top_k` | `topK` |
 | Stop sequences | `StopSequences` | `stop` | `stop_sequences` | `stopSequences` |
-| Structured output | `ResponseFormat` | `response_format` (json_schema only) | — not read | `responseMimeType` + `responseSchema` |
+| Structured output | `ResponseFormat` | `response_format` (json_schema only) | — not read | `responseSchema` only |
 | Reasoning effort | `Reasoning.Effort` | `reasoning_effort` | — | — |
 | Reasoning budget | `Reasoning.Budget` | — | `thinking.budget_tokens` | `thinkingConfig.thinkingBudget` |
 | Presence/frequency penalty | **absent** | — | — | — |
 | Seed | **absent** | — | — | — |
+
+Two IR fields are edge-parsed and adapter-written and are deliberately **not** controls on this
+screen. `ParallelToolCalls` belongs with the tools editor rather than with sampling, and is
+meaningless until tools are defined. `Safety` is Gemini-only, is a policy decision rather than a
+sampling one, and a four-category threshold matrix in a sampling pane would dominate it. Both are
+named here because §2 promises "every parameter the IR carries" and silence would read as an
+oversight rather than a choice.
 
 ### 6.2 Dialect-aware controls
 
@@ -180,14 +196,20 @@ It is not hidden. Hiding it makes the control appear and disappear as the dialec
 reads as a bug; disabling it teaches the operator something true about the three wires, which is
 most of what this screen is for.
 
+A disabled element fires no pointer events, so the tooltip attaches to a wrapper around the control
+rather than to the control itself. Stated because it is a trap that reliably costs an hour.
+
 Two cases need naming beyond the table:
 
 **Structured output is a schema, not a switch.** `internal/edge/openai/parse.go:131` honours
 `response_format` only when its type is `json_schema` *and* a schema is present — a bare
-`{"type":"json_object"}` is parsed and dropped. A "JSON mode" toggle, which is what OmniRoute ships,
-would therefore do nothing at all on the dialect most operators use. The control is a schema
-editor: a `Textarea` validated as JSON on every keystroke, with the same inline error treatment
-`parseTools` already uses for the tools field.
+`{"type":"json_object"}` is parsed and dropped. Gemini behaves the same way from the other side:
+`internal/edge/gemini/parse.go:88` declares `responseMimeType` in the wire struct, but the IR
+mapping at `parse.go:171` reads only `responseSchema`, so a mime type without a schema is likewise
+parsed and dropped. A "JSON mode" toggle, which is what OmniRoute ships, would therefore do nothing
+at all on two of the three dialects. The control is a schema editor: a `Textarea` validated as JSON
+on every keystroke, with the same inline error treatment `parseTools` already uses for the tools
+field.
 
 **Reasoning is one control with two renderings.** OpenAI takes an effort tier, Anthropic and Gemini
 take a token budget, and `ir.Reasoning` holds both. The pane shows a segmented low/medium/high on
@@ -196,24 +218,56 @@ operator learns that these are the same idea rather than three unrelated fields.
 
 ### 6.3 Why penalties and seed are out
 
-They are absent from `ir.Request`. Adding them means a new field on the IR, a parse in the OpenAI
-edge, a write in every outbound adapter, and a `Warning` from every adapter that cannot express
-them — which is all of them except OpenAI-compatible. That is a change to the core routing path,
-reviewed on the core routing path's terms, to serve three controls that two of three dialects
-cannot carry. If they are wanted they should be their own change with its own justification, not a
-rider on a UI overhaul.
+They are absent from `ir.Request`, and absent from every edge's inbound wire struct. Adding them
+means a new field on the IR, a parse in the OpenAI and Gemini edges, a write in the adapters that
+can express them, and a `Warning` from the Anthropic adapter, which cannot.
 
-### 6.4 Go changes
+Be accurate about the reason, because the obvious version of this argument is wrong: **Gemini's API
+does carry `presencePenalty`, `frequencyPenalty` and `seed`** in `generationConfig`, and OpenAI
+carries all three. Only Anthropic genuinely lacks them. The case for dropping them is not that the
+providers cannot take them — it is that darkrouter's IR is the narrow waist every request passes
+through, and widening it is a change to the core routing path reviewed on the core routing path's
+terms. Doing that as a rider on a UI overhaul is how a narrow waist stops being narrow.
+
+One apparent shortcut is not one. `ir.Request.Extra` exists and looks like a passthrough channel,
+but nothing in any edge or adapter reads or writes it — it is a vestigial field, not an escape
+hatch, and routing a parameter through it would mean building the passthrough as well.
+
+If these are wanted they should be their own change with its own justification.
+
+### 6.4 The other half of the lie: adapter warnings
+
+Gating controls per dialect stops a control lying about the *wire*. It does not stop one lying about
+the *provider*, and the gateway already knows when that happens.
+
+`internal/adapter/anthropic/build.go:111-145` drops temperature, top_p and top_k — each with an
+`ir.Warning` naming the field, the target and the reason — when thinking is on, or when the model is
+one that rejects any non-default sampling parameter. `internal/adapter/openaicompat/build.go:39-43`
+drops top_k as having no equivalent, and `build.go:53-60` downgrades a reasoning budget to the
+nearest effort band. So on the Anthropic dialect, a temperature the pane happily enabled goes into
+the void the moment reasoning is switched on, and today nothing on this screen says so.
+
+The warnings already ride the trace, and the trace types already declare them. Lab renders them
+**beside the run they belong to**, under the metrics strip: field, target and reason, in the same
+quiet register as the route line. This is the natural completion of §6.2's principle rather than a
+new feature — a control that was accepted, sent, and then dropped upstream is exactly as misleading
+as one that was never on the wire, and this is the only screen in the console positioned to show it.
+
+Chat mode shows a single quiet marker when a run produced warnings, expanding to the list on click.
+The full treatment belongs to the instrument.
+
+### 6.5 Go changes
 
 `playgroundBody` in `internal/admin/playground.go` gains `TopP *float64`, `TopK *int`,
 `Stop []string`, `ResponseSchema json.RawMessage` and `Reasoning *playgroundReasoning`. Each of the
 three body builders writes what its wire carries and drops the rest — the same shape the existing
 builders already have for tools, where `geminiPlaygroundBody` refuses rather than silently dropping.
 
-The refusal precedent matters: `playgroundRequest` already errors on Gemini plus tools rather than
-sending a request the operator would misread. Parameters follow the softer rule instead — dropped,
-because the UI has already disabled them, so a value can only arrive here from a hand-made request
-or a preset saved under another dialect. §7.2 covers the preset case.
+The refusal precedent matters: `playgroundRequest` (`internal/admin/playground.go:71-75`) already
+errors on Gemini plus tools rather than sending a request the operator would misread. Parameters
+follow the softer rule instead — dropped, because the UI has already disabled them, so a value can
+only arrive here from a hand-made request or a preset saved under another dialect. §7.1 covers the
+preset case.
 
 ## 7. Persistence
 
@@ -251,6 +305,31 @@ The decision taken here, and it should be reviewed as a decision rather than abs
 - The stored text is the operator's own prompts and the models' replies. It is not client traffic,
   and nothing in this design starts capturing that.
 
+**Its relationship to `capture.bodies`.** These are now two knobs governing prompt text at rest and
+they must not be silently unrelated. An operator who turned body capture off for privacy reasons
+would reasonably expect that stance to cover the playground. They stay separate settings, because
+they govern genuinely different things — `capture.bodies` records *other people's* traffic passing
+through the gateway, `playground.save_conversations` records *the operator's own* typing — but the
+settings screen groups them under one heading that says exactly that, so the distinction is offered
+rather than left to be inferred.
+
+**Why the text is stored in plaintext.** The same database holds provider credentials encrypted at
+rest (`provider_keys.ciphertext`/`nonce`), so plaintext here is a choice and should read as one. The
+threat model differs: a credential is a live capability an attacker can use against a third party,
+and it is encrypted so that a leaked database file does not become a leaked API key. A test prompt
+is content, not capability; encrypting it would protect it from an attacker who already has the
+database file and the ability to read every other table in it, while costing the ability to search
+or inspect conversations with `sqlite3`. If the operator's prompts are sensitive enough to need
+encryption at rest, the honest answer is the switch, not a cipher.
+
+**Settings plumbing.** `configFields` in `internal/admin/configapi.go:33` is a deliberate allowlist,
+not reflection — the comment says so and names the credential it exists to keep out — so the switch
+needs a new key in `internal/config`, an entry in that list, and a control on the settings screen.
+The purge is the UI's `DELETE /api/playground/conversations` call, not a side effect of the config
+value changing. Config is file-backed and reloadable, and a setting whose *reload* deletes data
+would mean an edit to a file on disk silently destroying the operator's history. Flipping the key in
+the file stops new writes; it does not delete what is already there.
+
 This is separable from the rest of the overhaul. If the reviewer wants prompt-at-rest to stay a
 closed question, the history rail becomes session-scoped `localStorage` and everything else in this
 document is unchanged.
@@ -278,6 +357,12 @@ CREATE TABLE playground_conversations (
   title      TEXT    NOT NULL,
   model      TEXT    NOT NULL,
   dialect    TEXT    NOT NULL,
+  -- The rest of the request that shaped every answer below: system prompt,
+  -- tools, sampling, reasoning. Same JSON shape as playground_presets.config.
+  -- Without it a conversation reopened tomorrow loses the system prompt that
+  -- produced its transcript, and "open this configuration in Lab" has nothing
+  -- to open -- which is the quiet lossiness section 7.1 refuses for presets.
+  config     TEXT    NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) STRICT;
@@ -322,15 +407,41 @@ DELETE /api/playground/presets/{id}
 GET    /api/playground/conversations           list, newest first, no messages
 POST   /api/playground/conversations
 GET    /api/playground/conversations/{id}      with messages
-PATCH  /api/playground/conversations/{id}      title only
+PATCH  /api/playground/conversations/{id}      title, model, dialect, config
 DELETE /api/playground/conversations/{id}
 POST   /api/playground/conversations/{id}/messages
 DELETE /api/playground/conversations           purge, for the settings switch
 ```
 
+Go's `ServeMux` registers the exact literal `DELETE /api/playground/conversations` alongside the
+wildcard `.../{id}` and routes the literal correctly, so the purge and the single delete coexist.
+
 Store methods land in `internal/store/playground.go`; the HTTP layer in
 `internal/admin/playgroundstore.go`, separate from `playground.go` so the file that synthesizes
 proxy requests does not also become the file that does CRUD.
+
+### 7.5 Behaviour the endpoints do not settle
+
+Small decisions that will otherwise each be made twice, differently.
+
+**Title.** A new conversation is created titled "New chat" and retitled from the first user turn once
+it completes — truncated at 52 characters on a word boundary, 9router's rule, which is a good one. A
+title the operator has edited is never overwritten.
+
+**Mid-conversation changes.** Switching model or dialect part-way through `PATCH`es the conversation
+row. The transcript keeps the turns that came before; each answer's route line already records what
+actually served it, so a conversation that changed models mid-way stays readable rather than
+claiming one model answered everything.
+
+**Duplicate preset names.** `idx_playground_presets_name` is unique, so the store returns a conflict
+and the save dialog offers to overwrite the existing preset rather than reporting a database error.
+
+**List size.** The conversations list is capped at the 200 most recent, ordered by `updated_at`. Past
+that the rail is not the right retrieval tool and search would be a different feature; the cap is
+stated so it is a decision rather than the point where the query gets slow.
+
+**Empty conversations.** A conversation with no messages — created, then abandoned — is deleted when
+the rail next loads. Nothing is lost and the alternative is a rail that fills with "New chat".
 
 ## 8. Compare, as N columns
 
@@ -358,14 +469,15 @@ web/src/features/playground/
   chat/
     chat-mode.tsx            new — the three-region layout
     history-rail.tsx         new
-    conversation-header.tsx  new — model pill, title, overflow menu
-    composer.tsx             new — extracted from chat.tsx unchanged in behaviour
-    transcript.tsx           new — extracted from chat.tsx
+    conversation-header.tsx  new — model pill, dialect, title, overflow menu
+    composer.tsx             new — from chat.tsx, unchanged in behaviour
+    transcript.tsx           new — from chat.tsx
   lab/
     lab-mode.tsx             new — sub-tabs, config pane, metrics strip
-    single.tsx               from chat.tsx, minus the composer and transcript extractions
+    single.tsx               new — composer + transcript + useChatRun, no rail
     compare.tsx              rewritten — N columns
     compare-column.tsx       new
+    warnings.tsx             new — §6.4, the adapter warnings for a run
   config-pane/
     config-pane.tsx          rewritten
     preset-picker.tsx        new
@@ -377,20 +489,42 @@ web/src/features/playground/
   message.tsx                extended — quiet and expanded RouteLine
   markdown*.tsx              unchanged
   lib/
-    stream.ts                new — drainSSE and the dialect extractors, moved verbatim
+    stream.ts                new — drainSSE, extractUnaryText, dialect extractors
+    request.ts               new — chatBody, parseTools, seedFromTrace
+    use-chat-run.ts          new — the send loop, shared by Chat and Lab Single
     presets.ts               new — queries and mutations
     conversations.ts         new — queries and mutations
+
+web/vitest.config.ts                            extended — pool: "threads" (§11)
+web/src/features/settings/settings-catalog.ts   extended — the save switch
 
 internal/store/migrations/0014_playground.sql   new
 internal/store/playground.go                    new
 internal/admin/playgroundstore.go               new
-internal/admin/playground.go                    extended — §6.4
+internal/admin/playground.go                    extended — §6.5
+internal/admin/configapi.go                     extended — configFields entry
+internal/config/*.go                            extended — the new key
 internal/admin/admin.go                         extended — route registration
 ```
 
-`chat.tsx` is dissolved. Its SSE draining and dialect extractors move to `lib/stream.ts` untouched;
-its component halves become `transcript.tsx` and `composer.tsx`. The file is 451 lines doing four
-jobs and it is the reason the current screen is hard to change.
+**`chat.tsx` is dissolved, and every one of its exports needs a stated home** — it has five, and
+three of them have importers outside the file today (`config-pane.tsx:15` takes `parseTools`,
+`compare.tsx:7` takes `chatBody` and `drainSSE`). `drainSSE` and `extractUnaryText` go to
+`lib/stream.ts`; `chatBody`, `parseTools` and `seedFromTrace` to `lib/request.ts`. All five move
+verbatim.
+
+**The send loop is a hook, not a duplicated block.** `send()`, `appendToLastMessage`, the abort
+controller, the TTFT measurement and the `traceWhenWritten` follow-up (`chat.tsx:239-330`) are
+needed identically by Chat mode and by Lab's Single tab. They become `useChatRun`. Copying them into
+two files would guarantee the two surfaces drift, and this is precisely the logic §11 wants moved
+rather than rewritten.
+
+**The `?seed=` flow keeps working, in Lab.** `trace-drawer.tsx:158-162` links "Open in playground"
+with `search={{ seed: trace.id }}`, and `chat.tsx:210-221` consumes it. A seed is a routing
+investigation, so it opens **Lab / Single**, and the consuming effect moves there with
+`seedFromTrace`. The existing note explaining that a trace carries no prompt text — only model and
+dialect are recoverable — moves with it unchanged; it is the only thing standing between the
+operator and a transcript that is mysteriously empty.
 
 ## 10. Mockups gate implementation
 
@@ -400,22 +534,48 @@ the same gate. Fragments `11-playground.html` and `12-playground-compare.html` a
 - `11-playground-chat.html` — Chat mode, mid-stream, history rail populated, one answer showing a
   quiet route line and one expanded.
 - `12-playground-lab.html` — Lab mode on Single, config pane open with a preset loaded, two
-  controls disabled with their dialect reasons visible, metrics strip populated.
-- `12b-playground-compare.html` — Lab mode on Compare, four columns, one streaming, one errored.
+  controls disabled with their dialect reasons visible, metrics strip populated, and one adapter
+  warning shown beneath it.
+- `13-playground-compare.html` — Lab mode on Compare, four columns, one streaming, one errored.
+
+Renumbering rather than adding a `12b`: the fragment set is `00`–`17` in two digits and the build
+assembles in filename order, so a suffixed name is a special case in a sequence that has none. The
+existing `13`–`17` shift up by one, and `index.html`'s table of contents and
+`docs/ux/DONE-CRITERIA.md` are updated to match.
 
 `build.py`, `qa.py` and `check.py` are unchanged and their gates apply as they stand: no colour
-literal in a fragment, nothing fetched from the network, and a screenshot per screen in both
-themes. The `index.html` table of contents and `docs/ux/DONE-CRITERIA.md` are updated to match.
+literal in a fragment, nothing fetched from the network, and a screenshot per screen in both themes.
+
+**One warning for whoever builds these.** `qa.py:45` enforces a font-size *ceiling* only, so it will
+not catch a size below the floor, and the two reference products are saturated with exactly that:
+OmniRoute's playground components carry over a hundred `text-xs` and `text-[11px]` occurrences —
+`StudioConfigPane.tsx` alone has twelve — and 9router's chat client has seven. `CLAUDE.md` forbids
+both outright: 14px (`text-sm`) is the floor and only the predefined scale is allowed. Every layout
+borrowed from those files must be translated to the `text-*` scale, and hierarchy below body text
+comes from colour and weight instead. This is the single easiest way for this overhaul to import a
+rule violation, and neither the mockup gate nor a typecheck will stop it.
 
 ## 11. Testing
 
 **Console.** Vitest under the **threads pool** — the default fork pool silently skips half this
-suite. New coverage: the dialect-support matrix as a pure table test; preset round-trip through a
-dialect that cannot carry one of its parameters, asserting the value survives; conversation
-auto-save writing exactly one message per turn; the compare column cap; mode persistence across a
-reload. Existing `chat.test.ts`, `metrics.test.ts`, `message.test.tsx`, `markdown.test.tsx` and
-`aux-panels.test.ts` must pass unchanged — the logic they cover is being moved, not rewritten, and
-any of them needing an edit is a signal that something was lost.
+suite. Note that this is currently an unenforced requirement: `web/vitest.config.ts` sets no `pool`
+and the test script is a bare `vitest run`, so the gate below could pass with half the suite never
+executing. Pinning `pool: "threads"` in the config is part of this change, and it comes first,
+because every other test claim in this section depends on it.
+
+New coverage: the dialect-support matrix as a pure table test; preset round-trip through a dialect
+that cannot carry one of its parameters, asserting the value survives; a conversation reopened with
+its system prompt intact; auto-save writing exactly one message per turn; the compare column cap;
+mode persistence across a reload; the adapter warnings rendering for a run that produced them.
+
+**The gate on existing tests, stated so it is achievable.** `chat.test.ts:2` imports `parseTools`,
+`chatBody`, `seedFromTrace`, `drainSSE` and `extractUnaryText` from `./chat` — the file §9 deletes.
+Those five tests therefore *must* change: their import lines move to `lib/request.ts` and
+`lib/stream.ts`. The gate is that **nothing but the import lines changes**. Every assertion in
+`chat.test.ts`, `metrics.test.ts`, `message.test.tsx`, `markdown.test.tsx` and `aux-panels.test.ts`
+stands as written, and an assertion needing an edit is the signal that behaviour was lost in the
+move. The earlier phrasing — "must pass unchanged" — was impossible by §9's own file layout and
+would have fired on day one for a reason that signalled nothing.
 
 **Go.** Table tests over `playgroundRequest` asserting, per dialect, exactly which of the new
 parameters appear in the synthesized body and which are dropped — the §6.1 matrix, executable.
@@ -427,16 +587,17 @@ expanded, before the change is called done. Then redeploy, per the same file.
 
 ## 12. The adjacent bug
 
-`web/src/features/playground/chat.tsx:238` guards the streaming auto-scroll with:
+`web/src/features/playground/chat.tsx:207` guards the streaming auto-scroll with:
 
 ```js
 window.innerHeight + window.scrollY >= document.body.offsetHeight - 160
 ```
 
-`body` is `overflow: hidden` at exactly viewport height — the scroll container is `main`, not the
-window. So `window.scrollY` is always 0 and `document.body.offsetHeight` always equals
-`window.innerHeight`, making the test `1000 >= 840`: permanently true. The guard that is supposed to
-stop yanking the operator back to the bottom while they read something earlier has never fired.
+darkraise-ui's layout root is `flex h-screen overflow-hidden`, so the window never scrolls — the
+scroll container is `main`, not the window. `window.scrollY` is therefore always 0 and
+`document.body.offsetHeight` always equals `window.innerHeight`, making the test `1000 >= 840`:
+permanently true. The guard that is supposed to stop yanking the operator back to the bottom while
+they read something earlier has never fired.
 
 The fix falls out of §4: once the transcript is its own scroll container, the check reads that
 element's `scrollTop`, `clientHeight` and `scrollHeight`. It is called out separately because it is
@@ -456,8 +617,31 @@ silently into a layout rewrite.
 | 7 | Presets keep values a dialect cannot send | Rewriting the preset on load, making it lossy |
 | 8 | Compare capped at four columns | Unbounded |
 | 9 | Code export dropped | Duplicating the Connect screen's generator |
+| 10 | Adapter warnings surfaced beside the run | Leaving a control that was sent and then dropped upstream indistinguishable from one that worked |
+| 11 | Conversations store their full config, not just model and dialect | A conversation that silently loses its system prompt on reopen |
+| 12 | `playground.save_conversations` and `capture.bodies` stay separate, grouped under one heading | One combined switch; or two unrelated switches with no explanation |
+| 13 | Conversation text stored in plaintext | Encrypting it as credentials are — protects only against an attacker who already has the database |
+| 14 | The send loop is a shared hook | Duplicating it into Chat and Lab Single, which would drift |
+| 15 | `?seed=` opens Lab / Single | Chat mode — a seed is a routing investigation, not a conversation |
 
-## 14. Open decisions
+## 14. Review history
+
+| Artifact | Reviewer | Outcome |
+|---|---|---|
+| This spec, first draft | 1 × Fable, read-only | 2 Critical, 8 Important, 8 Minor. All verified against source and all applied. The factual survey held: of roughly twenty checkable claims, seventeen verified exactly. |
+
+The two Critical findings were both real and both would have surfaced on the first day of
+implementation. The test gate in §11 was impossible as written — `chat.test.ts` imports five symbols
+from the file §9 deletes, so "must pass unchanged" could not hold. And `playground_conversations`
+had no column for the system prompt, so the auto-save feature §7.2 reverses a phase 10 boundary to
+provide would have silently dropped the setting that shaped every answer it stored.
+
+The most valuable finding was not a defect but a completion: §6.4 exists because the review pointed
+out that gating controls per dialect stops a control lying about the wire while leaving it free to
+lie about the provider — and that the gateway already records exactly that, in warnings no screen
+displays.
+
+## 15. Open decisions
 
 None. The one that was open — §7.2, whether the playground may retain prompt text at rest — was put
 to the owner during design and approved on 2026-08-29, with the auto-save, the settings switch and
