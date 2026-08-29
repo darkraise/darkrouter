@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { describe, expect, it, vi } from "vitest"
 import { PresetPicker } from "./preset-picker"
 import { emptyConfig } from "../config"
-import type { PlaygroundPreset } from "../../../lib/api-types"
+import type { PlaygroundDialect, PlaygroundPreset } from "../../../lib/api-types"
 
 const saved: PlaygroundPreset = {
   id: "p1",
@@ -16,9 +16,19 @@ const saved: PlaygroundPreset = {
   updated_at: "2026-08-30T00:00:00Z",
 }
 
+// The admin API is operator-facing, so this row is what a hand-written curl
+// against an unpatched server can produce: a dialect column outside the
+// three the console understands.
+const wildDialect: PlaygroundPreset = {
+  ...saved,
+  id: "p2",
+  name: "wild",
+  dialect: "responses" as PlaygroundDialect,
+}
+
 vi.mock("../../../lib/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/queries")>()),
-  usePlaygroundPresets: () => ({ data: [saved], isLoading: false }),
+  usePlaygroundPresets: () => ({ data: [saved, wildDialect], isLoading: false }),
 }))
 
 const { postMock, patchMock, delMock } = vi.hoisted(() => ({
@@ -55,6 +65,21 @@ describe("loading a preset", () => {
     expect(next.dialect).toBe("anthropic")
     expect(next.system).toBe("be brief")
     expect(next.topK).toBe("40")
+  })
+
+  it("falls back to openai for a preset carrying an unknown dialect", async () => {
+    // A row can be written by hand with curl, not only by the console, so a
+    // stored dialect the config pane cannot render must not crash it.
+    const onChange = vi.fn()
+    mounted(
+      <PresetPicker config={{ ...emptyConfig(), model: "gpt", dialect: "openai" }} onChange={onChange} />,
+    )
+    await userEvent.click(screen.getByRole("combobox", { name: /load a preset|preset/i }))
+    await userEvent.click(await screen.findByRole("option", { name: "wild" }))
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const next = onChange.mock.calls[0]![0]
+    expect(next.dialect).toBe("openai")
   })
 })
 

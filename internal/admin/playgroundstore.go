@@ -8,10 +8,10 @@ import (
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-// presetView is the wire shape. Config is json.RawMessage in both directions:
-// the server is a courier for the console's own settings, and a struct here
-// would strip any field this binary has not learned yet.
-type presetView struct {
+// playgroundPresetView is the wire shape. Config is json.RawMessage in both
+// directions: the server is a courier for the console's own settings, and a
+// struct here would strip any field this binary has not learned yet.
+type playgroundPresetView struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Dialect   string          `json:"dialect"`
@@ -21,19 +21,29 @@ type presetView struct {
 	UpdatedAt string          `json:"updated_at"`
 }
 
-func viewOfPreset(p store.PlaygroundPreset) presetView {
-	return presetView{
+func viewOfPreset(p store.PlaygroundPreset) playgroundPresetView {
+	return playgroundPresetView{
 		ID: p.ID, Name: p.Name, Dialect: p.Dialect, Model: p.Model, Config: p.Config,
 		CreatedAt: p.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: p.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
-type presetBody struct {
+type playgroundPresetBody struct {
 	Name    string          `json:"name"`
 	Dialect string          `json:"dialect"`
 	Model   string          `json:"model"`
 	Config  json.RawMessage `json:"config"`
+}
+
+// validPlaygroundDialects mirrors the switch playgroundRequest dials on in
+// playground.go. dialect-support.ts on the client has no fallback case for an
+// unknown dialect, so a preset naming any other wire would crash the config
+// pane's render the moment it loads.
+var validPlaygroundDialects = map[string]bool{
+	"openai":    true,
+	"anthropic": true,
+	"gemini":    true,
 }
 
 // readPresetBody decodes and validates everything the store will not.
@@ -41,20 +51,24 @@ type presetBody struct {
 // The blob's interior is never inspected beyond confirming it is an object:
 // that is the one shape the client can merge, and anything inside it belongs
 // to the console.
-func readPresetBody(w http.ResponseWriter, r *http.Request) (presetBody, bool) {
-	var body presetBody
+func readPresetBody(w http.ResponseWriter, r *http.Request) (playgroundPresetBody, bool) {
+	var body playgroundPresetBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return presetBody{}, false
+		return playgroundPresetBody{}, false
 	}
 	if body.Name == "" {
 		writeError(w, http.StatusBadRequest, "a preset needs a name")
-		return presetBody{}, false
+		return playgroundPresetBody{}, false
+	}
+	if !validPlaygroundDialects[body.Dialect] {
+		writeError(w, http.StatusBadRequest, "dialect must be one of openai, anthropic, gemini")
+		return playgroundPresetBody{}, false
 	}
 	var probe map[string]any
 	if err := json.Unmarshal(body.Config, &probe); err != nil || probe == nil {
 		writeError(w, http.StatusBadRequest, "config must be a JSON object")
-		return presetBody{}, false
+		return playgroundPresetBody{}, false
 	}
 	return body, true
 }
@@ -65,7 +79,7 @@ func (s *Server) handleListPlaygroundPresets(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := []presetView{}
+	out := []playgroundPresetView{}
 	for _, p := range presets {
 		out = append(out, viewOfPreset(p))
 	}
