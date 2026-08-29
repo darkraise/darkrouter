@@ -106,3 +106,63 @@ func TestPlaygroundPresetUpdatesAndDeletesReportWhetherARowMoved(t *testing.T) {
 		t.Error("second delete reported a row")
 	}
 }
+
+func TestPlaygroundPresetStoresTheExactBytesItWasGiven(t *testing.T) {
+	// The sibling round-trip test uses a blob whose keys are already in
+	// marshal order and whose scalars are already canonical, so a store that
+	// decoded into a map and re-marshalled would reproduce it and pass. This
+	// blob cannot survive that: the keys are unsorted, the whitespace is
+	// irregular, the seed is wider than a float64 can hold without rounding,
+	// and 1.50 renormalises to 1.5.
+	ctx := context.Background()
+	db := migrated(t)
+
+	blob := json.RawMessage("{\"zeta\": 1,\n  \"alpha\":  {\"b\":2,\"a\":3},\n" +
+		"\"seed\":12345678901234567890,\"temperature\":1.50,\"system\":\"caf\\u00e9\"}")
+
+	made, err := db.CreatePlaygroundPreset(ctx, "exact", "openai", "gpt", blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(made.Config) != string(blob) {
+		t.Errorf("returned config = %s, want %s", made.Config, blob)
+	}
+
+	// Read the column itself, not just the value the store hands back: this is
+	// what proves nothing reshapes the JSON on the way into SQLite.
+	var raw string
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT config FROM playground_presets WHERE id = ?`, made.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != string(blob) {
+		t.Errorf("stored column = %s, want %s", raw, blob)
+	}
+
+	list, err := db.PlaygroundPresets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(list[0].Config) != string(blob) {
+		t.Errorf("listed config = %s, want %s", list[0].Config, blob)
+	}
+	byName, ok, err := db.PlaygroundPresetByName(ctx, "exact")
+	if err != nil || !ok {
+		t.Fatalf("lookup by name = %v, %v", ok, err)
+	}
+	if string(byName.Config) != string(blob) {
+		t.Errorf("looked-up config = %s, want %s", byName.Config, blob)
+	}
+
+	updated := json.RawMessage("{\"zeta\":0,\"alpha\":\t9,\"seed\":98765432109876543210}")
+	if ok, err := db.UpdatePlaygroundPreset(ctx, made.ID, "exact", "openai", "gpt", updated); err != nil || !ok {
+		t.Fatalf("update = %v, %v", ok, err)
+	}
+	after, _, err := db.PlaygroundPresetByName(ctx, "exact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after.Config) != string(updated) {
+		t.Errorf("updated config = %s, want %s", after.Config, updated)
+	}
+}
