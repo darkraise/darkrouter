@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { PageHeader } from "darkraise-ui/layout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "darkraise-ui/components/tabs"
-import { Chat } from "./chat"
+import { ChatTab } from "./chat-tab"
 import { Compare } from "./compare"
 import { AuxPanels, Count } from "./aux-panels"
 import { ConfigPane } from "./config-pane"
@@ -51,7 +51,7 @@ export function PlaygroundScreen() {
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="min-w-0 flex-1">
           <TabsContent value="chat">
-            <Chat config={config} onConfigChange={setConfig} onMetrics={setMetrics} />
+            <ChatTab config={config} onConfigChange={setConfig} onMetrics={setMetrics} />
           </TabsContent>
           <TabsContent value="compare">
             <Compare config={config} />
