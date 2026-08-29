@@ -4,6 +4,12 @@
 /data/
 darkrouter.yaml
 .env
+.uat-credentials
+# A copy of the live database, taken by hand before a risky change. It holds
+# encrypted credentials, so it is as sensitive as .env.
+/data-backup/
+# Screenshots and page dumps from browser-driven checks.
+/.playwright-mcp/
 __pycache__/
 *.pyc
 docs/ux/mockups/.check/
