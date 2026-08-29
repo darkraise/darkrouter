@@ -1,19 +1,18 @@
 import {
-  Input,
   Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Switch,
   Textarea,
 } from "darkraise-ui"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "darkraise-ui"
-import { ModelCombobox, useModelCandidates } from "../shell/model-combobox"
-import { DIALECTS, type PlaygroundConfig } from "./config"
-import { parseTools } from "./lib/request"
-import type { PlaygroundDialect } from "../../lib/api-types"
+import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
+import { DIALECTS, type PlaygroundConfig } from "../config"
+import { parseTools } from "../lib/request"
+import type { PlaygroundDialect } from "../../../lib/api-types"
+import { Sampling } from "./sampling"
 
 /**
  * The request, beside the surfaces that send it.
@@ -72,34 +71,8 @@ export function ConfigPane({
       <Accordion type="multiple" defaultValue={[]} className="flex flex-col">
       <AccordionItem value="sampling">
       <AccordionTrigger className="text-sm">Sampling</AccordionTrigger>
-      <AccordionContent className="flex flex-col gap-4 pt-1">
-      <div className="flex gap-2">
-        <div className="flex flex-1 flex-col gap-1.5">
-          <Label htmlFor="pg-temp">Temperature</Label>
-          <Input
-            id="pg-temp"
-            type="number"
-            placeholder="default"
-            value={config.temperature}
-            onChange={(e) => set("temperature", e.target.value)}
-          />
-        </div>
-        <div className="flex flex-1 flex-col gap-1.5">
-          <Label htmlFor="pg-max">Max tokens</Label>
-          <Input
-            id="pg-max"
-            type="number"
-            placeholder="default"
-            value={config.maxTokens}
-            onChange={(e) => set("maxTokens", e.target.value)}
-          />
-        </div>
-      </div>
-
-      <label className="flex items-center gap-2 text-sm">
-        <Switch checked={config.stream} onCheckedChange={(next) => set("stream", next)} />
-        Stream the reply
-      </label>
+      <AccordionContent className="pt-1">
+      <Sampling config={config} onChange={onChange} />
       </AccordionContent>
       </AccordionItem>
 

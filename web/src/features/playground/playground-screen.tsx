@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "darkraise-ui/component
 import { ChatTab } from "./chat-tab"
 import { Compare } from "./compare"
 import { AuxPanels, Count } from "./aux-panels"
-import { ConfigPane } from "./config-pane"
+import { ConfigPane } from "./config-pane/config-pane"
 import { emptyConfig, type PlaygroundConfig } from "./config"
 import { MetricsStrip, NO_METRICS, hasReadings, type StreamMetrics } from "./metrics"
 
