@@ -292,6 +292,10 @@ Three sources merge into one index:
   and serves with no outbound access to it.
 - **Discovery** — each enabled provider's own model listing, probed every
   fifteen minutes and whenever a provider or credential changes.
+- **Free tiers** — which models a provider's free tier covers, curated by hand
+  upstream and refreshed daily. It cannot be derived from prices: a free tier is
+  a property of your account, not of the model, so a provider that charges per
+  token on paper can still serve you for nothing.
 
 A provider that times out does not lose its models: after three consecutive
 failed probes they are marked stale and stay routable, because the circuit
@@ -300,6 +304,15 @@ breaker rather than the catalog is what avoids a broken provider. A model a
 stops being routable.
 
 Both workers are optional. See the `catalog:` block in `darkrouter.example.yaml`.
+
+## Third-party material
+
+Provider logos, the preset catalogue, the curated free-tier list and the
+models.dev snapshot all come from elsewhere, and the libraries in the binary
+and the console bundle do too. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+names each one, its licence and its upstream. Provider logos are their owners'
+trademarks, shown so an operator can find the provider they mean — not as an
+endorsement, and removable on request.
 
 ## Develop
 
