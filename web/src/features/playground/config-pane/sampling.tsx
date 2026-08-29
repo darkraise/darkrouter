@@ -1,5 +1,5 @@
 import { Input, Label, Switch, Textarea } from "darkraise-ui"
-import { GatedField } from "./gated-field"
+import { GatedField, retainedValueClass } from "./gated-field"
 import { reasonFor } from "../dialect-support"
 import type { PlaygroundConfig } from "../config"
 
@@ -24,6 +24,7 @@ export function Sampling({
             disabled={why("temperature") !== null}
             value={config.temperature}
             onChange={(e) => set("temperature", e.target.value)}
+            className={retainedValueClass(config.temperature)}
           />
         </GatedField>
         <GatedField reason={why("maxTokens")}>
@@ -33,6 +34,7 @@ export function Sampling({
             disabled={why("maxTokens") !== null}
             value={config.maxTokens}
             onChange={(e) => set("maxTokens", e.target.value)}
+            className={retainedValueClass(config.maxTokens)}
           />
         </GatedField>
       </div>
@@ -45,6 +47,7 @@ export function Sampling({
             disabled={why("topP") !== null}
             value={config.topP}
             onChange={(e) => set("topP", e.target.value)}
+            className={retainedValueClass(config.topP)}
           />
         </GatedField>
         <GatedField reason={why("topK")}>
@@ -54,6 +57,7 @@ export function Sampling({
             disabled={why("topK") !== null}
             value={config.topK}
             onChange={(e) => set("topK", e.target.value)}
+            className={retainedValueClass(config.topK)}
           />
         </GatedField>
       </div>
@@ -65,7 +69,7 @@ export function Sampling({
           disabled={why("stop") !== null}
           value={config.stopRaw}
           onChange={(e) => set("stopRaw", e.target.value)}
-          className="font-mono text-sm"
+          className={`font-mono text-sm ${retainedValueClass(config.stopRaw)}`}
         />
       </GatedField>
 

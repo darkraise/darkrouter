@@ -1,7 +1,7 @@
 import {
   Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "darkraise-ui"
-import { GatedField } from "./gated-field"
+import { GatedField, retainedValueClass } from "./gated-field"
 import { reasonFor } from "../dialect-support"
 import type { PlaygroundConfig } from "../config"
 
@@ -39,7 +39,7 @@ export function Reasoning({
           {/* Label association only, no aria-label: the existing dialect
               select in this pane pairs Label htmlFor with SelectTrigger id,
               and two labelling mechanisms on one control is one too many. */}
-          <SelectTrigger id="pg-effort">
+          <SelectTrigger id="pg-effort" className={retainedValueClass(config.reasoningEffort)}>
             <SelectValue placeholder="default" />
           </SelectTrigger>
           <SelectContent>
@@ -57,6 +57,7 @@ export function Reasoning({
           disabled={budgetWhy !== null}
           value={config.reasoningBudget}
           onChange={(e) => set("reasoningBudget", e.target.value)}
+          className={retainedValueClass(config.reasoningBudget)}
         />
       </GatedField>
     </div>
