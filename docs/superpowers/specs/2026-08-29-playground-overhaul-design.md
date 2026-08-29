@@ -1,6 +1,8 @@
 # Playground overhaul — Chat and Lab
 
-**Status:** design, 2026-08-29. Awaiting review.
+**Status:** design, 2026-08-29. Reviewed and restructured into four stages; see §3 and §15.
+**Delivery:** four separately shippable stages. Stages 3 and 4 can be cut without stranding
+anything already built.
 **Master design:** `2026-08-22-darkrouter-design.md`
 **Builds on:** `2026-08-24-darkrouter-phase10-operator-console.md`, which established the Warm
 Console design language, the mockup pipeline, and the playground this document replaces.
@@ -41,10 +43,13 @@ been able to demonstrate.
 **In:** a two-mode playground — Chat and Lab — replacing the four-tab screen; a full-height layout;
 a conversation history rail with server-side persistence; named request presets with server-side
 persistence; sampling controls covering every sampling parameter the IR actually carries, gated per
-dialect (§6.1 names the two IR fields deliberately excluded); the adapter warnings that say when a
+dialect (§7.1 names the two IR fields deliberately excluded); the adapter warnings that say when a
 parameter was accepted and then dropped upstream; a structured-output schema editor; reasoning
 controls; Compare grown from two fixed panels to N columns; new mockup fragments; the admin
 endpoints, migration and settings key the two persisted features need.
+
+All of it is **in** as a destination; §3 splits it into four separately shippable stages, of which
+the last two can be cut without stranding anything already built.
 
 **Out:** code export (curl/Python/TypeScript snippets). Considered and deliberately dropped — the
 Connect screen already generates client snippets against the router's base URL, and a second
@@ -59,18 +64,87 @@ and multimodal content would mean changing that type, the three dialect body bui
 message rendering — a feature in its own right, not part of a layout overhaul. `ir.Media` and
 `BlockImage` already exist to build it on when it is wanted.
 
-**Out:** presence penalty, frequency penalty and seed. See §6.3 — these are not reachable without
-changing `ir.Request` and every edge and adapter that reads it, and two of the three dialects have
-no equivalent field. Adding them would be core routing surgery to serve three sliders.
+**Out:** presence penalty, frequency penalty and seed. See §7.3 — they are absent from `ir.Request`
+and from every edge's inbound wire struct, so reaching them means widening the narrow waist every
+request passes through. Core routing surgery to serve three sliders.
 
-## 3. The two modes
+## 3. Sequence
+
+This document describes one destination and **four separately shippable stages** that reach it. Each
+ends deployed, verified in the running console, and useful on its own. None of them leaves the
+screen in a half-built state, and the last two can be cut without stranding anything already built.
+
+The decomposition works because of an asymmetry worth stating plainly: **Lab mode is the current
+screen done properly, and Chat mode is the genuinely new thing.** The four tabs that exist today
+already *are* the instrument — they are simply in a frame that does not fit them, missing most of
+their controls, and unable to remember anything. So stages 1 to 3 finish the screen that exists,
+without introducing a mode switch at all, and stage 4 adds the second mode beside it.
+
+### Stage 1 — The screen fills its frame
+
+The full-height layout (§5) and the scroll-container defect (§13). The four tabs, the config pane and
+the metrics strip keep their current contents and move into regions that fit the viewport: the
+composer pinned to the foot, the transcript scrolling in its own container, empty states occupying
+the space they are given.
+
+Nothing is added. This is the stage that fixes what is wrong every time the page is opened, and it
+is deliberately first for that reason — it is a day's work standing in front of several weeks of it.
+
+**Gate:** live verification at 1600×1000 and 1280×800, both themes, sidebar collapsed and expanded.
+No mockup: there is no new design here, only the existing one finally occupying its frame.
+
+### Stage 2 — The instrument gets its controls
+
+The full sampling set (§7), the per-dialect gating that stops a control lying about the wire, the
+structured-output schema editor, the reasoning controls, and the adapter warnings (§7.4) that say
+when a parameter was accepted and then dropped upstream.
+
+This is the highest ratio of capability to risk in the document. It touches no storage, adds no
+endpoint, and surfaces two things the gateway has carried since phase 4 and never shown: reasoning
+effort and budget, and the warnings recording what each adapter dropped.
+
+**Gate:** a mockup fragment for the rebuilt config pane and the warnings region, then live
+verification.
+
+### Stage 3 — The instrument remembers, and compares
+
+Named presets (§8.1) with their table and endpoints, and Compare grown from two fixed panels to N
+columns (§9).
+
+The first stage that touches the database, and deliberately the smaller of the two that do: one
+table, four endpoints, no new data category, no settings key, nothing to reverse.
+
+**Gate:** the preset picker folded into stage 2's config-pane fragment; a fragment for Compare.
+
+### Stage 4 — The second mode
+
+The Chat/Lab switch, the history rail, saved conversations (§8.2) with their tables, endpoints and
+settings key, and the quiet route line.
+
+Everything built in stages 1 to 3 becomes Lab mode unchanged — the config pane, the metrics strip
+and the four tabs move inside it without being rewritten. Chat mode is built alongside.
+
+This stage is last because it carries the most risk for the least certain return: it introduces
+prompt text at rest, reverses a boundary phase 10 drew deliberately, and its payoff — returning to a
+conversation days later — is the one this document is least able to predict the value of. If it is
+cut, stages 1 to 3 stand as a complete and coherent playground rather than as three quarters of one.
+
+**Gate:** mockup fragments for both modes, then live verification.
+
+### What this changes about the rest of the document
+
+Nothing in the design. §4 onward describes the destination, and the stage that delivers each part is
+marked in §10's file list. Where a section describes something that only exists once Chat mode does —
+the mode switch, the history rail — it is describing stage 4.
+
+## 4. The two modes
 
 The mode switch lives in the `PageHeader` row, right-aligned, as a two-item `ToggleGroup`. It
 persists per operator in `localStorage`; the URL carries it as `?mode=` so a link opens where the
 sender meant. `PageHeader` itself stays, unchanged in kind, because every other screen has one and
 a playground that drops it reads as a different application.
 
-### 3.1 Chat mode
+### 4.1 Chat mode
 
 Three regions inside the mode's full height.
 
@@ -93,7 +167,7 @@ Chat mode shows no config pane and no metrics strip. The two settings a conversa
 are reachable without one: model and dialect from the model pill's popover, the system prompt from
 the overflow menu. Everything else belongs to Lab.
 
-### 3.2 Lab mode
+### 4.2 Lab mode
 
 Sub-tabs Single, Compare, Auxiliary and Count, in a `TabsList` sized to its content, with the config
 pane pinned right and the metrics strip pinned beneath the tabs.
@@ -107,7 +181,7 @@ after the first run shifts the transcript down at exactly the moment the operato
 `Single` is the current Chat tab without the history rail — one conversation, disposable, with the
 full route line under every answer.
 
-## 4. Layout mechanics
+## 5. Layout mechanics
 
 The fix is small and the measurement is what makes it safe to make.
 
@@ -132,7 +206,7 @@ Below `lg`, the config pane moves from a right column to a `Sheet`, and the Chat
 a left column to a `Sheet`. A 320px pane and a 260px rail either side of a transcript is three
 columns on a laptop and an unusable squeeze on anything narrower.
 
-## 5. What survives from the current screen
+## 6. What survives from the current screen
 
 Named because an overhaul that discards them would be a worse screen, not a better one.
 
@@ -151,9 +225,9 @@ and the comment explaining it should outlive this overhaul.
 `drainSSE` and the per-dialect extractors stay untouched. They are verified against the edge writers
 and there is no reason to reopen them.
 
-## 6. Sampling parameters
+## 7. Sampling parameters
 
-### 6.1 The constraint
+### 7.1 The constraint
 
 A parameter reaches a provider only if the playground sends it, the **inbound edge parses it into
 `ir.Request`**, and the outbound adapter writes it. The middle step is the binding one and it is
@@ -183,7 +257,7 @@ sampling one, and a four-category threshold matrix in a sampling pane would domi
 named here because §2 promises "every parameter the IR carries" and silence would read as an
 oversight rather than a choice.
 
-### 6.2 Dialect-aware controls
+### 7.2 Dialect-aware controls
 
 Every cell marked "—" is a control that would render, accept a value, and change nothing. The
 codebase already refuses that class of lie — `aux-panels.tsx` keeps `catalogSurface` beside
@@ -216,7 +290,7 @@ take a token budget, and `ir.Reasoning` holds both. The pane shows a segmented l
 the OpenAI dialect and a budget input on the other two, under one "Reasoning" heading, so the
 operator learns that these are the same idea rather than three unrelated fields.
 
-### 6.3 Why penalties and seed are out
+### 7.3 Why penalties and seed are out
 
 They are absent from `ir.Request`, and absent from every edge's inbound wire struct. Adding them
 means a new field on the IR, a parse in the OpenAI and Gemini edges, a write in the adapters that
@@ -235,7 +309,7 @@ hatch, and routing a parameter through it would mean building the passthrough as
 
 If these are wanted they should be their own change with its own justification.
 
-### 6.4 The other half of the lie: adapter warnings
+### 7.4 The other half of the lie: adapter warnings
 
 Gating controls per dialect stops a control lying about the *wire*. It does not stop one lying about
 the *provider*, and the gateway already knows when that happens.
@@ -249,14 +323,14 @@ the void the moment reasoning is switched on, and today nothing on this screen s
 
 The warnings already ride the trace, and the trace types already declare them. Lab renders them
 **beside the run they belong to**, under the metrics strip: field, target and reason, in the same
-quiet register as the route line. This is the natural completion of §6.2's principle rather than a
+quiet register as the route line. This is the natural completion of §7.2's principle rather than a
 new feature — a control that was accepted, sent, and then dropped upstream is exactly as misleading
 as one that was never on the wire, and this is the only screen in the console positioned to show it.
 
 Chat mode shows a single quiet marker when a run produced warnings, expanding to the list on click.
 The full treatment belongs to the instrument.
 
-### 6.5 Go changes
+### 7.5 Go changes
 
 `playgroundBody` in `internal/admin/playground.go` gains `TopP *float64`, `TopK *int`,
 `Stop []string`, `ResponseSchema json.RawMessage` and `Reasoning *playgroundReasoning`. Each of the
@@ -266,12 +340,12 @@ builders already have for tools, where `geminiPlaygroundBody` refuses rather tha
 The refusal precedent matters: `playgroundRequest` (`internal/admin/playground.go:71-75`) already
 errors on Gemini plus tools rather than sending a request the operator would misread. Parameters
 follow the softer rule instead — dropped, because the UI has already disabled them, so a value can
-only arrive here from a hand-made request or a preset saved under another dialect. §7.1 covers the
+only arrive here from a hand-made request or a preset saved under another dialect. §8.1 covers the
 preset case.
 
-## 7. Persistence
+## 8. Persistence
 
-### 7.1 Presets
+### 8.1 Presets
 
 A preset is a named request configuration: model, dialect, system prompt, tools, and every sampling
 parameter. Loading one replaces the config pane's state wholesale.
@@ -282,7 +356,7 @@ stored and the pane disables what the current dialect cannot send, with the disa
 showing the stored value. Silently dropping the value would make a preset quietly lossy every time
 it round-tripped through a dialect it was not written for.
 
-### 7.2 Conversations, and prompt text at rest
+### 8.2 Conversations, and prompt text at rest
 
 **This is the decision in this document with consequences outside this screen.**
 
@@ -334,10 +408,13 @@ This is separable from the rest of the overhaul. If the reviewer wants prompt-at
 closed question, the history rail becomes session-scoped `localStorage` and everything else in this
 document is unchanged.
 
-### 7.3 Schema
+### 8.3 Schema
 
-New migration `internal/store/migrations/0014_playground.sql`, following the `STRICT` table
-convention every migration since `0001` uses.
+Two migrations, split along the stage boundary in §3 so that stage 4 stays cuttable —
+`0014_playground.sql` carries the presets table in stage 3, `0015_playground_conversations.sql` the
+two conversation tables in stage 4. Both follow the `STRICT` convention every migration since `0001`
+uses, and `PRAGMA foreign_keys` is set in the DSN (`internal/store/db.go:50`), so the cascade below
+does fire.
 
 ```sql
 CREATE TABLE playground_presets (
@@ -393,7 +470,7 @@ from last week and clicking through to the trace is the feature no chat client h
 and the UI must treat a missing trace as ordinary, because the request log's retention sweep will
 outlive plenty of conversations.
 
-### 7.4 Endpoints
+### 8.4 Endpoints
 
 Registered in `internal/admin/admin.go` beside the existing three playground routes, all behind
 `requireCSRF` for the mutating verbs.
@@ -420,7 +497,7 @@ Store methods land in `internal/store/playground.go`; the HTTP layer in
 `internal/admin/playgroundstore.go`, separate from `playground.go` so the file that synthesizes
 proxy requests does not also become the file that does CRUD.
 
-### 7.5 Behaviour the endpoints do not settle
+### 8.5 Behaviour the endpoints do not settle
 
 Small decisions that will otherwise each be made twice, differently.
 
@@ -443,7 +520,7 @@ stated so it is a decision rather than the point where the query gets slow.
 **Empty conversations.** A conversation with no messages — created, then abandoned — is deleted when
 the rail next loads. Nothing is lost and the alternative is a rail that fills with "New chat".
 
-## 8. Compare, as N columns
+## 9. Compare, as N columns
 
 Compare today is two fixed `Side` values and two `SidePanel`s. It becomes a list, with add and
 remove, a per-column status dot — idle, streaming, done, error — and per-column metrics, following
@@ -458,54 +535,67 @@ anything.
 Columns are capped at four. Beyond that each is too narrow to read a wrapped answer in, and the
 comparison the screen exists for stops being possible.
 
-## 9. Files
+## 10. Files
+
+The stage that delivers each file is marked `[1]`–`[4]`, per §3. A file listed under more than one
+stage is touched again there; nothing is rewritten twice.
 
 ```
 web/src/features/playground/
-  playground-screen.tsx      rewritten — mode router, ~60 lines
-  mode.ts                    new — mode type, URL and localStorage persistence
-  config.ts                  extended — the full parameter set
-  dialect-support.ts         new — the §6.1 matrix as data, plus per-control reasons
+  playground-screen.tsx      [1] full-height frame  [4] becomes the mode router
+  mode.ts                    [4] mode type, URL and localStorage persistence
+  config.ts                  [2] extended — the full parameter set
+  dialect-support.ts         [2] the §7.1 matrix as data, plus per-control reasons
   chat/
-    chat-mode.tsx            new — the three-region layout
-    history-rail.tsx         new
-    conversation-header.tsx  new — model pill, dialect, title, overflow menu
-    composer.tsx             new — from chat.tsx, unchanged in behaviour
-    transcript.tsx           new — from chat.tsx
+    chat-mode.tsx            [4] the three-region layout
+    history-rail.tsx         [4]
+    conversation-header.tsx  [4] model pill, dialect, title, overflow menu
+    composer.tsx             [1] from chat.tsx, unchanged in behaviour
+    transcript.tsx           [1] from chat.tsx
   lab/
-    lab-mode.tsx             new — sub-tabs, config pane, metrics strip
-    single.tsx               new — composer + transcript + useChatRun, no rail
-    compare.tsx              rewritten — N columns
-    compare-column.tsx       new
-    warnings.tsx             new — §6.4, the adapter warnings for a run
+    lab-mode.tsx             [4] wraps the stage 1-3 tabs; no rewrite of them
+    single.tsx               [1] composer + transcript + useChatRun
+    compare.tsx              [3] rewritten — N columns
+    compare-column.tsx       [3]
+    warnings.tsx             [2] §7.4, the adapter warnings for a run
   config-pane/
-    config-pane.tsx          rewritten
-    preset-picker.tsx        new
-    sampling.tsx             new — sliders and inputs
-    reasoning.tsx            new
-    structured-output.tsx    new
-  aux-panels.tsx             unchanged
-  metrics.tsx                unchanged but for the reserved-height flag
-  message.tsx                extended — quiet and expanded RouteLine
-  markdown*.tsx              unchanged
+    config-pane.tsx          [1] moved into its region  [2] rebuilt inside
+    preset-picker.tsx        [3]
+    sampling.tsx             [2] sliders and inputs
+    reasoning.tsx            [2]
+    structured-output.tsx    [2]
+  aux-panels.tsx             unchanged throughout
+  metrics.tsx                [1] reserved-height flag
+  message.tsx                [2] warnings marker  [4] quiet RouteLine
+  markdown*.tsx              unchanged throughout
   lib/
-    stream.ts                new — drainSSE, extractUnaryText, dialect extractors
-    request.ts               new — chatBody, parseTools, seedFromTrace
-    use-chat-run.ts          new — the send loop, shared by Chat and Lab Single
-    presets.ts               new — queries and mutations
-    conversations.ts         new — queries and mutations
+    stream.ts                [1] drainSSE, extractUnaryText, dialect extractors
+    request.ts               [1] chatBody, parseTools, seedFromTrace
+    use-chat-run.ts          [1] the send loop, shared by every sending surface
+    presets.ts               [3] queries and mutations
+    conversations.ts         [4] queries and mutations
 
-web/vitest.config.ts                            extended — pool: "threads" (§11)
-web/src/features/settings/settings-catalog.ts   extended — the save switch
+web/vitest.config.ts                            [1] pool: "threads" (§12)
+web/src/features/settings/settings-catalog.ts   [4] the save switch
 
-internal/store/migrations/0014_playground.sql   new
-internal/store/playground.go                    new
-internal/admin/playgroundstore.go               new
-internal/admin/playground.go                    extended — §6.5
-internal/admin/configapi.go                     extended — configFields entry
-internal/config/*.go                            extended — the new key
-internal/admin/admin.go                         extended — route registration
+internal/store/migrations/0014_playground.sql   [3] presets  [4] conversations
+internal/store/playground.go                    [3] presets  [4] conversations
+internal/admin/playgroundstore.go               [3] presets  [4] conversations
+internal/admin/playground.go                    [2] extended — §7.5
+internal/admin/configapi.go                     [4] configFields entry
+internal/config/*.go                            [4] the new key
+internal/admin/admin.go                         [3] [4] route registration
 ```
+
+**Two migrations, not one.** `0014_playground.sql` creates `playground_presets` in stage 3;
+`0015_playground_conversations.sql` creates the conversation tables in stage 4. Splitting them is
+what keeps stage 4 cuttable — a single migration would put the prompt-at-rest tables on disk in
+stage 3, in service of a feature that might never ship, and migrations do not come back off.
+
+**Stage 1 does the file surgery.** Dissolving `chat.tsx`, extracting the hook and the two component
+halves, and moving the five pure functions all happen in the first stage, before anything new is
+built on them. Doing it later would mean building stage 2's controls against a file that is about
+to be taken apart.
 
 **`chat.tsx` is dissolved, and every one of its exports needs a stated home** — it has five, and
 three of them have importers outside the file today (`config-pane.tsx:15` takes `parseTools`,
@@ -516,7 +606,7 @@ verbatim.
 **The send loop is a hook, not a duplicated block.** `send()`, `appendToLastMessage`, the abort
 controller, the TTFT measurement and the `traceWhenWritten` follow-up (`chat.tsx:239-330`) are
 needed identically by Chat mode and by Lab's Single tab. They become `useChatRun`. Copying them into
-two files would guarantee the two surfaces drift, and this is precisely the logic §11 wants moved
+two files would guarantee the two surfaces drift, and this is precisely the logic §12 wants moved
 rather than rewritten.
 
 **The `?seed=` flow keeps working, in Lab.** `trace-drawer.tsx:158-162` links "Open in playground"
@@ -526,22 +616,30 @@ investigation, so it opens **Lab / Single**, and the consuming effect moves ther
 dialect are recoverable — moves with it unchanged; it is the only thing standing between the
 operator and a transcript that is mysteriously empty.
 
-## 10. Mockups gate implementation
+## 11. Mockups gate implementation
 
-Phase 10 established that mockups gate implementation, and this overhaul is large enough to earn
-the same gate. Fragments `11-playground.html` and `12-playground-compare.html` are replaced by:
+Phase 10 established that mockups gate implementation. That gate applies per stage rather than up
+front, because a mockup drawn for a stage that gets cut is work thrown away, and because stage 1
+introduces no new design to draw.
 
-- `11-playground-chat.html` — Chat mode, mid-stream, history rail populated, one answer showing a
-  quiet route line and one expanded.
-- `12-playground-lab.html` — Lab mode on Single, config pane open with a preset loaded, two
-  controls disabled with their dialect reasons visible, metrics strip populated, and one adapter
-  warning shown beneath it.
-- `13-playground-compare.html` — Lab mode on Compare, four columns, one streaming, one errored.
+**Stage 1 — no fragment.** There is no new design: it is the existing one occupying its frame. The
+gate is live verification, and the existing `11-playground.html` stays as it is so the mockup set
+does not describe a screen that no longer exists mid-sequence.
 
-Renumbering rather than adding a `12b`: the fragment set is `00`–`17` in two digits and the build
-assembles in filename order, so a suffixed name is a special case in a sequence that has none. The
-existing `13`–`17` shift up by one, and `index.html`'s table of contents and
-`docs/ux/DONE-CRITERIA.md` are updated to match.
+**Stage 2 — `11-playground.html` is rewritten in place.** The rebuilt config pane with two controls
+disabled and their dialect reasons visible, the metrics strip populated, and one adapter warning
+beneath it.
+
+**Stage 3 — `12-playground-compare.html` is rewritten in place**, four columns, one streaming and
+one errored, with the preset picker visible in the pane.
+
+**Stage 4 — one fragment is added**, `13-playground-chat.html`: Chat mode mid-stream, history rail
+populated, one answer with a quiet route line and one expanded. The existing `13`–`17` shift up by
+one, and `index.html`'s table of contents and `docs/ux/DONE-CRITERIA.md` are updated to match.
+
+Rewriting two fragments in place and adding one, rather than replacing both and adding two, keeps
+the numbering churn to the single stage that actually needs it — and if stage 4 is cut, no
+renumbering happens at all.
 
 `build.py`, `qa.py` and `check.py` are unchanged and their gates apply as they stand: no colour
 literal in a fragment, nothing fetched from the network, and a screenshot per screen in both themes.
@@ -555,7 +653,7 @@ borrowed from those files must be translated to the `text-*` scale, and hierarch
 comes from colour and weight instead. This is the single easiest way for this overhaul to import a
 rule violation, and neither the mockup gate nor a typecheck will stop it.
 
-## 11. Testing
+## 12. Testing
 
 **Console.** Vitest under the **threads pool** — the default fork pool silently skips half this
 suite. Note that this is currently an unenforced requirement: `web/vitest.config.ts` sets no `pool`
@@ -563,29 +661,37 @@ and the test script is a bare `vitest run`, so the gate below could pass with ha
 executing. Pinning `pool: "threads"` in the config is part of this change, and it comes first,
 because every other test claim in this section depends on it.
 
-New coverage: the dialect-support matrix as a pure table test; preset round-trip through a dialect
-that cannot carry one of its parameters, asserting the value survives; a conversation reopened with
-its system prompt intact; auto-save writing exactly one message per turn; the compare column cap;
-mode persistence across a reload; the adapter warnings rendering for a run that produced them.
+New coverage, by the stage that adds it:
+
+| Stage | Tests |
+|---|---|
+| 1 | The extracted pure functions still behave (the moved suites); the scroll-follow guard actually declining to follow when the operator has scrolled up — the assertion the current code cannot make |
+| 2 | The dialect-support matrix as a pure table test; a control disabled for the current dialect not appearing in the request body; adapter warnings rendering for a run that produced them |
+| 3 | Preset round-trip through a dialect that cannot carry one of its parameters, asserting the value survives; the compare column cap |
+| 4 | A conversation reopened with its system prompt intact; auto-save writing exactly one message per turn; mode persistence across a reload; the purge |
 
 **The gate on existing tests, stated so it is achievable.** `chat.test.ts:2` imports `parseTools`,
-`chatBody`, `seedFromTrace`, `drainSSE` and `extractUnaryText` from `./chat` — the file §9 deletes.
+`chatBody`, `seedFromTrace`, `drainSSE` and `extractUnaryText` from `./chat` — the file §10 deletes.
 Those five tests therefore *must* change: their import lines move to `lib/request.ts` and
 `lib/stream.ts`. The gate is that **nothing but the import lines changes**. Every assertion in
 `chat.test.ts`, `metrics.test.ts`, `message.test.tsx`, `markdown.test.tsx` and `aux-panels.test.ts`
 stands as written, and an assertion needing an edit is the signal that behaviour was lost in the
-move. The earlier phrasing — "must pass unchanged" — was impossible by §9's own file layout and
+move. The earlier phrasing — "must pass unchanged" — was impossible by §10's own file layout and
 would have fired on day one for a reason that signalled nothing.
 
-**Go.** Table tests over `playgroundRequest` asserting, per dialect, exactly which of the new
-parameters appear in the synthesized body and which are dropped — the §6.1 matrix, executable.
-Store CRUD including the `ON DELETE CASCADE` and the purge. The existing playground tests stand.
+**Go.** Stage 2: table tests over `playgroundRequest` asserting, per dialect, exactly which of the
+new parameters appear in the synthesized body and which are dropped — the §7.1 matrix, executable.
+Stage 3: preset store CRUD. Stage 4: conversation store CRUD including the `ON DELETE CASCADE` and
+the purge. The existing playground tests stand throughout.
 
-**Live.** Per `CLAUDE.md`, a layout change cannot be verified from tests. Both modes are checked in
-the running console at 1600×1000 and at 1280×800, in light and dark, with the sidebar collapsed and
-expanded, before the change is called done. Then redeploy, per the same file.
+**Live, and it ends each stage rather than the project.** Per `CLAUDE.md`, a layout change cannot be
+verified from tests. Every stage is checked in the running console at 1600×1000 and at 1280×800, in
+light and dark, with the sidebar collapsed and expanded, and then redeployed with the documented
+`compose.uat.yml` overlay before it is called done. A stage that has not been deployed and looked at
+is not finished, and that is the point of splitting them: four chances to discover the design is
+wrong instead of one.
 
-## 12. The adjacent bug
+## 13. The adjacent bug
 
 `web/src/features/playground/chat.tsx:207` guards the streaming auto-scroll with:
 
@@ -599,12 +705,12 @@ scroll container is `main`, not the window. `window.scrollY` is therefore always
 permanently true. The guard that is supposed to stop yanking the operator back to the bottom while
 they read something earlier has never fired.
 
-The fix falls out of §4: once the transcript is its own scroll container, the check reads that
+The fix falls out of §5: once the transcript is its own scroll container, the check reads that
 element's `scrollTop`, `clientHeight` and `scrollHeight`. It is called out separately because it is
 a real defect with a real symptom, and it should be fixed as its own commit rather than absorbed
 silently into a layout rewrite.
 
-## 13. Decisions taken
+## 14. Decisions taken
 
 | # | Decision | Alternative rejected |
 |---|---|---|
@@ -623,28 +729,39 @@ silently into a layout rewrite.
 | 13 | Conversation text stored in plaintext | Encrypting it as credentials are — protects only against an attacker who already has the database |
 | 14 | The send loop is a shared hook | Duplicating it into Chat and Lab Single, which would drift |
 | 15 | `?seed=` opens Lab / Single | Chat mode — a seed is a routing investigation, not a conversation |
+| 16 | Four separately shippable stages, layout first | One plan delivered whole, which puts the daily annoyance behind several weeks of work that might be cut |
+| 17 | Two migrations, split on the stage boundary | One migration, which would put the prompt-at-rest tables on disk in service of a stage that might never ship |
+| 18 | Mockups drawn per stage, none for stage 1 | Drawing all of them up front, where a cut stage wastes the work and stage 1 has no new design to draw |
 
-## 14. Review history
+## 15. Review history
 
 | Artifact | Reviewer | Outcome |
 |---|---|---|
 | This spec, first draft | 1 × Fable, read-only | 2 Critical, 8 Important, 8 Minor. All verified against source and all applied. The factual survey held: of roughly twenty checkable claims, seventeen verified exactly. |
 
 The two Critical findings were both real and both would have surfaced on the first day of
-implementation. The test gate in §11 was impossible as written — `chat.test.ts` imports five symbols
-from the file §9 deletes, so "must pass unchanged" could not hold. And `playground_conversations`
-had no column for the system prompt, so the auto-save feature §7.2 reverses a phase 10 boundary to
+implementation. The test gate in §12 was impossible as written — `chat.test.ts` imports five symbols
+from the file §10 deletes, so "must pass unchanged" could not hold. And `playground_conversations`
+had no column for the system prompt, so the auto-save feature §8.2 reverses a phase 10 boundary to
 provide would have silently dropped the setting that shaped every answer it stored.
 
-The most valuable finding was not a defect but a completion: §6.4 exists because the review pointed
+The most valuable finding was not a defect but a completion: §7.4 exists because the review pointed
 out that gating controls per dialect stops a control lying about the wire while leaving it free to
 lie about the provider — and that the gateway already records exactly that, in warnings no screen
 displays.
 
-## 15. Open decisions
+**Restructured into stages, 2026-08-29, after review.** The first draft described one destination and
+implied one delivery. The owner's objection was that the change worth having soonest — the screen
+occupying its frame — sat behind several weeks of work of much less certain value, and that the two
+persisted features were the least justified parts of the document. §3 is the answer: the same
+design, sequenced so the daily annoyance is fixed first and the riskiest feature is last and
+cuttable. Nothing in §4 onward changed to accommodate it, which is the test of whether a
+decomposition is honest.
 
-None. The one that was open — §7.2, whether the playground may retain prompt text at rest — was put
+## 16. Open decisions
+
+None. The one that was open — §8.2, whether the playground may retain prompt text at rest — was put
 to the owner during design and approved on 2026-08-29, with the auto-save, the settings switch and
-the purge as described. It is recorded in §7.2 at length rather than in a line here because it
+the purge as described. It is recorded in §8.2 at length rather than in a line here because it
 reverses a boundary phase 10 drew deliberately, and a future reader finding saved prompts on disk
 should be able to find out why without reconstructing it.
