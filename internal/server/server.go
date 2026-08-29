@@ -205,7 +205,10 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		"anthropic":    anthropicadapter.New(),
 		"gemini":       geminiadapter.NewWithFetcher(mediaFetcher),
 		"bedrock":      bedrockadapter.New(),
-		"vertex":       vertexadapter.New(),
+		// The same fetcher as the direct Gemini route: media.inline is the
+		// operator's answer to "may the gateway fetch a client's image URL",
+		// and it has to mean the same thing on both.
+		"vertex": vertexadapter.NewWithFetcher(mediaFetcher),
 	}, exec.Deps{
 		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
 		Auth:      authManager,
