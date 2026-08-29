@@ -369,6 +369,41 @@ stored and the pane disables what the current dialect cannot send, with the disa
 showing the stored value. Silently dropping the value would make a preset quietly lossy every time
 it round-tripped through a dialect it was not written for.
 
+**Open from stage 2.** A disabled input renders at half opacity, which puts the retained value near
+4:1 contrast. It is legible and WCAG exempts disabled controls, but this is the value a preset saves
+and a dialect switch resurrects, so stage 3 should decide whether to dim the field chrome while
+keeping the value itself at body contrast.
+
+**The client namespace is `playgroundPresets`, not `presets`.** The console already has presets:
+`/api/presets`, `keys.presets`, `usePresets` and `PresetsResponse` are the provider catalogue
+shipped with the binary, cached with `staleTime: Infinity` because it cannot change while the tab is
+open. Request presets are operator-authored and mutable, the opposite lifecycle, and a second
+meaning for the same word in the same query cache is a defect waiting to be written. The wire path
+`/api/playground/presets` is already distinct; only the client needs the discipline.
+
+**Loading sets the dialect too.** "Wholesale" includes model and dialect, so a preset always loads
+under the dialect it was saved with, and nothing is disabled at the moment of loading. The
+cross-dialect case above arises when the operator then switches dialect to try the same request on
+another wire -- the sequence stage 2's live gate exercised by hand.
+
+**The stored blob is merged by type, not spread blindly.** `config` is read as
+`{ ...emptyConfig(), ...stored }` with one amendment: a stored key is kept only where its `typeof`
+matches the default's. Missing fields are the obvious half of blob drift and a plain spread handles
+them. Wrong-typed fields are the half that bites, because `chatBody` dereferences these values
+unconditionally -- `parseStopLines` calls `.split`, `parseSchema` and `parseTools` call `.trim` -- so
+a preset written through the operator-facing API with `"stopRaw": 42` is a TypeError at first use,
+not a degraded value. The type-checked merge costs about five lines and brings the client to the
+tolerance `internal/store/catalog.go:100` already states for the Go side: a malformed JSON column is
+a corrupt row rather than a fatal error, and degrades to the zero value.
+
+The merge is read-time only and does not contradict "not rewritten on load" above: the stored row is
+untouched, a dropped key is a value this build refused to trust rather than one deleted from the
+preset, and it survives on disk until the operator saves that preset again.
+
+**If a field is ever renamed, the load site is where the shim goes.** Key presence discriminates a
+rename as precisely as a version number would, so the blob carries no version field and needs none.
+Nothing will prompt a future renamer, which is the reason this sentence exists.
+
 ### 8.2 Conversations, and prompt text at rest
 
 **This is the decision in this document with consequences outside this screen.**
@@ -510,6 +545,12 @@ Store methods land in `internal/store/playground.go`; the HTTP layer in
 `internal/admin/playgroundstore.go`, separate from `playground.go` so the file that synthesizes
 proxy requests does not also become the file that does CRUD.
 
+**The server stores the blob as it received it.** The handler enforces the size cap and checks that
+`config` is a well-formed JSON object; it does not decode into a struct of today's fields and
+re-marshal. Decoding and re-marshalling would silently strip any field the frontend had added before
+the Go struct learned it -- the lossy preset 8.1 forbids, arriving invisibly, with nothing at the
+call site to show it happened. Unknown keys pass through untouched.
+
 ### 8.5 Behaviour the endpoints do not settle
 
 Small decisions that will otherwise each be made twice, differently.
@@ -525,6 +566,10 @@ claiming one model answered everything.
 
 **Duplicate preset names.** `idx_playground_presets_name` is unique, so the store returns a conflict
 and the save dialog offers to overwrite the existing preset rather than reporting a database error.
+
+**Rename.** Stage 3 ships no rename affordance. `POST` creates a preset and `PATCH` overwrites an
+existing one in place, which is what the overwrite branch of the save dialog calls. Renaming by
+saving under a new name and deleting the old one is two clicks and needs no fifth endpoint.
 
 **List size.** The conversations list is capped at the 200 most recent, ordered by `updated_at`. Past
 that the rail is not the right retrieval tool and search would be a different feature; the cap is
