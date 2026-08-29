@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { Transcript } from "./transcript"
+import { Transcript, nearBottom } from "./transcript"
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...rest }: { children: React.ReactNode }) => <a {...rest}>{children}</a>,
@@ -47,5 +47,41 @@ describe("the transcript with turns", () => {
       />,
     )
     expect(screen.getByText(/model and dialect carried over/i)).toBeInTheDocument()
+  })
+})
+
+/** jsdom reports 0 for every layout measurement, so a scroll position has to
+ *  be described rather than produced. */
+function scrolled(el: HTMLElement, top: number, client: number, height: number) {
+  Object.defineProperty(el, "scrollTop", { value: top, configurable: true })
+  Object.defineProperty(el, "clientHeight", { value: client, configurable: true })
+  Object.defineProperty(el, "scrollHeight", { value: height, configurable: true })
+}
+
+describe("following a streaming answer down", () => {
+  it("follows while the reader is at the bottom", () => {
+    const el = document.createElement("div")
+    scrolled(el, 840, 400, 1240)
+    expect(nearBottom(el)).toBe(true)
+  })
+
+  it("still follows inside the slack, so one wheel notch does not detach it", () => {
+    const el = document.createElement("div")
+    scrolled(el, 760, 400, 1240)
+    expect(nearBottom(el)).toBe(true)
+  })
+
+  it("stops following once the reader has scrolled up to read", () => {
+    // Yanking someone back to the bottom mid-sentence is the thing every chat
+    // surface gets wrong, and the old guard could never decline.
+    const el = document.createElement("div")
+    scrolled(el, 200, 400, 1240)
+    expect(nearBottom(el)).toBe(false)
+  })
+
+  it("follows an unscrollable transcript, which is always at its bottom", () => {
+    const el = document.createElement("div")
+    scrolled(el, 0, 400, 400)
+    expect(nearBottom(el)).toBe(true)
   })
 })

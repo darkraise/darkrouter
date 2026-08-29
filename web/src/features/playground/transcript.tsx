@@ -56,8 +56,23 @@ export function Transcript({
   )
 }
 
-export function nearBottom(_el: HTMLElement): boolean {
-  return true
+/** How far from the bottom still counts as reading the newest text. Roughly a
+ *  few lines: enough that one wheel notch does not detach the follow, small
+ *  enough that scrolling up to re-read does. */
+const FOLLOW_SLACK_PX = 160
+
+/**
+ * Whether the reader is at the bottom of the transcript.
+ *
+ * Read off the scrolling element, which is this component's own container.
+ * The window is not it and never was: darkraise-ui's layout root is
+ * `h-screen overflow-hidden`, so `window.scrollY` is pinned at 0 and the
+ * previous window-based test was true on every render — the follow could not
+ * decline, and reading something earlier while an answer streamed pulled you
+ * straight back down.
+ */
+export function nearBottom(el: HTMLElement): boolean {
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - FOLLOW_SLACK_PX
 }
 
 /**
