@@ -151,6 +151,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/playground/count", s.requireCSRF(s.handlePlaygroundCount))
 	s.mux.HandleFunc("POST /api/playground/aux", s.requireCSRF(s.handlePlaygroundAux))
 
+	s.mux.HandleFunc("GET /api/playground/presets", s.requireSession(s.handleListPlaygroundPresets))
+	s.mux.HandleFunc("POST /api/playground/presets", s.requireCSRF(s.handleCreatePlaygroundPreset))
+	s.mux.HandleFunc("PATCH /api/playground/presets/{id}", s.requireCSRF(s.handleUpdatePlaygroundPreset))
+	s.mux.HandleFunc("DELETE /api/playground/presets/{id}", s.requireCSRF(s.handleDeletePlaygroundPreset))
+
 	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
 	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
 	s.mux.HandleFunc("GET /api/models", s.requireSession(s.handleModels))
