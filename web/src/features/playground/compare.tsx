@@ -111,7 +111,7 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
       <Textarea placeholder="Prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
       <Button onClick={run} disabled={!canRun}>
         {busy ? "Running…" : "Run"}

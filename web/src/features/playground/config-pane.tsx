@@ -35,7 +35,7 @@ export function ConfigPane({
   const toolsError = parseTools(config.toolsRaw).error
 
   return (
-    <aside className="flex w-full shrink-0 flex-col gap-4 border-l p-4 lg:w-80">
+    <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-l p-4 lg:w-80">
       {/* Model and dialect decide where a prompt goes, so they stay in view.
           Sampling and the prompt scaffolding are set once a session and fold
           away — the transcript needs the height more than they do. */}

@@ -61,7 +61,7 @@ function Cell({ label, value }: { label: string; value: string }) {
 export function MetricsStrip({ metrics }: { metrics: StreamMetrics }) {
   const tps = tokensPerSecond(metrics)
   return (
-    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-b px-6 py-3">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-8 gap-y-3 border-b px-6 py-3">
       <LatencySplit ttftMs={metrics.ttftMs} totalMs={metrics.totalMs} />
       <TokenSplit tokensIn={metrics.tokensIn} tokensOut={metrics.tokensOut} />
       <Cell label="tokens/s" value={tps === null ? "—" : tps.toFixed(1)} />
@@ -145,13 +145,6 @@ function TokenSplit({ tokensIn, tokensOut }: { tokensIn: number | null; tokensOu
       </div>
     </div>
   )
-}
-
-/** Whether the strip has anything to say yet. An instrument row of em dashes
- *  above an empty chat is furniture; it appears when a run has produced a
- *  reading and stays for the rest of the session. */
-export function hasReadings(m: StreamMetrics): boolean {
-  return m.ttftMs !== null || m.totalMs !== null || m.tokensIn !== null || m.tokensOut !== null
 }
 
 /** How long to keep asking for the trace of a request that just finished.
