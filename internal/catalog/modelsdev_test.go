@@ -170,3 +170,35 @@ func TestEmbeddedFallbackIsPopulated(t *testing.T) {
 		t.Fatalf("embedded snapshot has %d providers; regenerate with tools/presetgen", len(fb))
 	}
 }
+
+func TestEmbeddedFallbackKeepsAZeroPriceKnown(t *testing.T) {
+	// The bug this flag exists for. Every price field in the snapshot is
+	// omitempty, so a model priced at zero and one nobody has priced both
+	// arrive with no numbers at all -- and inferring PriceKnown from the
+	// numbers read every free model as unpriced, which is the one verdict
+	// that keeps it out of a free-only import.
+	fb := FallbackDoc()
+	free, ok := fb.Metadata("groq", "allam-2-7b")
+	if !ok {
+		t.Fatal("allam-2-7b missing from the embedded snapshot")
+	}
+	if !free.PriceKnown || free.InputMicrosPerMTok != 0 || free.OutputMicrosPerMTok != 0 {
+		t.Errorf("allam-2-7b = %+v; want a known price of zero", free)
+	}
+	if !IsFreeModel("allam-2-7b", free, ok, nil) {
+		t.Error("a model models.dev prices at zero must pass the free filter")
+	}
+
+	// The other half of the distinction: models.dev publishes no price for
+	// whisper at all, and an unpriced model is not free.
+	unpriced, ok := fb.Metadata("groq", "whisper-large-v3")
+	if !ok {
+		t.Fatal("whisper-large-v3 missing from the embedded snapshot")
+	}
+	if unpriced.PriceKnown {
+		t.Errorf("whisper-large-v3 = %+v; want no price known", unpriced)
+	}
+	if IsFreeModel("whisper-large-v3", unpriced, ok, nil) {
+		t.Error("an unpriced model must not pass the free filter")
+	}
+}

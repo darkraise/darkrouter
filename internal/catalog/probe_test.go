@@ -127,6 +127,35 @@ func TestBuildListRequestNoAuth(t *testing.T) {
 	}
 }
 
+func TestBuildListRequestSendsTheKeyForEveryKeylessStyleThatHasOne(t *testing.T) {
+	// The listing request is what discovery and the console probe both send.
+	// An anonymous provider has a key by definition and an optional one may
+	// have been given one, and neither reached the wire while these styles
+	// fell through to the unsigned default: the sweep then reported whatever
+	// an unauthenticated listing returns.
+	for _, style := range []string{"anonymous", "optional"} {
+		r, err := BuildListRequest(context.Background(), Probe{
+			Kind: "openaicompat", BaseURL: "https://oai.example.net/v1",
+			AuthStyle: style, APIKey: "0000000000",
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", style, err)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer 0000000000" {
+			t.Errorf("%s: Authorization = %q, want the key", style, got)
+		}
+	}
+
+	// An optional provider with no key still sends nothing: an empty Bearer
+	// header is what several of them 401 on.
+	r, _ := BuildListRequest(context.Background(), Probe{
+		Kind: "openaicompat", BaseURL: "https://oai.example.net/v1", AuthStyle: "optional",
+	})
+	if got := r.Header.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q, want empty", got)
+	}
+}
+
 func TestParseOpenAICompatList(t *testing.T) {
 	got, err := ParseList("openaicompat",
 		[]byte(`{"object":"list","data":[{"id":"gpt-4o","object":"model"},{"id":"gpt-4o-mini"}]}`))

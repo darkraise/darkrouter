@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,6 +62,73 @@ func TestASuccessfulProbeReportsWhatItFound(t *testing.T) {
 	}
 	if body.LatencyMs < 0 {
 		t.Errorf("latency = %d", body.LatencyMs)
+	}
+}
+
+func TestAKeylessProviderWithNoCredentialIsStillProbed(t *testing.T) {
+	// The console offers Test on every configured row, and a keyless provider
+	// is configured the moment it exists. Refusing it left the one button on
+	// the row answering "this provider has no credential to test" for a
+	// provider that needs none — and for an anonymous one, whose published key
+	// is exactly what an operator wants tested.
+	upstream := httptest.NewServer(listingUpstream("m1", "m2", "m3"))
+	defer upstream.Close()
+
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"keyless","name":"keyless","kind":"openaicompat","base_url":"`+
+			upstream.URL+`","auth_style":"none"}`); w.Code != http.StatusCreated {
+		t.Fatalf("seed: %d %s", w.Code, w.Body.String())
+	}
+
+	w := do(t, s, cookie, token, "POST", "/api/providers/keyless/test", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		OK         bool `json:"ok"`
+		ModelCount int  `json:"model_count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK || body.ModelCount != 3 {
+		t.Errorf("ok = %v, model_count = %d: %s", body.OK, body.ModelCount, w.Body)
+	}
+}
+
+func TestAFailedProbeCarriesTheProvidersOwnMessage(t *testing.T) {
+	// A status line is a poor answer when the provider said something
+	// actionable. The local-CLI transport returns 502 for a CLI that is merely
+	// logged out, and "Bad Gateway" alone sends the operator to the network.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"auggie listed no models: run auggie login"}}`))
+	}))
+	defer upstream.Close()
+
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "p1", upstream.URL)
+
+	w := do(t, s, cookie, token, "POST", "/api/providers/p1/test", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.OK {
+		t.Fatal("ok = true for a 502")
+	}
+	if !strings.Contains(body.Error, "run auggie login") {
+		t.Errorf("error = %q, want the provider's own words", body.Error)
 	}
 }
 

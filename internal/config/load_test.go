@@ -449,3 +449,32 @@ func TestMediaInlineIsRestartOnly(t *testing.T) {
 		t.Fatalf("media.inline missing from RestartOnly: %v", RestartOnly)
 	}
 }
+
+func TestFreeCatalogSyncDefaultsToDaily(t *testing.T) {
+	c, err := Parse([]byte("server:\n  proxy_listen: \":8080\"\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Catalog.FreeCatalogInterval != 24*time.Hour {
+		t.Errorf("free catalog interval = %v, want 24h", c.Catalog.FreeCatalogInterval)
+	}
+	if c.Catalog.FreeCatalogURL == "" {
+		t.Error("no default source for the curated free-tier catalogue")
+	}
+	// Absent means on: a frozen catalogue silently drops models an operator
+	// can use for free, and that failure is invisible where a refused
+	// outbound call is not.
+	if !c.Catalog.FreeCatalogSyncEnabled() {
+		t.Error("the daily refresh must default to on")
+	}
+}
+
+func TestFreeCatalogSyncCanBeTurnedOff(t *testing.T) {
+	c, err := Parse([]byte("catalog:\n  free_catalog_sync: false\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Catalog.FreeCatalogSyncEnabled() {
+		t.Error("an explicit false did not turn the refresh off")
+	}
+}

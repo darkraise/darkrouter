@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"github.com/darkraise/darkrouter/internal/auth"
 	"net/http"
 	"strconv"
 	"time"
@@ -72,6 +73,11 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !p.Enabled:
 			t.State = "disabled"
+		// A keyless provider with no credentials is configured: there is
+		// nothing left for an operator to add, and calling it unconfigured
+		// sends them looking for a key that does not exist.
+		case t.Credentials == 0 && auth.IsKeyless(p.AuthStyle):
+			t.State = "healthy"
 		case t.Credentials == 0:
 			t.State = "unconfigured"
 		case t.Cooling > 0:

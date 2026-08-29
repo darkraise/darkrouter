@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"net/http"
 	"sort"
 	"strings"
@@ -196,6 +197,13 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reloadProviders(r.Context())
+	// A keyless provider is discoverable the moment it exists: the sweep needs
+	// one of the provider's own keys, and this one has none to need. Waiting a
+	// quarter of an hour for its first models is the same gap the first
+	// credential closes for a keyed provider.
+	if auth.IsKeyless(row.AuthStyle) && s.deps.Disc != nil {
+		s.deps.Disc.Trigger(row.ID)
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": row.ID})
 }
 
@@ -308,8 +316,16 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 	if body.Label == "" {
 		body.Label = "default"
 	}
+	providerID := r.PathValue("id")
+	// Counted before the write, so "was there anything here" is answerable
+	// afterwards. A provider with no credential cannot be swept at all: the
+	// discoverer needs one of the provider's own keys to ask what it serves,
+	// so the first key is the moment the provider becomes discoverable.
+	before, cerr := s.deps.DB.Credentials(r.Context(), s.deps.Key, providerID)
+	firstCredential := cerr == nil && len(before) == 0
+
 	id, err := s.deps.DB.AddCredential(r.Context(), s.deps.Key, store.Credential{
-		ProviderID: r.PathValue("id"), Label: body.Label,
+		ProviderID: providerID, Label: body.Label,
 		Secret: body.Secret, Enabled: true,
 	})
 	if err != nil {
@@ -317,6 +333,13 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reloadProviders(r.Context())
+	// Only on the first one. A bulk import of twenty keys would otherwise ask
+	// the provider to list its models twenty times, against a rate limit the
+	// operator has just finished telling us they care about — and the second
+	// key does not change what the provider lists.
+	if firstCredential && s.deps.Disc != nil {
+		s.deps.Disc.Trigger(providerID)
+	}
 	// The id and the label, never the secret — not even the one just supplied.
 	// Echoing it back would put it in a response body, a proxy log and a
 	// browser's network panel for no reason.

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"hash/fnv"
 	"sort"
 	"strconv"
@@ -71,10 +72,16 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 			return fmt.Errorf("provider %q: %w", r.id, err)
 		}
 		enabled := enabledOnly(creds)
-		if len(enabled) == 0 {
+		if len(enabled) == 0 && !auth.IsKeyless(r.authStyle) {
 			// A provider with no usable credential cannot serve. Skipping it
 			// here is what stops every request against it failing at the
 			// transport layer instead.
+			//
+			// Unless it needs none: a local runtime and a public keyless
+			// gateway both answer an unauthenticated request, and dropping
+			// them here put them beyond the router, the discovery sweep and
+			// the console alike — every guard downstream that knows about
+			// keyless providers never saw one.
 			continue
 		}
 		models, err := s.models(ctx, r.id)

@@ -141,6 +141,124 @@ lmstudio:
   website: https://lmstudio.ai
   quirks: []
 
+# OmniRoute's registry records opencode as apikey, but its own provider
+# constants file lists it among the no-auth providers, and so does the endpoint.
+#
+# The evidence is a completion rather than a listing — a public model list means
+# nothing, which is what the g4f gateways were removed for. Verified 2026-08-29
+# with no credential: big-pickle, mimo-v2.5-free, nemotron-3.5-lightning-free
+# and hy3-free all answered 200; claude-fable-5 and the other premium ids 401.
+#
+# `optional` is exactly that shape: it answers without a credential on its free
+# roster and answers more with one. An operator who wants only the models that
+# work keyless can turn on "import free models only" when adding it.
+opencode:
+  auth:
+    style: optional
+
+# --- local runtimes -------------------------------------------------------
+#
+# A server the operator runs themselves, reached over the loopback interface.
+# Every one of these speaks the OpenAI shape, so the kind is openaicompat and
+# the only thing that distinguishes them is a port. None is in models.dev: the
+# models are whatever the operator has pulled, which is exactly what discovery
+# asking the endpoint will find.
+#
+# Ports are each project's documented default. An operator who moved one edits
+# the base URL on the provider.
+
+vllm:
+  name: vLLM
+  kind: openaicompat
+  base_url: http://localhost:8000/v1
+  auth:
+    style: none
+  surfaces: [llm]
+  no_models_dev: true
+  website: https://docs.vllm.ai
+  quirks: []
+
+llama-cpp:
+  name: llama.cpp
+  kind: openaicompat
+  base_url: http://localhost:8080/v1
+  auth:
+    style: none
+  surfaces: [llm, embedding]
+  no_models_dev: true
+  website: https://github.com/ggml-org/llama.cpp
+  quirks: []
+
+llamafile:
+  name: llamafile
+  kind: openaicompat
+  base_url: http://localhost:8080/v1
+  auth:
+    style: none
+  surfaces: [llm]
+  no_models_dev: true
+  website: https://github.com/Mozilla-Ocho/llamafile
+  quirks: []
+
+oobabooga:
+  name: Text Generation WebUI
+  kind: openaicompat
+  base_url: http://localhost:5000/v1
+  auth:
+    style: none
+  surfaces: [llm]
+  no_models_dev: true
+  website: https://github.com/oobabooga/text-generation-webui
+  quirks: []
+
+xinference:
+  name: Xinference
+  kind: openaicompat
+  base_url: http://localhost:9997/v1
+  auth:
+    style: none
+  # Xinference also serves rerank, but that surface needs a verified
+  # rerank-path quirk and this entry was written from its documented default
+  # port alone. Claiming a path nobody has checked is how a router sends a
+  # rerank request to a 404.
+  surfaces: [llm, embedding]
+  no_models_dev: true
+  website: https://inference.readthedocs.io
+  quirks: []
+
+docker-model-runner:
+  name: Docker Model Runner
+  kind: openaicompat
+  base_url: http://localhost:12434/engines/v1
+  auth:
+    style: none
+  surfaces: [llm, embedding]
+  no_models_dev: true
+  website: https://docs.docker.com/ai/model-runner
+  quirks: []
+
+lemonade:
+  name: Lemonade
+  kind: openaicompat
+  base_url: http://localhost:8000/api/v1
+  auth:
+    style: none
+  surfaces: [llm]
+  no_models_dev: true
+  website: https://lemonade-server.ai
+  quirks: []
+
+mlx-lm:
+  name: MLX LM
+  kind: openaicompat
+  base_url: http://localhost:8080/v1
+  auth:
+    style: none
+  surfaces: [llm]
+  no_models_dev: true
+  website: https://github.com/ml-explore/mlx-lm
+  quirks: []
+
 bedrock:
   name: Amazon Bedrock
   kind: bedrock
@@ -196,3 +314,29 @@ anthropic-oauth:
     redirect:
       style: localhost
       port: 54545
+
+# Hand-written: the generator drops the OmniRoute entry because its base URL is
+# auggie://cli/stdio, and a non-http scheme is exactly what the drop rule is
+# for. This one is not a mistranscription — internal/localcli serves the scheme
+# by running the local CLI — so the entry is restored here rather than by
+# weakening the rule for every other auggie://, devin:// and zcode:// entry the
+# release has no transport for.
+#
+# optional rather than none: the CLI authenticates itself, so `auggie login`
+# inside the container is one way to set it up and darkrouter holds nothing.
+# The other is pasting the session document into the console, which is stored
+# and rotated like any other credential and reaches the CLI as
+# AUGMENT_SESSION_AUTH. Both work, which is exactly what optional means.
+#
+# The path suffix is /v1 so the openaicompat adapter builds
+# auggie://cli/v1/chat/completions and auggie://cli/v1/models, which is what
+# internal/localcli answers.
+auggie:
+  name: Augment (Auggie CLI)
+  kind: openaicompat
+  base_url: auggie://cli/v1
+  auth:
+    style: optional
+  surfaces: [llm]
+  no_models_dev: true
+  website: https://augmentcode.com

@@ -363,3 +363,99 @@ func TestAKindAbsentFromTheMapIsNotASurfaceSkip(t *testing.T) {
 		}
 	}
 }
+
+// keylessFleet is a provider reached with no credential at all — a local
+// runtime, or a public gateway that asks for nothing.
+func keylessFleet(cs ...provider.Credential) []provider.Provider {
+	return []provider.Provider{{
+		ID: "ollama", Kind: "openaicompat", BaseURL: "http://localhost:11434/v1",
+		AuthStyle: "none", Credentials: cs, Models: []string{"llama"},
+	}}
+}
+
+func TestFilterRoutesToAKeylessProviderWithNoCredentials(t *testing.T) {
+	// The whole point: requiring an invented secret to reach a server on the
+	// loopback interface is a configuration step that protects nothing, and
+	// until now it was the difference between a usable local runtime and one
+	// the router would never choose.
+	ps := keylessFleet()
+	snap := snapOf(t, ps, health.Availability{})
+
+	cands, skips, found := filterTarget(target{"ollama", "llama"}, llmQuery(), snap, byIDOf(ps))
+	if !found {
+		t.Fatal("provider should have been found")
+	}
+	if len(skips) != 0 {
+		t.Errorf("skips = %+v, want none", skips)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("candidates = %+v, want one", cands)
+	}
+	// The empty string is the honest key id: there is no credential to name.
+	if cands[0].KeyID != "" || cands[0].ProviderID != "ollama" {
+		t.Errorf("candidate = %+v", cands[0])
+	}
+}
+
+func TestAKeylessProviderStillCools(t *testing.T) {
+	// Its one attempt is keyed on the empty credential id, so a provider that
+	// is refusing everything backs off exactly as a keyed one does.
+	ps := keylessFleet()
+	b := health.New(1, time.Minute)
+	b.Record(health.Key{ProviderID: "ollama", KeyID: "", Model: "llama"},
+		health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	snap := snapOf(t, ps, b.SnapshotAvailability(time.Now()))
+
+	cands, skips, _ := filterTarget(target{"ollama", "llama"}, llmQuery(), snap, byIDOf(ps))
+	if len(cands) != 0 {
+		t.Fatalf("candidates = %+v, want none while cooling", cands)
+	}
+	if len(skips) != 1 || skips[0].Reason != SkipCooling {
+		t.Fatalf("skips = %+v, want one cooling", skips)
+	}
+}
+
+func TestAKeylessProviderPrefersItsCredentialsWhenItHasSome(t *testing.T) {
+	// Keyless says a credential is not required, not that one is ignored: an
+	// operator who added a token to a local runtime behind a reverse proxy
+	// means it to be sent.
+	ps := keylessFleet(provider.Credential{ID: "k1", Secret: "a", Enabled: true})
+	snap := snapOf(t, ps, health.Availability{})
+
+	cands, _, _ := filterTarget(target{"ollama", "llama"}, llmQuery(), snap, byIDOf(ps))
+	if len(cands) != 1 || cands[0].KeyID != "k1" {
+		t.Fatalf("candidates = %+v, want the real credential", cands)
+	}
+}
+
+func TestAKeyedProviderWithNoCredentialsStillSkips(t *testing.T) {
+	// The guard that keyless must not weaken: a bearer provider with no key
+	// cannot serve, and routing to it would 401 every request.
+	ps := fleetWith()
+	ps[0].AuthStyle = "bearer"
+	snap := snapOf(t, ps, health.Availability{})
+
+	_, skips, _ := filterTarget(target{"groq", "llama"}, llmQuery(), snap, byIDOf(ps))
+	if len(skips) != 1 || skips[0].Reason != SkipNoCredential {
+		t.Fatalf("skips = %+v, want one no_credential", skips)
+	}
+}
+
+func TestAnOptionalProviderRoutesBothWays(t *testing.T) {
+	// The style exists for gateways that answer an unauthenticated request and
+	// answer a credentialled one more generously, so both shapes must route.
+	ps := keylessFleet()
+	ps[0].AuthStyle = "optional"
+	snap := snapOf(t, ps, health.Availability{})
+	cands, _, _ := filterTarget(target{"ollama", "llama"}, llmQuery(), snap, byIDOf(ps))
+	if len(cands) != 1 || cands[0].KeyID != "" {
+		t.Fatalf("with no credential: %+v", cands)
+	}
+
+	ps[0].Credentials = []provider.Credential{{ID: "k1", Secret: "a", Enabled: true}}
+	snap = snapOf(t, ps, health.Availability{})
+	cands, _, _ = filterTarget(target{"ollama", "llama"}, llmQuery(), snap, byIDOf(ps))
+	if len(cands) != 1 || cands[0].KeyID != "k1" {
+		t.Fatalf("with a credential: %+v", cands)
+	}
+}

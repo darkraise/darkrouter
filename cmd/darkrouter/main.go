@@ -16,10 +16,28 @@ import (
 	"syscall"
 
 	"github.com/darkraise/darkrouter/internal/admin"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/server"
 	"github.com/darkraise/darkrouter/internal/store"
 )
+
+// seedable turns the presets that need no credential into what the seeder
+// inserts. Free-models-only because a keyless provider is reached by everyone
+// on the same terms: what its free tier covers is what an operator can rely on
+// getting, and importing the rest fills the catalogue with models that answer
+// 401 to a gateway holding no key.
+func seedable(ps catalog.Presets) []store.SeedProvider {
+	var out []store.SeedProvider
+	for _, id := range ps.SelfServing() {
+		p := ps[id]
+		out = append(out, store.SeedProvider{
+			ID: id, Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
+			AuthStyle: p.Auth.Style, FreeModelsOnly: true,
+		})
+	}
+	return out
+}
 
 func main() {
 	// Subcommands are dispatched before flag.Parse, which would otherwise
@@ -84,6 +102,22 @@ func runServer(args []string) error {
 	}
 	if res.Imported {
 		log.Printf("imported %d providers from %s into the database", res.Providers, *path)
+	}
+
+	// Seeded before the config overlay and the server: the providers it adds
+	// are ordinary rows, and everything downstream — the router's source, the
+	// discovery sweep, the console — reads them the same way it reads one an
+	// operator added by hand.
+	if cfg.Catalog.SeedFreeProvidersEnabled() {
+		seedRes, err := store.SeedProviders(context.Background(), db, seedable(catalog.Embedded()))
+		if err != nil {
+			return err
+		}
+		if len(seedRes.Added) > 0 {
+			log.Printf("added %d providers that need no credential: %s. "+
+				"Delete any you do not want — they are not offered twice",
+				len(seedRes.Added), strings.Join(seedRes.Added, ", "))
+		}
 	}
 
 	cfgRes, err := store.ImportConfigOnce(context.Background(), db, cfg)

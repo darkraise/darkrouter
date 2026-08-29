@@ -34,6 +34,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/localcli"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -56,7 +57,10 @@ type Server struct {
 
 	cat  *catalog.Store
 	disc *catalog.Discoverer
-	sync *catalog.Syncer
+	// freeSync is nil when the daily refresh is turned off; the catalogue the
+	// release shipped with is then what the import filter reads.
+	freeSync *catalog.FreeSyncer
+	sync     *catalog.Syncer
 
 	adm *admin.Server
 
@@ -142,6 +146,31 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		startupWarnings = append(startupWarnings, fmt.Sprintf("catalog: %v", err))
 	}
 
+	syncer := catalog.NewSyncer(db, src, cat, catalog.SyncOptions{
+		URL:      cfg.Catalog.ModelsDevURL,
+		Interval: cfg.Catalog.SyncInterval,
+		Timeout:  cfg.Catalog.SyncTimeout,
+	})
+
+	// Constructed whether or not its worker runs: with the refresh turned off
+	// it simply serves the catalogue embedded at build time, which keeps one
+	// path into the import filter rather than two.
+	freeSync := catalog.NewFreeSyncer(catalog.FreeSyncOptions{
+		URL:      cfg.Catalog.FreeCatalogURL,
+		Interval: cfg.Catalog.FreeCatalogInterval,
+		Timeout:  cfg.Catalog.SyncTimeout,
+	})
+
+	// A provider whose base URL names a local program rather than a host is
+	// served by a transport of its own, registered on every client that
+	// reaches providers: the executor's, the discovery sweep's, and the
+	// console's probe. Registering in one place would have left the other two
+	// reporting "unsupported protocol scheme" for a provider the operator can
+	// see in the catalogue.
+	protocols := map[string]http.RoundTripper{
+		localcli.AuggieScheme: localcli.NewTransport(localcli.NewAuggie()),
+	}
+
 	var disc *catalog.Discoverer
 	if e := cfg.Catalog.Discovery.Enabled; e == nil || *e {
 		disc = catalog.NewDiscoverer(db, src, cat, breaker, catalog.DiscoveryOptions{
@@ -153,13 +182,20 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 			// imports both halves and catalog must not import an adapter.
 			Listers: map[string]catalog.KindLister{"bedrock": bedrockadapter.NewLister(nil)},
 			Auth:    authManager,
+			// The syncer holds the newest models.dev document; the import
+			// filter prices against that rather than against the snapshot
+			// frozen into this binary. The free-tier catalogue is refreshed
+			// the same way, for the same reason.
+			Metadata:  syncer.Doc,
+			FreeTiers: freeSync.Catalog,
+			Protocols: protocols,
 		})
 	}
-	syncer := catalog.NewSyncer(db, src, cat, catalog.SyncOptions{
-		URL:      cfg.Catalog.ModelsDevURL,
-		Interval: cfg.Catalog.SyncInterval,
-		Timeout:  cfg.Catalog.SyncTimeout,
-	})
+
+	var freeSyncWorker *catalog.FreeSyncer
+	if cfg.Catalog.FreeCatalogSyncEnabled() {
+		freeSyncWorker = freeSync
+	}
 
 	mediaFetcher := geminiadapter.NewFetcher()
 	mediaFetcher.Inline = cfg.MediaInline()
@@ -172,7 +208,8 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		"vertex":       vertexadapter.New(),
 	}, exec.Deps{
 		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
-		Auth: authManager,
+		Auth:      authManager,
+		Protocols: protocols,
 	})
 
 	// The dashboard is always mounted. A missing password hash closes it — the
@@ -188,14 +225,23 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 			"DARKROUTER_ADMIN_PASSWORD_HASH is not set; the admin dashboard will refuse "+
 				"every login. Generate one with: darkrouter hash-password")
 	}
+	// A typed nil is not a nil interface. Assigning a disabled discoverer
+	// straight into admin.Deps.Disc would satisfy every `Disc != nil` guard in
+	// that package and then dereference on the first call.
+	var discTrigger admin.DiscoveryTrigger
+	if disc != nil {
+		discTrigger = disc
+	}
+
 	adm, err := admin.New(admin.Deps{
 		DB: db, PasswordHash: passwordHash,
 		Config: cfgStore, Src: src, Key: key,
-		Catalog: cat, Disc: disc, Sync: syncer, Breaker: breaker,
+		Catalog: cat, Disc: discTrigger, Sync: syncer, Breaker: breaker,
 		Presets: o.presets, Exec: ex,
 		Warnings: startupWarnings,
 		Flows:    flows,
 		Auth:     authManager,
+		HTTP:     &http.Client{Transport: protocolTransport(protocols)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
@@ -205,11 +251,23 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
+		freeSync:  freeSyncWorker,
 		refresher: refresher,
 		ex:        ex,
 		started:   time.Now(),
 		warnings:  startupWarnings,
 	}, nil
+}
+
+// protocolTransport is the console's outbound transport: the shared default
+// plus the non-network schemes, so the Test button reaches a local CLI provider
+// the same way the sweep does.
+func protocolTransport(protocols map[string]http.RoundTripper) http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	for scheme, rt := range protocols {
+		t.RegisterProtocol(scheme, rt)
+	}
+	return t
 }
 
 func (s *Server) ProxyHandler() http.Handler {
@@ -546,6 +604,9 @@ func (s *Server) Run(ctx context.Context) error {
 		startWorker("discovery", s.disc.Run)
 	}
 	startWorker("models.dev sync", s.sync.Run)
+	if s.freeSync != nil {
+		startWorker("free catalogue sync", s.freeSync.Run)
+	}
 
 	startWorker("config watcher", func(c context.Context) error {
 		// A watcher that cannot start leaves hot reload silently dead, so the

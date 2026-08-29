@@ -16,6 +16,7 @@ func filtersFrom(r *http.Request) RequestFilters {
 		Alias:     q.Get("alias"),
 		Surface:   q.Get("surface"),
 		ErrorCode: q.Get("error_code"),
+		Source:    q.Get("source"),
 	}
 	f.SinceMs, _ = strconv.ParseInt(q.Get("since_ms"), 10, 64)
 	f.UntilMs, _ = strconv.ParseInt(q.Get("until_ms"), 10, 64)
@@ -32,6 +33,7 @@ type requestView struct {
 	Provider        string `json:"provider,omitempty"`
 	FinalModel      string `json:"final_model,omitempty"`
 	Status          string `json:"status"`
+	Source          string `json:"source"`
 	TokensIn        int64  `json:"tokens_in"`
 	TokensOut       int64  `json:"tokens_out"`
 	CacheReadTokens int64  `json:"cache_read_tokens"`
@@ -51,7 +53,7 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	q := store.RequestQuery{
 		Provider: f.Provider, Model: f.Model, Status: f.Status,
 		Alias: f.Alias, Surface: f.Surface, ErrorCode: f.ErrorCode,
-		SinceMs: f.SinceMs, UntilMs: f.UntilMs,
+		Source: f.Source, SinceMs: f.SinceMs, UntilMs: f.UntilMs,
 	}
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
 		q.Limit = n
@@ -79,7 +81,8 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 			ID: row.ID, TSMs: row.TSMs, Dialect: row.Dialect, Surface: row.Surface,
 			Model: row.RequestedModel, Alias: row.ResolvedAlias,
 			Provider: row.FinalProviderID, FinalModel: row.FinalModel,
-			Status: row.Status, TokensIn: row.TokensIn, TokensOut: row.TokensOut,
+			Status: row.Status, Source: row.Source,
+			TokensIn: row.TokensIn, TokensOut: row.TokensOut,
 			CacheReadTokens: row.CacheReadTokens,
 			CostMicros:      row.CostMicros, TTFTMs: row.TTFTMs, TotalMs: row.TotalMs,
 			ErrorCode: row.ErrorCode, Attempts: row.Attempts, Path: row.Path,

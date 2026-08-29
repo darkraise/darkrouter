@@ -45,7 +45,8 @@ aihorde:
   kind: openaicompat
   base_url: https://oai.aihorde.net/v1
   auth:
-    style: bearer
+    style: anonymous
+    key: "0000000000"
   surfaces:
     - llm
   no_models_dev: true
@@ -212,6 +213,16 @@ api-airforce:
   free_tier: true
   website: https://api.airforce
   models_url: https://api.airforce/v1/models
+auggie:
+  name: Augment (Auggie CLI)
+  kind: openaicompat
+  base_url: auggie://cli/v1
+  auth:
+    style: optional
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://augmentcode.com
 auriko:
   name: Auriko
   kind: openaicompat
@@ -415,17 +426,6 @@ chenzk:
   no_models_dev: true
   website: https://chenzk.top
   models_url: https://chenzk.top/v1/models
-chipotle:
-  name: Chipotle Pepper AI (Free)
-  kind: openaicompat
-  base_url: https://amelia.chipotle.com
-  auth:
-    style: none
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://amelia.chipotle.com
 chutes:
   name: Chutes.ai
   kind: openaicompat
@@ -459,17 +459,6 @@ cloudflare-ai:
   no_models_dev: true
   free_tier: true
   website: https://developers.cloudflare.com/workers-ai
-cloudflare-playground:
-  name: Cloudflare AI Playground
-  kind: openaicompat
-  base_url: https://playground.ai.cloudflare.com
-  auth:
-    style: none
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://playground.ai.cloudflare.com
 clova-studio:
   name: Naver CLOVA Studio
   kind: openaicompat
@@ -626,6 +615,17 @@ dit:
   no_models_dev: true
   website: https://dit.ai
   models_url: https://api.dit.ai/v1/models
+docker-model-runner:
+  name: Docker Model Runner
+  kind: openaicompat
+  base_url: http://localhost:12434/engines/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+    - embedding
+  no_models_dev: true
+  website: https://docs.docker.com/ai/model-runner
 doubao:
   name: Doubao
   kind: openaicompat
@@ -791,66 +791,6 @@ friendliai:
   free_tier: true
   website: https://friendli.ai
   models_url: https://api.friendli.ai/serverless/v1/models
-g4f-gemini:
-  name: g4f.space — Gemini
-  kind: openaicompat
-  base_url: https://g4f.space/api/gemini/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://g4f.space
-  models_url: https://g4f.space/api/gemini/v1/models
-g4f-groq:
-  name: g4f.space — Groq
-  kind: openaicompat
-  base_url: https://g4f.space/api/groq/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://g4f.space
-  models_url: https://g4f.space/api/groq/v1/models
-g4f-nvidia:
-  name: g4f.space — NVIDIA
-  kind: openaicompat
-  base_url: https://g4f.space/api/nvidia/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://g4f.space
-  models_url: https://g4f.space/api/nvidia/v1/models
-g4f-ollama:
-  name: g4f.space — Ollama
-  kind: openaicompat
-  base_url: https://g4f.space/api/ollama/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://g4f.space
-  models_url: https://g4f.space/api/ollama/v1/models
-g4f-pollinations:
-  name: g4f.space — Pollinations
-  kind: openaicompat
-  base_url: https://g4f.space/api/pollinations/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://g4f.space
-  models_url: https://g4f.space/api/pollinations/v1/models
 galadriel:
   name: Galadriel
   kind: openaicompat
@@ -1124,6 +1064,16 @@ lambda-ai:
     - llm
   no_models_dev: true
   website: https://lambda.ai
+lemonade:
+  name: Lemonade
+  kind: openaicompat
+  base_url: http://localhost:8000/api/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://lemonade-server.ai
 leonardo:
   name: Leonardo AI
   kind: openaicompat
@@ -1158,6 +1108,27 @@ literouter:
   free_tier: true
   website: https://literouter.com
   models_url: https://api.literouter.com/v1/models
+llama-cpp:
+  name: llama.cpp
+  kind: openaicompat
+  base_url: http://localhost:8080/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+    - embedding
+  no_models_dev: true
+  website: https://github.com/ggml-org/llama.cpp
+llamafile:
+  name: llamafile
+  kind: openaicompat
+  base_url: http://localhost:8080/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://github.com/Mozilla-Ocho/llamafile
 llamagate:
   name: LlamaGate
   kind: openaicompat
@@ -1283,6 +1254,16 @@ mixlayer:
   free_tier: true
   website: https://www.mixlayer.com
   models_url: https://models.mixlayer.ai/v1/models
+mlx-lm:
+  name: MLX LM
+  kind: openaicompat
+  base_url: http://localhost:8080/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://github.com/ml-explore/mlx-lm
 mnn-ai:
   name: MNN AI
   kind: openaicompat
@@ -1514,6 +1495,16 @@ ollama-cloud:
   free_tier: true
   website: https://ollama.com/settings/keys
   models_url: https://ollama.com/api/tags
+oobabooga:
+  name: Text Generation WebUI
+  kind: openaicompat
+  base_url: http://localhost:5000/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://github.com/oobabooga/text-generation-webui
 openadapter:
   name: OpenAdapter
   kind: openaicompat
@@ -1548,7 +1539,7 @@ opencode:
   kind: openaicompat
   base_url: https://opencode.ai/zen/v1
   auth:
-    style: bearer
+    style: optional
   surfaces:
     - llm
   models_dev_id: opencode
@@ -1603,7 +1594,7 @@ ovhcloud:
   kind: openaicompat
   base_url: https://oai.endpoints.kepler.ai.cloud.ovh.net/v1
   auth:
-    style: bearer
+    style: optional
   surfaces:
     - llm
   models_dev_id: ovhcloud
@@ -1937,17 +1928,6 @@ tencent:
   no_models_dev: true
   free_tier: true
   website: https://hunyuan.tencent.com
-theoldllm:
-  name: The Old LLM (Free)
-  kind: openaicompat
-  base_url: https://theoldllm.vercel.app/api/chatgpt
-  auth:
-    style: none
-  surfaces:
-    - llm
-  no_models_dev: true
-  free_tier: true
-  website: https://theoldllm.vercel.app
 together:
   name: Together AI
   kind: openaicompat
@@ -2022,7 +2002,7 @@ uncloseai:
   kind: openaicompat
   base_url: https://hermes.ai.unturf.com/v1
   auth:
-    style: bearer
+    style: optional
   surfaces:
     - llm
   no_models_dev: true
@@ -2106,6 +2086,16 @@ vertex-anthropic:
   quirks:
     - requires-max-tokens
   publisher: publishers/anthropic
+vllm:
+  name: vLLM
+  kind: openaicompat
+  base_url: http://localhost:8000/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://docs.vllm.ai
 void-ai:
   name: Void AI
   kind: openaicompat
@@ -2126,7 +2116,7 @@ volcengine:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: volcengine
   website: https://www.volcengine.com
 voyage:
   name: Voyage AI
@@ -2209,6 +2199,17 @@ xiaomi-mimo-token-plan:
     - llm
   no_models_dev: true
   website: https://mimo.mi.com
+xinference:
+  name: Xinference
+  kind: openaicompat
+  base_url: http://localhost:9997/v1
+  auth:
+    style: none
+  surfaces:
+    - llm
+    - embedding
+  no_models_dev: true
+  website: https://inference.readthedocs.io
 yi:
   name: Yi (01.AI)
   kind: openaicompat

@@ -40,6 +40,16 @@ func TestEmbeddedPresetsValidate(t *testing.T) {
 		if p.ModelsDevID == "" && !p.NoModelsDev {
 			t.Errorf("%s: neither models_dev_id nor no_models_dev", id)
 		}
+		// The anonymous style is only anonymous if the published credential
+		// actually ships: without it the preset promises a provider an
+		// operator can add with no key and then sends an empty Authorization
+		// header, which is a 401 the console never explains.
+		if p.Auth.Style == "anonymous" && p.Auth.Key == "" {
+			t.Errorf("%s: auth style anonymous with no published key", id)
+		}
+		if p.Auth.Style != "anonymous" && p.Auth.Key != "" {
+			t.Errorf("%s: ships an auth key with style %q", id, p.Auth.Style)
+		}
 		if p.Auth.Style == "oauth" {
 			if p.OAuth == nil {
 				t.Errorf("%s: auth style oauth with no oauth block", id)
@@ -56,6 +66,65 @@ func TestEmbeddedPresetsValidate(t *testing.T) {
 				t.Errorf("%s: localhost redirect with no port", id)
 			}
 		}
+	}
+}
+
+func TestAnonymousAuthResolvesThePublishedKey(t *testing.T) {
+	a := Auth{Style: "anonymous", Key: "0000000000"}
+	if got := a.Secret(""); got != "0000000000" {
+		t.Errorf("secret = %q, want the published key", got)
+	}
+	if got := a.Secret("mine"); got != "mine" {
+		t.Errorf("secret = %q, want the configured credential to win", got)
+	}
+	// Every other style has nothing to fall back to, and inventing one would
+	// send an empty header as if it were a key.
+	if got := (Auth{Style: "bearer"}).Secret(""); got != "" {
+		t.Errorf("bearer resolved %q", got)
+	}
+}
+
+func TestSelfServingIsWhatAnOperatorCanUseWithoutConfiguringAnything(t *testing.T) {
+	ps, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := ps.SelfServing()
+	if len(ids) == 0 {
+		t.Fatal("no preset is usable without a credential; the release seeds nothing")
+	}
+	for _, id := range ids {
+		p := ps[id]
+		if !AuthStyles[p.Auth.Style] {
+			t.Errorf("%s: unknown style %q", id, p.Auth.Style)
+		}
+		switch p.Auth.Style {
+		case "none", "optional", "anonymous":
+		default:
+			t.Errorf("%s: style %q needs a credential the operator has to find", id, p.Auth.Style)
+		}
+		// A local runtime asks for no credential either, and seeding one would
+		// add a provider pointing at a server nobody has started.
+		if isLoopback(p.BaseURL) {
+			t.Errorf("%s: %s is this machine, not a service", id, p.BaseURL)
+		}
+		if !strings.HasPrefix(p.BaseURL, "http") {
+			t.Errorf("%s: %s needs a transport of its own", id, p.BaseURL)
+		}
+	}
+}
+
+func TestSelfServingIsSortedSoSeedingIsStable(t *testing.T) {
+	ps := Presets{
+		"zeta":  {Name: "Z", Kind: "openaicompat", BaseURL: "https://z.example/v1", Auth: Auth{Style: "none"}},
+		"alpha": {Name: "A", Kind: "openaicompat", BaseURL: "https://a.example/v1", Auth: Auth{Style: "optional"}},
+		"keyed": {Name: "K", Kind: "openaicompat", BaseURL: "https://k.example/v1", Auth: Auth{Style: "bearer"}},
+		"local": {Name: "L", Kind: "openaicompat", BaseURL: "http://localhost:11434/v1", Auth: Auth{Style: "none"}},
+		"cli":   {Name: "C", Kind: "openaicompat", BaseURL: "auggie://cli/v1", Auth: Auth{Style: "optional"}},
+	}
+	got := ps.SelfServing()
+	if len(got) != 2 || got[0] != "alpha" || got[1] != "zeta" {
+		t.Fatalf("SelfServing() = %v, want [alpha zeta]", got)
 	}
 }
 

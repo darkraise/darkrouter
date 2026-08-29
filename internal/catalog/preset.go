@@ -4,11 +4,15 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/darkraise/darkrouter/internal/auth"
 )
 
 //go:embed presets.yaml
@@ -65,6 +69,22 @@ type Auth struct {
 	Header string `yaml:"header,omitempty"`
 	// QueryParam names the parameter for the query-param style.
 	QueryParam string `yaml:"query_param,omitempty"`
+	// Key is the credential the anonymous style ships. It is a published
+	// constant, not a secret: AI Horde documents 0000000000 so that anyone can
+	// call it, and an operator who pastes their own key over it gets the
+	// higher queue priority it buys.
+	Key string `yaml:"key,omitempty"`
+}
+
+// Secret resolves what to send for a provider whose configured credential is
+// the empty string. Only the anonymous style has anything to fall back to, and
+// routing it through one method is what keeps the executor and the discovery
+// sweep sending the same thing.
+func (a Auth) Secret(configured string) string {
+	if configured == "" && a.Style == "anonymous" {
+		return a.Key
+	}
+	return configured
 }
 
 type OAuth struct {
@@ -98,6 +118,41 @@ type TraitRule struct {
 
 type Presets map[string]Preset
 
+// SelfServing names the presets an operator can use without configuring
+// anything: no credential to paste, and an endpoint the gateway can reach on
+// its own. Sorted, so a caller that seeds from it does so in a stable order.
+//
+// A local runtime is excluded even though it asks for no credential. It needs
+// a server running on this machine, which is configuration of a different
+// kind, and seeding a provider for an Ollama nobody has started would fill the
+// console with providers that answer nothing. So is a program reached through
+// a scheme of its own — the local CLI kind — for the same reason: the operator
+// has to install and sign into it first.
+func (ps Presets) SelfServing() []string {
+	var out []string
+	for id, p := range ps {
+		if !auth.IsKeyless(p.Auth.Style) {
+			continue
+		}
+		if !strings.HasPrefix(p.BaseURL, "http://") && !strings.HasPrefix(p.BaseURL, "https://") {
+			continue
+		}
+		if isLoopback(p.BaseURL) {
+			continue
+		}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// loopback matches the addresses that can only be this machine. It mirrors the
+// console's rule, which reads localness off the address rather than a flag: a
+// loopback URL cannot be anybody else's server.
+var loopback = regexp.MustCompile(`^https?://(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|/|$)`)
+
+func isLoopback(baseURL string) bool { return loopback.MatchString(baseURL) }
+
 // Kinds is every provider kind an adapter exists for, plus the two whose
 // adapters arrive in phase 8. A preset naming anything else is a typo.
 var Kinds = map[string]bool{
@@ -111,7 +166,7 @@ var Kinds = map[string]bool{
 // AuthStyles is the closed vocabulary from spec §3.
 var AuthStyles = map[string]bool{
 	"bearer": true, "x-api-key": true, "api-key": true,
-	"query-param": true, "none": true, "sigv4": true,
+	"query-param": true, "none": true, "optional": true, "anonymous": true, "sigv4": true,
 	"gcp-sa": true, "oauth": true,
 }
 

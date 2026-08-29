@@ -283,7 +283,7 @@ func TestPriorityChangeReachesRoutingImmediately(t *testing.T) {
 	seedProviderWithKey(t, s, cookie, token, "high", "http://high.invalid")
 	for _, id := range []string{"low", "high"} {
 		if err := db.RecordDiscoverySuccess(ctx, id,
-			[]store.DiscoveredModel{{ModelID: "m", ContextWindow: 1000, MaxOutputTokens: 100}}, 0, time.Now()); err != nil {
+			[]store.DiscoveredModel{{ModelID: "m", ContextWindow: 1000, MaxOutputTokens: 100}}, nil, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -407,5 +407,69 @@ func TestAStaticKeyOmitsOAuthOnlyFields(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no credential in the view: %s", w.Body.String())
+	}
+}
+
+// spyTrigger records the providers a handler asked to have swept.
+type spyTrigger struct{ swept []string }
+
+func (s *spyTrigger) Trigger(providerID string) { s.swept = append(s.swept, providerID) }
+
+// withSpyTrigger swaps the server's discoverer for one that only records, so a
+// test can see the side effect the handler is supposed to have.
+func withSpyTrigger(s *Server) *spyTrigger {
+	spy := &spyTrigger{}
+	s.deps.Disc = spy
+	return spy
+}
+
+func TestFirstCredentialTriggersDiscovery(t *testing.T) {
+	// A provider with no credential cannot be swept at all: the discoverer
+	// needs one of the provider's own keys to ask what it serves. The first
+	// key is therefore the moment its models become discoverable, and waiting
+	// a quarter of an hour to find that out is the whole complaint.
+	s, db := testServerFull(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, store.ProviderRow{
+		ID: "groq", Kind: "openaicompat", BaseURL: "https://x.example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	spy := withSpyTrigger(s)
+	cookie, token := login(t, s)
+
+	res := do(t, s, cookie, token, "POST", "/api/providers/groq/keys",
+		`{"label":"one","secret":"sk-aaa"}`)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d: %s", res.Code, res.Body.String())
+	}
+	if len(spy.swept) != 1 || spy.swept[0] != "groq" {
+		t.Errorf("swept %v, want one sweep of groq", spy.swept)
+	}
+}
+
+func TestLaterCredentialsDoNotResweep(t *testing.T) {
+	// A bulk import of twenty keys must not ask the provider to list its
+	// models twenty times, against the rate limit the operator is on a free
+	// tier to respect. The second key does not change what a provider lists.
+	s, db := testServerFull(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, store.ProviderRow{
+		ID: "groq", Kind: "openaicompat", BaseURL: "https://x.example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	spy := withSpyTrigger(s)
+	cookie, token := login(t, s)
+
+	for _, secret := range []string{"sk-aaa", "sk-bbb", "sk-ccc"} {
+		res := do(t, s, cookie, token, "POST", "/api/providers/groq/keys",
+			`{"label":"k","secret":"`+secret+`"}`)
+		if res.Code != http.StatusCreated {
+			t.Fatalf("status = %d: %s", res.Code, res.Body.String())
+		}
+	}
+	if len(spy.swept) != 1 {
+		t.Errorf("swept %v, want exactly one sweep for three keys", spy.swept)
 	}
 }

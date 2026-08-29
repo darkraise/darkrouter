@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
@@ -61,13 +62,23 @@ func filterTarget(t target, q Query, snap Snapshot,
 		return nil, []Skip{{ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipCapability}}, true
 	}
 
-	if len(p.Credentials) == 0 {
-		return nil, []Skip{{ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipNoCredential}}, true
+	// A keyless provider is served by one attempt carrying no credential.
+	// Everything below is keyed on a credential id, and the empty string is
+	// the honest one to key on: there is no credential to rotate, to cool
+	// independently, or to name in a trace.
+	creds := orderCredentials(p.ID, p.Credentials, snap.LastUsed)
+	if len(creds) == 0 {
+		if !Keyless(p) {
+			return nil, []Skip{{
+				ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipNoCredential,
+			}}, true
+		}
+		creds = []provider.Credential{{Enabled: true}}
 	}
 
 	var cands []Candidate
 	var skips []Skip
-	for _, c := range orderCredentials(p.ID, p.Credentials, snap.LastUsed) {
+	for _, c := range creds {
 		k := health.Key{ProviderID: p.ID, KeyID: c.ID, Model: t.ModelID}
 		if !snap.Health.Available(k) {
 			skips = append(skips, Skip{
@@ -88,4 +99,16 @@ func filterTarget(t target, q Query, snap Snapshot,
 		})
 	}
 	return cands, skips, true
+}
+
+// Keyless reports whether this provider is reached with no credential at all.
+//
+// A local runtime on the loopback interface and a public keyless gateway both
+// answer an unauthenticated request, and requiring an invented secret to route
+// to one is a configuration step that protects nothing. The style is read off
+// the provider row rather than its preset: the row is what the source builds
+// from, it is NOT NULL in the schema, and an operator who overrode the style is
+// the authority on how their own endpoint is reached.
+func Keyless(p provider.Provider) bool {
+	return auth.IsKeyless(p.AuthStyle)
 }

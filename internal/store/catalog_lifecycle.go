@@ -78,10 +78,18 @@ func (d *DB) DiscoveryStates(ctx context.Context) (map[string]DiscoveryState, er
 // provider still has a row for and this listing omitted has its omission
 // counter advanced, and crosses to removed_upstream on the third.
 //
+// `dropped` names the models the listing did carry and the operator's import
+// filter excluded. Those rows are deleted outright rather than left to the
+// omission sweep: the provider still lists them, so retiring them as
+// removed_upstream would record a fact about the provider that is not true and
+// would leave every one of them on screen as a model this provider offers. A
+// filter the operator later widens re-imports them on the next sweep, which is
+// the same path a genuinely new model takes.
+//
 // The whole update is one transaction: a crash between the upserts and the
 // omission sweep would otherwise leave models both listed and counted absent.
 func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
-	seen []DiscoveredModel, filteredOut int, at time.Time) error {
+	seen []DiscoveredModel, dropped []string, at time.Time) error {
 
 	ms := at.UTC().UnixMilli()
 	tx, err := d.Write.BeginTx(ctx, nil)
@@ -145,6 +153,22 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 		ids = append(ids, m.ModelID)
 	}
 
+	// The filtered models leave before the omission sweep runs, so a model the
+	// operator excluded is neither kept nor counted as one the provider
+	// stopped listing.
+	if len(dropped) > 0 {
+		args := make([]any, 0, len(dropped)+1)
+		args = append(args, providerID)
+		for _, id := range dropped {
+			args = append(args, id)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM models WHERE provider_id = ? AND model_id IN (`+
+				placeholders(len(dropped))+`)`, args...); err != nil {
+			return fmt.Errorf("drop filtered models: %w", err)
+		}
+	}
+
 	// The omission sweep. A model this listing did not name has its counter
 	// advanced; the third omission retires it. Building the NOT IN list from
 	// placeholders rather than string concatenation keeps a model id that
@@ -173,7 +197,7 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 		     last_success_at      = excluded.last_success_at,
 		     last_error           = '',
 		     filtered_out         = excluded.filtered_out`,
-		providerID, ms, ms, filteredOut); err != nil {
+		providerID, ms, ms, len(dropped)); err != nil {
 		return fmt.Errorf("record discovery success: %w", err)
 	}
 	return tx.Commit()
