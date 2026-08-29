@@ -21,6 +21,7 @@ export function Sampling({
           <Label htmlFor="pg-temp">Temperature</Label>
           <Input
             id="pg-temp" type="number" placeholder="default"
+            disabled={why("temperature") !== null}
             value={config.temperature}
             onChange={(e) => set("temperature", e.target.value)}
           />
@@ -29,6 +30,7 @@ export function Sampling({
           <Label htmlFor="pg-max">Max tokens</Label>
           <Input
             id="pg-max" type="number" placeholder="default"
+            disabled={why("maxTokens") !== null}
             value={config.maxTokens}
             onChange={(e) => set("maxTokens", e.target.value)}
           />
