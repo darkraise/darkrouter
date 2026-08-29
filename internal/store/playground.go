@@ -128,7 +128,7 @@ func scanPreset(s scanner) (PlaygroundPreset, error) {
 		created, updated int64
 	)
 	if err := s.Scan(&p.ID, &p.Name, &p.Dialect, &p.Model, &cfg, &created, &updated); err != nil {
-		return PlaygroundPreset{}, err
+		return PlaygroundPreset{}, fmt.Errorf("scan playground preset: %w", err)
 	}
 	p.Config = json.RawMessage(cfg)
 	p.CreatedAt = time.Unix(created, 0).UTC()
