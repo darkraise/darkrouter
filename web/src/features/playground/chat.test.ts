@@ -30,6 +30,7 @@ describe("chatBody", () => {
     const body = chatBody({
       model: "m", dialect: "openai", system: "", stream: true,
       temperature: "", maxTokens: "", toolsRaw: "",
+      topP: "", topK: "", stopRaw: "", schemaRaw: "", reasoningEffort: "", reasoningBudget: "",
       messages: [
         { role: "user", content: "hi" },
         { role: "assistant", content: "hello" },
@@ -44,7 +45,9 @@ describe("chatBody", () => {
     // zero for it would quietly make every run deterministic.
     const body = chatBody({
       model: "m", dialect: "openai", system: "", stream: true,
-      temperature: "", maxTokens: "", toolsRaw: "", messages: [],
+      temperature: "", maxTokens: "", toolsRaw: "",
+      topP: "", topK: "", stopRaw: "", schemaRaw: "", reasoningEffort: "", reasoningBudget: "",
+      messages: [],
     })
     expect(body.temperature).toBeUndefined()
     expect(body.max_tokens).toBeUndefined()
@@ -53,7 +56,9 @@ describe("chatBody", () => {
   it("sends an explicit zero temperature", () => {
     const body = chatBody({
       model: "m", dialect: "openai", system: "", stream: true,
-      temperature: "0", maxTokens: "", toolsRaw: "", messages: [],
+      temperature: "0", maxTokens: "", toolsRaw: "",
+      topP: "", topK: "", stopRaw: "", schemaRaw: "", reasoningEffort: "", reasoningBudget: "",
+      messages: [],
     })
     expect(body.temperature).toBe(0)
   })
@@ -61,7 +66,9 @@ describe("chatBody", () => {
   it("carries the dialect through", () => {
     const body = chatBody({
       model: "m", dialect: "anthropic", system: "be terse", stream: false,
-      temperature: "", maxTokens: "", toolsRaw: "", messages: [],
+      temperature: "", maxTokens: "", toolsRaw: "",
+      topP: "", topK: "", stopRaw: "", schemaRaw: "", reasoningEffort: "", reasoningBudget: "",
+      messages: [],
     })
     expect(body.dialect).toBe("anthropic")
     expect(body.system).toBe("be terse")

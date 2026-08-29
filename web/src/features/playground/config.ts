@@ -17,6 +17,18 @@ export type PlaygroundConfig = {
    *  number state cannot hold both. */
   temperature: string
   maxTokens: string
+  topP: string
+  topK: string
+  /** One sequence per line. A comma would be a character a sequence may contain. */
+  stopRaw: string
+  /** A JSON Schema object. Structured output is a schema, never a boolean:
+   *  the OpenAI edge honours response_format only when a schema is present,
+   *  so a bare "JSON mode" switch would be a control that does nothing. */
+  schemaRaw: string
+  /** "" | "low" | "medium" | "high" — OpenAI's spelling of reasoning. */
+  reasoningEffort: string
+  /** A token budget — Anthropic's and Gemini's spelling of the same idea. */
+  reasoningBudget: string
   toolsRaw: string
 }
 
@@ -28,6 +40,12 @@ export function emptyConfig(): PlaygroundConfig {
     stream: true,
     temperature: "",
     maxTokens: "",
+    topP: "",
+    topK: "",
+    stopRaw: "",
+    schemaRaw: "",
+    reasoningEffort: "",
+    reasoningBudget: "",
     toolsRaw: "",
   }
 }

@@ -1,4 +1,5 @@
 import { DIALECTS, type PlaygroundConfig } from "../config"
+import { supports } from "../dialect-support"
 import type {
   PlaygroundChatBody,
   PlaygroundDialect,
@@ -27,6 +28,30 @@ export function parseTools(raw: string): { tools?: Record<string, unknown>[]; er
   return { tools: parsed as Record<string, unknown>[] }
 }
 
+/** One stop sequence per line. Blank lines are not sequences. */
+export function parseStopLines(raw: string): string[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+}
+
+/** The structured-output schema, or the reason it could not be read. */
+export function parseSchema(raw: string): { schema?: unknown; error?: string } {
+  const trimmed = raw.trim()
+  if (trimmed === "") return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch (err) {
+    return { error: `schema must be JSON: ${(err as Error).message}` }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { error: "schema must be a JSON object" }
+  }
+  return { schema: parsed }
+}
+
 export function chatBody(state: ChatState): PlaygroundChatBody {
   const body: PlaygroundChatBody = {
     model: state.model,
@@ -37,6 +62,22 @@ export function chatBody(state: ChatState): PlaygroundChatBody {
   if (state.system !== "") body.system = state.system
   if (state.temperature !== "") body.temperature = Number(state.temperature)
   if (state.maxTokens !== "") body.max_tokens = Number(state.maxTokens)
+  // Dropped here rather than sent and ignored: a value the dialect's edge does
+  // not parse never reaches the router, so putting it on the wire would make
+  // the request body disagree with what actually happened.
+  const d = state.dialect
+  if (state.topP !== "" && supports(d, "topP")) body.top_p = Number(state.topP)
+  if (state.topK !== "" && supports(d, "topK")) body.top_k = Number(state.topK)
+  const stop = parseStopLines(state.stopRaw)
+  if (stop.length > 0 && supports(d, "stop")) body.stop = stop
+  const { schema } = parseSchema(state.schemaRaw)
+  if (schema !== undefined && supports(d, "schema")) body.response_schema = schema
+  if (state.reasoningEffort !== "" && supports(d, "reasoningEffort")) {
+    body.reasoning_effort = state.reasoningEffort
+  }
+  if (state.reasoningBudget !== "" && supports(d, "reasoningBudget")) {
+    body.reasoning_budget = Number(state.reasoningBudget)
+  }
   const { tools } = parseTools(state.toolsRaw)
   if (tools) body.tools = tools
   return body
