@@ -492,6 +492,11 @@ func TestPlaygroundSamplingPerDialect(t *testing.T) {
 		if got["reasoning_effort"] != "high" {
 			t.Errorf("reasoning_effort = %v, want high", got["reasoning_effort"])
 		}
+		if _, ok := got["thinking"]; ok {
+			// A budget is how Anthropic spells reasoning. On this wire it is an
+			// effort, and the budget shape would be parsed off and dropped.
+			t.Error("thinking must not appear on the openai wire")
+		}
 		rf, ok := got["response_format"].(map[string]any)
 		if !ok || rf["type"] != "json_schema" {
 			t.Fatalf("response_format = %v, want a json_schema wrapper", got["response_format"])
@@ -510,8 +515,8 @@ func TestPlaygroundSamplingPerDialect(t *testing.T) {
 			t.Errorf("top_k = %v, want 40", got["top_k"])
 		}
 		seq, _ := got["stop_sequences"].([]string)
-		if len(seq) != 2 {
-			t.Errorf("stop_sequences = %v, want two", got["stop_sequences"])
+		if len(seq) != 2 || seq[0] != "END" {
+			t.Errorf("stop_sequences = %v, want [END STOP]", got["stop_sequences"])
 		}
 		if _, ok := got["response_format"]; ok {
 			t.Error("the anthropic edge never reads response_format")
@@ -538,8 +543,8 @@ func TestPlaygroundSamplingPerDialect(t *testing.T) {
 			t.Errorf("topP/topK = %v/%v, want 0.9/40", gen["topP"], gen["topK"])
 		}
 		seq, _ := gen["stopSequences"].([]string)
-		if len(seq) != 2 {
-			t.Errorf("stopSequences = %v, want two", gen["stopSequences"])
+		if len(seq) != 2 || seq[0] != "END" {
+			t.Errorf("stopSequences = %v, want [END STOP]", gen["stopSequences"])
 		}
 		if gen["responseSchema"] == nil {
 			t.Error("responseSchema missing")
@@ -547,6 +552,17 @@ func TestPlaygroundSamplingPerDialect(t *testing.T) {
 		tc, ok := gen["thinkingConfig"].(map[string]any)
 		if !ok || tc["thinkingBudget"] != 2048 {
 			t.Errorf("thinkingConfig = %v, want thinkingBudget 2048", gen["thinkingConfig"])
+		}
+		// Gemini spends reasoning as a budget only. Both spellings are checked
+		// at both levels because this wire nests and camel-cases, so a wrong
+		// guess at either would be dropped in silence.
+		for _, k := range []string{"reasoning_effort", "reasoningEffort"} {
+			if _, ok := got[k]; ok {
+				t.Errorf("%s must not appear on the gemini wire", k)
+			}
+			if _, ok := gen[k]; ok {
+				t.Errorf("generationConfig.%s must not appear on the gemini wire", k)
+			}
 		}
 	})
 }
