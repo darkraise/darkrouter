@@ -1,136 +1,108 @@
-import { useState } from "react"
-import { Link } from "@tanstack/react-router"
-import { Button } from "darkraise-ui/components/button"
-import { Card } from "darkraise-ui/components/card"
-import { Textarea } from "darkraise-ui/components/textarea"
+import { useRef, useState } from "react"
+import { Button, Textarea } from "darkraise-ui"
 import { stream, type StreamStart } from "../../lib/api"
 import { chatBody } from "./lib/request"
 import { drainSSE } from "./lib/stream"
 import type { PlaygroundConfig } from "./config"
-import { ModelCombobox, useModelCandidates } from "../shell/model-combobox"
+import { CompareColumn, emptyColumn, type Column } from "./compare-column"
+import { useModelCandidates } from "../shell/model-combobox"
 import type { PlaygroundMessage } from "../../lib/api-types"
 
-type Side = {
-  model: string
-  text: string
-  requestId: string
-  error: string
-  busy: boolean
-  latencyMs: number | undefined
-}
+/** Past four, no column is wide enough to read a wrapped answer in, and the
+ *  comparison the screen exists for stops being possible. */
+export const MAX_COLUMNS = 4
 
-function emptySide(model: string): Side {
-  return { model, text: "", requestId: "", error: "", busy: false, latencyMs: undefined }
-}
+/** Two is the comparison the screen is named for. */
+const MIN_COLUMNS = 2
 
-async function runSide(
+async function runColumn(
   model: string,
   prompt: string,
   config: PlaygroundConfig,
-  setSide: (fn: (s: Side) => Side) => void,
+  update: (fn: (c: Column) => Column) => void,
 ): Promise<void> {
   const started = performance.now()
-  setSide((s) => ({ ...emptySide(s.model), busy: true }))
+  update((c) => ({ ...emptyColumn(c.id), model: c.model, status: "streaming" }))
   let buffer = ""
   try {
     const turns: PlaygroundMessage[] = [{ role: "user", content: prompt }]
     for await (const chunk of stream(
       "/api/playground",
-      // The shared settings, with only the model differing between sides:
-      // comparing two models under two system prompts would answer a question
+      // The shared settings, with only the model differing between columns:
+      // comparing models under two system prompts would answer a question
       // nobody asked.
       chatBody({ ...config, model, stream: true, messages: turns }),
-      (s: StreamStart) => setSide((cur) => ({ ...cur, requestId: s.requestId })),
+      (s: StreamStart) => update((c) => ({ ...c, requestId: s.requestId })),
     )) {
       buffer += chunk
       const { text, rest } = drainSSE(buffer, config.dialect)
       buffer = rest
-      if (text) setSide((cur) => ({ ...cur, text: cur.text + text }))
+      if (text) update((c) => ({ ...c, text: c.text + text }))
     }
+    update((c) => ({ ...c, status: "done" }))
   } catch (err) {
-    setSide((cur) => ({ ...cur, error: (err as Error).message }))
+    update((c) => ({ ...c, error: (err as Error).message, status: "error" }))
   } finally {
-    setSide((cur) => ({ ...cur, busy: false, latencyMs: performance.now() - started }))
+    update((c) => ({ ...c, latencyMs: performance.now() - started }))
   }
 }
 
-function SidePanel({
-  side,
-  onModel,
-  candidates,
-  loading,
-  label,
-}: {
-  side: Side
-  onModel: (model: string) => void
-  candidates: string[]
-  loading?: boolean
-  label: string
-}) {
-  return (
-    <Card className="flex flex-col gap-3 p-4">
-      <ModelCombobox
-        label={label}
-        value={side.model}
-        onChange={onModel}
-        candidates={candidates}
-        loading={loading}
-        className="w-full"
-      />
-      <div className="min-h-24 rounded border p-3 text-sm font-mono whitespace-pre-wrap">{side.text}</div>
-      {side.error ? <p className="text-destructive text-sm">{side.error}</p> : null}
-      <div className="flex items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
-        {side.latencyMs !== undefined ? <span>{Math.round(side.latencyMs)} ms</span> : null}
-        {side.requestId ? (
-          <Link to="/requests/$id" params={{ id: side.requestId }} className="underline">
-            View the trace for this request
-          </Link>
-        ) : null}
-      </div>
-    </Card>
-  )
-}
-
-/** Two models against the same prompt, run concurrently through the exact
- *  request chat sends — chatBody is shared rather than rebuilt, so a
- *  difference in the transcripts reflects the models, not a second,
- *  slightly different request shape. */
+/** Up to four models against the same prompt, run concurrently through the
+ *  exact request chat sends — chatBody is shared rather than rebuilt, so a
+ *  difference in the transcripts reflects the models, not a second, slightly
+ *  different request shape. */
 export function Compare({ config }: { config: PlaygroundConfig }) {
+  const counter = useRef(MIN_COLUMNS)
   const [prompt, setPrompt] = useState("")
-  const [left, setLeft] = useState<Side>(() => emptySide(""))
-  const [right, setRight] = useState<Side>(() => emptySide(""))
+  const [columns, setColumns] = useState<Column[]>(() => [emptyColumn("c0"), emptyColumn("c1")])
 
   const { candidates, loading } = useModelCandidates()
-  const busy = left.busy || right.busy
-  const canRun = !busy && prompt !== "" && left.model !== "" && right.model !== ""
+  const busy = columns.some((c) => c.status === "streaming")
+  const canRun = !busy && prompt !== "" && columns.every((c) => c.model !== "")
+
+  const updateColumn = (id: string, fn: (c: Column) => Column) =>
+    setColumns((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
 
   function run() {
     if (!canRun) return
-    void runSide(left.model, prompt, config, setLeft)
-    void runSide(right.model, prompt, config, setRight)
+    // Started in one pass so they overlap: run sequentially and the latency
+    // readings beside them would measure the queue, not the providers.
+    for (const column of columns) {
+      void runColumn(column.model, prompt, config, (fn) => updateColumn(column.id, fn))
+    }
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
       <Textarea placeholder="Prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <Button onClick={run} disabled={!canRun}>
-        {busy ? "Running…" : "Run"}
-      </Button>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <SidePanel
-          side={left}
-          label="Left model or alias"
-          candidates={candidates}
-          loading={loading}
-          onModel={(model) => setLeft((s) => ({ ...s, model }))}
-        />
-        <SidePanel
-          side={right}
-          label="Right model or alias"
-          candidates={candidates}
-          loading={loading}
-          onModel={(model) => setRight((s) => ({ ...s, model }))}
-        />
+      <div className="flex items-center gap-2">
+        <Button onClick={run} disabled={!canRun}>
+          {busy ? "Running…" : "Run"}
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={columns.length >= MAX_COLUMNS}
+          onClick={() => setColumns((cs) => [...cs, emptyColumn(`c${counter.current++}`)])}
+        >
+          Add a column
+        </Button>
+      </div>
+      <div
+        className="grid gap-4"
+        style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+      >
+        {columns.map((column, index) => (
+          <CompareColumn
+            key={column.id}
+            column={column}
+            index={index}
+            candidates={candidates}
+            loading={loading}
+            removable={columns.length > MIN_COLUMNS}
+            onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
+            onRemove={() => setColumns((cs) => cs.filter((c) => c.id !== column.id))}
+          />
+        ))}
       </div>
     </div>
   )
