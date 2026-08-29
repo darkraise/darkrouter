@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { Sampling } from "./sampling"
+import { Reasoning } from "./reasoning"
+import { StructuredOutput } from "./structured-output"
 import { emptyConfig } from "../config"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -40,5 +42,48 @@ describe("the sampling controls", () => {
       expect(screen.getByLabelText(/top p/i)).toBeEnabled()
       unmount()
     }
+  })
+})
+
+describe("reasoning, in whichever spelling the dialect uses", () => {
+  it("offers an effort tier on openai", () => {
+    render(<Reasoning config={{ ...emptyConfig(), dialect: "openai" }} onChange={noop} />)
+    expect(screen.getByLabelText(/effort/i)).toBeEnabled()
+    expect(screen.getByLabelText(/budget/i)).toBeDisabled()
+  })
+
+  it("offers a token budget on anthropic and gemini", () => {
+    for (const dialect of ["anthropic", "gemini"] as const) {
+      const { unmount } = render(<Reasoning config={{ ...emptyConfig(), dialect }} onChange={noop} />)
+      expect(screen.getByLabelText(/budget/i)).toBeEnabled()
+      expect(screen.getByLabelText(/effort/i)).toBeDisabled()
+      unmount()
+    }
+  })
+})
+
+describe("structured output", () => {
+  it("is a schema editor, not a switch", () => {
+    // The OpenAI edge honours response_format only with a schema present, so
+    // a JSON-mode toggle would be a control that did nothing on two of the
+    // three dialects.
+    render(<StructuredOutput config={{ ...emptyConfig(), dialect: "openai" }} onChange={noop} />)
+    expect(screen.getByLabelText(/schema/i)).toBeEnabled()
+  })
+
+  it("reports malformed JSON rather than sending nothing", () => {
+    render(
+      <StructuredOutput
+        config={{ ...emptyConfig(), dialect: "openai", schemaRaw: "{not json" }}
+        onChange={noop}
+      />,
+    )
+    expect(screen.getByText(/schema must be JSON/i)).toBeInTheDocument()
+  })
+
+  it("is disabled on anthropic, whose edge never reads it", () => {
+    render(<StructuredOutput config={{ ...emptyConfig(), dialect: "anthropic" }} onChange={noop} />)
+    expect(screen.getByLabelText(/schema/i)).toBeDisabled()
+    expect(screen.getByText(/does not read response_format/i)).toBeInTheDocument()
   })
 })
