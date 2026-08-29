@@ -28,8 +28,7 @@ These apply to every task without restating.
 
 | # | Criterion | Verification |
 |---|---|---|
-| D1 | The whole console suite runs, not half of it | Task 1 records the test count before and after; the after is greater |
-| D2 | `chat.tsx` no longer exists and nothing imports it | `rg "from \"./chat\"\|from \"../chat\"" web/src` returns nothing |
+| D2 | `chat.tsx` no longer exists and nothing imports it | `rg 'playground/chat"\|from "\./chat"' web/src` returns nothing |
 | D3 | Every assertion in the five existing suites still passes | `cd web && npm test` |
 | D4 | Streaming does not yank a reader back to the bottom | `cd web && npm test -- transcript` |
 | D5 | The playground fills the viewport with no dead band | UAT at 1600×1000: the composer sits at the foot of the frame, the config pane border runs full height |
@@ -38,57 +37,16 @@ These apply to every task without restating.
 
 ---
 
-### Task 1: Pin the threads pool
+### Task 1: Pin the threads pool — DROPPED, do not perform
 
-`web/vitest.config.ts` sets no `pool`, so the suite runs under the default fork pool, which silently skips part of it. Every test claim in this plan is meaningless until this is true, so it is first.
+The premise was false. This task existed because the spec claimed the default fork pool silently
+skips part of the console suite. Measured on 2026-08-29 at the lockfile's vitest 4.1.11, `npx vitest
+run --pool=forks` and `--pool=threads` both run **51 files and 517 tests, all passing**. Pinning a
+pool would add configuration that changes nothing, carrying a comment asserting something untrue.
 
-**Files:**
-- Modify: `web/vitest.config.ts`
-
-**Interfaces:**
-- Consumes: nothing.
-- Produces: a test runner that executes the whole suite. Every later task's `npm test` depends on it.
-
-- [ ] **Step 1: Record what the fork pool actually runs**
-
-```bash
-cd web && npm test 2>&1 | tail -8
-```
-
-Write the "Test Files" and "Tests" totals down. This is the baseline the next steps compare against.
-
-- [ ] **Step 2: Pin the pool**
-
-In `web/vitest.config.ts`, inside `test:`, add `pool` above `environment`:
-
-```ts
-  test: {
-    // The default fork pool does not run this suite whole. Threads is not a
-    // performance preference here -- it is the difference between a green run
-    // that executed everything and a green run that executed some of it.
-    pool: "threads",
-    environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
-    globals: true,
-  },
-```
-
-- [ ] **Step 3: Confirm the suite grew**
-
-```bash
-cd web && npm test 2>&1 | tail -8
-```
-
-Expected: the "Tests" total is **higher** than the Step 1 baseline, and the run is green.
-
-If the total is unchanged, stop and report it: the premise this plan inherited from the spec is wrong, and the plan's other test gates need rethinking before continuing. If the run is now **red**, that is the expected shape of the problem — tests that were being skipped are now running and some fail. Report the failures rather than fixing them here; they are pre-existing defects, not this plan's work, and folding them in would hide them inside a config commit.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add web/vitest.config.ts
-git commit -m "test(web): run the console suite under threads"
-```
+Spec §12 is corrected to record the measurement, so the claim is not re-derived the next time a
+suite looks short. D1 is void and removed from the Definition of Done. Task numbering is left alone
+so earlier references stay valid.
 
 ---
 
