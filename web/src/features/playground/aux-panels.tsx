@@ -347,7 +347,7 @@ export function AuxPanels() {
   }
 
   return (
-    <Tabs defaultValue={AUX_SURFACES[0].surface} className="p-6">
+    <Tabs defaultValue={AUX_SURFACES[0].surface} className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
       <TabsList>
         {AUX_SURFACES.map(({ surface, label }) => (
           <TabsTrigger key={surface} value={surface}>
@@ -407,7 +407,7 @@ export function Count() {
   }
 
   return (
-    <div className="p-6">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
       <Card className="flex max-w-md flex-col gap-3 p-4">
         <Select value={dialect} onValueChange={(v) => setDialect(v as CountDialect)}>
           <SelectTrigger>

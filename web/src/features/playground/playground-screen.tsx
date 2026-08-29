@@ -6,7 +6,7 @@ import { Compare } from "./compare"
 import { AuxPanels, Count } from "./aux-panels"
 import { ConfigPane } from "./config-pane"
 import { emptyConfig, type PlaygroundConfig } from "./config"
-import { MetricsStrip, NO_METRICS, hasReadings, type StreamMetrics } from "./metrics"
+import { MetricsStrip, NO_METRICS, type StreamMetrics } from "./metrics"
 
 /**
  * The playground, as one instrument rather than four forms.
@@ -28,12 +28,12 @@ export function PlaygroundScreen() {
   const sends = tab === "chat" || tab === "compare"
 
   return (
-    <>
+    <div className="-m-6 flex h-[calc(100%+3rem)] min-h-0 flex-col">
       <PageHeader
         title="Playground"
         description="Send a real request, and see what it cost"
       />
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
       {/* Sized to its tabs: stretched across the page it reads as an empty
           band with four words adrift in it. */}
       <TabsList className="mx-6 w-fit">
@@ -43,29 +43,26 @@ export function PlaygroundScreen() {
         <TabsTrigger value="count">Count</TabsTrigger>
       </TabsList>
 
-      {/* Only once a run has produced a reading: a row of em dashes above an
-          empty chat is furniture, and it pushed the conversation down the
-          page before there was anything to measure. */}
-      {sends && hasReadings(metrics) && <MetricsStrip metrics={metrics} />}
+      {sends && <MetricsStrip metrics={metrics} />}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="min-w-0 flex-1">
-          <TabsContent value="chat">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
             <ChatTab config={config} onConfigChange={setConfig} onMetrics={setMetrics} />
           </TabsContent>
-          <TabsContent value="compare">
+          <TabsContent value="compare" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
             <Compare config={config} />
           </TabsContent>
-          <TabsContent value="auxiliary">
+          <TabsContent value="auxiliary" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
             <AuxPanels />
           </TabsContent>
-          <TabsContent value="count">
+          <TabsContent value="count" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
             <Count />
           </TabsContent>
         </div>
         {sends && <ConfigPane config={config} onChange={setConfig} />}
       </div>
       </Tabs>
-    </>
+    </div>
   )
 }
