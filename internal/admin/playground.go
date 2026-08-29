@@ -28,9 +28,17 @@ type playgroundBody struct {
 	Messages    []playgroundMessage `json:"messages,omitempty"`
 	Temperature *float64            `json:"temperature,omitempty"`
 	MaxTokens   *int                `json:"max_tokens,omitempty"`
-	Tools       []map[string]any    `json:"tools,omitempty"`
-	Stream      *bool               `json:"stream,omitempty"`
-	Dialect     string              `json:"dialect,omitempty"`
+
+	TopP            *float64        `json:"top_p,omitempty"`
+	TopK            *int            `json:"top_k,omitempty"`
+	Stop            []string        `json:"stop,omitempty"`
+	ResponseSchema  json.RawMessage `json:"response_schema,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	ReasoningBudget *int            `json:"reasoning_budget,omitempty"`
+
+	Tools   []map[string]any `json:"tools,omitempty"`
+	Stream  *bool            `json:"stream,omitempty"`
+	Dialect string           `json:"dialect,omitempty"`
 }
 
 // turns is the conversation the caller described, however they described it.
@@ -125,6 +133,27 @@ func openaiPlaygroundBody(b playgroundBody, stream bool) map[string]any {
 	if b.MaxTokens != nil {
 		out["max_tokens"] = *b.MaxTokens
 	}
+	if b.TopP != nil {
+		out["top_p"] = *b.TopP
+	}
+	if len(b.Stop) > 0 {
+		out["stop"] = b.Stop
+	}
+	if b.ReasoningEffort != "" {
+		out["reasoning_effort"] = b.ReasoningEffort
+	}
+	// The edge reads response_format only when the type is json_schema and a
+	// schema is present, so a bare {"type":"json_object"} would parse and then
+	// be dropped. The name is required by the wire and is not otherwise used.
+	if len(b.ResponseSchema) > 0 {
+		out["response_format"] = map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "response",
+				"schema": b.ResponseSchema,
+			},
+		}
+	}
 	if len(b.Tools) > 0 {
 		out["tools"] = b.Tools
 	}
@@ -151,6 +180,23 @@ func anthropicPlaygroundBody(b playgroundBody, stream bool) map[string]any {
 	}
 	if b.Temperature != nil {
 		out["temperature"] = *b.Temperature
+	}
+	if b.TopP != nil {
+		out["top_p"] = *b.TopP
+	}
+	if b.TopK != nil {
+		out["top_k"] = *b.TopK
+	}
+	if len(b.Stop) > 0 {
+		out["stop_sequences"] = b.Stop
+	}
+	// The type travels with the budget: the edge keeps it as transport state
+	// the Anthropic adapter needs to choose its outbound shape.
+	if b.ReasoningBudget != nil && *b.ReasoningBudget > 0 {
+		out["thinking"] = map[string]any{
+			"type":          "enabled",
+			"budget_tokens": *b.ReasoningBudget,
+		}
 	}
 	if len(b.Tools) > 0 {
 		out["tools"] = b.Tools
@@ -182,6 +228,23 @@ func geminiPlaygroundBody(b playgroundBody) map[string]any {
 	}
 	if b.MaxTokens != nil {
 		gen["maxOutputTokens"] = *b.MaxTokens
+	}
+	if b.TopP != nil {
+		gen["topP"] = *b.TopP
+	}
+	if b.TopK != nil {
+		gen["topK"] = *b.TopK
+	}
+	if len(b.Stop) > 0 {
+		gen["stopSequences"] = b.Stop
+	}
+	// The edge maps responseSchema alone; responseMimeType is declared on its
+	// wire struct but never read, so sending it would be noise.
+	if len(b.ResponseSchema) > 0 {
+		gen["responseSchema"] = b.ResponseSchema
+	}
+	if b.ReasoningBudget != nil && *b.ReasoningBudget > 0 {
+		gen["thinkingConfig"] = map[string]any{"thinkingBudget": *b.ReasoningBudget}
 	}
 	if len(gen) > 0 {
 		out["generationConfig"] = gen

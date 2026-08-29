@@ -463,3 +463,110 @@ func TestTheAuxEndpointRejectsAnUnknownSurface(t *testing.T) {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestPlaygroundSamplingPerDialect(t *testing.T) {
+	topP, topK, budget := 0.9, 40, 2048
+	body := playgroundBody{
+		Model: "m", Prompt: "hi",
+		TopP: &topP, TopK: &topK,
+		Stop:            []string{"END", "STOP"},
+		ResponseSchema:  json.RawMessage(`{"type":"object"}`),
+		ReasoningEffort: "high",
+		ReasoningBudget: &budget,
+	}
+
+	t.Run("openai takes top_p, stop, a json_schema and an effort", func(t *testing.T) {
+		got := openaiPlaygroundBody(body, false)
+		if got["top_p"] != 0.9 {
+			t.Errorf("top_p = %v, want 0.9", got["top_p"])
+		}
+		if _, ok := got["top_k"]; ok {
+			// The OpenAI chat wire has no such field; sending it would be a
+			// setting the operator believes took effect.
+			t.Error("top_k must not appear on the openai wire")
+		}
+		stop, _ := got["stop"].([]string)
+		if len(stop) != 2 || stop[0] != "END" {
+			t.Errorf("stop = %v, want [END STOP]", got["stop"])
+		}
+		if got["reasoning_effort"] != "high" {
+			t.Errorf("reasoning_effort = %v, want high", got["reasoning_effort"])
+		}
+		rf, ok := got["response_format"].(map[string]any)
+		if !ok || rf["type"] != "json_schema" {
+			t.Fatalf("response_format = %v, want a json_schema wrapper", got["response_format"])
+		}
+		// The edge honours response_format only when json_schema.schema is
+		// present, so the wrapper is not optional decoration.
+		js, ok := rf["json_schema"].(map[string]any)
+		if !ok || js["schema"] == nil {
+			t.Errorf("json_schema.schema missing: %v", rf)
+		}
+	})
+
+	t.Run("anthropic takes top_k and a thinking budget, not a schema", func(t *testing.T) {
+		got := anthropicPlaygroundBody(body, false)
+		if got["top_k"] != 40 {
+			t.Errorf("top_k = %v, want 40", got["top_k"])
+		}
+		seq, _ := got["stop_sequences"].([]string)
+		if len(seq) != 2 {
+			t.Errorf("stop_sequences = %v, want two", got["stop_sequences"])
+		}
+		if _, ok := got["response_format"]; ok {
+			t.Error("the anthropic edge never reads response_format")
+		}
+		th, ok := got["thinking"].(map[string]any)
+		if !ok || th["budget_tokens"] != 2048 {
+			t.Fatalf("thinking = %v, want budget_tokens 2048", got["thinking"])
+		}
+		if th["type"] != "enabled" {
+			t.Errorf("thinking.type = %v, want enabled", th["type"])
+		}
+		if _, ok := got["reasoning_effort"]; ok {
+			t.Error("anthropic spells reasoning as a budget, not an effort")
+		}
+	})
+
+	t.Run("gemini nests everything under generationConfig", func(t *testing.T) {
+		got := geminiPlaygroundBody(body)
+		gen, ok := got["generationConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("no generationConfig in %v", got)
+		}
+		if gen["topP"] != 0.9 || gen["topK"] != 40 {
+			t.Errorf("topP/topK = %v/%v, want 0.9/40", gen["topP"], gen["topK"])
+		}
+		seq, _ := gen["stopSequences"].([]string)
+		if len(seq) != 2 {
+			t.Errorf("stopSequences = %v, want two", gen["stopSequences"])
+		}
+		if gen["responseSchema"] == nil {
+			t.Error("responseSchema missing")
+		}
+		tc, ok := gen["thinkingConfig"].(map[string]any)
+		if !ok || tc["thinkingBudget"] != 2048 {
+			t.Errorf("thinkingConfig = %v, want thinkingBudget 2048", gen["thinkingConfig"])
+		}
+	})
+}
+
+func TestPlaygroundDropsUnsupported(t *testing.T) {
+	// Nothing set: no dialect may invent a field. A body that carries an empty
+	// stop array or a zero budget is a body that changed the request.
+	body := playgroundBody{Model: "m", Prompt: "hi"}
+	for name, got := range map[string]map[string]any{
+		"openai":    openaiPlaygroundBody(body, false),
+		"anthropic": anthropicPlaygroundBody(body, false),
+	} {
+		for _, k := range []string{"top_p", "top_k", "stop", "stop_sequences", "response_format", "thinking", "reasoning_effort"} {
+			if _, ok := got[k]; ok {
+				t.Errorf("%s: %s must be absent when unset", name, k)
+			}
+		}
+	}
+	gem := geminiPlaygroundBody(body)
+	if _, ok := gem["generationConfig"]; ok {
+		t.Error("gemini: generationConfig must be absent when nothing is set")
+	}
+}
