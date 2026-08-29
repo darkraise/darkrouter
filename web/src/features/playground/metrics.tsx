@@ -147,6 +147,13 @@ function TokenSplit({ tokensIn, tokensOut }: { tokensIn: number | null; tokensOu
   )
 }
 
+/** Whether the strip has anything to say yet. An instrument row of em dashes
+ *  above an empty chat is furniture; it appears when a run has produced a
+ *  reading and stays for the rest of the session. */
+export function hasReadings(m: StreamMetrics): boolean {
+  return m.ttftMs !== null || m.totalMs !== null || m.tokensIn !== null || m.tokensOut !== null
+}
+
 /** How long to keep asking for the trace of a request that just finished.
  *  The log writer batches on a 250 ms timer, so the row is reliably absent at
  *  the moment the stream ends and reliably present a beat later. */

@@ -6,7 +6,7 @@ import { Compare } from "./compare"
 import { AuxPanels, Count } from "./aux-panels"
 import { ConfigPane } from "./config-pane"
 import { emptyConfig, type PlaygroundConfig } from "./config"
-import { MetricsStrip, NO_METRICS, type StreamMetrics } from "./metrics"
+import { MetricsStrip, NO_METRICS, hasReadings, type StreamMetrics } from "./metrics"
 
 /**
  * The playground, as one instrument rather than four forms.
@@ -43,7 +43,10 @@ export function PlaygroundScreen() {
         <TabsTrigger value="count">Count</TabsTrigger>
       </TabsList>
 
-      {sends && <MetricsStrip metrics={metrics} />}
+      {/* Only once a run has produced a reading: a row of em dashes above an
+          empty chat is furniture, and it pushed the conversation down the
+          page before there was anything to measure. */}
+      {sends && hasReadings(metrics) && <MetricsStrip metrics={metrics} />}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
