@@ -406,10 +406,7 @@ Create `internal/admin/playgroundstore_test.go`:
 package admin
 
 import (
-	"bytes"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -417,24 +414,24 @@ func TestPlaygroundPresetBlobIsOpaque(t *testing.T) {
 	// A field the console learned before this binary did must survive a save.
 	// Decoding into a struct of today's fields and re-marshalling would drop
 	// it silently, which is the lossy preset the design forbids.
-	srv := newTestServer(t)
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
 
 	body := `{"name":"terse","dialect":"anthropic","model":"claude",
 	          "config":{"system":"be brief","fieldFromTheFuture":{"nested":true}}}`
-	rec := srv.do(t, http.MethodPost, "/api/playground/presets", body)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
+	if w := do(t, s, cookie, token, "POST", "/api/playground/presets", body); w.Code != 201 {
+		t.Fatalf("create = %d: %s", w.Code, w.Body.String())
 	}
 
-	rec = srv.do(t, http.MethodGet, "/api/playground/presets", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list = %d", rec.Code)
+	w := do(t, s, cookie, token, "GET", "/api/playground/presets", "")
+	if w.Code != 200 {
+		t.Fatalf("list = %d", w.Code)
 	}
 	var list []struct {
 		ID     string         `json:"id"`
 		Config map[string]any `json:"config"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
 	if len(list) != 1 {
@@ -447,26 +444,30 @@ func TestPlaygroundPresetBlobIsOpaque(t *testing.T) {
 }
 
 func TestPlaygroundPresetNameClashOffersTheExistingRow(t *testing.T) {
-	srv := newTestServer(t)
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
 	first := `{"name":"terse","dialect":"openai","model":"gpt","config":{}}`
-	rec := srv.do(t, http.MethodPost, "/api/playground/presets", first)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("first create = %d", rec.Code)
+
+	w := do(t, s, cookie, token, "POST", "/api/playground/presets", first)
+	if w.Code != 201 {
+		t.Fatalf("first create = %d", w.Code)
 	}
 	var made struct {
 		ID string `json:"id"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &made)
+	if err := json.Unmarshal(w.Body.Bytes(), &made); err != nil {
+		t.Fatal(err)
+	}
 
-	rec = srv.do(t, http.MethodPost, "/api/playground/presets", first)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("clash = %d, want 409", rec.Code)
+	w = do(t, s, cookie, token, "POST", "/api/playground/presets", first)
+	if w.Code != 409 {
+		t.Fatalf("clash = %d, want 409", w.Code)
 	}
 	var clash struct {
 		ID    string `json:"id"`
 		Error string `json:"error"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &clash); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &clash); err != nil {
 		t.Fatal(err)
 	}
 	if clash.ID != made.ID {
@@ -481,45 +482,30 @@ func TestPlaygroundPresetRejectsABlobThatIsNotAnObject(t *testing.T) {
 	// The blob is stored unparsed, so this is the only place its shape is
 	// checked. A bare array or string would reach the client as a config it
 	// cannot merge.
-	srv := newTestServer(t)
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
 	for _, cfg := range []string{`[1,2]`, `"text"`, `7`, `null`} {
 		body := `{"name":"n","dialect":"openai","model":"m","config":` + cfg + `}`
-		rec := srv.do(t, http.MethodPost, "/api/playground/presets", body)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("config %s = %d, want 400", cfg, rec.Code)
+		if w := do(t, s, cookie, token, "POST", "/api/playground/presets", body); w.Code != 400 {
+			t.Errorf("config %s = %d, want 400", cfg, w.Code)
 		}
 	}
 }
 
 func TestPlaygroundPresetUpdateAndDeleteAnswer404ForAnUnknownID(t *testing.T) {
-	srv := newTestServer(t)
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
 	body := `{"name":"n","dialect":"openai","model":"m","config":{}}`
-	if rec := srv.do(t, http.MethodPatch, "/api/playground/presets/nope", body); rec.Code != http.StatusNotFound {
-		t.Errorf("patch unknown = %d, want 404", rec.Code)
+	if w := do(t, s, cookie, token, "PATCH", "/api/playground/presets/nope", body); w.Code != 404 {
+		t.Errorf("patch unknown = %d, want 404", w.Code)
 	}
-	if rec := srv.do(t, http.MethodDelete, "/api/playground/presets/nope", ""); rec.Code != http.StatusNotFound {
-		t.Errorf("delete unknown = %d, want 404", rec.Code)
+	if w := do(t, s, cookie, token, "DELETE", "/api/playground/presets/nope", ""); w.Code != 404 {
+		t.Errorf("delete unknown = %d, want 404", w.Code)
 	}
-}
-
-// do issues an authenticated request against the test server.
-func (s *testServer) do(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	var r *http.Request
-	if body == "" {
-		r = httptest.NewRequest(method, path, nil)
-	} else {
-		r = httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
-		r.Header.Set("Content-Type", "application/json")
-	}
-	s.authenticate(r)
-	rec := httptest.NewRecorder()
-	s.srv.mux.ServeHTTP(rec, r)
-	return rec
 }
 ```
 
-**Before writing the implementation, adapt the harness.** `internal/admin` already has test servers with session and CSRF plumbing — read the existing `_test.go` files in that package and reuse whatever they use, rather than introducing `newTestServer` and `authenticate` if equivalents already exist under other names. If they do, rename the calls in the test above to match and drop the `do` helper's duplicate. Report which harness you used.
+The harness is already in `internal/admin/fixtures_test.go`: `testServerFull(t) (*Server, *store.DB)`, `login(t, s) (*http.Cookie, string)` and `do(t, s, cookie, token, method, path, body) *httptest.ResponseRecorder`, which sets the CSRF header and content type for every non-GET. Do not add a second harness.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -633,7 +619,8 @@ func (s *Server) handleCreatePlaygroundPreset(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, viewOfPreset(made))
+	// 201, matching every other create in this package.
+	writeJSON(w, http.StatusCreated, viewOfPreset(made))
 }
 
 func (s *Server) handleUpdatePlaygroundPreset(w http.ResponseWriter, r *http.Request) {
@@ -919,7 +906,7 @@ git commit -m "feat(web): read and write preset configs"
 
 **Implementer:** dcc-superpower-companions:impl-sonnet-high
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
-**Approach:** inline - skip 2: `web/src/features/routing/add-alias-dialog.tsx` is the established save-dialog pattern in this console
+**Approach:** inline - skip 2: `web/src/features/routing/add-alias-dialog.tsx` is the established save-dialog pattern in this console, and its Dialog usage is reproduced above
 
 - [ ] **Step 1: Write the failing test**
 
@@ -998,19 +985,189 @@ Expected: FAIL — cannot resolve `./preset-picker`.
 
 - [ ] **Step 3: Write the picker**
 
-Create `web/src/features/playground/config-pane/preset-picker.tsx`. It renders a
-`Select` of saved presets and a Save button; Save opens a `Dialog` carrying an
-`Input` labelled Name and a Save button of its own. Follow
-`web/src/features/routing/add-alias-dialog.tsx` for the dialog's structure and
-`web/src/features/playground/config-pane/sampling.tsx` for the field markup.
+Create `web/src/features/playground/config-pane/preset-picker.tsx`:
 
-Behaviour, all of it required:
+```tsx
+import { useState } from "react"
+import {
+  Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+  Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "darkraise-ui"
+import { Trash2 } from "lucide-react"
+import { api } from "../../../lib/api"
+import { useApiMutation } from "../../../lib/mutations"
+import { keys, usePlaygroundPresets } from "../../../lib/queries"
+import { mergeStoredConfig, toStoredConfig } from "../preset-config"
+import type { PlaygroundConfig } from "../config"
+import type { PlaygroundPreset } from "../../../lib/api-types"
 
-- Loading calls `onChange(mergeStoredConfig(preset.config, preset.model, preset.dialect))`.
-- Saving posts `{name, dialect: config.dialect, model: config.model, config: toStoredConfig(config)}` to `/api/playground/presets` through `useApiMutation`, invalidating `keys.playgroundPresets`.
-- A 409 response carries the clashing preset's `id`. Do not surface it as an error: show the dialog's overwrite branch — "A preset called X already exists. Overwrite it?" — and on confirmation `PATCH /api/playground/presets/{id}` with the same body.
-- Deleting a preset is a `DELETE /api/playground/presets/{id}` from a control beside each row in the Select, also invalidating `keys.playgroundPresets`.
-- `useApiMutation` already toasts success and failure; do not add a second reporting path.
+/** What a save sends. model and dialect are columns; the rest is the blob. */
+function bodyFor(name: string, config: PlaygroundConfig) {
+  return {
+    name,
+    dialect: config.dialect,
+    model: config.model,
+    config: toStoredConfig(config),
+  }
+}
+
+/**
+ * Saved request configurations, above the fields they fill in.
+ *
+ * Loading replaces the pane wholesale rather than merging into what is already
+ * typed: a half-loaded preset would produce a request neither the operator nor
+ * the preset asked for. A name that is already taken is not an error path —
+ * the server answers 409 with the clashing row's id precisely so this dialog
+ * can offer to overwrite it.
+ */
+export function PresetPicker({
+  config,
+  onChange,
+}: {
+  config: PlaygroundConfig
+  onChange: (next: PlaygroundConfig) => void
+}) {
+  const { data: presets } = usePlaygroundPresets()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+
+  const close = () => {
+    setOpen(false)
+    setName("")
+  }
+
+  // The clash is found in the list already on screen rather than by sending a
+  // save and reading the rejection: ApiError carries a status and a message
+  // and no body, so a 409's id could not be recovered from it anyway. The
+  // server's unique index stays the integrity backstop.
+  const clash = (presets ?? []).find((preset) => preset.name === name.trim())
+
+  const save = useApiMutation<PlaygroundPreset, { name: string }>({
+    mutationFn: (vars) => api.post<PlaygroundPreset>("/api/playground/presets", bodyFor(vars.name, config)),
+    success: (_data, vars) => `Saved ${vars.name}`,
+    invalidates: [keys.playgroundPresets],
+    onSuccess: () => close(),
+  })
+
+  const overwrite = useApiMutation<{ id: string }, { id: string; name: string }>({
+    mutationFn: (vars) =>
+      api.patch<{ id: string }>(`/api/playground/presets/${vars.id}`, bodyFor(vars.name, config)),
+    success: (_data, vars) => `Overwrote ${vars.name}`,
+    invalidates: [keys.playgroundPresets],
+    onSuccess: () => close(),
+  })
+
+  const remove = useApiMutation<void, { id: string; name: string }>({
+    mutationFn: (vars) => api.del<void>(`/api/playground/presets/${vars.id}`),
+    success: (_data, vars) => `Deleted ${vars.name}`,
+    invalidates: [keys.playgroundPresets],
+  })
+
+  function load(preset: PlaygroundPreset) {
+    onChange(mergeStoredConfig(preset.config, preset.model, preset.dialect))
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor="pg-preset">Preset</Label>
+      <div className="flex items-center gap-2">
+        <Select
+          value=""
+          onValueChange={(id) => {
+            const found = (presets ?? []).find((p) => p.id === id)
+            if (found) load(found)
+          }}
+        >
+          <SelectTrigger id="pg-preset" className="flex-1">
+            <SelectValue placeholder="Load a preset" />
+          </SelectTrigger>
+          <SelectContent>
+            {(presets ?? []).map((preset) => (
+              <SelectItem key={preset.id} value={preset.id}>
+                {preset.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="ghost" onClick={() => setOpen(true)}>
+          Save
+        </Button>
+      </div>
+
+      {(presets ?? []).length > 0 ? (
+        <ul className="flex flex-col">
+          {(presets ?? []).map((preset) => (
+            <li key={preset.id} className="flex items-center gap-2 text-sm">
+              <button
+                type="button"
+                className="flex-1 truncate text-left hover:underline"
+                onClick={() => load(preset)}
+              >
+                {preset.name}
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete ${preset.name}`}
+                className="shrink-0 p-1 text-[hsl(var(--legend))] hover:text-[hsl(var(--destructive))]"
+                onClick={() => remove.mutate({ id: preset.id, name: preset.name })}
+              >
+                <Trash2 className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save this request</DialogTitle>
+            <DialogDescription>
+              The model, the dialect and every setting in this pane, under a name you can
+              load them back with.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pg-preset-name">Name</Label>
+            <Input
+              id="pg-preset-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="terse"
+              autoFocus
+            />
+            {clash ? (
+              <p className="text-sm text-[hsl(var(--legend))]">
+                A preset called {clash.name} already exists. Overwrite it?
+              </p>
+            ) : null}
+          </div>
+
+          <div className="mt-2 flex items-center justify-end gap-2 border-t pt-3">
+            <Button variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+            {clash ? (
+              <Button onClick={() => overwrite.mutate({ id: clash.id, name: clash.name })}>
+                Overwrite
+              </Button>
+            ) : (
+              <Button
+                disabled={name.trim() === ""}
+                onClick={() => save.mutate({ name: name.trim() })}
+              >
+                Save
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+```
+
 
 - [ ] **Step 4: Mount it in the pane**
 
@@ -1114,13 +1271,221 @@ Expected: FAIL — `MAX_COLUMNS` is not exported.
 
 - [ ] **Step 3: Extract the column**
 
-Create `web/src/features/playground/compare-column.tsx`, moving `SidePanel`'s markup into it and adding the status dot. `Column` replaces the current `Side` type and gains `id: string` and `status: ColumnStatus`; the dot is drawn from `status` in the `--legend` colour, with an accessible name so a test can read it. Keep the existing latency reading and trace link exactly as they are.
+Create `web/src/features/playground/compare-column.tsx`:
+
+```tsx
+import { Link } from "@tanstack/react-router"
+import { Button, Card } from "darkraise-ui"
+import { X } from "lucide-react"
+import { ModelCombobox } from "../shell/model-combobox"
+
+/** Where one column is in its run. Idle is before the first Run, not an error. */
+export type ColumnStatus = "idle" | "streaming" | "done" | "error"
+
+export type Column = {
+  id: string
+  model: string
+  text: string
+  requestId: string
+  error: string
+  status: ColumnStatus
+  latencyMs: number | undefined
+}
+
+export function emptyColumn(id: string): Column {
+  return { id, model: "", text: "", requestId: "", error: "", status: "idle", latencyMs: undefined }
+}
+
+const DOT: Record<ColumnStatus, string> = {
+  idle: "bg-[hsl(var(--legend))]",
+  streaming: "bg-[hsl(var(--primary))] motion-safe:animate-pulse",
+  done: "bg-[hsl(var(--primary))]",
+  error: "bg-[hsl(var(--destructive))]",
+}
+
+/** Named rather than drawn only as a colour: a dot alone tells a screen
+ *  reader nothing, and colour alone tells a colourblind reader nothing. */
+function StatusDot({ status }: { status: ColumnStatus }) {
+  return <span role="status" aria-label={status} className={`size-2 shrink-0 rounded-full ${DOT[status]}`} />
+}
+
+export function CompareColumn({
+  column,
+  index,
+  onModel,
+  onRemove,
+  candidates,
+  loading,
+  removable,
+}: {
+  column: Column
+  index: number
+  onModel: (model: string) => void
+  onRemove: () => void
+  candidates: string[]
+  loading?: boolean
+  removable: boolean
+}) {
+  return (
+    <Card className="flex min-w-0 flex-col gap-3 p-4">
+      <div className="flex items-center gap-2">
+        <StatusDot status={column.status} />
+        <div className="min-w-0 flex-1">
+          <ModelCombobox
+            label={`Column ${index + 1} model or alias`}
+            value={column.model}
+            onChange={onModel}
+            candidates={candidates}
+            loading={loading}
+            className="w-full"
+          />
+        </div>
+        <Button
+          variant="ghost"
+          aria-label={`Remove column ${index + 1}`}
+          disabled={!removable}
+          onClick={onRemove}
+        >
+          <X className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
+        </Button>
+      </div>
+
+      <div className="min-h-24 rounded border p-3 font-mono text-sm whitespace-pre-wrap">
+        {column.text}
+      </div>
+      {column.error ? <p className="text-destructive text-sm">{column.error}</p> : null}
+      <div className="flex items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
+        {column.latencyMs !== undefined ? <span>{Math.round(column.latencyMs)} ms</span> : null}
+        {column.requestId ? (
+          <Link to="/requests/$id" params={{ id: column.requestId }} className="underline">
+            View the trace for this request
+          </Link>
+        ) : null}
+      </div>
+    </Card>
+  )
+}
+```
 
 - [ ] **Step 4: Make Compare a list**
 
-In `web/src/features/playground/compare.tsx`: replace the two `useState<Side>` with one `useState<Column[]>` seeded with two empty columns, add `export const MAX_COLUMNS = 4`, and render the array. Add and Remove sit above the grid; Add is disabled at `MAX_COLUMNS`, Remove is disabled on every column when only two remain. The grid's column count follows the array length.
+Replace `web/src/features/playground/compare.tsx` with:
 
-Two behaviours to carry over deliberately, both already in the file: `chatBody({ ...config, model, stream: true, messages: turns })` stays shared with only the model differing, and every column is started in the same tick so they run concurrently.
+```tsx
+import { useRef, useState } from "react"
+import { Button, Textarea } from "darkraise-ui"
+import { stream, type StreamStart } from "../../lib/api"
+import { chatBody } from "./lib/request"
+import { drainSSE } from "./lib/stream"
+import type { PlaygroundConfig } from "./config"
+import { CompareColumn, emptyColumn, type Column } from "./compare-column"
+import { useModelCandidates } from "../shell/model-combobox"
+import type { PlaygroundMessage } from "../../lib/api-types"
+
+/** Past four, no column is wide enough to read a wrapped answer in, and the
+ *  comparison the screen exists for stops being possible. */
+export const MAX_COLUMNS = 4
+
+/** Two is the comparison the screen is named for. */
+const MIN_COLUMNS = 2
+
+async function runColumn(
+  model: string,
+  prompt: string,
+  config: PlaygroundConfig,
+  update: (fn: (c: Column) => Column) => void,
+): Promise<void> {
+  const started = performance.now()
+  update((c) => ({ ...emptyColumn(c.id), model: c.model, status: "streaming" }))
+  let buffer = ""
+  try {
+    const turns: PlaygroundMessage[] = [{ role: "user", content: prompt }]
+    for await (const chunk of stream(
+      "/api/playground",
+      // The shared settings, with only the model differing between columns:
+      // comparing models under two system prompts would answer a question
+      // nobody asked.
+      chatBody({ ...config, model, stream: true, messages: turns }),
+      (s: StreamStart) => update((c) => ({ ...c, requestId: s.requestId })),
+    )) {
+      buffer += chunk
+      const { text, rest } = drainSSE(buffer, config.dialect)
+      buffer = rest
+      if (text) update((c) => ({ ...c, text: c.text + text }))
+    }
+    update((c) => ({ ...c, status: "done" }))
+  } catch (err) {
+    update((c) => ({ ...c, error: (err as Error).message, status: "error" }))
+  } finally {
+    update((c) => ({ ...c, latencyMs: performance.now() - started }))
+  }
+}
+
+/** Up to four models against the same prompt, run concurrently through the
+ *  exact request chat sends — chatBody is shared rather than rebuilt, so a
+ *  difference in the transcripts reflects the models, not a second, slightly
+ *  different request shape. */
+export function Compare({ config }: { config: PlaygroundConfig }) {
+  const counter = useRef(MIN_COLUMNS)
+  const [prompt, setPrompt] = useState("")
+  const [columns, setColumns] = useState<Column[]>(() => [emptyColumn("c0"), emptyColumn("c1")])
+
+  const { candidates, loading } = useModelCandidates()
+  const busy = columns.some((c) => c.status === "streaming")
+  const canRun = !busy && prompt !== "" && columns.every((c) => c.model !== "")
+
+  const updateColumn = (id: string, fn: (c: Column) => Column) =>
+    setColumns((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
+
+  function run() {
+    if (!canRun) return
+    // Started in one pass so they overlap: run sequentially and the latency
+    // readings beside them would measure the queue, not the providers.
+    for (const column of columns) {
+      void runColumn(column.model, prompt, config, (fn) => updateColumn(column.id, fn))
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+      <Textarea placeholder="Prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <div className="flex items-center gap-2">
+        <Button onClick={run} disabled={!canRun}>
+          {busy ? "Running…" : "Run"}
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={columns.length >= MAX_COLUMNS}
+          onClick={() => setColumns((cs) => [...cs, emptyColumn(`c${counter.current++}`)])}
+        >
+          Add a column
+        </Button>
+      </div>
+      <div
+        className="grid gap-4"
+        style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+      >
+        {columns.map((column, index) => (
+          <CompareColumn
+            key={column.id}
+            column={column}
+            index={index}
+            candidates={candidates}
+            loading={loading}
+            removable={columns.length > MIN_COLUMNS}
+            onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
+            onRemove={() => setColumns((cs) => cs.filter((c) => c.id !== column.id))}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+```
+
+The grid is an inline `gridTemplateColumns` rather than a Tailwind class because the
+count is data: `grid-cols-${n}` is not a class Tailwind can see at build time and
+would silently not exist. This is a geometry style, not a colour or a font size.
 
 - [ ] **Step 5: Run the gate**
 
