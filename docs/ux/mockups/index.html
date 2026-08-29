@@ -12246,8 +12246,9 @@ body.theme-light .preset-scrim,
 <section class="screen" id="s-11-playground" data-screen-title="use/playground">
   <p class="legend">
     The playground rebuilt around one request pane rather than four forms: a
-    Chat/Compare/Auxiliary/Count tab strip, a config pane holding Model,
-    Dialect and a Sampling/Reasoning/Structured&nbsp;output/System&nbsp;&amp;&nbsp;tools
+    Chat/Compare/Auxiliary/Count tab strip, a config pane that now remembers
+    past requests as named presets, holding Model, Dialect and a
+    Sampling/Reasoning/Structured&nbsp;output/System&nbsp;&amp;&nbsp;tools
     accordion, two of its controls disabled under the anthropic dialect with
     the real reason printed beneath each, and a served turn whose route line
     is followed by the warning the anthropic edge emits when temperature
@@ -12342,7 +12343,7 @@ body.theme-light .preset-scrim,
 
         <div class="region">
 
-          <p><b class="pin" data-pin="2-3">2-3</b><span class="pin-note">2-3 &middot; config-pane.tsx &mdash; Model, Dialect, then an accordion of Sampling, Reasoning, Structured output and System &amp; tools. Sampling, Reasoning and Structured output are pinned open here so their disabled controls are visible; System &amp; tools stays collapsed, its own default state.</span></p>
+          <p><b class="pin" data-pin="2-3">2-3</b><span class="pin-note">2-3 &middot; config-pane.tsx &mdash; a Preset picker, then Model, Dialect, then an accordion of Sampling, Reasoning, Structured output and System &amp; tools. Sampling, Reasoning and Structured output are pinned open here so their disabled controls are visible; System &amp; tools stays collapsed, its own default state.</span></p>
 
           <div class="pg-split">
 
@@ -12388,6 +12389,22 @@ def ulid_ms(ulid: str) -&gt; int:
 
             <aside class="panel pg-panel" style="display:flex;flex-direction:column;gap:var(--gutter)">
               <p class="section-title">Request</p>
+
+              <div class="pg-field">
+                <p class="legend-caps">Preset</p>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="combo" style="flex:1 1 auto;min-width:0">
+                    <button class="control combo-trigger">
+                      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--legend)">Load a preset</span>
+                      <span class="combo-chevron">&#9662;</span>
+                    </button>
+                  </div>
+                  <button class="control control-ghost" type="button" aria-label="Manage presets" title="Manage presets" style="flex:0 0 auto;width:var(--control-h);padding:0">
+                    <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg>
+                  </button>
+                  <button class="control control-ghost" type="button" style="flex:0 0 auto">Save</button>
+                </div>
+              </div>
 
               <div class="pg-field">
                 <p class="legend-caps">Model or alias</p>
@@ -12513,11 +12530,10 @@ def ulid_ms(ulid: str) -&gt; int:
 
 <section class="screen" id="s-12-playground-compare" data-screen-title="use/playground">
   <p class="legend">
-    Compare mode: one prompt, two panes, two independent calls. The left pane
-    has closed its stream and the right one is still open, so both states of
-    a run are on the same screen &mdash; and the comparison footer has to
-    report a partial reading without pretending it is a final one. Press
-    <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+    Compare mode: one prompt feeds every column, and Run starts them all in
+    the same pass. Three columns are shown here &mdash; one finished, one
+    still streaming &mdash; with Add a column offering a fourth before the
+    ceiling. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
   </p>
 
   <div class="chrome">
@@ -12564,249 +12580,88 @@ def ulid_ms(ulid: str) -&gt; int:
       </header>
       <main class="content">
 
-        <div class="segmented" style="margin-bottom:var(--section-pad)">
-          <span class="segmented-option">single</span>
-          <span class="segmented-option" data-active="true">compare</span>
+        <div class="segmented" aria-label="playground surface">
+          <span class="segmented-option">Chat</span>
+          <span class="segmented-option" data-active="true">Compare</span>
+          <span class="segmented-option">Auxiliary</span>
+          <span class="segmented-option">Count</span>
         </div>
 
-        <p class="section-title">Shared prompt</p>
-        <p><b class="pin" data-pin="1">1</b><b class="pin" data-pin="2">2</b><span class="pin-note">1-2 &middot; Two independent POST /api/playground calls with a shared prompt. Each pane carries its own model, params and stream.</span></p>
+        <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; compare.tsx &mdash; one prompt feeds every column; Run starts them all in the same pass so each column's own latency reading measures its provider, not a queue behind another column. A column is still streaming here, so the button reads Running&hellip; and Add a column is the only action left.</span></p>
 
-        <div class="panel pgc-prompt">
+        <textarea class="field-input" rows="3" style="height:auto;resize:none;width:100%;margin-top:var(--gutter)">Compare openai/gpt-oss-120b on together against claude-opus-4-20250514 on anthropic for a summarisation workload at about 1,800 input tokens each, and say which one you would put first in the ladder.</textarea>
 
-          <div class="pgc-field">
-            <div class="pgc-field-head">
-              <p class="legend-caps">system</p>
-              <span class="chip chip-path">shared &middot; sent to both panes</span>
-            </div>
-            <div class="well pgc-prompt-body pgc-prompt-body-sys">You are a release engineer. Answer in prose, no lists, under 120 words.</div>
-          </div>
-
-          <div class="pgc-field">
-            <div class="pgc-field-head">
-              <p class="legend-caps">user</p>
-              <span class="chip chip-path">shared &middot; sent to both panes</span>
-            </div>
-            <div class="well pgc-prompt-body pgc-prompt-body-user">Our gateway serves 2,000 summarisation requests a day at about 1,800 input tokens each. Compare openai/gpt-oss-120b on together against claude-opus-4-20250514 on anthropic for that workload, and say which one you would put first in the ladder.</div>
-          </div>
-
-          <div class="pgc-prompt-bar">
-            <div class="segmented">
-              <span class="segmented-option" data-active="true">llm</span>
-              <span class="segmented-option">embedding</span>
-              <span class="segmented-option">image</span>
-              <span class="segmented-option">stt</span>
-              <span class="segmented-option">tts</span>
-              <span class="segmented-option">rerank</span>
-              <span class="segmented-option">moderation</span>
-            </div>
-            <span class="chip chip-path">dialect: openai</span>
-            <span class="micro">1,842 input tokens &middot; llm surface only</span>
-            <span class="pgc-prompt-bar-spacer"></span>
-            <button class="control control-ghost">Stop right pane</button>
-            <button class="control control-primary">Run both</button>
-          </div>
-
+        <div style="display:flex;align-items:center;gap:8px;margin-top:var(--section-pad)">
+          <button class="control control-primary" type="button" disabled>Running&hellip;</button>
+          <button class="control control-ghost" type="button">Add a column</button>
         </div>
 
-        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; Sync toggle &mdash; locked means one variable (the model), unlocked means the operator accepts two.</span></p>
-        <div class="panel pgc-sync">
-          <span class="switch" data-on="true">
-            <span class="switch-track"><span class="switch-knob"></span></span>
-            <span class="switch-label">parameters locked</span>
-          </span>
-          <span class="chip chip-path">⇄ temperature, top_p, max_tokens, stream</span>
-          <p class="prose pgc-sync-note">
-            Locked, the two panes differ in exactly one thing &mdash; the model
-            &mdash; so the footer below reads as a measurement of that model.
-            Unlock it and the run has two variables; the numbers still land,
-            but they stop answering the question they look like they answer.
-          </p>
-        </div>
+        <p style="margin-top:var(--gutter)"><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; compare-column.tsx &mdash; a status dot (idle/streaming/done/error), the column's own model combobox, a monospace answer well, and a closing row with the latency reading and the trace link. Two columns is the floor and four the ceiling; a third is shown here with Add a column still enabled for the fourth.</span></p>
 
-        <p class="section-title" style="margin-top:var(--gutter)">Two panes</p>
-        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; Comparison &mdash; ttft_ms, total_ms, tokens_in/out, cost_micros per pane. Winner marks use --trace: a reading, not a health state.</span></p>
-        <p><b class="pin" data-pin="5">5</b><span class="pin-note">5 &middot; Each pane's X-Darkrouter-Request links to its own trace.</span></p>
+        <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:var(--gutter);margin-top:var(--gutter)">
 
-        <svg class="pgc-fanout" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="the shared prompt feeds both panes">
-          <path d="M500 0V9M246 9H754M246 9V24M754 9V24"/>
-        </svg>
-
-        <div class="pgc-grid">
-
-          <div class="panel pgc-pane">
-
-            <div class="combo pgc-picker">
-              <button class="control combo-trigger">
-                <span class="pgc-picker-id">
-                  <span class="state-pip" data-state="healthy"></span>
-                  <span>together / openai-gpt-oss-120b</span>
-                </span>
-                <span class="combo-chevron">▾</span>
+          <div class="panel pg-panel" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span role="status" aria-label="done" style="display:inline-block;flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--accent)"></span>
+              <div class="combo" style="flex:1 1 auto;min-width:0">
+                <button class="control combo-trigger">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">together/openai-gpt-oss-120b</span>
+                  <span class="combo-chevron">▾</span>
+                </button>
+              </div>
+              <button class="control control-ghost" type="button" aria-label="Remove column 1" style="flex:0 0 auto;width:var(--control-h);padding:0">
+                <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5"/></svg>
               </button>
             </div>
-
-            <div class="pgc-params">
-              <span class="control pgc-param"><span class="pgc-param-key">temperature</span><span class="pgc-param-val">0.20</span></span>
-              <span class="control pgc-param"><span class="pgc-param-key">top_p</span><span class="pgc-param-val">1.00</span></span>
-              <span class="control pgc-param"><span class="pgc-param-key">max_tokens</span><span class="pgc-param-val">400</span></span>
-              <span class="control pgc-param"><span class="pgc-param-key">stream</span><span class="pgc-param-val">on</span></span>
-              <span class="pgc-linked">⇄ linked</span>
-            </div>
-
-            <div class="pgc-out-head">
-              <p class="legend-caps">output</p>
-              <span class="chip pgc-state" data-stream="done">complete &middot; 214 tok</span>
-            </div>
-            <div class="well pgc-out">
+            <div class="well pgc-out" style="height:120px">
               <p>For 2,000 summarisations a day at 1,800 input tokens, put openai/gpt-oss-120b on together first. It answers in about a fifth of the time and costs roughly a hundredth as much per request, and summarisation is the surface where the gap in output quality between the two is narrowest.</p>
-              <p>Keep claude-opus-4-20250514 on anthropic as the next candidate so a Together timeout or a 429 falls through to something better rather than to a second cheap model.</p>
             </div>
-
-            <div class="pgc-stats">
-
-              <div class="well readout-tile">
-                <div class="pgc-tile-head"><p class="spec-note">ttft_ms</p></div>
-                <span><span class="readout">640</span><span class="unit">ms</span></span>
-              </div>
-
-              <div class="well readout-tile">
-                <div class="pgc-tile-head"><p class="spec-note">total_ms</p></div>
-                <span><span class="readout">1,284</span><span class="unit">ms</span></span>
-                <p class="spec-note">final &mdash; stream closed</p>
-              </div>
-
-              <div class="well readout-tile">
-                <div class="pgc-tile-head"><p class="spec-note">tokens_in / tokens_out</p></div>
-                <span class="readout">1,842/214</span>
-              </div>
-
-              <div class="well readout-tile pgc-tile-win">
-                <div class="pgc-tile-head">
-                  <p class="spec-note">cost_micros</p>
-                  <span class="pgc-win">cheaper</span>
-                </div>
-                <span class="readout">$0.0004</span>
-                <p class="spec-note">final &mdash; 404 micros</p>
-              </div>
-
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="color:var(--legend)">1,284 ms</span>
+              <a href="#" class="link">View the trace for this request</a>
             </div>
-
-            <div class="pgc-tracelink">
-              <span class="micro">X-Darkrouter-Request</span>
-              <span class="mono pgc-tracelink-id">01M0W4YFDW4E7RP2N9SD3HQBFA</span>
-              <a class="control link-out" href="#">Open trace &rarr;</a>
-            </div>
-
           </div>
 
-          <div class="panel pgc-pane">
-
-            <div class="combo pgc-picker">
-              <button class="control combo-trigger">
-                <span class="pgc-picker-id">
-                  <span class="state-pip" data-state="healthy"></span>
-                  <span>anthropic / claude-opus-4-20250514</span>
-                </span>
-                <span class="combo-chevron">▾</span>
+          <div class="panel pg-panel" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span role="status" aria-label="streaming" style="display:inline-block;flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--accent)"></span>
+              <div class="combo" style="flex:1 1 auto;min-width:0">
+                <button class="control combo-trigger">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">anthropic/claude-opus-4-20250514</span>
+                  <span class="combo-chevron">▾</span>
+                </button>
+              </div>
+              <button class="control control-ghost" type="button" aria-label="Remove column 2" style="flex:0 0 auto;width:var(--control-h);padding:0">
+                <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5"/></svg>
               </button>
             </div>
-
-            <div class="pgc-params">
-              <span class="control pgc-param"><span class="pgc-param-key">temperature</span><span class="pgc-param-val">0.20</span></span>
-              <span class="control pgc-param"><span class="pgc-param-key">top_p</span><span class="pgc-param-val">1.00</span></span>
-              <span class="control pgc-param"><span class="pgc-param-key">max_tokens</span><span class="pgc-param-val">400</span></span>
-              <span class="control pgc-param"><span class="pgc-param-key">stream</span><span class="pgc-param-val">on</span></span>
-              <span class="pgc-linked">⇄ linked</span>
+            <div class="well pgc-out" style="height:120px">
+              <p>Opus will write you a better summary, but not a hundred times better. At 1,800 input tokens the two differ by about four and a half cents a request, which is ninety dollars a day at the volume you describe. I would keep claude-opus-4-20250514 for the summaries a person actually reads and route the nightly batch to<span class="pgc-caret"></span></p>
             </div>
-
-            <div class="pgc-out-head">
-              <p class="legend-caps">output</p>
-              <span class="chip pgc-state" data-stream="live">streaming &middot; <span class="value-swap"><span class="v-a">268</span><span class="v-b">284</span></span> tok</span>
+            <div style="display:flex;align-items:center;gap:12px">
+              <a href="#" class="link">View the trace for this request</a>
             </div>
-            <div class="well pgc-out">
-              <p>Opus will write you a better summary, but not a hundred times better. At 1,800 input tokens the two differ by about four and a half cents a request, which is ninety dollars a day at the volume you describe.</p>
-              <p>I would keep claude-opus-4-20250514 for the summaries a person actually reads and route the nightly batch to<span class="pgc-caret"></span></p>
-            </div>
-
-            <div class="pgc-stats">
-
-              <div class="well readout-tile pgc-tile-win">
-                <div class="pgc-tile-head">
-                  <p class="spec-note">ttft_ms</p>
-                  <span class="pgc-win">faster</span>
-                </div>
-                <span><span class="readout">486</span><span class="unit">ms</span></span>
-              </div>
-
-              <div class="well readout-tile">
-                <div class="pgc-tile-head"><p class="spec-note">total_ms</p></div>
-                <span class="readout">&mdash;</span>
-                <p class="spec-note">streaming &middot; 4,120ms elapsed</p>
-              </div>
-
-              <div class="well readout-tile">
-                <div class="pgc-tile-head"><p class="spec-note">tokens_in / tokens_out</p></div>
-                <span class="readout">1,842/268</span>
-              </div>
-
-              <div class="well readout-tile">
-                <div class="pgc-tile-head"><p class="spec-note">cost_micros</p></div>
-                <span class="readout">$0.0477</span>
-                <p class="spec-note">so far &mdash; still rising</p>
-              </div>
-
-            </div>
-
-            <div class="pgc-tracelink">
-              <span class="micro">X-Darkrouter-Request</span>
-              <span class="mono pgc-tracelink-id">01M0W4YFDX6T2W5CBN8HDQR3XF</span>
-              <a class="control link-out" href="#">Open trace &rarr;</a>
-            </div>
-
           </div>
 
-        </div>
-
-        <p class="prose pgc-foot-note">
-          Two marks, two different readings, both in <b class="mono">--trace</b>:
-          the right pane reached its first token sooner, the left pane cost
-          less. Neither is a health verdict, so neither takes green. The
-          <b class="mono">total_ms</b> mark is withheld until both runs finish
-          &mdash; the right pane has no total yet. The cost mark holds anyway,
-          because a stream that is still running can only push that figure
-          further up. Both request ids exist already: the header goes out with
-          the first byte, so the right pane's trace opens now with its ladder
-          closed and its totals still to land.
-        </p>
-
-        <p class="section-title" style="margin-top:var(--gutter)">Unlocked &mdash; a deliberate two-variable run</p>
-        <div class="panel pgc-diverge">
-
-          <div class="pgc-diverge-row">
-            <span class="micro pgc-diverge-side">left &middot; together/openai-gpt-oss-120b</span>
-            <span class="control pgc-param"><span class="pgc-param-key">temperature</span><span class="pgc-param-val">0.20</span></span>
-            <span class="control pgc-param"><span class="pgc-param-key">top_p</span><span class="pgc-param-val">1.00</span></span>
-            <span class="control pgc-param"><span class="pgc-param-key">max_tokens</span><span class="pgc-param-val">400</span></span>
+          <div class="panel pg-panel" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span role="status" aria-label="error" style="display:inline-block;flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--state-failed)"></span>
+              <div class="combo" style="flex:1 1 auto;min-width:0">
+                <button class="control combo-trigger">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">groq/llama-3.1-70b-versatile</span>
+                  <span class="combo-chevron">▾</span>
+                </button>
+              </div>
+              <button class="control control-ghost" type="button" aria-label="Remove column 3" style="flex:0 0 auto;width:var(--control-h);padding:0">
+                <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5"/></svg>
+              </button>
+            </div>
+            <div class="well pgc-out" style="height:120px"></div>
+            <p style="color:var(--state-failed);margin:0">model_not_found: llama-3.1-70b-versatile is not served on groq</p>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="color:var(--legend)">312 ms</span>
+            </div>
           </div>
-
-          <div class="pgc-diverge-row">
-            <span class="micro pgc-diverge-side">right &middot; anthropic/claude-opus-4-20250514</span>
-            <span class="control pgc-param pgc-param-diff"><span class="pgc-neq">&ne;</span><span class="pgc-param-key">temperature</span><span class="pgc-param-val">0.90</span></span>
-            <span class="control pgc-param"><span class="pgc-param-key">top_p</span><span class="pgc-param-val">1.00</span></span>
-            <span class="control pgc-param pgc-param-diff"><span class="pgc-neq">&ne;</span><span class="pgc-param-key">max_tokens</span><span class="pgc-param-val">1200</span></span>
-          </div>
-
-          <p class="prose">
-            The switch is off, so the panes no longer mirror. Two parameters
-            have diverged and the comparison now carries three variables, not
-            one. The footer keeps reporting &mdash; the numbers are still true
-            &mdash; but a slower, dearer right pane no longer tells the
-            operator anything about claude-opus-4-20250514 on its own. The
-            divergence is marked in bezel and legend, not in a state colour
-            and not in trace: it is a fact about this bench, not an outcome
-            and not a router decision.
-          </p>
 
         </div>
 
