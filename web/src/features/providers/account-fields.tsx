@@ -5,7 +5,10 @@ export type AccountDraft = {
   label: string
   secret: string
   bulk: string
-  /** Narrows what the first discovery sweep imports for this provider. */
+  /** Narrows what the next discovery sweep imports for this provider. A
+   *  provider setting rather than a property of the keys being added: against
+   *  a provider that already exists the dialog seeds it from what that
+   *  provider holds and writes it back when it changes. */
   freeModelsOnly: boolean
   /** Probe each key as it is added and keep only the ones that answer. */
   verifyKeys: boolean
@@ -21,6 +24,46 @@ export const emptyAccounts: AccountDraft = {
 }
 
 export type ParsedAccount = { label: string; secret: string }
+
+/** What the secret field asks for. Most providers hand out a key; a local CLI
+ *  hands out a session document, and asking for an "API key" would send the
+ *  operator looking for something their vendor does not issue. */
+export type SecretField = {
+  label: string
+  placeholder: string
+  /** A session document is JSON several lines long; a key is one short line. */
+  multiline: boolean
+  help?: string
+}
+
+const API_KEY_FIELD: SecretField = {
+  label: "API key",
+  placeholder: "sk-…",
+  multiline: false,
+}
+
+/**
+ * The secret field for one preset.
+ *
+ * Keyed on the preset rather than on the auth style, because the style says
+ * how the credential is transmitted and this says what the operator has to go
+ * and find — two different questions that happen to coincide for most of the
+ * catalogue.
+ */
+export function secretFieldFor(presetID?: string): SecretField {
+  if (presetID === "auggie") {
+    return {
+      label: "Augment session",
+      placeholder: '{"accessToken":"…","tenantURL":"…"}',
+      multiline: true,
+      help:
+        "Run `auggie login` on a machine with a browser, then paste the contents of " +
+        "~/.augment/session.json. Leave this empty if you ran `auggie login` inside " +
+        "the container instead — the CLI keeps its own session and needs nothing here.",
+    }
+  }
+  return API_KEY_FIELD
+}
 
 /**
  * One account per non-empty line, in `name|key` form.
@@ -78,10 +121,13 @@ export function AccountFields({
   value,
   onChange,
   autoFocus,
+  field = API_KEY_FIELD,
 }: {
   value: AccountDraft
   onChange: (next: AccountDraft) => void
   autoFocus?: boolean
+  /** What this provider's secret is called and looks like. */
+  field?: SecretField
 }) {
   const parsed = parseBulkAccounts(value.bulk, value.label.trim() || "key")
   return (
@@ -113,17 +159,35 @@ export function AccountFields({
               className="w-40"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="account-secret">API key</Label>
-            <Input
-              id="account-secret"
-              type="password"
-              autoFocus={autoFocus}
-              value={value.secret}
-              onChange={(e) => onChange({ ...value, secret: e.target.value })}
-              placeholder="sk-…"
-              className="w-72"
-            />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Label htmlFor="account-secret">{field.label}</Label>
+            {field.multiline ? (
+              // A session document does not fit a one-line password box, and
+              // pasting one into an input that hides what arrived is how a
+              // truncated paste goes unnoticed until the first request fails.
+              <Textarea
+                id="account-secret"
+                rows={4}
+                autoFocus={autoFocus}
+                value={value.secret}
+                onChange={(e) => onChange({ ...value, secret: e.target.value })}
+                placeholder={field.placeholder}
+                className="font-mono text-sm"
+              />
+            ) : (
+              <Input
+                id="account-secret"
+                type="password"
+                autoFocus={autoFocus}
+                value={value.secret}
+                onChange={(e) => onChange({ ...value, secret: e.target.value })}
+                placeholder={field.placeholder}
+                className="w-72"
+              />
+            )}
+            {field.help && (
+              <p className="max-w-prose text-sm text-[hsl(var(--legend))]">{field.help}</p>
+            )}
           </div>
         </div>
       ) : (
@@ -183,9 +247,10 @@ export function AccountFields({
           <div className="flex flex-col">
             <Label htmlFor="account-free-only">Import free models only</Label>
             <span className="text-sm text-[hsl(var(--legend))]">
-              A discovery sweep keeps only models priced at zero or tagged{" "}
-              <span className="font-mono">:free</span>. A model nobody has priced is
-              not imported — unpriced is not free.
+              A discovery sweep keeps a model the provider's own free tier documents,
+              one priced at zero, or one tagged <span className="font-mono">:free</span>.
+              A model nobody has priced and no free tier covers is not imported —
+              unpriced is not free.
             </span>
           </div>
         </div>

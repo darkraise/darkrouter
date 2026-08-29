@@ -50,20 +50,50 @@ describe("flowProviders", () => {
     expect(got[0]?.candidate).toBe(true)
   })
 
-  it("takes disabled and unconfigured out of the path", () => {
+  it("takes a disabled provider out of the path but keeps its row", () => {
+    // Switched off is a configuration an operator chose and needs to see.
+    const got = flowProviders(overview([tile({ id: "off", state: "disabled" })]), [])
+    expect(got.map((p) => p.id)).toEqual(["off"])
+    expect(got[0]?.candidate).toBe(false)
+  })
+
+  it("drops a provider whose last account was removed", () => {
+    // A provider keeps its database row after its credentials are deleted.
+    // Drawing that row would put a provider nobody has set up in the routing
+    // flow beside the ones actually carrying traffic.
     const got = flowProviders(
-      overview([
-        tile({ id: "off", state: "disabled" }),
-        tile({ id: "blank", state: "unconfigured" }),
-      ]),
-      [],
+      overview([tile({ id: "a" }), tile({ id: "groq", state: "unconfigured", credentials: 0 })]),
+      [usage("a", 5)],
     )
-    expect(got.map((p) => p.candidate)).toEqual([false, false])
+    expect(got.map((p) => p.id)).toEqual(["a"])
+  })
+
+  it("keeps an emptied provider that still has traffic in the window", () => {
+    // The window is history: erasing the row would erase the requests it
+    // served and any return arc drawn to or from it.
+    const got = flowProviders(
+      overview([tile({ id: "groq", state: "unconfigured", credentials: 0 })]),
+      [usage("groq", 7)],
+    )
+    expect(got).toHaveLength(1)
+    expect(got[0]).toMatchObject({ id: "groq", requests: 7, candidate: false })
   })
 
   it("numbers providers in the order the router walks them", () => {
     const got = flowProviders(
       overview([tile({ id: "first" }), tile({ id: "second" })]),
+      [],
+    )
+    expect(got.map((p) => p.priority)).toEqual([1, 2])
+  })
+
+  it("numbers the rows it draws, without gaps for the ones it dropped", () => {
+    const got = flowProviders(
+      overview([
+        tile({ id: "first" }),
+        tile({ id: "gone", state: "unconfigured", credentials: 0 }),
+        tile({ id: "second" }),
+      ]),
       [],
     )
     expect(got.map((p) => p.priority)).toEqual([1, 2])

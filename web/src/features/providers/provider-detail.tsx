@@ -1,36 +1,38 @@
 import { useState } from "react"
 import { Link, useParams } from "@tanstack/react-router"
+import { Plus, Settings2 } from "lucide-react"
 import {
   Badge,
   Button,
   Card,
   Checkbox,
-  Input,
-  Label,
   Table,
   TableBody,
   TableHead,
   TableHeader,
   TableRow,
 } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { POLL, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import {
   keys,
   useDiscoveryHealth,
   useModels,
+  usePresets,
   useProviderHealth,
   useProviders,
   useUsage,
 } from "../../lib/queries"
-import type { Provider } from "../../lib/api-types"
-import { AccountFields, type AccountDraft, emptyAccounts } from "./account-fields"
-import { addAccountsLabel, addCredentials, countAccounts, reportAdded } from "./accounts"
+import type { Preset, Provider } from "../../lib/api-types"
+import { ConfirmButton } from "../shell/confirm-button"
+import { EmptyState, GhostRows } from "../shell/empty-state"
+import { AddAccountsDialog } from "./add-accounts-dialog"
 import { CredentialRow } from "./credential-row"
 import { DiscoveryPanel } from "./discovery-panel"
 import { ProbePanel } from "./probe-panel"
 import { ProviderIcon } from "./provider-icon"
 import { ProviderModels } from "./provider-models"
+import { ProviderSettingsDialog } from "./provider-settings-dialog"
 import { CapabilityBars, Sparkline, Stat } from "./provider-summary"
 import {
   accountSummary,
@@ -41,26 +43,7 @@ import {
   requestsByDay,
   totalRequests,
 } from "./provider-stats"
-import { STATE_VARIANT, breakersFor, providerState } from "./provider-state"
-
-/**
- * Only the touched half of the region/project patch.
- *
- * Both are pointer fields on the backend (`store.ProviderPatch.Region` /
- * `.Project`): a key present with value "" means "set this to empty", not
- * "leave alone". `GET /api/providers` never returns either field, so the
- * inputs here start with nothing to prefill — null distinguishes "never
- * touched" from "touched and cleared", which "" alone cannot.
- */
-export function locationPatch(
-  region: string | null,
-  project: string | null,
-): Record<string, string> {
-  const patch: Record<string, string> = {}
-  if (region !== null) patch.region = region
-  if (project !== null) patch.project = project
-  return patch
-}
+import { STATE_VARIANT, breakersFor, isKeyless, providerState } from "./provider-state"
 
 /** The line under the name. Kind and priority only: everything else about
  *  this provider is a reading in the strip below, and repeating it here would
@@ -80,60 +63,223 @@ function Fact({ term, children }: { term: string; children: React.ReactNode }) {
   )
 }
 
+/**
+ * A provider the release supports and nobody has configured.
+ *
+ * The same page, minus everything that reads a database row: there are no
+ * accounts to list, nothing to probe, no priority to set, and no discovery to
+ * report, because none of those exist until the provider has a key. What the
+ * release does know — where it connects and how it authenticates — is here,
+ * because deciding whether to add a key is what an operator came to this page
+ * to do.
+ */
+function UnconfiguredProvider({ preset }: { preset: Preset }) {
+  const [addOpen, setAddOpen] = useState(false)
+  const [freeOnly, setFreeOnly] = useState(false)
+  const keyless = isKeyless({ auth_style: preset.auth_kind })
+  // A base URL that names no host is a program on this box rather than an
+  // endpoint, and what it needs from the operator is a different question
+  // from "which credential": the program signs itself in.
+  const localProgram = !/^https?:\/\//i.test(preset.base_url ?? "")
+
+  // A keyless provider needs no secret, so the accounts dialog would be a form
+  // with no fields — but the import filter is not a property of a key, and
+  // skipping the dialog was skipping the one question that still applied. The
+  // first sweep starts within seconds of this POST, so choosing afterwards is
+  // choosing too late.
+  const add = useApiMutation({
+    mutationFn: () =>
+      api.post("/api/providers", {
+        id: preset.id,
+        preset: preset.id,
+        free_models_only: freeOnly,
+      }),
+    success: `${preset.name} added`,
+    invalidates: [keys.providers, keys.health, keys.overview, keys.models],
+  })
+
+  return (
+    <>
+      <Link to="/providers" className="text-sm text-[hsl(var(--legend))] hover:underline">
+        ← Providers
+      </Link>
+
+      <header className="mt-3 mb-6 flex flex-wrap items-center gap-4 border-b pb-5">
+        <ProviderIcon preset={preset.id} id={preset.id} name={preset.name} size={44} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h1 className="truncate text-2xl font-semibold tracking-tight">{preset.name}</h1>
+            <Badge variant={STATE_VARIANT.unconfigured}>unconfigured</Badge>
+            {preset.free_tier && <Badge variant="secondary">Free tier</Badge>}
+          </div>
+          <p className="mt-0.5 font-mono text-sm text-[hsl(var(--legend))]">
+            {preset.id} · {preset.kind}
+          </p>
+        </div>
+        {keyless ? (
+          <Button size="sm" disabled={add.isPending} onClick={() => add.mutate(undefined)}>
+            <Plus className="size-[var(--icon-size)]" />
+            Add provider
+          </Button>
+        ) : (
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="size-[var(--icon-size)]" />
+            Add accounts
+          </Button>
+        )}
+      </header>
+
+      <AddAccountsDialog preset={preset} open={addOpen} onOpenChange={setAddOpen} />
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+        <div className="flex min-w-0 flex-col gap-6">
+          <EmptyState
+            title={`${preset.name} ships with this release, unconfigured`}
+            hint={
+              localProgram
+                ? "It runs a program on this machine, and that program holds its own login. " +
+                  "Adding the provider is the whole of the setup if the program is already " +
+                  "signed in; otherwise add an account and paste its session, which the " +
+                  "next screen explains."
+                : keyless
+                ? preset.auth_kind === "optional"
+                  ? "It answers without a credential, so adding it is the whole of the setup. An account can be added later — this provider serves more generously when it knows who is calling."
+                  : preset.auth_kind === "anonymous"
+                    ? "It needs a credential and publishes one, which this release ships, so adding it is the whole of the setup. An account of your own can be added later — a registered key buys a shorter queue."
+                    : "It asks for no credential, so adding it is the whole of the setup. The router can choose it as soon as it exists, and discovery lists its models on the next sweep."
+                  : "The router cannot choose it until it has a key to send with. The first account creates the provider and starts discovery."
+            }
+            action={
+              keyless ? (
+                <div className="flex flex-col items-center gap-3">
+                  {/* Offered here because this is the last moment it is a
+                      choice: the first sweep starts within seconds of the
+                      provider existing, and a filter set afterwards only takes
+                      effect on the next one. */}
+                  <label className="flex items-start gap-2 text-left">
+                    <Checkbox
+                      id="keyless-free-only"
+                      checked={freeOnly}
+                      onCheckedChange={(next) => setFreeOnly(next === true)}
+                    />
+                    <span className="flex flex-col">
+                      <span className="text-sm font-medium">Import free models only</span>
+                      <span className="max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
+                        A sweep keeps a model this provider's free tier documents, one
+                        priced at zero, or one tagged <span className="font-mono">:free</span>.
+                        Changeable afterwards in settings.
+                      </span>
+                    </span>
+                  </label>
+                  <Button size="sm" disabled={add.isPending} onClick={() => add.mutate(undefined)}>
+                    Add {preset.name}
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" onClick={() => setAddOpen(true)}>
+                  Add the first account
+                </Button>
+              )
+            }
+            preview={<GhostRows rows={3} />}
+          />
+
+          <section>
+            <h2 className="mb-2 text-sm font-medium">Models</h2>
+            {/* Not "no models": nothing has asked this provider what it serves.
+                A catalogue is the result of a discovery sweep, and a sweep
+                needs a credential. */}
+            <EmptyState
+              title="Nothing has asked this provider what it serves"
+              hint="Discovery lists a provider's models with one of its own keys, so the catalogue fills in once an account exists."
+            />
+          </section>
+        </div>
+
+        <aside className="flex min-w-0 flex-col gap-4">
+          <Card className="p-4">
+            <h2 className="mb-3 text-sm font-medium">Connection</h2>
+            <dl className="text-sm">
+              <Fact term="Base URL">{preset.base_url}</Fact>
+              <Fact term="Preset">{preset.id}</Fact>
+              <Fact term="Auth style">{preset.auth_kind}</Fact>
+              <Fact term="Kind">{preset.kind}</Fact>
+              <Fact term="Surfaces">{preset.surfaces.join(", ") || "—"}</Fact>
+            </dl>
+            {preset.website && (
+              <a
+                href={preset.website}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-sm text-[hsl(var(--legend))] hover:underline"
+              >
+                {preset.website}
+              </a>
+            )}
+          </Card>
+        </aside>
+      </div>
+    </>
+  )
+}
+
+/** How often to look while a sweep is expected. Three seconds is faster than
+ *  a sweep can plausibly finish and slow enough that a page left open on a
+ *  broken provider is not a poll every render. */
+const SWEEP_POLL_MS = 3000
+
+/** Whether this provider is waiting on a sweep: it has a key to sweep with,
+ *  which is the one thing discovery cannot proceed without. */
+export function awaitingModels(providers: Provider[], id: string): boolean {
+  const p = providers.find((x) => x.id === id)
+  if (p === undefined || !p.enabled) return false
+  // Sweepable, not credentialled. A keyless provider is swept with no key at
+  // all, so asking for one here left every local runtime and every free
+  // gateway on the slow poll — the models landed and the page sat there.
+  return p.credentials.length > 0 || isKeyless(p)
+}
+
 export function ProviderDetail() {
   const { id } = useParams({ from: "/providers/$id" })
   const providers = useProviders()
+  const presets = usePresets()
   const health = useProviderHealth()
   const discovery = useDiscoveryHealth()
-  const catalog = useModels()
+  // Polled faster while a sweep is expected, and only then.
+  //
+  // Adding the first account makes the provider discoverable and triggers a
+  // sweep, but that sweep is asynchronous: a single refetch when the dialog
+  // closes lands before the models are written, and the ordinary
+  // thirty-second poll leaves an operator watching an empty panel long after
+  // they exist. The condition is read off the response itself, so the fast
+  // poll stops the moment the first model arrives rather than running for as
+  // long as the page is open.
+  const catalog = useModels({
+    refetchInterval: (query) => {
+      const served = (query.state.data?.models ?? []).some((m) => m.providers.includes(id))
+      return awaitingModels(providers.data?.providers ?? [], id) && !served
+        ? SWEEP_POLL_MS
+        : POLL.slow
+    },
+  })
   const usage = useUsage("provider")
   const provider = providers.data?.providers.find((p) => p.id === id)
 
-  const [draftPriority, setDraftPriority] = useState<string | null>(null)
-  const [draftRegion, setDraftRegion] = useState<string | null>(null)
-  const [draftProject, setDraftProject] = useState<string | null>(null)
-  const [accounts, setAccounts] = useState<AccountDraft>(emptyAccounts)
   const [addOpen, setAddOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const saveFreeOnly = useApiMutation({
-    mutationFn: (next: boolean) =>
-      api.patch(`/api/providers/${id}`, { free_models_only: next }),
-    success: "Import filter updated",
-    invalidates: [keys.providers],
-  })
-  const savePriority = useApiMutation({
-    mutationFn: () =>
-      api.patch(`/api/providers/${id}`, {
-        priority: Number(draftPriority ?? provider?.priority) || 0,
-      }),
-    success: "Priority updated",
-    invalidates: [keys.providers, keys.overview],
-    onSuccess: () => setDraftPriority(null),
-  })
   const toggle = useApiMutation({
     mutationFn: (enabled: boolean) => api.patch(`/api/providers/${id}`, { enabled }),
     success: "Provider updated",
     invalidates: [keys.providers, keys.overview],
   })
-  const saveLocation = useApiMutation({
-    mutationFn: (vars: Record<string, string>) => api.patch(`/api/providers/${id}`, vars),
-    success: "Provider updated",
-    invalidates: [keys.providers],
-    onSuccess: () => {
-      setDraftRegion(null)
-      setDraftProject(null)
-    },
-  })
-  const addAccounts = useApiMutation({
-    mutationFn: (draft: AccountDraft) => addCredentials(id, draft),
-    invalidates: [keys.providers, keys.health],
-    onSuccess: (result) => {
-      reportAdded(result)
-      setAccounts(emptyAccounts)
-      setAddOpen(false)
-    },
-  })
+  // No row is not the same as no such provider: the list holds every provider
+  // the release supports, and clicking one that nobody has configured has to
+  // land somewhere that explains it rather than on a deletion notice.
+  const preset = presets.data?.presets.find((p) => p.id === id)
   if (providers.isSuccess && !provider) {
+    if (preset) return <UnconfiguredProvider preset={preset} />
+    if (!presets.isSuccess) return null
     return (
       <>
         <Link to="/providers" className="text-sm text-[hsl(var(--legend))] hover:underline">
@@ -142,7 +288,7 @@ export function ProviderDetail() {
         <Card className="mt-4 p-6">
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             No provider named <span className="font-mono">{id}</span>. It may have been
-            deleted.
+            deleted, and this release ships no preset by that name.
           </p>
         </Card>
       </>
@@ -159,8 +305,6 @@ export function ProviderDetail() {
   const requests = totalRequests(usage.data?.days ?? [], provider.id)
   const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === provider.id)
   const discovered = discoveryFraction(discoveryRow)
-  const dirtySettings = draftPriority !== null
-  const dirtyLocation = draftRegion !== null || draftProject !== null
 
   return (
     <>
@@ -181,16 +325,41 @@ export function ProviderDetail() {
             {provider.id} · {headline(provider)}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant={provider.enabled ? "ghost" : "default"}
-          onClick={() => toggle.mutate(!provider.enabled)}
-        >
-          {/* Disabling is a routing decision, not a deletion: the provider and
-              its accounts stay, and the router stops choosing it. */}
-          {provider.enabled ? "Disable" : "Enable"}
+        <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
+          <Settings2 className="size-[var(--icon-size)]" />
+          Settings
         </Button>
+        {/* Disabling is a routing decision, not a deletion: the provider and
+            its accounts stay, and the router stops choosing it. Enabling one
+            asks nothing — only the half that takes capacity away does. */}
+        {provider.enabled ? (
+          <ConfirmButton
+            size="sm"
+            variant="ghost"
+            title={`Disable ${provider.name}?`}
+            description={
+              provider.credentials.length > 0
+                ? `The router stops choosing it, and requests that would have gone to its ${provider.credentials.length} ${provider.credentials.length === 1 ? "account" : "accounts"} fail over to whatever else can serve them. Nothing is deleted.`
+                : "The router stops choosing it. Nothing is deleted."
+            }
+            confirmLabel="Disable"
+            onConfirm={() => toggle.mutate(false)}
+          >
+            Disable
+          </ConfirmButton>
+        ) : (
+          <Button size="sm" variant="default" onClick={() => toggle.mutate(true)}>
+            Enable
+          </Button>
+        )}
       </header>
+
+      <ProviderSettingsDialog
+        provider={provider}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+      />
+      <AddAccountsDialog provider={provider} open={addOpen} onOpenChange={setAddOpen} />
 
       {/* Four readings, in the order an operator asks them: is it carrying
           traffic, can it be sent to, what can it serve, and does the catalogue
@@ -240,72 +409,55 @@ export function ProviderDetail() {
           <section>
             <div className="mb-2 flex items-center justify-between gap-2">
               <h2 className="text-sm font-medium">Accounts</h2>
-              {!addOpen && (
-                <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
-                  Add accounts
-                </Button>
-              )}
+              <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
+                <Plus className="size-[var(--icon-size)]" />
+                Add accounts
+              </Button>
             </div>
 
-            {provider.credentials.length === 0 && !addOpen ? (
+            {provider.credentials.length === 0 ? (
               // An empty screen is an invitation to act: the one thing to do
               // here is the one thing that makes the provider routable.
-              <Card className="flex flex-col items-start gap-2 p-6">
-                <p className="text-sm font-medium">No accounts yet</p>
-                <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                  The router cannot choose {provider.name} until it has a key to send
-                  with.
-                </p>
-                <Button size="sm" className="mt-1" onClick={() => setAddOpen(true)}>
-                  Add the first account
-                </Button>
-              </Card>
+              <EmptyState
+                title={
+                  isKeyless(provider)
+                    ? "This provider needs no account"
+                    : "This provider has no accounts"
+                }
+                hint={
+                  !/^https?:\/\//i.test(provider.base_url ?? "")
+                    ? `${provider.name} runs a program on this machine, and that program holds its own login, so the router can choose it as it is. Add an account only to hand it a session of your own instead of the one it keeps on disk.`
+                    : provider.auth_style === "anonymous"
+                      ? `${provider.name} is reached with the key it publishes, which this release ships, so the router can choose it as it is. An account of your own can still be added — a registered key buys a shorter queue.`
+                      : isKeyless(provider)
+                        ? `${provider.name} is reached with no credential, so the router can choose it as it is. An account can still be added if your endpoint sits behind one.`
+                        : `The router cannot choose ${provider.name} until it has a key to send with. Its settings and priority are kept either way.`
+                }
+                action={
+                  <Button size="sm" variant={isKeyless(provider) ? "secondary" : "default"} onClick={() => setAddOpen(true)}>
+                    {isKeyless(provider) ? "Add an account anyway" : "Add the first account"}
+                  </Button>
+                }
+              />
             ) : (
               // Scrolls rather than clips: the actions are three words wide and
               // this column is the narrow half of a two-column page on a laptop.
-              provider.credentials.length > 0 && (
-                <Card className="overflow-x-auto p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Label</TableHead>
-                        <TableHead>Secret</TableHead>
-                        <TableHead>State</TableHead>
-                        <TableHead />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {provider.credentials.map((c) => (
-                        <CredentialRow key={c.id} providerId={provider.id} credential={c} />
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Card>
-              )
-            )}
-
-            {addOpen && (
-              <Card className="mt-3 p-4">
-                <AccountFields value={accounts} onChange={setAccounts} autoFocus />
-                <div className="mt-3 flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    disabled={countAccounts(accounts) === 0 || addAccounts.isPending}
-                    onClick={() => addAccounts.mutate(accounts)}
-                  >
-                    {addAccountsLabel(countAccounts(accounts))}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setAccounts(emptyAccounts)
-                      setAddOpen(false)
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
+              <Card className="overflow-x-auto p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Label</TableHead>
+                      <TableHead>Secret</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {provider.credentials.map((c) => (
+                      <CredentialRow key={c.id} providerId={provider.id} credential={c} />
+                    ))}
+                  </TableBody>
+                </Table>
               </Card>
             )}
           </section>
@@ -313,92 +465,6 @@ export function ProviderDetail() {
           <section>
             <h2 className="mb-2 text-sm font-medium">Models</h2>
             <ProviderModels models={models} loading={catalog.isPending} />
-          </section>
-
-          <section>
-            <h2 className="mb-2 text-sm font-medium">Routing</h2>
-            <Card className="flex flex-col gap-4 p-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="provider-priority">Priority</Label>
-                  <Input
-                    id="provider-priority"
-                    value={draftPriority ?? String(provider.priority)}
-                    onChange={(e) => setDraftPriority(e.target.value)}
-                    className="w-24"
-                    inputMode="numeric"
-                  />
-                </div>
-                <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
-                  The order the router walks providers in. Its name and its
-                  connection come from the release.
-                </p>
-                {/* Only once something has changed: a Save that is always
-                    live invites a click that writes what is already there. */}
-                {dirtySettings && (
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" onClick={() => savePriority.mutate(undefined)}>
-                      Save
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setDraftPriority(null)}>
-                      Discard
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* The wizard asks this before the first sweep; this is where an
-                  operator changes their mind. It takes effect on the next
-                  sweep -- models already imported stay until then. */}
-              <div className="flex items-start gap-2 border-t pt-4">
-                <Checkbox
-                  id="provider-free-only"
-                  checked={provider.free_models_only}
-                  onCheckedChange={(next) => saveFreeOnly.mutate(next === true)}
-                />
-                <div className="flex flex-col">
-                  <Label htmlFor="provider-free-only">Import free models only</Label>
-                  <span className="text-sm text-[hsl(var(--legend))]">
-                    The next discovery sweep keeps only models priced at zero or
-                    tagged <span className="font-mono">:free</span>.
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-end gap-3 border-t pt-4">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="provider-region">Region</Label>
-                  {/* Blank rather than prefilled: GET /api/providers does not
-                      return either field, so there is no current value to
-                      show. */}
-                  <Input
-                    id="provider-region"
-                    value={draftRegion ?? ""}
-                    onChange={(e) => setDraftRegion(e.target.value)}
-                    placeholder="unset"
-                    className="w-40"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="provider-project">Project</Label>
-                  <Input
-                    id="provider-project"
-                    value={draftProject ?? ""}
-                    onChange={(e) => setDraftProject(e.target.value)}
-                    placeholder="unset"
-                    className="w-40"
-                  />
-                </div>
-                {dirtyLocation && (
-                  <Button
-                    size="sm"
-                    onClick={() => saveLocation.mutate(locationPatch(draftRegion, draftProject))}
-                  >
-                    Save
-                  </Button>
-                )}
-              </div>
-            </Card>
           </section>
 
           <section>

@@ -1,31 +1,68 @@
+import { useState } from "react"
+import { PageHeader } from "darkraise-ui/layout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "darkraise-ui/components/tabs"
 import { Chat } from "./chat"
 import { Compare } from "./compare"
 import { AuxPanels, Count } from "./aux-panels"
+import { ConfigPane } from "./config-pane"
+import { emptyConfig, type PlaygroundConfig } from "./config"
+import { MetricsStrip, NO_METRICS, type StreamMetrics } from "./metrics"
 
-// A thin composition root: each surface is a self-contained feature, so this
-// file only wires the four together and holds none of their state.
+/**
+ * The playground, as one instrument rather than four forms.
+ *
+ * The request settings and the last run's readings live here, above the tabs,
+ * because they belong to the request rather than to whichever surface sent it:
+ * a system prompt typed on Chat used to be invisible to Compare and lost on a
+ * tab switch, and the timing that matters most for a streaming surface — how
+ * long until the first token — was not shown at all.
+ *
+ * Auxiliary and Count keep their own controls. They send embeddings, images
+ * and token counts, which take different inputs from a chat turn, and pointing
+ * a chat model picker at them would be a control that lies.
+ */
 export function PlaygroundScreen() {
+  const [config, setConfig] = useState<PlaygroundConfig>(emptyConfig)
+  const [metrics, setMetrics] = useState<StreamMetrics>(NO_METRICS)
+  const [tab, setTab] = useState("chat")
+  const sends = tab === "chat" || tab === "compare"
+
   return (
-    <Tabs defaultValue="chat">
-      <TabsList className="mx-6 mt-4">
+    <>
+      <PageHeader
+        title="Playground"
+        description="Send a real request, and see what it cost"
+      />
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
+      {/* Sized to its tabs: stretched across the page it reads as an empty
+          band with four words adrift in it. */}
+      <TabsList className="mx-6 w-fit">
         <TabsTrigger value="chat">Chat</TabsTrigger>
         <TabsTrigger value="compare">Compare</TabsTrigger>
         <TabsTrigger value="auxiliary">Auxiliary</TabsTrigger>
         <TabsTrigger value="count">Count</TabsTrigger>
       </TabsList>
-      <TabsContent value="chat">
-        <Chat />
-      </TabsContent>
-      <TabsContent value="compare">
-        <Compare />
-      </TabsContent>
-      <TabsContent value="auxiliary">
-        <AuxPanels />
-      </TabsContent>
-      <TabsContent value="count">
-        <Count />
-      </TabsContent>
-    </Tabs>
+
+      {sends && <MetricsStrip metrics={metrics} />}
+
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="min-w-0 flex-1">
+          <TabsContent value="chat">
+            <Chat config={config} onConfigChange={setConfig} onMetrics={setMetrics} />
+          </TabsContent>
+          <TabsContent value="compare">
+            <Compare config={config} />
+          </TabsContent>
+          <TabsContent value="auxiliary">
+            <AuxPanels />
+          </TabsContent>
+          <TabsContent value="count">
+            <Count />
+          </TabsContent>
+        </div>
+        {sends && <ConfigPane config={config} onChange={setConfig} />}
+      </div>
+      </Tabs>
+    </>
   )
 }

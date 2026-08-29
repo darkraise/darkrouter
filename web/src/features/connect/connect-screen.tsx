@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
   Badge,
@@ -18,10 +19,11 @@ import {
   toast,
 } from "darkraise-ui"
 import { api } from "../../lib/api"
+import { ConfirmButton } from "../shell/confirm-button"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useConfig, useModels, useProxyTokens } from "../../lib/queries"
 import type { Model, ProxyToken } from "../../lib/api-types"
-import { EmptyLegend } from "../shell/empty-legend"
+import { EmptyState } from "../shell/empty-state"
 import { baseUrlFor, snippetFor, TOOLS, type Tool } from "./snippets"
 
 const DIALECTS = ["anthropic", "openai", "gemini"] as const
@@ -216,9 +218,14 @@ export function ConnectScreen() {
             ))}
           </div>
         ) : (
-          <EmptyLegend
-            what="No surfaces are live yet."
-            hint="The catalog fills in after the first discovery sweep."
+          <EmptyState
+            title="A surface goes live when a model that serves it is found"
+            hint="Chat, embeddings and the rest appear as discovery works out what your providers can do."
+            action={
+              <Button asChild size="sm" variant="secondary">
+                <Link to="/providers">Add a provider account</Link>
+              </Button>
+            }
           />
         )}
       </Card>
@@ -278,9 +285,18 @@ export function ConnectScreen() {
                 )}
               </TableCell>
               <TableCell>
-                <Button size="sm" variant="ghost" onClick={() => revoke.mutate(t.id)}>
+                <ConfirmButton
+                  size="sm"
+                  variant="ghost"
+                  className="text-[hsl(var(--destructive))]"
+                  title={`Revoke ${t.name}?`}
+                  description="Every client still holding this token starts being refused, and the token cannot be reissued — the store keeps a digest, not the secret."
+                  confirmLabel="Revoke"
+                  destructive
+                  onConfirm={() => revoke.mutate(t.id)}
+                >
                   Revoke
-                </Button>
+                </ConfirmButton>
               </TableCell>
             </TableRow>
           ))}
@@ -288,10 +304,14 @@ export function ConnectScreen() {
       </Table>
 
       {(tokens.data ?? []).length === 0 && (
-        <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
-          No client tokens yet. The shared <code>server.proxy_token</code> still
-          works if one is configured.
-        </p>
+        <div className="mt-4">
+          {/* No action: the control that creates one is directly above, and a
+              second button for it would be the same offer twice. */}
+          <EmptyState
+            title="A client token names who is calling"
+            hint="Give each client its own, and a token you revoke stops that client alone. The shared server.proxy_token keeps working if one is configured."
+          />
+        </div>
       )}
     </>
   )

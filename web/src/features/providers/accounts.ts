@@ -6,6 +6,25 @@ import type { ProbeResult } from "../../lib/api-types"
 export type AddFailure = { label: string; error: string }
 export type AddResult = { added: number; failed: AddFailure[]; rejected: AddFailure[] }
 
+/** Where a run has got to. `done` counts accounts finished, so it is the
+ *  index of the one named — the bar and the sentence never disagree. */
+export type AddProgress = {
+  done: number
+  total: number
+  label: string
+  step: "adding" | "checking"
+}
+
+/** What the progress line reads while a run is in flight. Probing a key takes
+ *  a round trip to the provider per account, so a paste of twenty is a wait
+ *  long enough that silence reads as a hang. */
+export function progressLabel(p: AddProgress): string {
+  const position = `${Math.min(p.done + 1, p.total)} of ${p.total}`
+  return p.step === "checking"
+    ? `Checking ${p.label} · ${position}`
+    : `Adding ${p.label} · ${position}`
+}
+
 /** How many accounts the draft would create. */
 export function countAccounts(draft: AccountDraft): number {
   return draftAccounts(draft).length
@@ -34,12 +53,17 @@ export function addAccountsLabel(n: number): string {
 export async function addCredentials(
   providerId: string,
   draft: AccountDraft,
+  onProgress?: (p: AddProgress) => void,
 ): Promise<AddResult> {
   const failed: AddFailure[] = []
   const rejected: AddFailure[] = []
   let added = 0
 
-  for (const item of draftAccounts(draft)) {
+  const items = draftAccounts(draft)
+  for (const [done, item] of items.entries()) {
+    const report = (step: AddProgress["step"]) =>
+      onProgress?.({ done, total: items.length, label: item.label, step })
+    report("adding")
     let created: { id: string }
     try {
       created = await api.post<{ id: string }>(`/api/providers/${providerId}/keys`, item)
@@ -53,6 +77,7 @@ export async function addCredentials(
       continue
     }
 
+    report("checking")
     try {
       const probe = await api.post<ProbeResult>(
         `/api/providers/${providerId}/test?key=${encodeURIComponent(created.id)}`,

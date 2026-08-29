@@ -1,0 +1,90 @@
+/* The chain graph.
+ *
+ * A preview is a linear sequence, not a fan-out: the router tries candidate 1,
+ * and only reaches candidate 2 because 1 refused. So the nodes are drawn as a
+ * left-to-right run with the edge between them meaning "and if that fails",
+ * rather than as the overview's alias/router/provider columns.
+ *
+ * Shares the flow graph's conventions -- nodes are ordinary HTML on an
+ * @xyflow/react canvas, tokens prefixed and resolved once -- because two
+ * graphs in one console that disagree about their own chrome read as two
+ * products.
+ */
+.cg-wrap {
+  --cg-border: hsl(var(--border));
+  --cg-surface: hsl(var(--card));
+  --cg-legend: hsl(var(--legend));
+  --cg-ink-muted: hsl(var(--muted-foreground));
+  --cg-radius: calc(var(--radius) - 2px);
+  --cg-shadow: 0 1px 2px hsl(var(--foreground) / 0.06);
+  --cg-trace: hsl(var(--info));
+  --cg-accent: hsl(var(--primary));
+
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  overflow: hidden;
+}
+
+.cg-node {
+  box-sizing: border-box;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius);
+  background: var(--cg-surface);
+  box-shadow: var(--cg-shadow);
+}
+
+/* The request, not a candidate. The one node that is the subject rather than
+   a participant, so it is the one allowed the accent border. */
+.cg-node[data-kind="origin"] {
+  border-color: var(--cg-accent);
+}
+
+/* Hollow, like the predictive ladder's marks: nothing has been sent. The
+   dashed border is the whole claim -- these are candidates the router would
+   walk, not attempts it made. */
+.cg-node[data-kind="candidate"] {
+  border-style: dashed;
+}
+
+.cg-node[data-kind="skip"] {
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.cg-title {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cg-note {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  color: var(--cg-legend);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cg-rank {
+  color: var(--cg-ink-muted);
+}
+
+.cg-wrap .react-flow__edge-path {
+  stroke: var(--cg-trace);
+}
+
+.cg-wrap .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}

@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { MessageSquare, Plus, Radio, RefreshCw, RotateCcw } from "lucide-react"
+import { useSearchFilters } from "../../lib/search-filters"
 import { useNavigate } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
@@ -19,30 +21,52 @@ import {
 } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
+import { ConfirmButton } from "../shell/confirm-button"
 import {
   keys,
   useDiscoveryHealth,
   usePresets,
   useProviderHealth,
   useProviders,
+  useUsage,
 } from "../../lib/queries"
+import type { BreakerEntry, Preset } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
+import { NoMatch } from "../shell/empty-state"
+import { TestDrawer } from "./test-drawer"
+import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
+import { ProviderStateMark } from "../shell/status-mark"
 import { AddAccountsDialog } from "./add-accounts-dialog"
 import { ProviderCard } from "./provider-card"
 import { ProviderIcon } from "./provider-icon"
 import {
   filterProviderRows,
   filterSummary,
+  CONNECTION_LABEL,
+  connectionCounts,
   mergeProviderRows,
+  type ConnectionType,
   type ProviderRow,
 } from "./provider-rows"
-import { STATE_VARIANT, breakersFor, discoveryLine } from "./provider-state"
+import { breakersFor, discoveryLine } from "./provider-state"
 
 export { breakersFor, discoveryLine, providerState } from "./provider-state"
 
 export type ProviderView = "list" | "grid"
 
+/** The filters this screen keeps in the URL. */
+const PROVIDER_FIELDS = ["q", "state", "connection", "configured", "free_tier"] as const
+
 const VIEW_KEY = "providers-view"
+
+/** Most of the catalogue first, then the handfuls. The order is stable so a
+ *  chip does not move when a provider is added. */
+const CONNECTION_ORDER: ConnectionType[] = ["key", "local", "none", "oauth", "signed"]
+
+const CHIP_BASE =
+  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
+const CHIP_ON = `${CHIP_BASE} border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]`
+const CHIP_OFF = `${CHIP_BASE} hover:bg-[hsl(var(--muted))]`
 const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
 
 /** Which layout an operator last chose.
@@ -54,32 +78,62 @@ export function readView(store: Pick<Storage, "getItem">): ProviderView {
   return store.getItem(VIEW_KEY) === "grid" ? "grid" : "list"
 }
 
+/** A row's accounts by what the router can do with them right now. The list
+ *  has the credentials for a configured provider and nothing for one that has
+ *  never been set up, which is why this reads the row rather than a Provider. */
+function accountMix(row: ProviderRow, cooling: BreakerEntry[]): AccountMix {
+  const creds = row.provider?.credentials ?? []
+  const coolingIds = new Set(cooling.map((c) => c.key_id))
+  const disabled = creds.filter((c) => !c.enabled).length
+  const cool = creds.filter((c) => c.enabled && (c.cooling || coolingIds.has(c.id))).length
+  return { usable: creds.length - disabled - cool, cooling: cool, disabled }
+}
+
 export function ProvidersScreen() {
   const providers = useProviders()
   const presets = usePresets()
+  const byProvider = useUsage("provider")
   const health = useProviderHealth()
   const discovery = useDiscoveryHealth()
   const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
+  // Which provider the dialog opens on. Null is the picker, which is what the
+  // header button means; a row's own button has already named one.
+  const [addPreset, setAddPreset] = useState<Preset | null>(null)
+  // Which provider the test drawer is aimed at. Null closes it, so the drawer
+  // is mounted once rather than per row.
+  const [testing, setTesting] = useState<ProviderRow | null>(null)
   const [view, setView] = useState<ProviderView>(() => readView(localStorage))
-  const [q, setQ] = useState("")
-  const [state, setState] = useState("")
-  const [configuredOnly, setConfiguredOnly] = useState(false)
-  const [freeTier, setFreeTier] = useState(false)
+  // In the URL like every other filtered screen, so a narrowed list survives a
+  // reload and can be sent to someone. The two switches travel as "1" or the
+  // empty string: the hook's values are strings, and an absent key is the same
+  // as an unticked box.
+  const [filters, setFilter, clearFilters] = useSearchFilters(PROVIDER_FIELDS)
+  const q = filters.q
+  const state = filters.state
+  const connection = filters.connection
+  const configuredOnly = filters.configured === "1"
+  const freeTier = filters.free_tier === "1"
 
+  // Every row goes to the same place. Clicking a provider means "show me this
+  // provider", and a click that opened a dialog for some rows and navigated
+  // for others made the destination depend on database state the operator
+  // cannot see. The detail page renders an unconfigured provider from its
+  // preset and offers the accounts dialog there.
   function open(row: ProviderRow) {
-    // The row, not the accounts: a provider emptied of keys still has a
-    // detail page carrying its priority and import settings.
-    if (!row.provider) {
-      // Nothing to show yet: the detail page reads a database row, and one
-      // does not exist until the provider has an account. Sending an operator
-      // to an empty page would be a dead end with the useful action one click
-      // away.
-      setAddOpen(true)
-      return
-    }
     void navigate({ to: "/providers/$id", params: { id: row.id } })
   }
+
+  // Requests served per provider over the window, and their sum. The share a
+  // provider carries is the fact the list cannot otherwise show: two healthy
+  // providers look identical until one of them turns out to be serving
+  // everything.
+  const share = new Map<string, number>()
+  for (const day of byProvider.data?.days ?? []) {
+    if (!day.key) continue
+    share.set(day.key, (share.get(day.key) ?? 0) + day.requests)
+  }
+  const servedTotal = [...share.values()].reduce((n, v) => n + v, 0)
 
   const reset = useApiMutation({
     mutationFn: (id: string) => api.post(`/api/providers/${id}/breaker/reset`, {}),
@@ -98,7 +152,13 @@ export function ProvidersScreen() {
   })
 
   const all = mergeProviderRows(presets.data?.presets ?? [], providers.data?.providers ?? [])
-  const rows = filterProviderRows(all, { q, state, configuredOnly, freeTier })
+  const rows = filterProviderRows(all, { q, state, connection, configuredOnly, freeTier })
+  // Counted over everything the other filters leave, not over the whole
+  // catalogue: a chip reading 40 beside a list of 6 would be counting rows
+  // the screen is not showing.
+  const counts = connectionCounts(
+    filterProviderRows(all, { q, state, configuredOnly, freeTier }),
+  )
 
   return (
     <>
@@ -127,14 +187,28 @@ export function ProvidersScreen() {
                 Grid
               </ToggleGroupItem>
             </ToggleGroup>
-            <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => {
+                setAddPreset(null)
+                setAddOpen(true)
+              }}
+            >
+              <Plus className="size-[var(--icon-size)]" />
               Add accounts
             </Button>
           </div>
         }
       />
 
+      <TestDrawer
+        row={testing}
+        open={testing !== null}
+        onOpenChange={(next) => !next && setTesting(null)}
+      />
+
       <AddAccountsDialog
+        preset={addPreset ?? undefined}
         open={addOpen}
         onOpenChange={setAddOpen}
         onDone={(id) => void navigate({ to: "/providers/$id", params: { id } })}
@@ -146,21 +220,30 @@ export function ProvidersScreen() {
         <Input
           placeholder="Search providers"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => setFilter("q", e.target.value)}
           className="w-56"
           aria-label="Search providers"
         />
-        <FilterSelect label="State" value={state} options={STATES} onChange={setState} />
+        <FilterSelect
+          label="State"
+          value={state}
+          options={STATES}
+          onChange={(next) => setFilter("state", next)}
+        />
         <div className="flex items-center gap-2">
           <Switch
             id="providers-configured"
             checked={configuredOnly}
-            onCheckedChange={setConfiguredOnly}
+            onCheckedChange={(next) => setFilter("configured", next ? "1" : "")}
           />
           <Label htmlFor="providers-configured">Configured only</Label>
         </div>
         <div className="flex items-center gap-2">
-          <Switch id="providers-free-tier" checked={freeTier} onCheckedChange={setFreeTier} />
+          <Switch
+            id="providers-free-tier"
+            checked={freeTier}
+            onCheckedChange={(next) => setFilter("free_tier", next ? "1" : "")}
+          />
           <Label htmlFor="providers-free-tier">Free tier</Label>
         </div>
         <span className="ml-auto text-sm text-[hsl(var(--legend))]">
@@ -168,12 +251,42 @@ export function ProvidersScreen() {
         </span>
       </Card>
 
+      {/* One chip per way of connecting, with its count. A quick filter beats
+          another dropdown here: "the ones I run myself" is a question an
+          operator asks by pointing, and a count that reads zero answers it
+          before the click. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setFilter("connection", "")}
+          aria-pressed={connection === ""}
+          className={connection === "" ? CHIP_ON : CHIP_OFF}
+        >
+          All
+          <span className="tabular-nums text-[hsl(var(--legend))]">{all.length}</span>
+        </button>
+        {CONNECTION_ORDER.map((type) => {
+          const n = counts[type]
+          return (
+            <button
+              key={type}
+              type="button"
+              disabled={n === 0}
+              onClick={() => setFilter("connection", connection === type ? "" : type)}
+              aria-pressed={connection === type}
+              className={connection === type ? CHIP_ON : CHIP_OFF}
+            >
+              {CONNECTION_LABEL[type]}
+              <span className="tabular-nums text-[hsl(var(--legend))]">{n}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {rows.length === 0 ? (
-        <Card className="p-6">
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            No provider matches those filters.
-          </p>
-        </Card>
+        // Only ever a filter miss: the list is every provider the release
+        // supports, so it is never empty on its own.
+        <NoMatch what="providers" onClear={clearFilters} />
       ) : view === "grid" ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {rows.map((row) => (
@@ -181,6 +294,12 @@ export function ProvidersScreen() {
               key={row.id}
               row={row}
               cooling={breakersFor(health.data ?? [], row.id)}
+              onTest={() => setTesting(row)}
+              share={
+                share.get(row.id)
+                  ? (share.get(row.id) ?? 0) / Math.max(servedTotal, 1)
+                  : undefined
+              }
               onOpen={() => open(row)}
             />
           ))}
@@ -197,6 +316,9 @@ export function ProvidersScreen() {
               <TableHead>Provider</TableHead>
               <TableHead>Priority</TableHead>
               <TableHead>Accounts</TableHead>
+              <TableHead title="Share of the requests served in the last 30 days">
+                Traffic
+              </TableHead>
               <TableHead>Discovery</TableHead>
               <TableHead>State</TableHead>
               <TableHead />
@@ -213,6 +335,13 @@ export function ProvidersScreen() {
                   tabIndex={0}
                   role="button"
                   onKeyDown={(e) => {
+                    // Only the row itself. Enter on a button inside the row —
+                    // Probe, Discover, the breaker-reset confirm and its own
+                    // buttons in the portal — bubbles up here, and
+                    // preventDefault would suppress that button's activation
+                    // and navigate away instead. stopPropagation on the cell
+                    // guards clicks; it does not guard keys.
+                    if (e.target !== e.currentTarget) return
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault()
                       open(row)
@@ -240,16 +369,22 @@ export function ProvidersScreen() {
                   </TableCell>
                   <TableCell>
                     {row.accounts > 0 ? (
-                      <>
-                        {row.accounts}
-                        {cooling.length > 0 && (
-                          <span className="ml-2 text-sm text-[hsl(var(--warning))]">
-                            {cooling.length} cooling
-                          </span>
-                        )}
-                      </>
+                      <AccountStrip
+                        mix={accountMix(row, cooling)}
+                        label={`${accountMix(row, cooling).usable}/${row.accounts}`}
+                      />
                     ) : (
                       <span className="text-[hsl(var(--legend))]">none</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {share.get(row.id) ? (
+                      <ShareMeter
+                        fraction={(share.get(row.id) ?? 0) / Math.max(servedTotal, 1)}
+                        label={`${Math.round(((share.get(row.id) ?? 0) / Math.max(servedTotal, 1)) * 100)}%`}
+                      />
+                    ) : (
+                      <span className="text-[hsl(var(--legend))]">—</span>
                     )}
                   </TableCell>
                   <TableCell
@@ -263,31 +398,106 @@ export function ProvidersScreen() {
                     {row.provider ? discoveryLine(discoveryRow) : "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={STATE_VARIANT[row.state]}>{row.state}</Badge>
+                    {/* A mark, not the word: most of two hundred rows are
+                        unconfigured, and a column of that word repeated is
+                        text the eye reads to learn it says nothing new. */}
+                    <ProviderStateMark state={row.state} />
                   </TableCell>
                   {/* The row opens the provider; these act on it in place, so
-                      they must not also open it. */}
+                      they must not also open it — by pointer or by keyboard.
+                      The row's own handler ignores anything that did not start
+                      on the row, which covers the confirm dialog's buttons too:
+                      those portal to the body but stay React children of this
+                      cell, so their events bubble here. */}
                   <TableCell className="flex gap-2 py-3" onClick={(e) => e.stopPropagation()}>
-                    {row.configured ? (
+                    {/* A keyless provider is testable with nothing set up:
+                        there is no account to add, so offering "Add accounts"
+                        there is a button whose whole job is unavailable. */}
+                    {row.keyless && !row.configured ? (
+                      // Nothing else applies yet: probing and sweeping act on
+                      // a database row this provider does not have, and Test
+                      // is the one action that can make it.
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        title={`Test — send a message through ${row.name}`}
+                        onClick={() => setTesting(row)}
+                      >
+                        <MessageSquare className="size-[var(--icon-size)]" />
+                        <span className="sr-only">Test</span>
+                      </Button>
+                    ) : row.configured ? (
                       <>
-                        <Button size="sm" variant="ghost" onClick={() => probe.mutate(row.id)}>
-                          Probe
+                        {/* Icon-only, and not for fashion: four labelled
+                            actions made the row 1358px wide inside a 1294px
+                            column, which put Discover past the right edge of a
+                            1600px window. The name survives as the tooltip and
+                            the accessible name.
+                            Probe asks whether the credential is accepted; Test
+                            asks whether a real completion comes back. Both,
+                            because a key can be valid on a provider that
+                            serves nothing an operator asked for. */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Test — send a message through this provider"
+                          onClick={() => setTesting(row)}
+                        >
+                          <MessageSquare className="size-[var(--icon-size)]" />
+                          <span className="sr-only">Test</span>
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => discover.mutate(row.id)}>
-                          Discover
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Probe — check the credential is accepted"
+                          onClick={() => probe.mutate(row.id)}
+                        >
+                          <Radio className="size-[var(--icon-size)]" />
+                          <span className="sr-only">Probe</span>
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Discover — sweep this provider's models now"
+                          onClick={() => discover.mutate(row.id)}
+                        >
+                          <RefreshCw className="size-[var(--icon-size)]" />
+                          <span className="sr-only">Discover</span>
                         </Button>
                         {/* Only offered when there is something to clear: a
                             reset on a healthy provider invites a click that
                             does nothing and teaches the operator to distrust
                             it. */}
                         {cooling.length > 0 && (
-                          <Button size="sm" variant="ghost" onClick={() => reset.mutate(row.id)}>
-                            Reset breaker
-                          </Button>
+                          <ConfirmButton
+                            size="icon"
+                            variant="ghost"
+                            title={`Reset the breaker on ${row.name}?`}
+                            description="The cooldown is cleared and the router starts dispatching here again immediately. If whatever tripped it has not been fixed, it trips straight back — with the backoff starting over from the beginning."
+                            confirmLabel="Reset breaker"
+                            onConfirm={() => reset.mutate(row.id)}
+                          >
+                            <RotateCcw className="size-[var(--icon-size)]" />
+                            <span className="sr-only">Reset breaker</span>
+                          </ConfirmButton>
                         )}
                       </>
                     ) : (
-                      <Button size="sm" variant="ghost" onClick={() => setAddOpen(true)}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          // The row already names the provider. Opening the
+                          // picker here would ask an operator to find, among
+                          // two hundred, the one whose button they just
+                          // pressed.
+                          setAddPreset(
+                            presets.data?.presets.find((p) => p.id === row.id) ?? null,
+                          )
+                          setAddOpen(true)
+                        }}
+                      >
+                        <Plus className="size-[var(--icon-size)]" />
                         Add accounts
                       </Button>
                     )}

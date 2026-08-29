@@ -1,12 +1,16 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { PageHeader } from "darkraise-ui/layout"
-import { Badge, Button, Input } from "darkraise-ui"
+import { Link } from "@tanstack/react-router"
+import { Badge, Button } from "darkraise-ui"
+import { ModelCombobox } from "../shell/model-combobox"
+import { CapabilityTriad, ScaleBar } from "../shell/measures"
+import { ModelState } from "../shell/status-mark"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Model, Pricing } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
-import { EmptyLegend } from "../shell/empty-legend"
+import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
 import { OverrideEditor } from "./override-editor"
 
 const FIELDS = ["model", "provider"] as const
@@ -43,6 +47,19 @@ export function matches(m: Model, filters: Record<string, string>): boolean {
   if (provider && !m.providers.some((p) => p.toLowerCase().includes(provider)))
     return false
   return true
+}
+
+/** The scale the context bar is drawn on: the smallest window the catalogue
+ *  carries, and the largest. */
+const CONTEXT_FLOOR = 4_000
+const CONTEXT_CEILING = 2_000_000
+
+/** Tokens as thousands, because 131072 is a number nobody holds in their head
+ *  and 131k is the one on the vendor's own page. */
+export function tokenLabel(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`
+  return String(tokens)
 }
 
 export function priceLabel(p: Pricing | null): string {
@@ -110,14 +127,17 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     {
       accessorKey: "context_window",
       header: ({ column }) => <ColumnHeader column={column} title="Context" />,
-      cell: ({ row }) =>
-        row.original.context_window ? (
-          <span className="tabular-nums">
-            {row.original.context_window.toLocaleString()}
-          </span>
-        ) : (
-          "—"
-        ),
+      // Log-scaled: the catalogue runs from 4k to 2M, and on a linear scale
+      // every model below a hundred thousand would share the same empty bar.
+      cell: ({ row }) => (
+        <ScaleBar
+          value={row.original.context_window || null}
+          min={CONTEXT_FLOOR}
+          max={CONTEXT_CEILING}
+          label={row.original.context_window ? tokenLabel(row.original.context_window) : "—"}
+          title="Bar is log-scaled, 4k to 2M tokens"
+        />
+      ),
     },
     {
       accessorKey: "max_output_tokens",
@@ -158,12 +178,16 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       accessorKey: "caps",
       header: "Capabilities",
       cell: ({ row }) => (
-        <div className="flex flex-wrap gap-1">
-          {row.original.tools && <Badge variant="secondary">tools</Badge>}
-          {row.original.vision && <Badge variant="secondary">vision</Badge>}
-          {row.original.reasoning && <Badge variant="secondary">reasoning</Badge>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <CapabilityTriad
+            tools={row.original.tools}
+            vision={row.original.vision}
+            reasoning={row.original.reasoning}
+          />
           {/* Guessed rather than read. Master design §6.4 routes these
-              with a warning, so the row has to say which they are. */}
+              with a warning, so the row has to say which they are — and it
+              says it in words, because the triad beside it is about what the
+              model does, not about how well the catalogue knows it. */}
           {row.original.inferred && <Badge variant="amber">inferred</Badge>}
         </div>
       ),
@@ -171,7 +195,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     {
       accessorKey: "state",
       header: ({ column }) => <ColumnHeader column={column} title="State" />,
-      cell: ({ row }) => <span className="font-mono text-sm">{row.original.state}</span>,
+      cell: ({ row }) => <ModelState state={row.original.state} />,
     },
     {
       accessorKey: "merge_source",
@@ -185,6 +209,11 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     {
       id: "actions",
       header: "",
+      // Not data, so not something to hide: the column-visibility menu labels
+      // each entry with its header, and an empty header sits in that list as a
+      // checkbox with no name. The same reason requests-columns.tsx pins its
+      // own actions column.
+      enableHiding: false,
       cell: ({ row }) => {
         // A model row folds every provider that serves it; an override is
         // per (provider, model), so the editor has to pick one. The catalog
@@ -207,8 +236,18 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
 }
 
 export function ModelsScreen() {
-  const [filters, setFilter] = useSearchFilters(FIELDS)
+  const [filters, setFilter, clear] = useSearchFilters(FIELDS)
   const catalog = useModels()
+  // Straight from the catalogue this screen is already showing, so the
+  // suggestions cannot disagree with the rows beneath them.
+  const modelNames = useMemo(
+    () => [...new Set((catalog.data?.models ?? []).map((m) => m.model))].sort(),
+    [catalog.data],
+  )
+  const providerNames = useMemo(
+    () => [...new Set((catalog.data?.models ?? []).flatMap((m) => m.providers))].sort(),
+    [catalog.data],
+  )
   const models = (catalog.data?.models ?? []).filter((m) => matches(m, filters))
   const [editing, setEditing] = useState<{ provider: string; model: string } | null>(null)
   const filtered = Object.values(filters).some((v) => v !== "")
@@ -220,16 +259,31 @@ export function ModelsScreen() {
         description="What it can route to, and which providers serve each one"
       />
 
+      {/* Suggesting, not constraining: both stay substring filters, so a
+          partial name still narrows the table — but the catalogue is right
+          here, and making an operator remember an exact model id to filter by
+          one was a plain box in front of data the screen had already loaded. */}
       <div className="mb-4 flex flex-wrap gap-2">
-        {FIELDS.map((field) => (
-          <Input
-            key={field}
-            placeholder={field}
-            value={filters[field]}
-            onChange={(e) => setFilter(field, e.target.value)}
-            className="w-48"
-          />
-        ))}
+        <ModelCombobox
+          label="Filter by model"
+          placeholder="model"
+          value={filters.model}
+          onChange={(v) => setFilter("model", v)}
+          candidates={modelNames}
+          loading={catalog.isPending}
+          emptyText="No model in the catalogue matches."
+          className="w-56"
+        />
+        <ModelCombobox
+          label="Filter by provider"
+          placeholder="provider"
+          value={filters.provider}
+          onChange={(v) => setFilter("provider", v)}
+          candidates={providerNames}
+          loading={catalog.isPending}
+          emptyText="No provider serves a model matching that."
+          className="w-56"
+        />
       </div>
 
       <DataTable
@@ -241,17 +295,24 @@ export function ModelsScreen() {
         virtualize={{ rowHeight: 40, height: 640 }}
       />
 
-      {models.length === 0 &&
-        (filtered ? (
-          <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
-            No models match these filters.
-          </p>
-        ) : (
-          <EmptyLegend
-            what="Models appear here after a discovery sweep."
-            hint="Add a provider and probe it to trigger one."
-          />
-        ))}
+      {models.length === 0 && (
+        <div className="mt-4">
+          {filtered ? (
+            <NoMatch what="models" onClear={clear} />
+          ) : (
+            <EmptyState
+              title="Discovery fills this catalogue in"
+              hint="A sweep asks each provider what it serves, using one of that provider's own keys — so a provider needs an account before it can answer."
+              action={
+                <Button asChild size="sm">
+                  <Link to="/providers">Add a provider account</Link>
+                </Button>
+              }
+              preview={<GhostRows />}
+            />
+          )}
+        </div>
+      )}
 
       {editing && (
         <OverrideEditor

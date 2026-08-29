@@ -175,3 +175,22 @@ describe("the editable set", () => {
     }
   })
 })
+
+describe("formatDuration rounding", () => {
+  it("carries a rounded remainder into the unit above it", () => {
+    // Rounding the remainder alone lets it reach a full unit and print there:
+    // 1h59m30s used to render as "1h 60m".
+    expect(formatDuration("1h59m30s")).toBe("2h")
+    expect(formatDuration("1m59.5s")).toBe("2 min")
+  })
+
+  it("still splits a duration that does not round up", () => {
+    expect(formatDuration("1h30m")).toBe("1h 30m")
+    expect(formatDuration("90s")).toBe("1 min 30s")
+  })
+
+  it("leaves whole units alone", () => {
+    expect(formatDuration("2h")).toBe("2h")
+    expect(formatDuration("24h")).toBe("1 day")
+  })
+})

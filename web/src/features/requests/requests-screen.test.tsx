@@ -59,6 +59,7 @@ async function renderScreen() {
 }
 
 const row = (over: Partial<RequestRow> & { id: string }): RequestRow => ({
+  source: "proxy",
   ts_ms: Date.now(),
   dialect: "openai",
   surface: "llm",
@@ -100,7 +101,7 @@ describe("a requests screen opened while empty", () => {
     mockRequests([{ requests: [] }, { requests: [row({ id: "r1", model: "distinctive-model" })] }])
     const { client } = await renderScreen()
 
-    // Waited for explicitly, rather than inferred from the empty legend
+    // Waited for explicitly, rather than inferred from the empty state
     // alone: the legend already shows on the very first render, before the
     // first fetch has actually settled, and refetching too early would race
     // the two responses instead of exercising "held is frozen empty, then a
@@ -110,23 +111,43 @@ describe("a requests screen opened while empty", () => {
       expect(query?.state.status).toBe("success")
       expect(query?.state.data).toEqual({ requests: [] })
     })
-    expect(screen.getByText(/point a client at connect/i)).toBeInTheDocument()
+    expect(screen.getByText(/point a client at the proxy/i)).toBeInTheDocument()
 
     await client.refetchQueries({ queryKey: ["requests"] })
 
     await waitFor(() =>
-      expect(screen.queryByText(/point a client at connect/i)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/point a client at the proxy/i)).not.toBeInTheDocument(),
     )
     expect(screen.getByText("distinctive-model")).toBeInTheDocument()
   })
 
-  it("keeps showing the empty legend while the poll keeps finding nothing", async () => {
+  it("keeps showing the empty state while the poll keeps finding nothing", async () => {
     mockRequests([{ requests: [] }])
     await renderScreen()
 
     await waitFor(() =>
-      expect(screen.getByText(/point a client at connect/i)).toBeInTheDocument(),
+      expect(screen.getByText(/point a client at the proxy/i)).toBeInTheDocument(),
     )
-    expect(screen.getByText(/point a client at connect/i)).toBeInTheDocument()
+    expect(screen.getByText(/point a client at the proxy/i)).toBeInTheDocument()
+  })
+})
+
+describe("what a filter offers", () => {
+  it("puts the page's own values first, then everything else known", async () => {
+    // A menu built from the loaded rows can only offer what is already on
+    // screen, so filtering to a provider whose traffic is older than the
+    // first page used to be impossible.
+    const { mergedOptions } = await import("./requests-screen")
+    expect(mergedOptions(["groq"], ["cerebras", "groq", "nebius"])).toEqual([
+      "groq",
+      "cerebras",
+      "nebius",
+    ])
+  })
+
+  it("offers each value once, and never the empty one", async () => {
+    const { mergedOptions } = await import("./requests-screen")
+    expect(mergedOptions(["groq", "groq"], ["", "groq"])).toEqual(["groq", "groq"])
+    expect(mergedOptions([], ["", "a"])).toEqual(["a"])
   })
 })

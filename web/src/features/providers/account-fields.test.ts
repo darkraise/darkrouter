@@ -4,6 +4,7 @@ import {
   emptyAccounts,
   maskSecret,
   parseBulkAccounts,
+  secretFieldFor,
 } from "./account-fields"
 
 describe("parseBulkAccounts", () => {
@@ -103,5 +104,26 @@ describe("maskSecret", () => {
   it("shows nothing at all of a short one", () => {
     // Four of eight characters is most of a short key.
     expect(maskSecret("sk-abcd")).toBe("•••••••")
+  })
+})
+
+describe("secretFieldFor", () => {
+  it("asks for an API key by default", () => {
+    const field = secretFieldFor("groq")
+    expect(field.label).toBe("API key")
+    expect(field.multiline).toBe(false)
+  })
+
+  it("asks a local CLI provider for the thing its vendor actually issues", () => {
+    // Augment issues no API key. Labelling the box "API key" would send the
+    // operator looking for something that does not exist, and a session
+    // document does not fit a one-line password input.
+    const field = secretFieldFor("auggie")
+    expect(field.label).toBe("Augment session")
+    expect(field.multiline).toBe(true)
+    expect(field.help).toMatch(/auggie login/)
+    // The empty case is legitimate here and the copy has to say so: a login
+    // done inside the container needs no account at all.
+    expect(field.help).toMatch(/Leave this empty/)
   })
 })

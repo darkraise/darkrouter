@@ -79,6 +79,10 @@ export function waterfallRows(
 
 export function BodiesPanel({ bodies }: { bodies?: TraceBody[] }) {
   if (bodies === undefined || bodies.length === 0) {
+    // Deliberately not the shared empty state: that one names an action, and
+    // there is none. No build of the gateway writes bodies, so this panel is
+    // empty for every request rather than waiting on something an operator
+    // could do.
     return (
       <p className="text-sm text-[hsl(var(--muted-foreground))]">
         Bodies were not captured. <code>capture.bodies</code> has a retention

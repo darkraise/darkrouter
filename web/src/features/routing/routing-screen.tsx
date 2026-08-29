@@ -1,12 +1,21 @@
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
+import { Plus } from "lucide-react"
 import { PageHeader } from "darkraise-ui/layout"
-import { Button, Card, Input } from "darkraise-ui"
+import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useAliases, useProviders } from "../../lib/queries"
+import { keys, useAliases, useModels, usePolicy, useProviders } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Aliases, RoutePreview } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
+import { ConfirmButton } from "../shell/confirm-button"
+import { EmptyState, GhostChain } from "../shell/empty-state"
+import { AddAliasDialog } from "./add-alias-dialog"
+import { ChainGraph } from "./chain-graph"
+import { isFatal, targetFacts, type ChainContext } from "./chain-health"
+import { StrategyCard } from "./strategy-card"
+import { TargetPill } from "./target-pill"
+import { ModelCombobox, modelCandidates } from "../shell/model-combobox"
 
 /**
  * Preview rows, in the order the endpoint returned them.
@@ -50,23 +59,43 @@ export function moveTarget(chain: string[], from: number, to: number): string[] 
 }
 
 /**
- * Problems a browser can see without asking the server.
+ * Problems that stop a save, as opposed to problems worth showing.
  *
  * The server validates on PUT and stays the authority; this exists so a typo
  * is caught before a round trip rather than instead of one.
+ *
+ * Only the states nothing can fix by waiting block. A target on a disabled or
+ * cooling provider is a chain doing its job — the whole point of a fallback
+ * order is that some of it is not currently serving — so those are drawn on
+ * the pill and left alone here.
  */
-export function validateChain(targets: string[], knownProviders: string[]): string[] {
+export function validateChain(
+  targets: string[],
+  knownProviders: string[],
+  ctx?: ChainContext,
+): string[] {
   if (targets.length === 0) return ["an alias with no targets routes nowhere"]
+  // A context with no providers in it cannot judge anything, so the ids fall
+  // back to standing in for the full rows. Testing `ctx` for presence alone
+  // was not enough: the editor always passes one, so the fallback was
+  // unreachable and a caller that knew the provider ids was told none existed.
+  const context: ChainContext =
+    ctx && ctx.providers.length > 0
+      ? ctx
+      : {
+          providers: knownProviders.map((id) => ({
+            id, name: id, preset: id, kind: "", base_url: "", priority: 0, enabled: true,
+            auth_style: "", credentials: [{
+              id: "assumed", label: "assumed", masked: "", enabled: true,
+              cooling: false, kind: "static",
+            }], free_models_only: false,
+          })),
+          models: ctx?.models ?? [],
+        }
   const problems: string[] = []
   for (const target of targets) {
-    const slash = target.indexOf("/")
-    // A bare model name is not qualified, so any provider offering it may
-    // serve — there is nothing to check.
-    if (slash < 0) continue
-    const provider = target.slice(0, slash)
-    if (!knownProviders.includes(provider)) {
-      problems.push(`${target}: no provider named ${provider} is configured`)
-    }
+    const facts = targetFacts(target, context)
+    if (isFatal(facts.state)) problems.push(`${target}: ${facts.problem}`)
   }
   return problems
 }
@@ -100,12 +129,22 @@ function reorderRows(rows: DraftRow[], from: number, to: number): DraftRow[] {
   ).map((id) => ({ id, value: valueById.get(id) ?? "" }))
 }
 
+const EMPTY_CONTEXT: ChainContext = { providers: [], models: [] }
+
 export function AliasEditor({
   aliases,
   knownProviders,
+  context = EMPTY_CONTEXT,
+  candidates = [],
+  onPreview,
 }: {
   aliases: Aliases
   knownProviders: string[]
+  /** Live provider, catalogue and breaker state, so each target can say what
+   *  the router would make of it right now rather than only whether it parses. */
+  context?: ChainContext
+  candidates?: string[]
+  onPreview?: (name: string) => void
 }) {
   const idCounter = useRef(0)
   const makeId = () => `row-${idCounter.current++}`
@@ -113,7 +152,24 @@ export function AliasEditor({
   const [draft, setDraft] = useState<Record<string, DraftRow[]>>(() =>
     toDraftRows(aliases, makeId),
   )
-  const [newChainName, setNewChainName] = useState("")
+  // What the draft was seeded from. `PUT /api/aliases` replaces the whole map
+  // rather than merging, so a draft that never notices an alias added
+  // elsewhere will delete it on the next Save and report success. Adopting
+  // chains the draft has never seen keeps the write additive without
+  // discarding whatever is being typed.
+  const [seededFrom, setSeededFrom] = useState(aliases)
+  if (aliases !== seededFrom) {
+    setSeededFrom(aliases)
+    setDraft((d) => {
+      const next = { ...d }
+      for (const [name, targets] of Object.entries(aliases)) {
+        if (!(name in next)) next[name] = targets.map((value) => ({ id: makeId(), value }))
+      }
+      return next
+    })
+  }
+  const [addOpen, setAddOpen] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
   const [dragTarget, setDragTarget] = useState<{ name: string; index: number } | null>(null)
 
   const save = useApiMutation({
@@ -134,7 +190,7 @@ export function AliasEditor({
   const problemsByChain = Object.fromEntries(
     Object.entries(cleaned).map(([name, targets]) => [
       name,
-      validateChain(targets, knownProviders),
+      validateChain(targets, knownProviders, context),
     ]),
   )
   const hasProblems = Object.values(problemsByChain).some((p) => p.length > 0)
@@ -160,115 +216,220 @@ export function AliasEditor({
     setDragTarget(null)
   }
 
+  const names = Object.keys(draft)
+
   return (
     <Card className="p-4">
-      <h2 className="mb-3 text-sm font-medium">Alias chains</h2>
-      <div className="flex flex-col gap-4">
-        {Object.entries(draft).map(([name, rows]) => (
-          <div key={name} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <span className="w-32 shrink-0 font-mono text-sm">{name}</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  setDraft((d) => {
-                    const next = { ...d }
-                    delete next[name]
-                    return next
-                  })
-                }
-              >
-                Remove chain
-              </Button>
-            </div>
-            {/* The chain order is the fallback order, so it is edited as an
-                ordered, draggable list rather than as a set. Keyed by the
-                row's own id, not its position — a reorder moves the id's DOM
-                node with it, so an in-progress edit or focus stays on the
-                target the operator was looking at. */}
-            <ul className="flex flex-col gap-1 pl-4">
-              {rows.map((row, index) => (
-                <li
-                  key={row.id}
-                  draggable
-                  onDragStart={() => setDragTarget({ name, index })}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => drop(name, index)}
-                  className="flex items-center gap-2"
-                >
-                  <span className="cursor-grab text-[hsl(var(--muted-foreground))]" aria-hidden>
-                    ⠿
-                  </span>
-                  <Input
-                    aria-label={`${name} target ${index + 1}`}
-                    value={row.value}
-                    onChange={(e) => updateTarget(name, row.id, e.target.value)}
-                    className="flex-1 font-mono text-sm"
-                  />
-                  <Button size="sm" variant="ghost" onClick={() => removeTarget(name, row.id)}>
-                    Remove
-                  </Button>
-                </li>
-              ))}
-            </ul>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="ml-4 self-start"
-              onClick={() =>
-                setDraft((d) => ({
-                  ...d,
-                  [name]: [...(d[name] ?? []), { id: makeId(), value: "" }],
-                }))
-              }
-            >
-              Add target
-            </Button>
-            {(problemsByChain[name] ?? []).length > 0 && (
-              <ul className="ml-4 flex flex-col gap-0.5 text-sm text-[hsl(var(--destructive))]">
-                {(problemsByChain[name] ?? []).map((problem) => (
-                  <li key={problem}>{problem}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">Alias chains</h2>
+        <span className="text-sm text-[hsl(var(--legend))]">
+          {names.length === 0
+            ? "none yet"
+            : `${names.length} ${names.length === 1 ? "chain" : "chains"}`}
+        </span>
       </div>
-      <div className="mt-4 flex gap-2">
-        <Input
-          placeholder="new alias name"
-          value={newChainName}
-          onChange={(e) => setNewChainName(e.target.value)}
-          className="w-48 font-mono text-sm"
+
+      {names.length === 0 && (
+        <EmptyState
+          title="An alias is a name your clients ask for"
+          hint="Point one at a list of providers and the router walks it in order, moving to the next when one refuses. Clients keep asking for the alias; you change what it means."
+          preview={<GhostChain />}
         />
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            // An operator with no aliases has to be able to make their first
-            // one here; an editor that only edits what exists cannot be the
-            // only way in. An inline input replaces window.prompt: a prompt
-            // cannot be styled, cannot be driven by a test, and some
-            // embeddings block it outright.
-            const name = newChainName.trim()
-            if (!name || name in draft) return
-            setDraft((d) => ({ ...d, [name]: [] }))
-            setNewChainName("")
+      )}
+
+      <div className="flex flex-col gap-2">
+        {names.map((name) => {
+          const rows = draft[name] ?? []
+          const open = editing === name
+          const problems = problemsByChain[name] ?? []
+          const saved = aliases[name]
+          const pending = cleaned[name] ?? []
+          const unsaved =
+            saved === undefined ||
+            saved.length !== pending.length ||
+            saved.some((t, i) => t !== pending[i])
+          return (
+            <div key={name} className="rounded-[var(--radius)] border p-3">
+              {/* The chain at rest: its name, and where it would go, in order.
+                  This is the view an operator spends their time in — editing
+                  is the exception, so it is the thing behind a click. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-32 shrink-0 truncate font-mono text-sm" title={name}>
+                  {name}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                  {rows.length === 0 ? (
+                    <span className="text-sm text-[hsl(var(--muted-foreground))]">
+                      no targets yet
+                    </span>
+                  ) : (
+                    rows.map((row, i) => (
+                      <TargetPill
+                        key={row.id}
+                        rank={i + 1}
+                        facts={targetFacts(row.value, context)}
+                      />
+                    ))
+                  )}
+                </span>
+                {onPreview && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onPreview(name)}
+                    // The endpoint resolves what is stored, so a chain with
+                    // unsaved edits would be previewed as it was, beside pills
+                    // drawn from the draft.
+                    title={
+                      unsaved
+                        ? "Previews the saved chain — this one has unsaved changes"
+                        : undefined
+                    }
+                  >
+                    Preview{unsaved ? " (saved)" : ""}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditing(open ? null : name)}
+                  aria-expanded={open}
+                >
+                  {open ? "Done" : "Edit"}
+                </Button>
+                {/* A whole chain is worth asking about; a single target row is
+                    not — that is one click of Add target to put back, and a
+                    prompt per row would make the editor unusable. */}
+                <ConfirmButton
+                  size="sm"
+                  variant="ghost"
+                  className="text-[hsl(var(--destructive))]"
+                  title={`Remove the ${name} chain?`}
+                  description={`Requests asking for ${name} stop resolving through it and fall back to whatever a bare model name of that spelling finds. Nothing is written until you save.`}
+                  confirmLabel="Remove chain"
+                  destructive
+                  onConfirm={() =>
+                    setDraft((d) => {
+                      const next = { ...d }
+                      delete next[name]
+                      return next
+                    })
+                  }
+                >
+                  Remove
+                </ConfirmButton>
+              </div>
+
+              {open && (
+                <div className="mt-3 border-t pt-3">
+                  {/* The chain order is the fallback order, so it is edited as
+                      an ordered, draggable list rather than as a set. Keyed by
+                      the row's own id, not its position — a reorder moves the
+                      id's DOM node with it, so an in-progress edit or focus
+                      stays on the target the operator was looking at. */}
+                  <ul className="flex flex-col gap-1.5">
+                    {rows.map((row, index) => (
+                      <li
+                        key={row.id}
+                        draggable
+                        onDragStart={() => setDragTarget({ name, index })}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => drop(name, index)}
+                        className="flex items-center gap-2"
+                      >
+                        <span
+                          className="cursor-grab text-[hsl(var(--muted-foreground))]"
+                          aria-hidden
+                        >
+                          ⠿
+                        </span>
+                        <span className="w-5 shrink-0 text-right font-mono text-sm text-[hsl(var(--legend))]">
+                          {index + 1}
+                        </span>
+                        <ModelCombobox
+                          label={`${name} target ${index + 1}`}
+                          value={row.value}
+                          onChange={(value) => updateTarget(name, row.id, value)}
+                          candidates={candidates}
+                          placeholder="provider/model, or a model name"
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removeTarget(name, row.id)}
+                        >
+                          Remove
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="mt-1.5"
+                    onClick={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        [name]: [...(d[name] ?? []), { id: makeId(), value: "" }],
+                      }))
+                    }
+                  >
+                    Add target
+                  </Button>
+                </div>
+              )}
+
+              {problems.length > 0 && (
+                <ul className="mt-2 flex flex-col gap-0.5 text-sm text-[hsl(var(--destructive))]">
+                  {problems.map((problem) => (
+                    <li key={problem}>{problem}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+        {/* An operator with no aliases has to be able to make their first one
+            here; an editor that only edits what exists cannot be the only way
+            in. */}
+        <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
+          <Plus className="size-[var(--icon-size)]" />
+          Add alias
+        </Button>
+        <AddAliasDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          existingNames={names}
+          candidates={candidates}
+          context={context}
+          onCreate={(name, targets) => {
+            setDraft((d) => ({
+              ...d,
+              [name]: targets.map((value) => ({ id: makeId(), value })),
+            }))
+            // Opened rather than left collapsed: the operator was just editing
+            // this chain, and the next thing they do is usually to it.
+            setEditing(name)
           }}
-        >
-          Add chain
-        </Button>
-        <Button size="sm" disabled={hasProblems} onClick={() => save.mutate(cleaned)}>
-          Save
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setDraft(toDraftRows(aliases, makeId))}
-        >
-          Revert
-        </Button>
+        />
+        <div className="ml-auto flex gap-2">
+          <Button size="sm" disabled={hasProblems} onClick={() => save.mutate(cleaned)}>
+            Save
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDraft(toDraftRows(aliases, makeId))
+              setEditing(null)
+            }}
+          >
+            Revert
+          </Button>
+        </div>
       </div>
     </Card>
   )
@@ -278,13 +439,47 @@ export function RoutingScreen() {
   const [filters, setFilter] = useSearchFilters(["alias"] as const)
   const aliases = useAliases()
   const providers = useProviders()
-  const [preview, setPreview] = useState<RoutePreview | null>(null)
+  const models = useModels()
+  const policy = usePolicy()
+  // The request and its result move together. Kept apart, a preview that 404s
+  // or one that arrives out of order leaves the graph labelling the previous
+  // candidate list with the new request's name.
+  const [preview, setPreview] = useState<{ request: string; result: RoutePreview } | null>(null)
+  const [view, setView] = useState<"ladder" | "graph">("ladder")
 
   const run = useApiMutation({
-    mutationFn: (model: string) =>
-      api.post<RoutePreview>("/api/route/preview", { model }),
-    onSuccess: (data) => setPreview(data),
+    mutationFn: async (model: string) => ({
+      request: model,
+      result: await api.post<RoutePreview>("/api/route/preview", { model }),
+    }),
+    onSuccess: setPreview,
   })
+
+  // Memoised on the query results, not on the `?? []` defaults: those build a
+  // fresh array on every render while the data is undefined, so every memo
+  // below them would recompute each time and hand a new object to the editor.
+  const providerRows = useMemo(() => providers.data?.providers ?? [], [providers.data])
+  const modelRows = useMemo(() => models.data?.models ?? [], [models.data])
+  const context: ChainContext = useMemo(
+    () => ({ providers: providerRows, models: modelRows }),
+    [providerRows, modelRows],
+  )
+  // Two lists, because they are two different questions. Inside a chain the
+  // router expands targets through rules 2 and 3 only, so an alias suggested
+  // there could never resolve; the preview box answers rule 1 as well.
+  const chainCandidates = useMemo(() => modelCandidates({ models: modelRows }), [modelRows])
+  const aliasNames = useMemo(() => Object.keys(aliases.data ?? {}), [aliases.data])
+  const previewCandidates = useMemo(
+    () => modelCandidates({ models: modelRows, aliases: aliasNames }),
+    [modelRows, aliasNames],
+  )
+
+  function previewChain(name: string) {
+    setFilter("alias", name)
+    run.mutate(name)
+  }
+
+  const rows = preview ? previewRows(preview.result) : []
 
   return (
     <>
@@ -293,43 +488,69 @@ export function RoutingScreen() {
         description="How it chooses, and what it would choose right now"
       />
 
-      <Card className="mb-6 p-4">
-        <h2 className="mb-3 text-sm font-medium">Preview</h2>
+      <StrategyCard policy={policy.data} providers={providerRows} />
+
+      {aliases.data && (
+        <AliasEditor
+          aliases={aliases.data}
+          knownProviders={providerRows.map((p) => p.id)}
+          context={context}
+          candidates={chainCandidates}
+          onPreview={previewChain}
+        />
+      )}
+
+      <Card className="mt-6 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">Preview</h2>
+          <ToggleGroup
+            type="single"
+            value={view}
+            onValueChange={(next) => {
+              if (next === "ladder" || next === "graph") setView(next)
+            }}
+            aria-label="Preview layout"
+            className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
+          >
+            <ToggleGroupItem value="ladder">Ladder</ToggleGroupItem>
+            <ToggleGroupItem value="graph">Graph</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
         <div className="flex gap-2">
-          <Input
-            placeholder="alias or model"
+          <ModelCombobox
+            label="Alias or model to preview"
             value={filters.alias}
-            onChange={(e) => setFilter("alias", e.target.value)}
-            className="w-72 font-mono text-sm"
+            onChange={(next) => setFilter("alias", next)}
+            candidates={previewCandidates}
+            placeholder="alias or model"
+            className="w-72"
           />
-          <Button size="sm" onClick={() => run.mutate(filters.alias)}>
+          <Button
+            size="sm"
+            disabled={run.isPending}
+            onClick={() => run.mutate(filters.alias)}
+          >
             Preview
           </Button>
         </div>
 
         {preview && (
           <div className="mt-4">
-            {preview.error && (
+            {preview.result.error && (
               <p className="mb-2 text-sm text-[hsl(var(--muted-foreground))]">
-                {preview.error}
+                {preview.result.error}
               </p>
             )}
             {/* Even with no candidates the skips are shown: they are the only
                 account of why nothing routed. */}
-            <Ladder mode="predictive" rows={previewRows(preview)} />
+            {view === "ladder" ? (
+              <Ladder mode="predictive" rows={rows} />
+            ) : (
+              <ChainGraph request={preview.request} rows={rows} />
+            )}
           </div>
         )}
       </Card>
-
-      {aliases.data && (
-        <AliasEditor
-          aliases={aliases.data}
-          knownProviders={(providers.data?.providers ?? []).map((p) => p.id)}
-        />
-      )}
-
-      <div className="mt-6">
-      </div>
     </>
   )
 }

@@ -14,3 +14,17 @@
   background: hsl(var(--pi-hue) 30% 22%);
   color: hsl(var(--pi-hue) 55% 78%);
 }
+
+/* A logo file on the neutral tile. Contained rather than stretched: the files
+ * come from a dozen different sources and are not all square, and a squashed
+ * wordmark is worse than a small one. */
+.provider-asset {
+  object-fit: contain;
+}
+
+/* An SVG drawn only in black ink cannot adapt to the canvas the way a
+ * currentColor mark does, and on the dark tile it is an empty square. Inverting
+ * is safe precisely because it is monochrome — there is no hue to ruin. */
+[data-mode="dark"] .provider-asset-mono {
+  filter: invert(1);
+}

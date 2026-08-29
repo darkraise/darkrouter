@@ -2,10 +2,11 @@ import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card } from "darkraise-ui/components/card"
-import { Input } from "darkraise-ui/components/input"
 import { Textarea } from "darkraise-ui/components/textarea"
 import { stream, type StreamStart } from "../../lib/api"
 import { chatBody, drainSSE } from "./chat"
+import type { PlaygroundConfig } from "./config"
+import { ModelCombobox, useModelCandidates } from "../shell/model-combobox"
 import type { PlaygroundMessage } from "../../lib/api-types"
 
 type Side = {
@@ -24,6 +25,7 @@ function emptySide(model: string): Side {
 async function runSide(
   model: string,
   prompt: string,
+  config: PlaygroundConfig,
   setSide: (fn: (s: Side) => Side) => void,
 ): Promise<void> {
   const started = performance.now()
@@ -33,14 +35,14 @@ async function runSide(
     const turns: PlaygroundMessage[] = [{ role: "user", content: prompt }]
     for await (const chunk of stream(
       "/api/playground",
-      chatBody({
-        model, dialect: "openai", system: "", stream: true,
-        temperature: "", maxTokens: "", toolsRaw: "", messages: turns,
-      }),
+      // The shared settings, with only the model differing between sides:
+      // comparing two models under two system prompts would answer a question
+      // nobody asked.
+      chatBody({ ...config, model, stream: true, messages: turns }),
       (s: StreamStart) => setSide((cur) => ({ ...cur, requestId: s.requestId })),
     )) {
       buffer += chunk
-      const { text, rest } = drainSSE(buffer)
+      const { text, rest } = drainSSE(buffer, config.dialect)
       buffer = rest
       if (text) setSide((cur) => ({ ...cur, text: cur.text + text }))
     }
@@ -51,10 +53,29 @@ async function runSide(
   }
 }
 
-function SidePanel({ side, onModel }: { side: Side; onModel: (model: string) => void }) {
+function SidePanel({
+  side,
+  onModel,
+  candidates,
+  loading,
+  label,
+}: {
+  side: Side
+  onModel: (model: string) => void
+  candidates: string[]
+  loading?: boolean
+  label: string
+}) {
   return (
     <Card className="flex flex-col gap-3 p-4">
-      <Input placeholder="alias or provider/model" value={side.model} onChange={(e) => onModel(e.target.value)} />
+      <ModelCombobox
+        label={label}
+        value={side.model}
+        onChange={onModel}
+        candidates={candidates}
+        loading={loading}
+        className="w-full"
+      />
       <div className="min-h-24 rounded border p-3 text-sm font-mono whitespace-pre-wrap">{side.text}</div>
       {side.error ? <p className="text-destructive text-sm">{side.error}</p> : null}
       <div className="flex items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
@@ -73,18 +94,19 @@ function SidePanel({ side, onModel }: { side: Side; onModel: (model: string) => 
  *  request chat sends — chatBody is shared rather than rebuilt, so a
  *  difference in the transcripts reflects the models, not a second,
  *  slightly different request shape. */
-export function Compare() {
+export function Compare({ config }: { config: PlaygroundConfig }) {
   const [prompt, setPrompt] = useState("")
   const [left, setLeft] = useState<Side>(() => emptySide(""))
   const [right, setRight] = useState<Side>(() => emptySide(""))
 
+  const { candidates, loading } = useModelCandidates()
   const busy = left.busy || right.busy
   const canRun = !busy && prompt !== "" && left.model !== "" && right.model !== ""
 
   function run() {
     if (!canRun) return
-    void runSide(left.model, prompt, setLeft)
-    void runSide(right.model, prompt, setRight)
+    void runSide(left.model, prompt, config, setLeft)
+    void runSide(right.model, prompt, config, setRight)
   }
 
   return (
@@ -94,8 +116,20 @@ export function Compare() {
         {busy ? "Running…" : "Run"}
       </Button>
       <div className="grid gap-4 sm:grid-cols-2">
-        <SidePanel side={left} onModel={(model) => setLeft((s) => ({ ...s, model }))} />
-        <SidePanel side={right} onModel={(model) => setRight((s) => ({ ...s, model }))} />
+        <SidePanel
+          side={left}
+          label="Left model or alias"
+          candidates={candidates}
+          loading={loading}
+          onModel={(model) => setLeft((s) => ({ ...s, model }))}
+        />
+        <SidePanel
+          side={right}
+          label="Right model or alias"
+          candidates={candidates}
+          loading={loading}
+          onModel={(model) => setRight((s) => ({ ...s, model }))}
+        />
       </div>
     </div>
   )

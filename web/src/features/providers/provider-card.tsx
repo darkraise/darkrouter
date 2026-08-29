@@ -1,5 +1,7 @@
-import { Badge, Card } from "darkraise-ui"
+import { MessageSquare } from "lucide-react"
+import { Badge, Button, Card } from "darkraise-ui"
 import type { BreakerEntry } from "../../lib/api-types"
+import { AccountStrip, ShareMeter } from "../shell/measures"
 import { ProviderIcon } from "./provider-icon"
 import type { ProviderRow } from "./provider-rows"
 import { STATE_VARIANT } from "./provider-state"
@@ -15,12 +17,25 @@ import { STATE_VARIANT } from "./provider-state"
 export function ProviderCard({
   row,
   cooling,
+  share,
   onOpen,
+  onTest,
 }: {
   row: ProviderRow
   cooling: BreakerEntry[]
+  /** Share of the window's requests, or undefined for a provider that served
+   *  none — an empty meter and no meter say different things. */
+  share?: number
   onOpen: () => void
+  /** Absent for a provider with nothing to test — the router cannot reach one
+   *  that has no account and needs one. */
+  onTest?: () => void
 }) {
+  const creds = row.provider?.credentials ?? []
+  const coolingIds = new Set(cooling.map((c) => c.key_id))
+  const disabled = creds.filter((c) => !c.enabled).length
+  const cool = creds.filter((c) => c.enabled && (c.cooling || coolingIds.has(c.id))).length
+  const mix = { usable: creds.length - disabled - cool, cooling: cool, disabled }
   return (
     <Card className={row.configured ? "p-0" : "p-0 opacity-70"}>
       <button
@@ -43,22 +58,36 @@ export function ProviderCard({
             {row.priority ?? <span className="text-[hsl(var(--legend))]">—</span>}
           </dd>
           <dt className="text-[hsl(var(--legend))]">Accounts</dt>
-          <dd className="text-right tabular-nums">
+          <dd className="flex justify-end">
             {row.accounts > 0 ? (
-              <>
-                {row.accounts}
-                {cooling.length > 0 && (
-                  <span className="ml-1 text-[hsl(var(--warning))]">· {cooling.length} cooling</span>
-                )}
-              </>
+              <AccountStrip mix={mix} label={`${mix.usable}/${row.accounts}`} />
             ) : (
               <span className="text-[hsl(var(--legend))]">none</span>
             )}
           </dd>
+          {share !== undefined && (
+            <>
+              <dt className="text-[hsl(var(--legend))]">Traffic</dt>
+              <dd className="flex justify-end">
+                <ShareMeter fraction={share} label={`${Math.round(share * 100)}%`} />
+              </dd>
+            </>
+          )}
           <dt className="text-[hsl(var(--legend))]">Kind</dt>
           <dd className="truncate text-right font-mono">{row.kind}</dd>
         </dl>
       </button>
+
+      {/* Outside the button: a button inside a button is invalid markup and
+          the browser resolves it by dropping one of them. */}
+      {onTest && row.configured && (
+        <div className="border-t px-4 py-2">
+          <Button size="sm" variant="ghost" onClick={onTest}>
+            <MessageSquare className="size-[var(--icon-size)]" />
+            Test
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

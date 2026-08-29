@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { breakersFor, discoveryLine, providerState } from "./providers-screen"
+import { filterProviderRows, mergeProviderRows } from "./provider-rows"
 import type { BreakerEntry, Credential, Provider } from "../../lib/api-types"
 
 const cred = (over: Partial<Credential> = {}): Credential => ({
@@ -101,5 +102,36 @@ describe("the discovery line", () => {
     // Absence is the signal. "0 of 0 live" reads as a sweep that ran and
     // found nothing, which is a different fact.
     expect(discoveryLine(undefined)).toBe("never discovered")
+  })
+})
+
+describe("a keyless provider", () => {
+  const keyless = provider({ id: "ollama", auth_style: "none", credentials: [] })
+
+  it("is configured the moment it exists", () => {
+    // There is nothing an operator could add that would change how it is
+    // reached, so "unconfigured" would send them looking for a key that does
+    // nothing.
+    expect(providerState(keyless)).toBe("healthy")
+  })
+
+  it("is still unconfigured when it does need a key", () => {
+    expect(providerState(provider({ credentials: [] }))).toBe("unconfigured")
+  })
+
+  it("counts an optional-auth gateway as keyless too", () => {
+    // It answers without a key and answers better with one. An operator
+    // scanning for "what can I just add" gets the same answer either way.
+    const optional = provider({ id: "hackclub", auth_style: "optional", credentials: [] })
+    expect(providerState(optional)).toBe("healthy")
+    expect(mergeProviderRows([], [optional])[0]?.connection).toBe("none")
+  })
+
+  it("survives the configured-only filter with no accounts", () => {
+    // The filter means "ones the router can choose", and it can choose this.
+    const rows = mergeProviderRows([], [keyless])
+    expect(filterProviderRows(rows, { configuredOnly: true }).map((r) => r.id)).toEqual([
+      "ollama",
+    ])
   })
 })

@@ -1,5 +1,5 @@
 import type { Preset, Provider } from "../../lib/api-types"
-import { providerState, type ProviderState } from "./provider-state"
+import { isKeyless, providerState, type ProviderState } from "./provider-state"
 
 /**
  * One line of the providers list: a provider the release supports, and what
@@ -33,6 +33,14 @@ export type ProviderRow = {
    */
   configured: boolean
   freeTier: boolean
+  /** How the provider is reached — the axis an operator filters by when they
+   *  are looking for "the ones I run myself" or "the ones with a browser
+   *  flow" rather than for a name. */
+  connection: ConnectionType
+  /** Whether it serves a request with no credential. Carried on the row
+   *  because the actions turn on it: there is nothing to add to a provider
+   *  that asks for nothing, so the row offers the test instead. */
+  keyless: boolean
   /** Present when the provider has a database row, with or without accounts.
    *  The detail page and the per-row actions need the real thing. */
   provider?: Provider
@@ -40,6 +48,8 @@ export type ProviderRow = {
 
 function rowFromPreset(p: Preset): ProviderRow {
   return {
+    connection: connectionType(p),
+    keyless: isKeyless({ auth_style: p.auth_kind }),
     id: p.id,
     name: p.name,
     preset: p.id,
@@ -54,6 +64,11 @@ function rowFromPreset(p: Preset): ProviderRow {
 
 function rowFromProvider(p: Provider, preset: Preset | undefined): ProviderRow {
   return {
+    // The provider's own base URL, not the preset's: an operator who pointed
+    // a preset at their own machine has a local provider, whatever the
+    // release shipped.
+    connection: connectionType({ base_url: p.base_url, auth_kind: p.auth_style }),
+    keyless: isKeyless(p),
     id: p.id,
     name: p.name,
     preset: p.preset,
@@ -61,7 +76,9 @@ function rowFromProvider(p: Provider, preset: Preset | undefined): ProviderRow {
     state: providerState(p),
     accounts: p.credentials.length,
     priority: p.priority,
-    configured: p.credentials.length > 0,
+    // A keyless provider is configured with no accounts at all: there is
+    // nothing an operator could add that would change how it is reached.
+    configured: p.credentials.length > 0 || isKeyless(p),
     freeTier: preset?.free_tier ?? false,
     provider: p,
   }
@@ -92,6 +109,7 @@ export function mergeProviderRows(presets: Preset[], providers: Provider[]): Pro
 export type ProviderFilter = {
   q?: string
   state?: string
+  connection?: string
   configuredOnly?: boolean
   freeTier?: boolean
 }
@@ -103,6 +121,7 @@ export function filterProviderRows(rows: ProviderRow[], f: ProviderFilter): Prov
   return rows.filter((r) => {
     if (q && !r.id.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false
     if (f.state && r.state !== f.state) return false
+    if (f.connection && r.connection !== f.connection) return false
     if (f.configuredOnly && !r.configured) return false
     if (f.freeTier && !r.freeTier) return false
     return true
@@ -113,4 +132,67 @@ export function filterProviderRows(rows: ProviderRow[], f: ProviderFilter): Prov
  *  operator a filter is on rather than that the catalogue is small. */
 export function filterSummary(shown: number, total: number): string {
   return shown === total ? `${total} providers` : `${shown} of ${total}`
+}
+
+/**
+ * How a provider is reached, as an operator thinks of it.
+ *
+ * Derived rather than stored: every fact it needs is already on the preset,
+ * and a second field would be one more thing to keep in step with the first.
+ *
+ *  - `local` is a program the operator runs themselves. Read off the address
+ *    rather than a flag, because that is what actually makes it local — a
+ *    loopback URL cannot be anybody else's machine, and a base URL that names
+ *    no host at all (auggie://cli/v1) is a command on this box.
+ *  - `oauth` and `signed` are the two that are not a secret you paste once:
+ *    one mints short-lived tokens through a browser flow, the other signs
+ *    every request from a key pair.
+ *  - `none` covers the three styles that need nothing pasted: one that asks
+ *    for nothing, one that answers without a key and answers better with one,
+ *    and one that demands a key the vendor publishes and the release ships. To
+ *    an operator scanning for "what can I just add", they are the same answer.
+ *  - `key` is everything else, which is most of the catalogue.
+ */
+export type ConnectionType = "key" | "oauth" | "signed" | "none" | "local"
+
+export const CONNECTION_LABEL: Record<ConnectionType, string> = {
+  key: "API key",
+  oauth: "OAuth",
+  signed: "Signed",
+  none: "No auth",
+  local: "Local",
+}
+
+const LOOPBACK = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i
+
+/** Anything darkrouter reaches over the network. A base URL that is not one of
+ *  these names a transport of its own — today the local-CLI scheme. */
+const HTTP_URL = /^https?:\/\//i
+
+export function connectionType(p: {
+  base_url?: string
+  auth_kind?: string
+}): ConnectionType {
+  if (p.base_url && (LOOPBACK.test(p.base_url) || !HTTP_URL.test(p.base_url))) return "local"
+  switch (p.auth_kind) {
+    case "oauth":
+      return "oauth"
+    case "sigv4":
+    case "gcp-sa":
+      return "signed"
+    case "none":
+    case "optional":
+    case "anonymous":
+      return "none"
+    default:
+      return "key"
+  }
+}
+
+/** The counts behind the quick filters, so a chip can say how many rows it
+ *  would leave and an empty one is visibly empty before it is clicked. */
+export function connectionCounts(rows: ProviderRow[]): Record<ConnectionType, number> {
+  const out: Record<ConnectionType, number> = { key: 0, oauth: 0, signed: 0, none: 0, local: 0 }
+  for (const r of rows) out[r.connection]++
+  return out
 }

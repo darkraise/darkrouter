@@ -5,9 +5,8 @@ import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  configRows,
+  readOnlyGroups,
   passwordProblem,
-  readValue,
   reloadMessage,
   revokedText,
   SettingsScreen,
@@ -16,6 +15,7 @@ import {
   toWrite,
 } from "./settings-screen"
 import type { ConfigResponse } from "../../lib/api-types"
+import { EDITABLE } from "./settings-catalog"
 
 // PageHeader calls useRouterAdapter unconditionally even without breadcrumbs
 // or tabs, so anything rendering it needs a provider — Settings never uses
@@ -72,37 +72,46 @@ const cfg = (): ConfigResponse => ({
   },
 })
 
-describe("readValue", () => {
-  it("walks a dotted field into the blocks payload", () => {
-    expect(readValue(cfg(), "log.retention")).toBe("72h")
-    expect(readValue(cfg(), "catalog.discovery.interval")).toBe("6h")
+describe("the read-only configuration", () => {
+  it("leaves out the settings shown as editable fields above it", () => {
+    // Listing a value as a live input and again as a read-only row is what
+    // made the previous version of this screen show the same five settings
+    // twice under two different names.
+    const fields = readOnlyGroups(cfg()).flatMap((g) => g.rows.map((r) => r.field))
+    for (const editable of EDITABLE) expect(fields).not.toContain(editable.field)
   })
 
-  it("renders a block value rather than [object Object]", () => {
-    expect(readValue(cfg(), "aliases")).toBe('{"fast":["groq/a"]}')
+  it("keeps the policy settings that exist but cannot be edited", () => {
+    // connect and first_byte configure the one shared transport built at
+    // startup, so PUT /api/policy refuses them — which is exactly why they
+    // belong in the read-only view rather than nowhere.
+    const fields = readOnlyGroups(cfg()).flatMap((g) => g.rows.map((r) => r.field))
+    expect(fields).toContain("policy.timeout.connect")
+    expect(fields).toContain("policy.timeout.first_byte")
   })
 
-  it("shows a missing field as unknown rather than crashing", () => {
-    // The field list and the blocks are two payloads; one naming something the
-    // other omits must not take the screen down.
-    expect(readValue(cfg(), "server.nothing.here")).toBe("—")
+  it("drops a group left with nothing in it", () => {
+    // A heading over an empty card reads as a section that failed to load.
+    for (const section of readOnlyGroups(cfg())) {
+      expect(section.rows.length).toBeGreaterThan(0)
+    }
   })
-})
 
-describe("configRows", () => {
   it("carries each field's source and reloadability", () => {
-    const rows = configRows(cfg())
-    const aliases = rows.find((r) => r.field === "aliases")
-    // §8.1: after the first run, editing aliases in the file has no effect,
-    // and the config view has to say so at the point of display.
-    expect(aliases?.meta.source).toBe("database")
-    const interval = rows.find((r) => r.field === "catalog.discovery.interval")
-    expect(interval?.meta.hot_reloadable).toBe(false)
+    // §8.1: after the first run, editing these in the file has no effect, and
+    // the view has to say so at the point of display.
+    const rows = readOnlyGroups(cfg()).flatMap((g) => g.rows)
+    expect(rows.find((r) => r.field === "log.retention")?.source).toBe("file")
+    expect(rows.find((r) => r.field === "catalog.discovery.interval")?.source).toBe("default")
+    expect(rows.find((r) => r.field === "catalog.discovery.interval")?.hotReloadable).toBe(false)
+    expect(rows.find((r) => r.field === "log.retention")?.hotReloadable).toBe(true)
   })
 
-  it("orders fields so the table does not reshuffle between polls", () => {
-    const rows = configRows(cfg()).map((r) => r.field)
-    expect(rows).toEqual([...rows].sort((a, b) => a.localeCompare(b)))
+  it("renders the value a person reads and keeps the file's own spelling", () => {
+    const rows = readOnlyGroups(cfg()).flatMap((g) => g.rows)
+    const retention = rows.find((r) => r.field === "log.retention")
+    expect(retention?.display).toBe("3 days")
+    expect(retention?.literal).toBe("72h")
   })
 })
 
@@ -218,6 +227,8 @@ describe("a failed reload", () => {
     mount(<SettingsScreen />)
 
     await user.click(await screen.findByRole("button", { name: /reload config/i }))
+    // Replacing what the gateway serves asks first.
+    await user.click(await screen.findByRole("button", { name: /^reload$/i }))
 
     expect(await screen.findByText(/the reloaded configuration is invalid/i)).toBeInTheDocument()
     expect(screen.queryByText(/^the configuration file is invalid\.$/i)).not.toBeInTheDocument()
@@ -236,6 +247,7 @@ describe("a failed sync", () => {
     mount(<SettingsScreen />)
 
     await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
+    await user.click(await screen.findByRole("button", { name: /^sync$/i }))
 
     expect(await screen.findByText(/models.dev unreachable/i)).toBeInTheDocument()
     expect(screen.getByText(/the previous metadata is still serving/i)).toBeInTheDocument()
@@ -276,5 +288,60 @@ describe("the policy draft", () => {
     // it for an empty box would change behaviour nobody asked to change.
     const write = toWrite({ ...toDraft(policy as never), "policy.cooldown.trip_after": "" })
     expect("trip_after" in write.cooldown).toBe(false)
+  })
+})
+
+describe("the policy write", () => {
+  const draft = {
+    "policy.cooldown.max": "5m",
+    "policy.cooldown.trip_after": "3",
+    "policy.retry.max_attempts": "4",
+    "policy.timeout.total": "10m",
+    "policy.timeout.idle": "30s",
+  }
+
+  it("sends the attempts a number was typed into", () => {
+    expect(toWrite(draft).retry).toEqual({ max_attempts: 4 })
+  })
+
+  it("leaves attempts out when the box was emptied", () => {
+    // Number("") is 0, and the store reads 0 as "no override" and deletes the
+    // setting — reverting to the file default under a success toast.
+    expect(toWrite({ ...draft, "policy.retry.max_attempts": "" }).retry).toBeUndefined()
+  })
+
+  it("leaves attempts out when it will not parse as a whole number", () => {
+    // NaN serialises to null and the Go pointer stays nil, so the field is
+    // ignored with no complaint. A fraction cannot reach a Go *int either.
+    expect(toWrite({ ...draft, "policy.retry.max_attempts": "abc" }).retry).toBeUndefined()
+    expect(toWrite({ ...draft, "policy.retry.max_attempts": "2.5" }).retry).toBeUndefined()
+  })
+})
+
+describe("the read-only section on the page", () => {
+  it("shows a setting with its value, key, source and restart badge", async () => {
+    stubSettingsFetch({})
+    mount(<SettingsScreen />)
+
+    // The humanised value, and the file's own spelling beside it.
+    expect(await screen.findByText("3 days")).toBeInTheDocument()
+    expect(screen.getByText("72h")).toBeInTheDocument()
+    // The dotted key, which is what the YAML file and every error message use.
+    expect(screen.getByText("log.retention")).toBeInTheDocument()
+    // §8.1: where the value came from, said at the point of display.
+    expect(screen.getAllByText("file").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("default").length).toBeGreaterThan(0)
+    // Whether changing it takes a restart, stated rather than discovered.
+    expect(screen.getAllByText("restart").length).toBeGreaterThan(0)
+  })
+
+  it("does not repeat a setting that is editable above it", async () => {
+    stubSettingsFetch({})
+    mount(<SettingsScreen />)
+    await screen.findByText("3 days")
+
+    // policy.retry.max_attempts is an input up the page; its dotted key must
+    // appear once, under that field, not again as a read-only row.
+    expect(screen.getAllByText("policy.retry.max_attempts")).toHaveLength(1)
   })
 })

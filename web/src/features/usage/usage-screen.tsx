@@ -2,6 +2,7 @@ import "./chart-scope.css"
 import { Link } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import {
+  Button,
   Card,
   Table,
   TableBody,
@@ -15,7 +16,7 @@ import {
 import { useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
-import { EmptyLegend } from "../shell/empty-legend"
+import { EmptyState, GhostChart } from "../shell/empty-state"
 import { StackedAreaChart, CostLineChart } from "./usage-charts"
 
 const DIMENSIONS: { value: UsageDimension | "day"; label: string }[] = [
@@ -258,9 +259,15 @@ export function UsageScreen() {
       </div>
 
       {usageRows.length === 0 ? (
-        <EmptyLegend
-          what="Usage rolls up daily once requests start arriving."
-          hint="Spend needs a priced model; unpriced ones show an em-dash."
+        <EmptyState
+          title="Usage rolls up once a day, once requests start arriving"
+          hint="Every served request lands in the day's totals. Spend needs a priced model — a model nobody has priced shows an em dash rather than a zero."
+          action={
+            <Button asChild size="sm">
+              <Link to="/connect">Get a client connected</Link>
+            </Button>
+          }
+          preview={<GhostChart />}
         />
       ) : (
         <>

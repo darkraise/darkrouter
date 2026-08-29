@@ -5,6 +5,7 @@ import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { ModelCapabilities, ModelOverride } from "../../lib/api-types"
+import { ConfirmButton } from "../shell/confirm-button"
 
 function overridePath(provider: string, model: string) {
   return `/api/models/${provider}/${model}/override`
@@ -162,13 +163,17 @@ export function OverrideEditor({
         </div>
 
         <SheetFooter className="mt-6 flex-row justify-between">
-          <Button
+          <ConfirmButton
             variant="destructive"
             disabled={existing === null}
-            onClick={() => remove.mutate(undefined)}
+            title={`Remove the override on ${model}?`}
+            description="The model goes back to whatever the catalogue says about it, which is what discovery imported or what was inferred from the name."
+            confirmLabel="Remove override"
+            destructive
+            onConfirm={() => remove.mutate(undefined)}
           >
             Remove override
-          </Button>
+          </ConfirmButton>
           <Button onClick={() => save.mutate(buildPatch())}>Save</Button>
         </SheetFooter>
       </SheetContent>

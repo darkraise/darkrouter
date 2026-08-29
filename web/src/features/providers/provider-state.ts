@@ -2,11 +2,30 @@ import type { BreakerEntry, DiscoveryHealthRow, Provider } from "../../lib/api-t
 
 export type ProviderState = "healthy" | "degraded" | "disabled" | "unconfigured"
 
+/**
+ * A provider that serves a request with no credential the operator supplies.
+ *
+ * Three styles qualify and they are not the same offer. `none` asks for
+ * nothing and would ignore a key. `optional` answers without one and answers
+ * better with one — a free gateway whose limits rise when it knows who is
+ * calling — so it is keyless without being credential-free. `anonymous`
+ * insists on a key and publishes it, so the release ships the string and the
+ * operator still pastes nothing.
+ */
+export function isKeyless(p: { auth_style?: string }): boolean {
+  return (
+    p.auth_style === "none" || p.auth_style === "optional" || p.auth_style === "anonymous"
+  )
+}
+
 /** The four states the overview emits. `degraded` is not a synonym for
  *  `cooling`: a credential cools, a provider degrades. */
 export function providerState(p: Provider): ProviderState {
   if (!p.enabled) return "disabled"
-  if (p.credentials.length === 0) return "unconfigured"
+  // Keyless first: a provider that needs no key is configured the moment it
+  // exists, and calling it unconfigured sends an operator looking for a
+  // credential that would do nothing.
+  if (p.credentials.length === 0) return isKeyless(p) ? "healthy" : "unconfigured"
   if (p.credentials.some((c) => c.cooling)) return "degraded"
   return "healthy"
 }

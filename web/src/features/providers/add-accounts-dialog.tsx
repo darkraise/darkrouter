@@ -8,6 +8,7 @@ import {
   DialogTitle,
   Input,
   Label,
+  Progress,
   Switch,
 } from "darkraise-ui"
 import { api } from "../../lib/api"
@@ -15,8 +16,15 @@ import { useApiMutation } from "../../lib/mutations"
 import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
-import { AccountFields, type AccountDraft, draftAccounts, emptyAccounts, maskSecret } from "./account-fields"
-import { addCredentials, reportAdded } from "./accounts"
+import { AccountFields, secretFieldFor, type AccountDraft, emptyAccounts } from "./account-fields"
+import {
+  addAccountsLabel,
+  addCredentials,
+  countAccounts,
+  progressLabel,
+  reportAdded,
+  type AddProgress,
+} from "./accounts"
 import { ProviderIcon } from "./provider-icon"
 
 export function filterPresets(
@@ -51,18 +59,73 @@ export function planFor(
   return { needsProvider: provider === undefined, provider }
 }
 
+/**
+ * Whether submitting also has to write the provider's free-models setting.
+ *
+ * A provider that is about to be created carries the flag in its POST, and one
+ * whose setting the operator left alone needs no write at all — so this is
+ * true only for a change to a provider that already exists.
+ */
+export function freeOnlyChange(
+  draft: AccountDraft,
+  plan: { needsProvider: boolean; provider?: Provider } | null,
+): boolean {
+  if (!plan || plan.needsProvider || !plan.provider) return false
+  return draft.freeModelsOnly !== plan.provider.free_models_only
+}
+
+/** What a fresh visit starts from. The free-models box is a provider setting,
+ *  so against a provider that already exists it opens on what that provider
+ *  holds: an unticked box over a free-only provider would misreport it, and
+ *  saving would then quietly turn the setting off. */
+function draftFor(provider?: Provider): AccountDraft {
+  return provider
+    ? { ...emptyAccounts, freeModelsOnly: provider.free_models_only }
+    : emptyAccounts
+}
+
 function distinctSorted(values: string[]): string[] {
   return [...new Set(values)].sort()
 }
 
-const STEPS = ["Provider", "Accounts", "Review"] as const
-type Step = 0 | 1 | 2
+/** The screens, in order. Opened from a provider that already exists there is
+ *  nothing to pick, so the same step index means a different screen — which is
+ *  why the sequence is a value rather than a constant with fixed indices.
+ *
+ *  There is no review screen. Everything it restated is on the accounts step
+ *  and still editable there — the parsed accounts, the two settings and what
+ *  each does — so it asked the operator to read the form back to itself before
+ *  letting them submit the form. */
+export type Phase = "provider" | "accounts"
 
-function Stepper({ step }: { step: Step }) {
+export function phases(locked: boolean): Phase[] {
+  return locked ? ["accounts"] : ["provider", "accounts"]
+}
+
+const PHASE_LABEL: Record<Phase, string> = {
+  provider: "Provider",
+  accounts: "Accounts",
+}
+
+/** What the accounts are being added to. A preset and a provider disagree
+ *  about most things and agree about these four, which is all the summary
+ *  strips and the write path need. */
+type Chosen = {
+  id: string
+  name: string
+  kind: string
+  base_url: string
+  /** Which brand mark to draw. A preset's own id is its preset, but a provider
+   *  imported from config can carry a different one — reading `id` there shows
+   *  an anonymous monogram beside a detail page showing the real mark. */
+  preset?: string
+}
+
+function Stepper({ steps, step }: { steps: Phase[]; step: number }) {
   return (
     <ol className="mb-4 flex items-center gap-2" aria-label="Progress">
-      {STEPS.map((label, i) => (
-        <li key={label} className="flex items-center gap-2">
+      {steps.map((phase, i) => (
+        <li key={phase} className="flex items-center gap-2">
           <span
             className={
               i === step
@@ -80,9 +143,9 @@ function Stepper({ step }: { step: Step }) {
               i === step ? "text-sm font-medium" : "text-sm text-[hsl(var(--legend))]"
             }
           >
-            {label}
+            {PHASE_LABEL[phase]}
           </span>
-          {i < STEPS.length - 1 && (
+          {i < steps.length - 1 && (
             <span className="mx-1 w-6 border-t border-dashed" aria-hidden="true" />
           )}
         </li>
@@ -143,55 +206,112 @@ function PresetRow({
  * There is no provider id to type and no raw form. The set of providers is
  * whatever the release ships; an operator adds keys to one, they do not invent
  * one.
+ *
+ * Opened from a provider's own page there is one step rather than two: the
+ * provider is settled, and asking again for something the operator has already
+ * navigated to would be a step that can only be answered one way.
  */
 export function AddAccountsDialog({
   open,
   onOpenChange,
   onDone,
+  provider,
+  preset,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone?: (providerId: string) => void
+  /** Set when the dialog opens from a provider that already exists: the picker
+   *  is skipped and no provider row is created. */
+  provider?: Provider
+  /** Set when it opens from a provider the release supports but nobody has
+   *  configured. The picker is skipped for the same reason — the operator
+   *  named the provider by navigating to it — and the first account creates
+   *  its row. */
+  preset?: Preset
 }) {
   const presets = usePresets()
   const providers = useProviders()
-  const [step, setStep] = useState<Step>(0)
+  const [step, setStep] = useState(0)
   const [q, setQ] = useState("")
   const [surface, setSurface] = useState("")
   const [authKind, setAuthKind] = useState("")
   const [freeTier, setFreeTier] = useState(false)
   const [selected, setSelected] = useState<Preset | null>(null)
-  const [accounts, setAccounts] = useState<AccountDraft>(emptyAccounts)
+  const [accounts, setAccounts] = useState<AccountDraft>(() => draftFor(provider))
+  const [progress, setProgress] = useState<AddProgress | null>(null)
+  const [wasOpen, setWasOpen] = useState(open)
+
+  // The row the free-models box reads its setting from. A preset usually has
+  // none — that is what makes it a preset — but one can appear between the
+  // page loading and the dialog opening, and the box has to show what that row
+  // holds rather than write a default over it.
+  const settled =
+    provider ?? providers.data?.providers?.find((p) => p.id === preset?.id)
+
+  // Each visit re-reads the provider's free-models setting. The dialog outlives
+  // any one visit, so a draft seeded when it mounted would still be showing --
+  // and would write back -- a value that has since changed elsewhere.
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setAccounts(draftFor(settled))
+  }
+
+  const locked = provider !== undefined || preset !== undefined
+  const steps = phases(locked)
+  const phase = steps[Math.min(step, steps.length - 1)] ?? "accounts"
+  const chosen: Chosen | null = provider ?? preset ?? selected
 
   function reset() {
     setStep(0)
     setSelected(null)
-    setAccounts(emptyAccounts)
+    setAccounts(draftFor(settled))
+    setProgress(null)
     setQ("")
   }
 
   const existing = providers.data?.providers ?? []
-  const plan = selected ? planFor(selected, existing) : null
+  // A preset goes through planFor rather than straight to "create it": the row
+  // may have appeared since the page loaded, and a second POST would 409
+  // against it.
+  const target = preset ?? selected
+  const plan = provider
+    ? { needsProvider: false, provider }
+    : target
+      ? planFor(target, existing)
+      : null
 
   const submit = useApiMutation({
     mutationFn: async () => {
-      if (!selected) throw new Error("no provider chosen")
+      if (!chosen) throw new Error("no provider chosen")
+      setProgress(null)
       // The provider row is created only when it does not exist yet, and from
       // the preset alone — id, kind, base URL and auth style all come from the
       // release rather than from anything typed here.
       if (plan?.needsProvider) {
         await api.post<{ id: string }>("/api/providers", {
-          id: selected.id,
-          preset: selected.id,
+          id: chosen.id,
+          preset: chosen.id,
+          free_models_only: accounts.freeModelsOnly,
+        })
+      } else if (freeOnlyChange(accounts, plan)) {
+        // Against a provider that already exists the flag is a setting to be
+        // written, not part of the POST that creates the row. Sent on its own
+        // so the box means the same thing here as it does on the provider's
+        // settings, rather than being a control that looks applied and is not.
+        await api.patch(`/api/providers/${chosen.id}`, {
           free_models_only: accounts.freeModelsOnly,
         })
       }
-      return addCredentials(selected.id, accounts)
+      return addCredentials(chosen.id, accounts, setProgress)
     },
-    invalidates: [keys.providers, keys.health, keys.overview],
+    // The catalogue too: the first credential makes the provider
+    // discoverable, and a sweep lands models the screen that opened this
+    // dialog is showing.
+    invalidates: [keys.providers, keys.health, keys.overview, keys.models, keys.discovery],
     onSuccess: (result) => {
       reportAdded(result)
-      const id = selected?.id
+      const id = chosen?.id
       onOpenChange(false)
       reset()
       if (id) onDone?.(id)
@@ -202,8 +322,7 @@ export function AddAccountsDialog({
   const filtered = filterPresets(all, { q, surface, authKind, freeTier })
   const surfaceOptions = distinctSorted(all.flatMap((p) => p.surfaces))
   const authKindOptions = distinctSorted(all.map((p) => p.auth_kind))
-  const planned = draftAccounts(accounts)
-  const count = planned.length
+  const count = countAccounts(accounts)
 
   return (
     <Dialog
@@ -218,9 +337,11 @@ export function AddAccountsDialog({
           <DialogTitle>Add accounts</DialogTitle>
         </DialogHeader>
 
-        <Stepper step={step} />
+        {/* A one-step progress indicator is a claim that there is a sequence
+            to follow. Opened from a provider there is not: it is a form. */}
+        {steps.length > 1 && <Stepper steps={steps} step={step} />}
 
-        {step === 0 && (
+        {phase === "provider" && (
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -249,8 +370,18 @@ export function AddAccountsDialog({
                   provider={existing.find((e) => e.id === p.id)}
                   selected={selected?.id === p.id}
                   onSelect={() => {
+                    // A provider that already exists brings its own
+                    // free-models setting; the box has to show that rather
+                    // than whatever the last-looked-at provider left behind.
+                    if (p.id !== selected?.id) {
+                      const target = existing.find((e) => e.id === p.id)
+                      setAccounts((a) => ({
+                        ...a,
+                        freeModelsOnly: target?.free_models_only ?? false,
+                      }))
+                    }
                     setSelected(p)
-                    setStep(1)
+                    setStep(step + 1)
                   }}
                 />
               ))}
@@ -265,14 +396,14 @@ export function AddAccountsDialog({
           </div>
         )}
 
-        {step === 1 && selected && (
+        {phase === "accounts" && chosen && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3 rounded-[var(--radius)] border p-3">
-              <ProviderIcon preset={selected.id} id={selected.id} name={selected.name} size={32} />
+              <ProviderIcon preset={chosen.preset ?? chosen.id} id={chosen.id} name={chosen.name} size={32} />
               <span className="min-w-0 flex-1">
-                <span className="block font-medium">{selected.name}</span>
+                <span className="block font-medium">{chosen.name}</span>
                 <span className="block truncate font-mono text-sm text-[hsl(var(--legend))]">
-                  {selected.kind} · {selected.base_url}
+                  {chosen.kind} · {chosen.base_url}
                 </span>
               </span>
             </div>
@@ -282,80 +413,59 @@ export function AddAccountsDialog({
                 between two. */}
             <div className="ml-12 border-t" aria-hidden="true" />
 
-            <AccountFields value={accounts} onChange={setAccounts} autoFocus />
+            <AccountFields
+              value={accounts}
+              onChange={setAccounts}
+              autoFocus
+              field={secretFieldFor(chosen.preset ?? chosen.id)}
+            />
           </div>
         )}
 
-        {step === 2 && selected && (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3 rounded-[var(--radius)] border p-3">
-              <ProviderIcon preset={selected.id} id={selected.id} name={selected.name} size={32} />
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium">{selected.name}</span>
-                <span className="block font-mono text-sm text-[hsl(var(--legend))]">
-                  {plan?.needsProvider
-                    ? "not configured yet — the first account sets it up"
-                    : `${plan?.provider?.credentials.length ?? 0} already configured`}
+        <div className="mt-2 flex flex-col gap-2 border-t pt-3">
+          {/* Checking a key is a round trip to the provider per account, so a
+              paste of twenty is a wait long enough that silence reads as a
+              hang. The line names the account it is on, because the one it
+              stops at is the one an operator needs to look at. */}
+          {submit.isPending && progress && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm">{progressLabel(progress)}</span>
+                <span className="text-sm tabular-nums text-[hsl(var(--legend))]">
+                  {Math.round((progress.done / progress.total) * 100)}%
                 </span>
-              </span>
-              <Badge variant="outline">
-                +{count} {count === 1 ? "account" : "accounts"}
-              </Badge>
+              </div>
+              <Progress value={progress.done} max={progress.total} />
             </div>
-
-            {/* The masked keys, in the order they will be written. This is the
-                last point at which a stray line is cheap to notice. */}
-            <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto rounded-[var(--radius)] border p-3 font-mono text-sm">
-              {planned.map((a) => (
-                <li key={a.secret}>
-                  {a.label} · {maskSecret(a.secret)}
-                </li>
-              ))}
-            </ul>
-
-            <ul className="flex flex-col gap-1 text-sm text-[hsl(var(--legend))]">
-              <li>
-                {accounts.freeModelsOnly
-                  ? "Discovery will import only models it can show are free."
-                  : "Discovery will import every model the provider lists."}
-              </li>
-              <li>
-                {accounts.verifyKeys
-                  ? "Each key is probed, and any the provider refuses is removed again."
-                  : "Keys are stored without being checked."}
-              </li>
-            </ul>
-          </div>
-        )}
-
-        <div className="mt-2 flex items-center gap-2 border-t pt-3">
-          {step > 0 && (
-            <Button
-              variant="ghost"
-              onClick={() => setStep((step - 1) as Step)}
-              disabled={submit.isPending}
-            >
-              Back
-            </Button>
           )}
-          <div className="ml-auto flex items-center gap-2">
-            {step === 1 && (
-              <>
-                {count === 0 && (
-                  <span className="text-sm text-[hsl(var(--legend))]">
-                    Add at least one key to continue
-                  </span>
-                )}
-                <Button disabled={count === 0} onClick={() => setStep(2)}>
-                  Review
-                </Button>
-              </>
-            )}
-            {step === 2 && (
-              <Button disabled={submit.isPending} onClick={() => submit.mutate(undefined)}>
-                {count === 1 ? "Add account" : `Add ${count} accounts`}
+
+          <div className="flex items-center gap-2">
+            {step > 0 && (
+              <Button
+                variant="ghost"
+                onClick={() => setStep(step - 1)}
+                disabled={submit.isPending}
+              >
+                Back
               </Button>
             )}
+            <div className="ml-auto flex items-center gap-2">
+              {phase === "accounts" && (
+                <>
+                  {count === 0 && (
+                    <span className="text-sm text-[hsl(var(--legend))]">
+                      Add at least one key to continue
+                    </span>
+                  )}
+                  <Button
+                    disabled={count === 0 || submit.isPending}
+                    onClick={() => submit.mutate(undefined)}
+                  >
+                    {submit.isPending ? "Adding…" : addAccountsLabel(count)}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </DialogContent>
