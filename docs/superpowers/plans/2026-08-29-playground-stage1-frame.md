@@ -32,8 +32,17 @@ These apply to every task without restating.
 | D3 | Every assertion in the five existing suites still passes | `cd web && npm test` |
 | D4 | Streaming does not yank a reader back to the bottom | `cd web && npm test -- transcript` |
 | D5 | The playground fills the viewport with no dead band | UAT at 1600×1000: the composer sits at the foot of the frame, the config pane border runs full height |
-| D6 | The metrics strip does not shift the transcript when it appears | UAT: send a prompt; the transcript does not jump when the first reading lands |
+| ~~D6~~ | ~~The metrics strip does not shift the transcript when it appears~~ | Struck — see below |
 | D7 | Deployed and serving the build under test | `docker ps` healthy, `/healthz` 200, and the served bundle byte-matches the local build per `CLAUDE.md` |
+
+D6 gated a change that was later reversed. Task 6 originally made the metrics strip render
+unconditionally so it would reserve its height ahead of the first reading, and a live look at the
+result showed a row of em dashes sitting above an empty chat — exactly the "furniture" the
+pre-existing code comment had warned against. The `hasReadings` gate was restored, so the strip
+still shifts the transcript when the first reading lands; that is the pre-existing behaviour, and
+fixing it is out of scope for a stage whose goal is layout, not the metrics strip's appearance.
+Spec `docs/superpowers/specs/2026-08-29-playground-overhaul-design.md` §4.2 revisits this in stage
+4, where Lab mode reserves the strip's height.
 
 ---
 
@@ -1045,3 +1054,26 @@ git commit -m "docs(playground): record the stage 1 gate"
 **Task 3 is where the risk is.** The streaming loop has four comments describing bugs it already survived: the functional `setMessages` update, TTFT measured on first text rather than first chunk, the trace fetched after the fact rather than tokenised client-side, and abort treated as a decision rather than an error. Every one of them is a defect someone already paid for. Move them with their code.
 
 **Task 6 has no unit test and that is deliberate.** Asserting that an element carries `min-h-0` tests the implementation, not the behaviour, and would need rewriting the moment a class changed. Its gate is Task 7's live check, which is what `CLAUDE.md` requires for exactly this reason.
+
+---
+
+## Stage 1 result
+
+- **D2 — met.** `rg 'playground/chat"|from "\./chat"' web/src` returns nothing, and `chat.tsx` is deleted.
+- **D3 — met.** The full console suite passes: 530 tests across 53 files, and `npm run typecheck` is clean.
+- **D4 — met.** The `transcript` suite passes 8/8, including the case where a reader who has scrolled up is not pulled back to the bottom.
+- **D5 — met.** Verified live at 1600×1000 and 1280×800, in light and dark, on the Chat, Compare and Auxiliary tabs. The screen fills its frame, the composer sits at the foot, the config pane's border runs the full height, and the empty state is centred in the region it has. The dead band measured below the lowest content is 0px, against roughly 450px before the stage.
+- **D6 — struck.** See the note under the Definition of Done table above.
+- **D7 — met.** The container is healthy, `/healthz` returns 200 on port 8091, and the served bundle byte-matches the locally built one (`cmp` clean).
+
+## Decisions taken during execution
+
+**Task 1 was dropped entirely.** It existed to pin `pool: "threads"` in vitest, on the spec's claim that the default fork pool silently skips part of the suite. Measured at the lockfile's vitest 4.1.11, `--pool=forks` and `--pool=threads` both run 51 files and 517 tests, all passing, so the premise did not hold. The task was dropped and spec §12 corrected to record the measurement rather than re-deriving the claim later.
+
+**A fourth importer was added to Task 2.** `web/src/features/providers/test-drawer.tsx:27` imported `drainSSE` from `../playground/chat`, and the plan's list of three importers missed it. Without repointing this one too, the providers test drawer would have broken the moment `chat.tsx` was deleted.
+
+**D2's check was widened.** The original pattern matched `"./chat"` and `"../chat"` but not `"../playground/chat"`, which is the form the test drawer actually used. Left as written, the check would have reported clean while an importer remained.
+
+**`shrink-0` on `MetricsStrip` was judged correct for the providers test drawer too**, which renders the same component. The class only binds as a flex child, and not shrinking is the right behaviour in that screen's flex column as well, so no exception was carved out for it.
+
+**`hasReadings` was deleted in Task 6 and restored in the fix round.** Deleting it was a defensible call against carrying an uncalled, untested export for stages that might never arrive. The live look in Task 7 then produced concrete evidence against the change it was part of — the row of em dashes above an empty chat — and restoring the pre-existing behaviour beat inventing a third option in a stage whose scope is layout, not the metrics strip.
