@@ -1366,3 +1366,50 @@ git commit -m "docs(playground): record the stage 2 gate"
 **Structured output resists the obvious implementation.** Every reference product ships a JSON-mode boolean. Here it would do nothing on two of three dialects, because both edges require a schema to be present. If a task starts to feel like it wants a switch, re-read spec §7.2.
 
 **A disabled control keeps its value.** That is tested in Task 4 and checked live in Task 8, because it is what makes a preset non-lossy in stage 3 — the stage that adds presets is the one that will discover if this was got wrong.
+
+---
+
+## Stage 2 result
+
+Gated on 2026-08-29 against the build deployed from commit `31db787`, at
+1600×1000 and 1280×800 in both light and dark.
+
+- **Full gate — clean.** The console suite passes 563 tests across 56 files,
+  `npm run typecheck` and `npm run build` are clean, and `go build ./...`,
+  `go vet ./...` and `go test -count=1 ./internal/...` all pass with every
+  package `ok`.
+- **D3 — met.** On openai, Top K is disabled and carries "The OpenAI chat wire
+  has no top_k field. Switch the dialect to anthropic or gemini to send it.",
+  while Response schema is live. Switching to anthropic reverses both: Top K
+  enables, and Response schema disables under "Darkrouter's Anthropic edge does
+  not read response_format, so a schema sent here would be dropped before
+  routing. Switch to openai or gemini." Gemini, checked as well, leaves Top K
+  and Response schema both live.
+- **Value retention — met.** 40 typed into Top K on anthropic, then the dialect
+  switched to openai: the box is disabled and still reads 40, rendered at half
+  opacity rather than blanked to its placeholder. The value also survived the
+  round trip back to anthropic and on to gemini. A preset saved through this
+  pane is not lossy.
+- **Reasoning — met.** Effort is live and Budget disabled on openai; the pair
+  swaps on anthropic; gemini disables Effort and leaves Budget live. At no
+  dialect are both live, and each disabled control carries its reason.
+- **Pane height — met.** With all four accordion sections open the pane holds
+  1474px of content in an 816px scroll box at 1600×1000 and a 533px one at
+  1280×800. The document itself does not scroll at either size
+  (`scrollHeight == clientHeight`), there is no horizontal overflow, and the
+  pane's lower edge sits exactly on the viewport bottom. Sections open and
+  close independently.
+- **D5 — met.** A live run of alias `fast` on the anthropic dialect with Top K
+  set, routed to groq's OpenAI-compatible endpoint, answered and showed
+  `top_k → openaicompat: no equivalent parameter` on a warning line beneath the
+  route line, with its alert icon.
+- **Deploy — met.** The container is healthy, `/healthz` answers 200 on port
+  8091, and the served bundle is byte-identical to the local build (`cmp`
+  clean).
+
+No defect was found, so nothing in Tasks 4–6 was reopened.
+
+One observation, not a defect: a disabled control's reason is a full-width
+paragraph inside its half of the two-column grid, so a long reason under Top K
+leaves a tall gap beside Top P. It reads correctly at both widths and clips
+nothing.
