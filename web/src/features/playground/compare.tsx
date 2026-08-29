@@ -87,22 +87,28 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
           Add a column
         </Button>
       </div>
-      <div
-        className="grid gap-4"
-        style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
-      >
-        {columns.map((column, index) => (
-          <CompareColumn
-            key={column.id}
-            column={column}
-            index={index}
-            candidates={candidates}
-            loading={loading}
-            removable={columns.length > MIN_COLUMNS}
-            onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
-            onRemove={() => setColumns((cs) => cs.filter((c) => c.id !== column.id))}
-          />
-        ))}
+      {/* Columns have a floor and the row scrolls past it. Left to shrink
+          freely, a fourth column on a narrow screen squeezes the model
+          combobox down to its chevron, and a comparison whose columns no
+          longer say which model they ran is worse than one that scrolls. */}
+      <div className="overflow-x-auto">
+        <div
+          className="grid gap-4"
+          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(14rem, 1fr))` }}
+        >
+          {columns.map((column, index) => (
+            <CompareColumn
+              key={column.id}
+              column={column}
+              index={index}
+              candidates={candidates}
+              loading={loading}
+              removable={columns.length > MIN_COLUMNS}
+              onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
+              onRemove={() => setColumns((cs) => cs.filter((c) => c.id !== column.id))}
+            />
+          ))}
+        </div>
       </div>
     </div>
   )
