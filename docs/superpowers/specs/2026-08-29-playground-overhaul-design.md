@@ -321,11 +321,24 @@ drops top_k as having no equivalent, and `build.go:53-60` downgrades a reasoning
 nearest effort band. So on the Anthropic dialect, a temperature the pane happily enabled goes into
 the void the moment reasoning is switched on, and today nothing on this screen says so.
 
-The warnings already ride the trace, and the trace types already declare them. Lab renders them
-**beside the run they belong to**, under the metrics strip: field, target and reason, in the same
-quiet register as the route line. This is the natural completion of §7.2's principle rather than a
-new feature — a control that was accepted, sent, and then dropped upstream is exactly as misleading
-as one that was never on the wire, and this is the only screen in the console positioned to show it.
+The warnings already ride the trace, and the trace types already declare them — but **as flat
+strings, not as a structured triple**, which is worth stating because the obvious implementation
+assumes otherwise. `ir.Warning{Field, Target, Reason}` is flattened by `Warning.String()`
+(`internal/ir/ir.go:255`) into `"field -> target: reason"` — for example
+`"top_k -> openai: not expressible"` — collected by `warningStrings` (`internal/exec/exec.go:1063`),
+persisted as `warnings_json`, and served on the trace as `warnings?: string[]`
+(`web/src/lib/api-types.ts:150`, optional). The screen therefore renders the strings as they
+arrive. It must not parse them back into a triple: a reason containing `" -> "` or `": "` would
+mis-split, and the client would be duplicating a format only the Go side owns.
+
+They render **under the answer they belong to**, beneath the route line, in the same quiet register.
+Per turn rather than per screen, because a transcript of six answers may have warnings on only one
+of them, and because the route line above already establishes the pattern of "what happened to this
+turn". This is the natural completion of §7.2's principle rather than a new feature — a control that
+was accepted, sent, and then dropped upstream is exactly as misleading as one that was never on the
+wire, and this is the only screen in the console positioned to show it.
+
+The trace is already fetched for every run, so this costs no new request.
 
 Chat mode shows a single quiet marker when a run produced warnings, expanding to the list on click.
 The full treatment belongs to the instrument.
