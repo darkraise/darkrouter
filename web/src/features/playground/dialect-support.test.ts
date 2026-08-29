@@ -59,4 +59,18 @@ describe("what each dialect can carry", () => {
       }
     }
   })
+
+  it("answers every cell with a decision, never with undefined", () => {
+    // The table is total, so the compiler catches an omitted cell first. This
+    // is the runtime net for a caller that reached it past the types: an
+    // undefined answer would read as unsupported-with-no-reason, which draws a
+    // disabled control that cannot say why.
+    for (const d of DIALECTS) {
+      for (const c of CONTROLS) {
+        const reason = reasonFor(d, c)
+        expect(reason === null || typeof reason === "string").toBe(true)
+        if (typeof reason === "string") expect(reason.length).toBeGreaterThan(0)
+      }
+    }
+  })
 })
