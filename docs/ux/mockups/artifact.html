@@ -12293,7 +12293,7 @@ body.theme-light .preset-scrim,
 
         <div class="region">
 
-          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; The request settings moved out of the chat form and sit above the tabs: model, dialect and sampling now describe the request rather than one surface, so they hold across a tab switch instead of resetting on one.</span></p>
+          <p><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; The request settings moved out of the chat form and sit beside the surfaces, outside any one tab: model, dialect and sampling describe the request rather than one surface, so they hold across a tab switch instead of resetting on one.</span></p>
 
           <div class="pg-head">
             <p class="section-title">Playground</p>
@@ -12307,6 +12307,29 @@ body.theme-light .preset-scrim,
             <span class="segmented-option">Count</span>
           </div>
 
+          <p><b class="pin" data-pin="1b">1b</b><span class="pin-note">1b &middot; metrics.tsx &mdash; the MetricsStrip appears once a run has produced a reading (hasReadings) and stays for the rest of the session. This turn has already answered, so the strip is shown.</span></p>
+
+          <div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--gutter);padding:10px 0;border-bottom:1px solid var(--border-subtle)">
+            <div class="pg-field">
+              <p class="legend-caps">first token</p>
+              <span class="range-track pg-param-track" style="width:140px">
+                <span class="range-fill" style="left:0;right:79%"></span>
+              </span>
+              <p class="pg-resolved">291ms &middot; total 1.4s</p>
+            </div>
+            <div class="pg-field">
+              <p class="legend-caps">tokens</p>
+              <span class="range-track pg-param-track" style="width:140px">
+                <span class="range-fill" style="left:0;right:73%"></span>
+              </span>
+              <p class="pg-resolved">26 in &middot; 71 out</p>
+            </div>
+            <div class="pg-field">
+              <p class="legend-caps">tokens/s</p>
+              <p class="pg-resolved">50.7</p>
+            </div>
+          </div>
+
         </div>
 
         <div class="region">
@@ -12316,11 +12339,6 @@ body.theme-light .preset-scrim,
           <div class="pg-split">
 
             <div class="panel pg-panel">
-              <div class="pg-head">
-                <p class="section-title">Chat</p>
-                <span class="micro">2 turns &middot; 26 tok sent &middot; 71 tok received</span>
-              </div>
-
               <div class="well pg-turns">
 
                 <div class="pg-turn">
@@ -12353,11 +12371,11 @@ def ulid_ms(ulid: str) -&gt; int:
 
               </div>
 
-              <div class="pg-compose">
-                <button class="control control-ghost">+ New conversation</button>
-                <span class="pg-spacer"></span>
+              <div class="pg-compose" style="align-items:flex-end">
+                <span class="field-input" style="flex:1 1 auto;height:auto;min-height:36px;display:flex;align-items:center;color:var(--legend)">Ask the router something</span>
                 <button class="control control-primary">Send</button>
               </div>
+              <a href="#" class="spec-note" style="display:inline-block;margin-top:8px;text-decoration:underline;text-underline-offset:2px">New conversation</a>
             </div>
 
             <aside class="panel pg-panel" style="display:flex;flex-direction:column;gap:var(--gutter)">
@@ -12417,7 +12435,7 @@ def ulid_ms(ulid: str) -&gt; int:
 
                     <label class="field">
                       <span class="legend-caps">Stop sequences</span>
-                      <input class="field-input" placeholder="one per line">
+                      <textarea class="field-input" rows="2" placeholder="one per line" style="height:auto;resize:none"></textarea>
                     </label>
 
                     <label class="field">
@@ -12460,7 +12478,7 @@ def ulid_ms(ulid: str) -&gt; int:
 
                     <label class="field">
                       <span class="legend-caps">Response schema</span>
-                      <span class="field-input field-input-inert">JSON Schema, e.g. {&hellip;}</span>
+                      <span class="field-input field-input-inert">JSON Schema, e.g. {"type":"object","properties":{&hellip;}}</span>
                       <span class="spec-note">Darkrouter's Anthropic edge does not read response_format, so a schema sent here would be dropped before routing. Switch to openai or gemini.</span>
                     </label>
 
