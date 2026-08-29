@@ -49,6 +49,11 @@ services:
       #   docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
       #     hash-password -password 'yours'
       DARKROUTER_ADMIN_PASSWORD_HASH: ${DARKROUTER_ADMIN_PASSWORD_HASH:-}
+      # Optional, and an alternative to running `auggie login` inside the
+      # container: the bundled Augment CLI reads its session from here when it
+      # is set. Either way the credential stays with the CLI — darkrouter never
+      # reads it, and it is not in the keyring with the provider keys.
+      AUGMENT_SESSION_AUTH: ${AUGMENT_SESSION_AUTH:-}
       # Provider keys the configuration interpolates. Providers added through the
       # dashboard are stored encrypted in the database and need nothing here.
       GROQ_KEY: ${GROQ_KEY:-}
@@ -59,6 +64,11 @@ services:
       # Carries darkrouter.yaml, darkrouter.db and its WAL. The database holds
       # encrypted credentials, so this directory is as sensitive as .env.
       - ./data:/data
+      # Where `auggie login` keeps its session. The Augment provider runs the
+      # bundled CLI under the operator's own Augment account, and darkrouter
+      # never sees that credential — so it lives here rather than in the
+      # database, and without this volume every deploy would log it out.
+      - auggie-state:/home/darkrouter/.augment
 
     security_opt:
       - no-new-privileges:true
@@ -107,5 +117,6 @@ services:
       - caddy-config:/config
 
 volumes:
+  auggie-state:
   caddy-data:
   caddy-config:
