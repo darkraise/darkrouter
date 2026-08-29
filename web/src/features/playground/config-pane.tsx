@@ -12,7 +12,7 @@ import {
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "darkraise-ui"
 import { ModelCombobox, useModelCandidates } from "../shell/model-combobox"
 import { DIALECTS, type PlaygroundConfig } from "./config"
-import { parseTools } from "./chat"
+import { parseTools } from "./lib/request"
 import type { PlaygroundDialect } from "../../lib/api-types"
 
 /**

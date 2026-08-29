@@ -24,7 +24,7 @@ import {
 } from "darkraise-ui"
 import { api, stream } from "../../lib/api"
 import { keys, useModels } from "../../lib/queries"
-import { drainSSE } from "../playground/chat"
+import { drainSSE } from "../playground/lib/stream"
 import {
   MetricsStrip,
   NO_METRICS,

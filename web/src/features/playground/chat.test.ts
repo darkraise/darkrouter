@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { parseTools, chatBody, seedFromTrace, drainSSE, extractUnaryText } from "./chat"
+import { drainSSE, extractUnaryText } from "./lib/stream"
+import { parseTools, chatBody, seedFromTrace } from "./lib/request"
 import type { RequestTrace } from "../../lib/api-types"
 
 describe("parseTools", () => {
