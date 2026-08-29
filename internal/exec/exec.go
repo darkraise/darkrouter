@@ -74,6 +74,11 @@ type Deps struct {
 	// Auth resolves a non-static credential into an authorizer. Nil serves
 	// static styles only, which is every provider before phase 8.
 	Auth AuthResolver
+
+	// Protocols are non-network schemes a provider's base URL may name, keyed
+	// by scheme. A local CLI provider is reached this way: the request is built
+	// and classified exactly as an HTTP one, and only the transport differs.
+	Protocols map[string]http.RoundTripper
 }
 
 type Executor struct {
@@ -98,6 +103,24 @@ func New(store *config.Store, src provider.Source, adapters map[string]adapter.A
 	for kind, ad := range adapters {
 		surfaces[kind] = adapter.SurfacesOf(ad)
 	}
+	tr := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: t.Connect}).DialContext,
+		ResponseHeaderTimeout: t.FirstByte,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		// Spec §8: bytes must arrive as the provider sent them, so the
+		// forwarder can pass them through unchanged. Go otherwise adds
+		// Accept-Encoding: gzip and decompresses transparently, which
+		// would make fidelity depend on a precondition rather than on
+		// a setting. The IR path pays more bandwidth for it.
+		DisableCompression: true,
+	}
+	for scheme, rt := range deps.Protocols {
+		tr.RegisterProtocol(scheme, rt)
+	}
 	return &Executor{
 		store: store, src: src, adapters: adapters, adapterSurfaces: surfaces, deps: deps,
 		client: &http.Client{
@@ -106,21 +129,7 @@ func New(store *config.Store, src provider.Source, adapters map[string]adapter.A
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				DialContext:           (&net.Dialer{Timeout: t.Connect}).DialContext,
-				ResponseHeaderTimeout: t.FirstByte,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ForceAttemptHTTP2:     true,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				// Spec §8: bytes must arrive as the provider sent them, so the
-				// forwarder can pass them through unchanged. Go otherwise adds
-				// Accept-Encoding: gzip and decompresses transparently, which
-				// would make fidelity depend on a precondition rather than on
-				// a setting. The IR path pays more bandwidth for it.
-				DisableCompression: true,
-			},
+			Transport: tr,
 		},
 	}
 }
@@ -225,7 +234,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		// Refused before parsing, but still logged: the client sent bytes and
 		// got a response, which is an event the operator's records must cover.
 		start := time.Now()
-		rec, done := e.newRecord(start, d.Name(), string(ir.SurfaceLLM))
+		rec, done := e.newRecord(r, start, d.Name(), string(ir.SurfaceLLM))
 		defer done()
 		w.Header().Set("X-Darkrouter-Request", rec.ID)
 		w.Header().Set("X-Darkrouter-Attempts", "0")
@@ -243,7 +252,7 @@ func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect
 		// that never parsed has no op to name the surface it was asking for,
 		// and the operator is still owed the record.
 		start := time.Now()
-		rec, done := e.newRecord(start, d.Name(), string(ir.SurfaceLLM))
+		rec, done := e.newRecord(r, start, d.Name(), string(ir.SurfaceLLM))
 		defer done()
 		w.Header().Set("X-Darkrouter-Request", rec.ID)
 		w.Header().Set("X-Darkrouter-Attempts", "0")
@@ -920,7 +929,7 @@ func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
 	if style == "" {
 		style = presetStyle(p.Preset)
 	}
-	secret := secretOf(p, c.KeyID)
+	secret := secretOf(p, c.KeyID, style)
 	if auth.IsStatic(style) {
 		return secret, nil, nil
 	}
@@ -950,19 +959,36 @@ func credentialKind(p provider.Provider, keyID string) string {
 // presetStyle reads the shipped style for a provider whose row does not
 // override it. It mirrors rerankPath, which already reaches presets from here.
 func presetStyle(preset string) string {
-	if preset == "" {
-		return ""
-	}
-	return catalog.Embedded()[preset].Auth.Style
+	return presetAuth(preset).Style
 }
 
-func secretOf(p provider.Provider, keyID string) string {
+// secretOf resolves the bare credential for one candidate. The style is the
+// effective one — the row's override where it has one — because an operator who
+// re-declared their endpoint as keyless is the authority on how it is reached,
+// and sending a published key at it anyway would be this function overruling
+// the row.
+func secretOf(p provider.Provider, keyID, style string) string {
 	for _, c := range p.Credentials {
 		if c.ID == keyID {
 			return c.Secret
 		}
 	}
-	return ""
+	if style != auth.StyleAnonymous {
+		return ""
+	}
+	// A keyless candidate carries no credential id at all, which is how an
+	// anonymous provider reaches here: the published key its preset ships is
+	// the credential, and nothing upstream had one to hand over.
+	return presetAuth(p.Preset).Key
+}
+
+// presetAuth reads the shipped auth block for a provider whose row names a
+// preset. The zero value for one that does not, which resolves no key.
+func presetAuth(preset string) catalog.Auth {
+	if preset == "" {
+		return catalog.Auth{}
+	}
+	return catalog.Embedded()[preset].Auth
 }
 
 func traceCandidates(cs []router.Candidate) []string {

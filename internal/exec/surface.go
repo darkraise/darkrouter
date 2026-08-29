@@ -177,7 +177,7 @@ func (o *chatOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) 
 // one-config-per-request-lifetime rule the chat path has held since phase 3.
 func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op SurfaceOp, cfg *config.Config) {
 	start := time.Now()
-	rec, done := e.newRecord(start, op.Dialect(), string(op.Query().Surface))
+	rec, done := e.newRecord(r, start, op.Dialect(), string(op.Query().Surface))
 	defer done()
 	e.beginResponse(w, rec)
 	e.runOp(w, r, op, rec, start, cfg)
@@ -198,7 +198,7 @@ func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
 	build func(cfg *config.Config) (SurfaceOp, error)) {
 
 	start := time.Now()
-	rec, done := e.newRecord(start, dialect, string(surface))
+	rec, done := e.newRecord(r, start, dialect, string(surface))
 	defer done()
 	e.beginResponse(w, rec)
 
@@ -247,13 +247,14 @@ func (e *Executor) runOp(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 //
 // It takes the dialect and surface as strings rather than a SurfaceOp because a
 // body that failed to parse has no op yet and still owes the operator a row.
-func (e *Executor) newRecord(start time.Time, dialect, surface string) (*store.RequestRecord, func()) {
+func (e *Executor) newRecord(r *http.Request, start time.Time, dialect, surface string) (*store.RequestRecord, func()) {
 	rec := &store.RequestRecord{
 		ID:      ulid.MustNew(ulid.Timestamp(start), rand.Reader).String(),
 		TS:      start,
 		Dialect: dialect,
 		Surface: surface,
 		Status:  "error",
+		Source:  sourceOfRequest(r),
 	}
 	return rec, func() {
 		total := time.Since(start).Milliseconds()

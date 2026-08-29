@@ -38,6 +38,10 @@ func main() {
 	outPresets := flag.String("out-presets", "internal/catalog/presets.yaml", "generated preset file")
 	outSnapshot := flag.String("out-snapshot", "internal/catalog/models_snapshot.json", "generated fallback snapshot")
 	overrides := flag.String("overrides", "internal/catalog/presets.overrides.yaml", "hand-reviewed corrections")
+	outFree := flag.String("out-free", "internal/catalog/free_models.json", "generated free-model catalog")
+	outIcons := flag.String("out-icons", "web/public/providers", "directory the copied provider logos land in")
+	outIconManifest := flag.String("out-icon-manifest", "web/src/features/providers/provider-assets.ts", "generated logo manifest")
+	brandMarks := flag.String("brand-marks", "web/src/features/providers/brand-marks.ts", "marks already drawn from @lobehub/icons")
 	flag.Parse()
 	if *omni == "" || *modelsDev == "" {
 		log.Fatal("-omniroute and -modelsdev are both required")
@@ -83,14 +87,43 @@ func main() {
 	if err := writeSnapshot(*outSnapshot, doc); err != nil {
 		log.Fatal(err)
 	}
+	free, err := scrapeFreeCatalog(filepath.Join(*omni, "open-sse/config/freeModelCatalog.data.ts"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	unmatched := 0
+	for pid := range free.Providers {
+		if _, ok := presets[pid]; !ok {
+			unmatched++
+		}
+	}
+	if err := writeFreeCatalog(*outFree, free); err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("presetgen: %d presets (%d dropped, %d joined to models.dev, %d overridden), %d models in snapshot",
 		len(presets), dropped, joined, applied, countModels(doc))
+	log.Printf("presetgen: free catalog curated %s, %d models across %d providers (%d providers match no preset)",
+		free.CuratedAt, countFree(free), len(free.Providers), unmatched)
+
+	marked, err := countMarked(*brandMarks, presets)
+	if err != nil {
+		log.Fatal(err)
+	}
+	icons, err := copyIcons(filepath.Join(*omni, "public/providers"), *outIcons, *brandMarks, presets)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := writeIconManifest(*outIconManifest, icons); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("presetgen: %d provider logos copied (%d presets already draw a brand mark, %d have neither)",
+		len(icons), marked, len(presets)-marked-len(icons))
 }
 
 // --- OmniRoute registry ---
 
 type entry struct {
-	id, format, baseURL, modelsURL, authType, authHeader string
+	id, format, baseURL, modelsURL, authType, authHeader, anonKey string
 }
 
 var commentLine = regexp.MustCompile(`(?m)^\s*//.*$`)
@@ -130,6 +163,7 @@ func scrapeRegistry(dir string, drop map[string]bool) ([]entry, int, error) {
 			modelsURL:  field(src, "modelsUrl"),
 			authType:   field(src, "authType"),
 			authHeader: field(src, "authHeader"),
+			anonKey:    field(src, "anonymousApiKey"),
 		}
 		if e.id == "" {
 			e.id = d.Name()
@@ -149,12 +183,15 @@ func scrapeRegistry(dir string, drop map[string]bool) ([]entry, int, error) {
 }
 
 // dropReason implements spec §3.2's exclusions. It returns the empty string to
-// keep an entry. Each rule is structural rather than a hand-maintained list, so
-// a new OmniRoute entry of a dropped family is dropped without anyone noticing.
+// keep an entry. Every rule but one is structural rather than a
+// hand-maintained list, so a new OmniRoute entry of a dropped family is
+// dropped without anyone noticing.
 func dropReason(e entry, drop map[string]bool) string {
 	switch {
 	case drop[e.id]:
 		return "family" // web-cookie, cloud-agent, upstream-proxy, system, search
+	case unservable[e.id] != "":
+		return "unservable: " + unservable[e.id]
 	case e.authType == "cookie":
 		return "cookie"
 	case e.authType == "oauth":
@@ -234,8 +271,27 @@ func authOf(e entry) catalog.Auth {
 	if e.authType == "oauth" {
 		return catalog.Auth{Style: "oauth"}
 	}
+	// Live evidence outranks the upstream field. See keyRequired.
+	if keyRequired[e.id] != "" {
+		return catalog.Auth{Style: "bearer"}
+	}
 	if e.authType == "none" {
 		return catalog.Auth{Style: "none"}
+	}
+	// A published credential, not a secret: OmniRoute's anonymousApiKey is the
+	// string the vendor documents so that anybody can call. Transcribing it
+	// keeps the provider addable with nothing to paste, which is the whole
+	// difference between AI Horde being a no-auth provider and being a
+	// provider whose key an operator has to go and find.
+	if e.anonKey != "" {
+		return catalog.Auth{Style: "anonymous", Key: e.anonKey}
+	}
+	// A provider that serves an unauthenticated request and serves a
+	// credentialled one better. Transcribed rather than flattened to bearer:
+	// as bearer the console demands a key for a gateway that answers without
+	// one, which is a string the operator has to invent.
+	if e.authType == "optional" {
+		return catalog.Auth{Style: "optional"}
 	}
 	switch strings.ToLower(e.authHeader) {
 	case "bearer", "authorization", "":
@@ -486,6 +542,12 @@ func writeSnapshot(path string, doc map[string]mdProvider) error {
 		Tools            bool  `json:"t,omitempty"`
 		Reasoning        bool  `json:"r,omitempty"`
 		Vision           bool  `json:"v,omitempty"`
+		// ZeroPriced says models.dev published a price and it was zero. Every
+		// other field is omitempty to keep the snapshot under a megabyte,
+		// which erases the difference between a free model and one nobody has
+		// priced -- and the free-models filter turns on exactly that
+		// difference. Carried only for the handful that need it.
+		ZeroPriced bool `json:"z,omitempty"`
 	}
 	trimmed := map[string]map[string]out{}
 	for pid, p := range doc {
@@ -512,6 +574,11 @@ func writeSnapshot(path string, doc map[string]mdProvider) error {
 			if m.Cost.CacheWrite != nil {
 				o.CacheWriteMicros = int64(*m.Cost.CacheWrite*1_000_000 + 0.5)
 			}
+			// Priced, and the price rounds to nothing. The same test
+			// ParseModelsDev applies to the live document: a cost key that is
+			// present is knowledge, whatever number it carries.
+			o.ZeroPriced = (m.Cost.Input != nil || m.Cost.Output != nil) &&
+				o.InputMicros == 0 && o.OutputMicros == 0
 			for _, in := range m.Modalities.Input {
 				if in == "image" {
 					o.Vision = true
@@ -528,4 +595,270 @@ func writeSnapshot(path string, doc map[string]mdProvider) error {
 		return fmt.Errorf("encode snapshot: %w", err)
 	}
 	return os.WriteFile(path, buf, 0o644)
+}
+
+// --- the curated free-model catalog ---
+
+// scrapeFreeCatalog transcribes the hand-curated free-tier catalog.
+//
+// Free-tier membership is a curated fact rather than a derived one: no price
+// index can say which models a vendor's free tier covers, because the tier is
+// a property of the account and not of the model. OmniRoute maintains that
+// list against provider documentation, and this copies it rather than
+// inventing a second one that would drift from it.
+//
+// Parsed by internal/catalog, which reads the same file at runtime when the
+// daily sync fetches it from GitHub.
+func scrapeFreeCatalog(path string) (catalog.FreeCatalog, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return catalog.FreeCatalog{}, fmt.Errorf("read free catalog: %w", err)
+	}
+	c, err := catalog.ParseFreeCatalog(raw)
+	if err != nil {
+		return c, fmt.Errorf("%s: %w", path, err)
+	}
+	return c, nil
+}
+
+func countFree(c catalog.FreeCatalog) int {
+	n := 0
+	for _, models := range c.Providers {
+		n += len(models)
+	}
+	return n
+}
+
+func writeFreeCatalog(path string, c catalog.FreeCatalog) error {
+	buf, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("encode free catalog: %w", err)
+	}
+	return os.WriteFile(path, buf, 0o644)
+}
+
+// --- provider logos ---
+
+// unservable names registry entries darkrouter cannot serve through its
+// generic adapters. Each is `format: openai` upstream, but OmniRoute reaches
+// it through a bespoke executor — so the preset it would generate is a
+// provider that cannot answer a request the console makes.
+//
+// Verified 2026-08-28 by fetching the exact URL darkrouter's discovery calls,
+// `GET {base_url}/models`:
+//
+//	chipotle               certificate for another host, then 404
+//	cloudflare-playground  200 text/html — the playground page
+//	theoldllm              text/html
+//
+// The g4f.space gateways list models fine but refuse every completion, which
+// discovery alone does not reveal. Verified 2026-08-29 by posting a chat
+// completion with no credential, the way an authType: optional preset is
+// connected:
+//
+//	{"error":{"message":"No cake credits. Bake proof-of-work cakes at
+//	g4f.dev/chat to earn anonymous usage…","type":"insufficient_credits"}}
+//
+// The credit is minted by a proof-of-work run in their browser chat, so there
+// is no credential an operator can paste and no key-less path either. The
+// preset would sit in the console's no-auth list promising a provider that
+// answers nothing.
+//
+// Listing them by hand rather than by a rule: "has a bespoke executor" also
+// covers pollinations, which answers a model listing perfectly well.
+// keyRequired names entries OmniRoute records as authType: optional whose
+// upstream refuses an uncredentialled completion.
+//
+// Optional means one thing in OmniRoute, where a pool of accounts may or may
+// not be attached, and another in darkrouter's console, where it puts a
+// provider in the No auth group and promises an operator that adding it is the
+// whole of the setup. A provider that 401s the first request has broken that
+// promise before the operator has done anything wrong.
+//
+// A public model listing is not evidence of a usable provider — that was the
+// mistake the g4f gateways were removed for, and every entry here lists its
+// models to anyone who asks. What settles it is a completion with no
+// credential, verified 2026-08-29:
+//
+//	hackclub      401 Authentication required
+//	kilo-gateway  401 PAID_MODEL_AUTH_REQUIRED: You need to sign in to use this model
+//	naga-ac       401 authentication_required (its :free models too)
+//	pollinations  401 A valid API key is required. Get one at enter.pollinations.ai/key
+//
+// bearer rather than removed: each is perfectly usable with a key, unlike the
+// g4f gateways whose credential could not be obtained at all. The console asks
+// for that key instead of pretending none is needed.
+var keyRequired = map[string]string{
+	"hackclub":     "401s an uncredentialled completion",
+	"kilo-gateway": "401 PAID_MODEL_AUTH_REQUIRED without an account",
+	"naga-ac":      "401s an uncredentialled completion, free models included",
+	"pollinations": "401s without a key from enter.pollinations.ai",
+}
+
+var unservable = map[string]string{
+	"chipotle":              "serves an Azure gateway 404 under a certificate for another host",
+	"cloudflare-playground": "serves the playground web app, not an API",
+	"theoldllm":             "serves HTML, not an API",
+	"g4f-gemini":            "completions need proof-of-work credits, not a credential",
+	"g4f-groq":              "completions need proof-of-work credits, not a credential",
+	"g4f-nvidia":            "completions need proof-of-work credits, not a credential",
+	"g4f-ollama":            "completions need proof-of-work credits, not a credential",
+	"g4f-pollinations":      "completions need proof-of-work credits, not a credential",
+}
+
+// markEntry matches one line of the generated brand-marks map. A preset that
+// already draws a mark from @lobehub/icons needs no file copied: the mark wins
+// at render time, and shipping the logo too would be a megabyte of assets
+// nothing ever requests.
+var markEntry = regexp.MustCompile(`(?m)^\s+"?([a-zA-Z0-9._-]+)"?:\s*\{\s*Mark`)
+
+// darkInk matches a colour token that is black or near enough. An SVG drawn
+// only in those is monochrome, and monochrome dark ink disappears on the dark
+// canvas -- which is what iconAsset.Mono exists to tell the console.
+var darkInk = regexp.MustCompile(`(?i)#(000|111|222|000000|111111|1a1a1a|222222)\b`)
+
+var anyColour = regexp.MustCompile(`(?i)#[0-9a-f]{3,8}\b`)
+
+type iconAsset struct {
+	Preset string
+	File   string
+	Mono   bool
+}
+
+// copyIcons brings OmniRoute's provider logos across for the presets that have
+// no brand mark of their own.
+//
+// A logo is a fact about a vendor that nobody can derive: OmniRoute collected
+// them by hand, and the alternative to copying is 110 monogram tiles on a
+// screen whose whole job is recognition.
+func copyIcons(src, dst, brandMarksPath string, presets catalog.Presets) ([]iconAsset, error) {
+	marks := map[string]bool{}
+	if raw, err := os.ReadFile(brandMarksPath); err == nil {
+		for _, m := range markEntry.FindAllSubmatch(raw, -1) {
+			marks[string(m[1])] = true
+		}
+	} else {
+		return nil, fmt.Errorf("read brand marks: %w", err)
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return nil, fmt.Errorf("read logos: %w", err)
+	}
+	available := map[string]string{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		stem := strings.TrimSuffix(name, filepath.Ext(name))
+		// One file per preset, and .svg wins: it is the one that stays sharp
+		// at every size the console draws a tile at.
+		if existing, ok := available[stem]; ok && filepath.Ext(existing) == ".svg" {
+			continue
+		}
+		available[stem] = name
+	}
+
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return nil, fmt.Errorf("make logo directory: %w", err)
+	}
+	// Cleared rather than merged: a preset dropped from the registry must not
+	// leave its logo behind to be embedded in every future binary.
+	old, _ := os.ReadDir(dst)
+	for _, e := range old {
+		if !e.IsDir() {
+			_ = os.Remove(filepath.Join(dst, e.Name()))
+		}
+	}
+
+	ids := make([]string, 0, len(presets))
+	for id := range presets {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	out := []iconAsset{}
+	for _, id := range ids {
+		if marks[id] {
+			continue
+		}
+		name, ok := available[id]
+		if !ok {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			return nil, fmt.Errorf("read logo %s: %w", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, name), raw, 0o644); err != nil {
+			return nil, fmt.Errorf("write logo %s: %w", name, err)
+		}
+		out = append(out, iconAsset{Preset: id, File: name, Mono: monochromeDark(name, raw)})
+	}
+	return out, nil
+}
+
+// monochromeDark reports whether an SVG is drawn only in black ink, which the
+// console has to invert on its dark canvas or the logo is a black square on a
+// near-black tile. A raster file is never claimed: inverting a photograph
+// produces a negative, not a legible mark.
+func monochromeDark(name string, raw []byte) bool {
+	if filepath.Ext(name) != ".svg" {
+		return false
+	}
+	colours := anyColour.FindAll(raw, -1)
+	if len(colours) == 0 {
+		// No colour token at all means the ink is currentColor or the default
+		// black, both of which need the same treatment.
+		return true
+	}
+	for _, c := range colours {
+		if !darkInk.Match(c) {
+			return false
+		}
+	}
+	return true
+}
+
+func writeIconManifest(path string, icons []iconAsset) error {
+	var b bytes.Buffer
+	b.WriteString(`// Generated by tools/presetgen. Do not edit.
+//
+// Which presets have a logo file in web/public/providers, so ProviderIcon can
+// reach for one without a request that might 404. A preset absent here has
+// either a brand mark from @lobehub/icons or the monogram, in that order.
+//
+// Mono marks an SVG drawn only in black ink, which the dark canvas inverts:
+// the file carries its own colour and cannot adapt the way a currentColor mark
+// does, and a black mark on a near-black tile is an empty tile.
+
+export type ProviderAsset = { file: string; mono?: boolean }
+
+export const PROVIDER_ASSETS: Record<string, ProviderAsset> = {
+`)
+	for _, a := range icons {
+		b.WriteString(fmt.Sprintf("  %q: { file: %q", a.Preset, a.File))
+		if a.Mono {
+			b.WriteString(", mono: true")
+		}
+		b.WriteString(" },\n")
+	}
+	b.WriteString("}\n")
+	return os.WriteFile(path, b.Bytes(), 0o644)
+}
+
+// countMarked is how many presets already draw a mark from @lobehub/icons.
+func countMarked(brandMarksPath string, presets catalog.Presets) (int, error) {
+	raw, err := os.ReadFile(brandMarksPath)
+	if err != nil {
+		return 0, fmt.Errorf("read brand marks: %w", err)
+	}
+	n := 0
+	for _, m := range markEntry.FindAllSubmatch(raw, -1) {
+		if _, ok := presets[string(m[1])]; ok {
+			n++
+		}
+	}
+	return n, nil
 }

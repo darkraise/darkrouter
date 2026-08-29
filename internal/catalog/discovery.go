@@ -47,6 +47,23 @@ type DiscoveryOptions struct {
 	// Auth resolves a non-static credential into an authorizer, so a signed
 	// control-plane listing can be made. Nil serves static styles only.
 	Auth AuthResolver
+
+	// Protocols are non-network schemes a provider's base URL may name, keyed
+	// by scheme. A local CLI provider lists its models through one of these,
+	// so the sweep reaches it the same way it reaches every other provider.
+	Protocols map[string]http.RoundTripper
+
+	// Metadata supplies the models.dev document the import filter prices
+	// against, newest first: the syncer's, which is refreshed from the live
+	// document. Nil falls back to the snapshot embedded at build time, which
+	// is what a gateway with no outbound access has and what every test that
+	// does not care about prices gets.
+	Metadata func() Doc
+
+	// FreeTiers supplies the curated free-model catalogue, newest first, for
+	// the same reason and with the same fallback: nil serves the catalogue
+	// embedded at build time.
+	FreeTiers func() FreeCatalog
 }
 
 // AuthResolver mirrors exec.AuthResolver. Declared here rather than imported so
@@ -105,6 +122,20 @@ func (d *Discoverer) authorizerFor(ctx context.Context, p provider.Provider,
 	}, auth.Credential{ID: cred.ID, Kind: cred.Kind, Secret: cred.Secret})
 }
 
+// transportFor clones the default transport and registers any non-network
+// schemes on the copy. A nil map keeps the shared default rather than building
+// a second connection pool for nothing.
+func transportFor(protocols map[string]http.RoundTripper) http.RoundTripper {
+	if len(protocols) == 0 {
+		return nil
+	}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	for scheme, rt := range protocols {
+		t.RegisterProtocol(scheme, rt)
+	}
+	return t
+}
+
 func NewDiscoverer(db *store.DB, src provider.Source, cat *Store,
 	h Health, opts DiscoveryOptions) *Discoverer {
 
@@ -118,6 +149,7 @@ func NewDiscoverer(db *store.DB, src provider.Source, cat *Store,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
+			Transport: transportFor(opts.Protocols),
 		},
 		sem: make(chan struct{}, opts.Concurrency),
 		// Buffered so a caller creating a provider never blocks on the worker,
@@ -220,7 +252,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 		return
 	}
 
-	pr, err := ProbeForKind(p, preset, cred.Secret, d.opts.Listers)
+	pr, err := ProbeForKind(p, preset, preset.Auth.Secret(cred.Secret), d.opts.Listers)
 	if err != nil {
 		// An undiscoverable kind is a permanent, known fact rather than a
 		// failure. Counting it would retire Vertex's catalogue on the third
@@ -235,7 +267,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// is what "discovery is not pretended" means in practice. The credential
 	// probe confirms reachability separately, on the operator's schedule.
 	if seeded := SeedFromPreset(preset, FallbackDoc()); len(seeded) > 0 {
-		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, priceLookup(preset))
+		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset))
 		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
 			log.Printf("discovery: %s: seed: %v", p.ID, err)
 		}
@@ -286,21 +318,59 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// the sweep just fetched, before any of it is recorded. Narrowing at
 	// routing time instead would leave the catalogue full of models the
 	// operator asked not to have.
-	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, priceLookup(preset))
+	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, d.freeRules(p, preset))
 
 	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, dropped, now); err != nil {
 		log.Printf("discovery: %s: record success: %v", p.ID, err)
 	}
 }
 
+// freeRules assembles what a free-only import for this provider decides on:
+// the vendor's documented free tier, and models.dev's prices.
+//
+// Keyed on the preset rather than the provider row's id, because the curated
+// catalogue is a fact about the upstream vendor. A provider row an operator
+// named something else still routes to the same free tier.
+func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
+	style := p.AuthStyle
+	if style == "" {
+		style = preset.Auth.Style
+	}
+	rules := FreeRules{Price: d.priceLookup(preset), Keyless: auth.IsKeyless(style)}
+	key := p.Preset
+	if key == "" {
+		key = p.ID
+	}
+	free := FreeModels()
+	if d.opts.FreeTiers != nil {
+		if live := d.opts.FreeTiers(); len(live.Providers) > 0 {
+			free = live
+		}
+	}
+	if len(free.Providers[key]) > 0 {
+		rules.Curated = func(modelID string) bool { return free.Covers(key, modelID) }
+	}
+	return rules
+}
+
 // priceLookup resolves a model id against models.dev through the preset's
 // join key. A preset with no key -- an uncatalogued provider -- yields nil,
 // and every model then rests on the `:free` suffix alone.
-func priceLookup(preset Preset) func(string) (Metadata, bool) {
+//
+// The syncer's document is preferred over the embedded snapshot when there is
+// one. A price the gateway refreshed this morning is the one an import filter
+// should be deciding on, and a model that has appeared or changed tier since
+// the release was built is invisible to the snapshot.
+func (d *Discoverer) priceLookup(preset Preset) func(string) (Metadata, bool) {
 	if preset.ModelsDevID == "" {
 		return nil
 	}
 	doc := FallbackDoc()
+	if d.opts.Metadata != nil {
+		if live := d.opts.Metadata(); len(live) > 0 {
+			doc = live
+		}
+	}
 	return func(modelID string) (Metadata, bool) {
 		return doc.Metadata(preset.ModelsDevID, modelID)
 	}
@@ -391,6 +461,12 @@ func (d *Discoverer) pickCredential(p provider.Provider) (provider.Credential, b
 		usable = append(usable, c)
 	}
 	if len(usable) == 0 {
+		// A keyless provider is swept with no credential. Without this its
+		// catalogue never fills, and a local runtime an operator can reach
+		// from a browser would sit in the console offering nothing.
+		if len(p.Credentials) == 0 && auth.IsKeyless(p.AuthStyle) {
+			return provider.Credential{}, true
+		}
 		return provider.Credential{}, false
 	}
 	sort.SliceStable(usable, func(i, j int) bool {

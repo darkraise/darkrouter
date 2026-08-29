@@ -34,6 +34,7 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 	rec := &store.RequestRecord{
 		ID: reqID, TS: start, Dialect: d.Name(),
 		Surface: string(ir.SurfaceLLM), Status: "error",
+		Source: sourceOfRequest(r),
 	}
 	defer func() {
 		total := time.Since(start).Milliseconds()
@@ -97,7 +98,13 @@ func (e *Executor) nativeCount(ctx context.Context, req *ir.Request, cands []rou
 			continue
 		}
 		p := byID[c.ProviderID]
-		tgt := &adapter.Target{BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID), Model: c.Model}
+		style := p.AuthStyle
+		if style == "" {
+			style = presetStyle(p.Preset)
+		}
+		tgt := &adapter.Target{
+			BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID, style), Model: c.Model,
+		}
 		hr, err := tc.BuildCountRequest(ctx, tgt, req)
 		if err != nil {
 			return 0, false

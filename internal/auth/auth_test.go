@@ -54,3 +54,37 @@ func TestManagerRefusesAnUnknownStyle(t *testing.T) {
 }
 
 var _ Authorizer = func(context.Context, *http.Request) error { return nil }
+
+func TestOptionalIsStaticAndKeyless(t *testing.T) {
+	// Static: the adapter writes the key itself, and writes nothing when there
+	// is none — which is the whole of the difference from bearer.
+	if !IsStatic(StyleOptional) {
+		t.Error("optional must be served by a bare credential, not a signer")
+	}
+	// Keyless: the router may reach it with no credential at all.
+	if !IsKeyless(StyleOptional) || !IsKeyless(StyleNone) {
+		t.Error("both styles that serve an unauthenticated request must read as keyless")
+	}
+}
+
+func TestAnonymousIsStaticAndKeyless(t *testing.T) {
+	// The published credential is written by the adapter like any other bare
+	// key, and the router reaches the provider without the operator having
+	// configured one.
+	if !IsStatic(StyleAnonymous) {
+		t.Error("anonymous must be served by a bare credential, not a signer")
+	}
+	if !IsKeyless(StyleAnonymous) {
+		t.Error("anonymous must read as keyless: there is nothing to paste")
+	}
+}
+
+func TestAStyleThatNeedsAKeyIsNotKeyless(t *testing.T) {
+	// The guard keyless must not weaken: routing to a bearer provider with no
+	// credential would 401 every request.
+	for _, style := range []string{"", StyleBearer, StyleXAPIKey, StyleAPIKey, StyleSigV4, StyleOAuth} {
+		if IsKeyless(style) {
+			t.Errorf("%q read as keyless", style)
+		}
+	}
+}

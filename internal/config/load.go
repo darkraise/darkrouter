@@ -103,6 +103,14 @@ func applyDefaults(c *Config) {
 	if c.Catalog.SyncTimeout == 0 {
 		c.Catalog.SyncTimeout = 30 * time.Second
 	}
+	if c.Catalog.FreeCatalogURL == "" {
+		c.Catalog.FreeCatalogURL = "https://raw.githubusercontent.com/diegosouzapw/OmniRoute/HEAD/open-sse/config/freeModelCatalog.data.ts"
+	}
+	if c.Catalog.FreeCatalogInterval == 0 {
+		// Daily. The upstream list changes when someone runs a research pass,
+		// which is weeks apart.
+		c.Catalog.FreeCatalogInterval = 24 * time.Hour
+	}
 	if c.Catalog.Discovery.Enabled == nil {
 		on := true
 		c.Catalog.Discovery.Enabled = &on

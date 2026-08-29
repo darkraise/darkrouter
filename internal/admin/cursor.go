@@ -10,7 +10,7 @@ import (
 )
 
 // RequestFilters are spec §4.2's filter set: provider, model, status, alias,
-// surface, and a time range.
+// surface, source, and a time range.
 //
 // A struct rather than a map so the hash below cannot depend on iteration order,
 // and so a new filter is a compile error at every call site rather than a
@@ -22,7 +22,11 @@ type RequestFilters struct {
 	Alias     string
 	Surface   string
 	ErrorCode string
-	SinceMs   int64
+	// Source separates console traffic from a client's. Part of the hash like
+	// every other filter: a cursor minted while looking at test requests must
+	// not silently page into production ones.
+	Source  string
+	SinceMs int64
 	UntilMs   int64
 }
 
@@ -34,7 +38,7 @@ type RequestFilters struct {
 // scroll.
 func (f RequestFilters) Hash() string {
 	h := sha256.New()
-	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface, f.ErrorCode} {
+	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface, f.ErrorCode, f.Source} {
 		h.Write([]byte(s))
 		// A separator, so {Provider:"ab"} and {Provider:"a", Model:"b"} differ.
 		h.Write([]byte{0})

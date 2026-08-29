@@ -64,6 +64,12 @@ type RequestRecord struct {
 	ErrorCode string
 	Warnings  []string
 
+	// Source is where the request came from: "proxy" for a client through the
+	// gateway, "console" for one an operator sent by hand from the playground
+	// or a provider's test drawer. Empty means proxy — the executor is reached
+	// that way unless something says otherwise.
+	Source string
+
 	// SurfaceMeta is the surface-specific detail spec §9 asks for: input count
 	// and dimensions for embeddings, image count and size, audio duration and
 	// voice, document count for rerank. One JSON column rather than nine,
@@ -216,8 +222,8 @@ func (w *LogWriter) writeBatch(ctx context.Context, batch []*RequestRecord) (int
 		    final_provider_id, final_model, status,
 		    tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, reasoning_tokens,
 		    cost_micros, ttft_ms, total_ms, error_code, warnings_json,
-		    surface_meta_json, response_bytes, response_content_type
-		 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		    surface_meta_json, response_bytes, response_content_type, source
+		 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -277,7 +283,7 @@ func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord
 		string(trace), r.FinalProviderID, r.FinalModel, r.Status,
 		r.TokensIn, r.TokensOut, r.CacheReadTokens, r.CacheWriteTokens, r.ReasoningTokens,
 		r.CostMicros, r.TTFTMs, r.TotalMs, r.ErrorCode, string(warnings),
-		string(surfaceMeta), r.ResponseBytes, r.ResponseContentType,
+		string(surfaceMeta), r.ResponseBytes, r.ResponseContentType, sourceOf(r),
 	); err != nil {
 		return err
 	}
@@ -304,3 +310,23 @@ func nonNil(s []string) []string {
 	}
 	return s
 }
+
+// sourceOf names where a request came from, defaulting to the proxy. The
+// executor is reached that way unless an admin handler said otherwise, and a
+// row with an empty source would be a row no filter could find.
+func sourceOf(r *RequestRecord) string {
+	if r.Source == "" {
+		return SourceProxy
+	}
+	return r.Source
+}
+
+// The closed vocabulary. Two values, because there are two ways to reach the
+// executor and an operator only ever wants to separate those two.
+const (
+	// SourceProxy is a client calling the gateway.
+	SourceProxy = "proxy"
+	// SourceConsole is an operator sending one by hand — the playground, or a
+	// provider's test drawer.
+	SourceConsole = "console"
+)

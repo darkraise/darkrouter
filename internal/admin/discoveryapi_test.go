@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -112,7 +113,11 @@ func TestAWhollyFilteredSweepIsNotSilence(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordDiscoverySuccess(ctx, "paid-only", nil, 12, time.Now()); err != nil {
+	paid := make([]string, 12)
+	for i := range paid {
+		paid[i] = fmt.Sprintf("paid-%d", i)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "paid-only", nil, paid, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 

@@ -151,7 +151,12 @@ func applyAuth(r *http.Request, p Probe) {
 		return
 	}
 	switch p.AuthStyle {
-	case "bearer":
+	// optional and anonymous are bearer with a different rule about when there
+	// is a key at all: one may have none, the other ships its own. By the time
+	// a key has been resolved they are written the same way, and falling
+	// through to the default instead sent the listing request unauthenticated
+	// while the caller believed it had been credentialled.
+	case "bearer", "optional", "anonymous":
 		r.Header.Set("Authorization", "Bearer "+p.APIKey)
 	case "x-api-key":
 		r.Header.Set("x-api-key", p.APIKey)

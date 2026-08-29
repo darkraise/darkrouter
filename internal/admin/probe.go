@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -57,10 +58,19 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if len(creds) == 0 {
+	style := row.AuthStyle
+	if style == "" {
+		style = s.deps.Presets[row.Preset].Auth.Style
+	}
+	if len(creds) == 0 && !auth.IsKeyless(style) {
 		// A refusal rather than a failed probe: there is nothing to test, and
 		// reporting "credential invalid" for a provider with no credential
 		// would send the operator looking for the wrong problem.
+		//
+		// A keyless provider is the exception rather than an omission: its
+		// listing endpoint answers an unauthenticated request, and an
+		// anonymous one answers the published key, so in both cases there is
+		// something to test after all.
 		writeError(w, http.StatusBadRequest, "this provider has no credential to test")
 		return
 	}
@@ -68,7 +78,10 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	// the provider-level probe has always meant. The import path needs the
 	// narrow form: it is checking the key it just wrote, and creds[0] is
 	// whichever key happened to sort first.
-	cred := creds[0]
+	var cred store.Credential
+	if len(creds) > 0 {
+		cred = creds[0]
+	}
 	if want := r.URL.Query().Get("key"); want != "" {
 		found := false
 		for _, c := range creds {
@@ -181,7 +194,7 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 
 	pr, err := catalog.ProbeFor(provider.Provider{
 		ID: row.ID, Kind: row.Kind, BaseURL: row.BaseURL, Preset: row.Preset,
-	}, preset, cred.Secret)
+	}, preset, preset.Auth.Secret(cred.Secret))
 	if err != nil {
 		// No listing endpoint for this kind. Spec §4.3's fallback is a
 		// one-token completion, which spends real money and consumes quota;
@@ -195,7 +208,7 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 	if err != nil {
 		return "listing", 0, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return "listing", 0, err
 	}
@@ -208,6 +221,13 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 		return "listing", 0, errors.New("the provider rejected this credential: " + resp.Status)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// The status alone is a poor answer when the provider said something
+		// specific: "Bad Gateway" for a local CLI that is merely logged out
+		// sends the operator looking for a network problem, when the reply
+		// already said to run auggie login.
+		if why := upstreamMessage(resp.Body); why != "" {
+			return "listing", 0, errors.New(resp.Status + ": " + why)
+		}
 		return "listing", 0, errors.New("the provider returned " + resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
@@ -219,6 +239,26 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 		return "listing", 0, err
 	}
 	return "listing", len(models), nil
+}
+
+// upstreamMessage reads the message out of an OpenAI-shaped error body, which
+// is what most providers and every darkrouter-side transport return. Anything
+// else yields the empty string and the caller keeps the status alone: a page of
+// HTML in a toast is worse than no detail at all.
+func upstreamMessage(r io.Reader) string {
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r, 64<<10)).Decode(&body); err != nil {
+		return ""
+	}
+	msg := strings.TrimSpace(body.Error.Message)
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	return msg
 }
 
 // authTargetFor is the provider half of a strategy resolution.

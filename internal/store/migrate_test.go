@@ -34,6 +34,50 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 	}
 }
 
+func TestMigrationRealignsTheProvidersShippedAsKeylessThatAreNot(t *testing.T) {
+	// The correction has to reach a provider the operator already added: the
+	// row holds the style, so a fixed preset alone would leave it in the No
+	// auth group failing every request.
+	db := migrated(t)
+	ctx := context.Background()
+	for _, p := range []struct{ id, preset, style string }{
+		{"stale", "hackclub", "optional"},      // the copy the old preset wrote
+		{"keyed", "naga-ac", "bearer"},         // already corrected by hand
+		{"deliberate", "pollinations", "none"}, // an operator's own override
+		{"untouched", "opencode", "optional"},  // still genuinely keyless
+	} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO providers (id, preset, kind, base_url, auth_style, created_at)
+			 VALUES (?, ?, 'openaicompat', 'https://example.test/v1', ?, 0)`,
+			p.id, p.preset, p.style); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Rewind past this migration and run it again, which is the situation it
+	// exists for: rows written by an older binary, then a deploy.
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE schema_version SET version = version - 1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{
+		"stale": "bearer", "keyed": "bearer", "deliberate": "none", "untouched": "optional",
+	}
+	for id, style := range want {
+		var got string
+		if err := db.Read.QueryRowContext(ctx,
+			`SELECT auth_style FROM providers WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != style {
+			t.Errorf("%s: auth_style = %q, want %q", id, got, style)
+		}
+	}
+}
+
 func TestMigrateIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()

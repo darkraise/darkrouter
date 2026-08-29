@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/darkraise/darkrouter/internal/exec"
+	"github.com/darkraise/darkrouter/internal/store"
 	"net/http"
 	"net/url"
 
@@ -209,6 +211,11 @@ func (s *Server) handlePlayground(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Marked as console traffic before it goes anywhere near the executor. It
+	// is a real request through the real path — that is the point of the
+	// playground — so the only thing separating it from a client's afterwards
+	// is this.
+	pr = pr.WithContext(exec.WithSource(pr.Context(), store.SourceConsole))
 	// exec.Handle writes X-Darkrouter-Request before anything else, which is
 	// what gives the SPA the id for the trace link before the stream starts.
 	s.deps.Exec.Handle(w, pr, d)

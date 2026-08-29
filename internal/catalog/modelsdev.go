@@ -178,6 +178,10 @@ type fallbackModel struct {
 	Tools            bool  `json:"t,omitempty"`
 	Reasoning        bool  `json:"r,omitempty"`
 	Vision           bool  `json:"v,omitempty"`
+	// ZeroPriced distinguishes a model models.dev prices at zero from one it
+	// does not price at all. Both write no price at all through the omitempty
+	// fields above, and the free-models filter turns on telling them apart.
+	ZeroPriced bool `json:"z,omitempty"`
 }
 
 var (
@@ -211,7 +215,12 @@ func FallbackDoc() Doc {
 					OutputMicrosPerMTok:     m.OutputMicros,
 					CacheReadMicrosPerMTok:  m.CacheReadMicros,
 					CacheWriteMicrosPerMTok: m.CacheWriteMicros,
-					PriceKnown:              m.InputMicros != 0 || m.OutputMicros != 0,
+					// A nonzero price is self-evidently known; a zero one says
+					// so through its own flag. Inferring the flag from the
+					// numbers alone read every free model as unpriced, which
+					// is the one verdict that keeps it out of a free-only
+					// import.
+					PriceKnown: m.InputMicros != 0 || m.OutputMicros != 0 || m.ZeroPriced,
 					Capabilities: Capabilities{
 						Tools: m.Tools, Reasoning: m.Reasoning, Vision: m.Vision, Known: true,
 					},

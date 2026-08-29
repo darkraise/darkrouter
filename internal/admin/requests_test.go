@@ -339,3 +339,71 @@ func TestARequestRowNamesTheServingPath(t *testing.T) {
 		t.Fatalf("path missing from the row view: %+v", page.Requests)
 	}
 }
+
+func TestConsoleRequestsAreSeparableFromClientTraffic(t *testing.T) {
+	// The whole point of the column: the playground and a provider's test
+	// drawer send real requests through the real executor, so they land in the
+	// same log a client's does. An operator reading a provider's log has to be
+	// able to tell which is which.
+	s, db := testServerFull(t)
+	now := time.Now()
+	db.WriteBatchForTest(t, []*store.RequestRecord{
+		{
+			ID: "01CLIENT", TS: now, Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "groq", Status: "success",
+			Source: store.SourceProxy,
+		},
+		{
+			ID: "01CONSOLE", TS: now, Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "groq", Status: "success",
+			Source: store.SourceConsole,
+		},
+	})
+
+	cookie, token := login(t, s)
+	only := func(query string) []string {
+		res := do(t, s, cookie, token, "GET", "/api/requests"+query, "")
+		if res.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", res.Code, res.Body.String())
+		}
+		var page struct {
+			Requests []struct {
+				ID     string `json:"id"`
+				Source string `json:"source"`
+			} `json:"requests"`
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(page.Requests))
+		for _, r := range page.Requests {
+			ids = append(ids, r.ID)
+		}
+		return ids
+	}
+
+	if got := only("?source=console"); len(got) != 1 || got[0] != "01CONSOLE" {
+		t.Errorf("console filter returned %v", got)
+	}
+	if got := only("?source=proxy"); len(got) != 1 || got[0] != "01CLIENT" {
+		t.Errorf("proxy filter returned %v", got)
+	}
+	if got := only(""); len(got) != 2 {
+		t.Errorf("unfiltered returned %v, want both", got)
+	}
+}
+
+func TestARequestWithNoSourceReadsAsProxy(t *testing.T) {
+	// Every row written before the column existed came through the front door.
+	// Backfilling them as anything else would invent a fact about history.
+	s, db := testServerFull(t)
+	db.WriteBatchForTest(t, []*store.RequestRecord{{
+		ID: "01OLD", TS: time.Now(), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", Status: "success",
+	}})
+	cookie, token := login(t, s)
+	res := do(t, s, cookie, token, "GET", "/api/requests?source=proxy", "")
+	if !strings.Contains(res.Body.String(), "01OLD") {
+		t.Errorf("an unmarked request did not read as proxy: %s", res.Body.String())
+	}
+}

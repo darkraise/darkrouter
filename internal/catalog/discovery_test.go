@@ -388,3 +388,115 @@ func TestSweepReadsCapabilitiesFromTheRuntime(t *testing.T) {
 		t.Errorf("row = (%q, %+v)", rows[0].CapabilitiesSource, rows[0].Capabilities)
 	}
 }
+
+func TestPriceLookupPrefersTheSyncedDocument(t *testing.T) {
+	// A price refreshed this morning is the one an import filter should decide
+	// on. The snapshot is the offline fallback, not the source of record.
+	live := Doc{"acme": {"m": {InputMicrosPerMTok: 0, OutputMicrosPerMTok: 0, PriceKnown: true}}}
+	d := &Discoverer{opts: DiscoveryOptions{Metadata: func() Doc { return live }}}
+	price := d.priceLookup(Preset{ModelsDevID: "acme"})
+	if price == nil {
+		t.Fatal("a preset with a join key must yield a lookup")
+	}
+	meta, ok := price("m")
+	if !ok || !meta.PriceKnown {
+		t.Fatalf("lookup returned (%+v, %v); want the synced entry", meta, ok)
+	}
+}
+
+func TestPriceLookupFallsBackToTheSnapshot(t *testing.T) {
+	// No syncer, or one that has never held a document: the embedded snapshot
+	// still prices the filter, which is what an offline gateway runs on.
+	for _, meta := range []func() Doc{nil, func() Doc { return Doc{} }} {
+		d := &Discoverer{opts: DiscoveryOptions{Metadata: meta}}
+		price := d.priceLookup(Preset{ModelsDevID: "groq"})
+		if price == nil {
+			t.Fatal("a preset with a join key must yield a lookup")
+		}
+		if _, ok := price("allam-2-7b"); !ok {
+			t.Error("the embedded snapshot did not answer")
+		}
+	}
+}
+
+func TestPriceLookupIsNilForAnUncataloguedPreset(t *testing.T) {
+	d := &Discoverer{opts: DiscoveryOptions{}}
+	if d.priceLookup(Preset{}) != nil {
+		t.Error("a preset with no join key has nothing to look prices up in")
+	}
+}
+
+func TestFreeRulesCarryTheProvidersCuratedTier(t *testing.T) {
+	// Keyed on the preset, because the curated catalogue is a fact about the
+	// upstream vendor rather than about the row an operator named.
+	d := &Discoverer{opts: DiscoveryOptions{}}
+	rules := d.freeRules(provider.Provider{ID: "my-groq", Preset: "groq"}, Preset{ModelsDevID: "groq"})
+	if rules.Curated == nil {
+		t.Fatal("a provider the catalogue covers must carry its curated rule")
+	}
+	if !rules.Curated("openai/gpt-oss-120b") {
+		t.Error("gpt-oss-120b is on Groq's documented free tier")
+	}
+	if rules.Curated("not-a-model") {
+		t.Error("the curated rule admitted a model the catalogue does not list")
+	}
+}
+
+func TestFreeRulesFallBackToTheProviderIDForAnUnpresetedRow(t *testing.T) {
+	d := &Discoverer{opts: DiscoveryOptions{}}
+	rules := d.freeRules(provider.Provider{ID: "groq"}, Preset{})
+	if rules.Curated == nil || !rules.Curated("openai/gpt-oss-20b") {
+		t.Error("a row with no preset must fall back to its own id")
+	}
+}
+
+func TestFreeRulesLeaveAnUncoveredProviderToItsPrices(t *testing.T) {
+	d := &Discoverer{opts: DiscoveryOptions{}}
+	rules := d.freeRules(provider.Provider{ID: "nobody", Preset: "nobody"}, Preset{})
+	if rules.Curated != nil {
+		t.Error("a provider no catalogue covers must carry no curated rule")
+	}
+}
+
+func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
+	// A provider that opened a free tier after this binary was built is
+	// invisible to the embedded catalogue, which is the whole reason the daily
+	// refresh exists.
+	live := FreeCatalog{Providers: map[string]map[string]string{
+		"newcomer": {"m": "recurring-daily"},
+	}}
+	d := &Discoverer{opts: DiscoveryOptions{FreeTiers: func() FreeCatalog { return live }}}
+	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{})
+	if rules.Curated == nil || !rules.Curated("m") {
+		t.Error("the synced catalogue did not reach the import filter")
+	}
+}
+
+func TestFreeRulesFallBackToTheEmbeddedCatalogue(t *testing.T) {
+	for _, tiers := range []func() FreeCatalog{nil, func() FreeCatalog { return FreeCatalog{} }} {
+		d := &Discoverer{opts: DiscoveryOptions{FreeTiers: tiers}}
+		rules := d.freeRules(provider.Provider{ID: "groq", Preset: "groq"}, Preset{})
+		if rules.Curated == nil || !rules.Curated("openai/gpt-oss-120b") {
+			t.Error("an unsynced gateway lost the catalogue its release shipped with")
+		}
+	}
+}
+
+func TestAKeylessProviderIsSweptWithoutACredential(t *testing.T) {
+	// Its catalogue would never fill otherwise: a local runtime an operator
+	// can reach from a browser would sit in the console offering nothing.
+	d := &Discoverer{opts: DiscoveryOptions{}, health: &fakeHealth{}}
+	_, ok := d.pickCredential(provider.Provider{ID: "ollama", AuthStyle: "none"})
+	if !ok {
+		t.Error("a keyless provider must be swept with no credential")
+	}
+}
+
+func TestAKeyedProviderWithNoCredentialIsNotSwept(t *testing.T) {
+	// Unchanged: a sweep needs one of the provider's own keys to ask what it
+	// serves, and there is nothing to ask with.
+	d := &Discoverer{opts: DiscoveryOptions{}, health: &fakeHealth{}}
+	if _, ok := d.pickCredential(provider.Provider{ID: "groq", AuthStyle: "bearer"}); ok {
+		t.Error("a keyed provider with no credential must not be swept")
+	}
+}

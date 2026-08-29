@@ -1773,6 +1773,26 @@ func TestHandleRefusesACompressedBodyWith415(t *testing.T) {
 	}
 }
 
+func TestAnAnonymousProviderSendsThePublishedKey(t *testing.T) {
+	// The candidate for a keyless provider carries no credential id, so the
+	// secret has to come from somewhere: for the anonymous style it is the
+	// string the preset ships.
+	want := catalog.Embedded()["aihorde"].Auth.Key
+	if want == "" {
+		t.Fatal("the aihorde preset ships no published key")
+	}
+	p := provider.Provider{ID: "aihorde", Preset: "aihorde"}
+	if got := secretOf(p, "", "anonymous"); got != want {
+		t.Errorf("secret = %q, want the published key %q", got, want)
+	}
+
+	// An operator's own key still wins: on AI Horde it buys a shorter queue.
+	p.Credentials = []provider.Credential{{ID: "k1", Secret: "mine", Enabled: true}}
+	if got := secretOf(p, "k1", "anonymous"); got != "mine" {
+		t.Errorf("secret = %q, want the configured credential", got)
+	}
+}
+
 func TestASameDialectCandidateTakesTheFastPath(t *testing.T) {
 	var seen struct {
 		body []byte

@@ -33,15 +33,24 @@ const csrfHeader = "X-CSRF-Token"
 // Deps are the admin server's collaborators. Every field except DB and
 // PasswordHash is optional, so a handler test can build a server without
 // standing up a router, a catalog and a breaker.
+// DiscoveryTrigger asks for one provider's models to be listed now, rather
+// than at the next sweep. Satisfied by *catalog.Discoverer.
+type DiscoveryTrigger interface {
+	Trigger(providerID string)
+}
+
 type Deps struct {
 	DB           *store.DB
 	PasswordHash string
 
-	Config   *config.Store
-	Src      *provider.SQLSource
-	Key      *crypto.Key
-	Catalog  *catalog.Store
-	Disc     *catalog.Discoverer
+	Config  *config.Store
+	Src     *provider.SQLSource
+	Key     *crypto.Key
+	Catalog *catalog.Store
+	// Disc asks for one provider to be swept now. An interface rather than
+	// *catalog.Discoverer because Trigger is the whole of what this package
+	// wants from it, and a narrow dependency is one a test can stand in for.
+	Disc     DiscoveryTrigger
 	Sync     *catalog.Syncer
 	Breaker  *health.Breaker
 	Presets  catalog.Presets

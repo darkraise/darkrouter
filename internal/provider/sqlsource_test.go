@@ -306,3 +306,34 @@ func TestReloadToleratesUncataloguedProviders(t *testing.T) {
 		t.Errorf("auth style = %q, want the column default bearer", ps[0].AuthStyle)
 	}
 }
+
+// The exception to the rule above: a provider that needs no credential is
+// reached with none, so dropping it here would put it beyond the router and
+// the discovery sweep alike — every guard downstream that knows about keyless
+// providers would never see one.
+func TestSQLSourceKeepsAKeylessProviderWithNoCredential(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	for _, style := range []string{"none", "optional", "anonymous"} {
+		id := "local-" + style
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO providers (id, kind, base_url, auth_style, created_at)
+			 VALUES (?, 'openaicompat', 'http://localhost:11434/v1', ?, 0)`, id, style); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := src.Providers(ctx)
+	if len(ps) != 3 {
+		t.Fatalf("got %+v, want every keyless provider", ps)
+	}
+	for _, p := range ps {
+		if len(p.Credentials) != 0 {
+			t.Errorf("%s carries %d credentials, want none", p.ID, len(p.Credentials))
+		}
+	}
+}

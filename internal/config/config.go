@@ -103,14 +103,18 @@ type TimeoutConfig struct {
 // max_body_bytes is deliberately absent: the executor reads it from a fresh
 // per-request snapshot, so it does hot-reload. connect and first_byte are
 // listed because they configure a shared http.Transport built once at startup,
-// and the two catalog intervals for the same reason one step out: each worker
-// captures its interval into an options struct when it is constructed.
+// and the catalog fields for the same reason one step out: each worker captures
+// its options struct when it is constructed, and whether a worker starts at all
+// is decided there too.
 var RestartOnly = []string{
 	"server.proxy_listen",
 	"server.admin_listen",
 	"policy.timeout.connect",
 	"policy.timeout.first_byte",
 	"catalog.sync_interval",
+	"catalog.free_catalog_interval",
+	"catalog.free_catalog_url",
+	"catalog.free_catalog_sync",
 	"catalog.discovery.interval",
 	// The adapters map is constructed once at startup and the Gemini adapter
 	// captures its fetcher there.
@@ -124,7 +128,43 @@ type CatalogConfig struct {
 	SyncInterval time.Duration `yaml:"sync_interval"`
 	SyncTimeout  time.Duration `yaml:"sync_timeout"`
 
+	// FreeCatalogURL is the curated free-tier list the import filter reads.
+	// Free-tier membership cannot be derived from prices, so it is somebody's
+	// hand-maintained list, and staying current with it means re-reading what
+	// they publish.
+	FreeCatalogURL      string        `yaml:"free_catalog_url"`
+	FreeCatalogInterval time.Duration `yaml:"free_catalog_interval"`
+	// FreeCatalogSync is a pointer so an explicit false is distinguishable
+	// from an absent key. An operator who does not want the gateway reaching
+	// GitHub on a schedule turns it off and keeps the catalogue its release
+	// shipped with.
+	FreeCatalogSync *bool `yaml:"free_catalog_sync"`
+
 	Discovery DiscoveryConfig `yaml:"discovery"`
+
+	// SeedFreeProviders adds a provider on first start for every preset that
+	// needs no credential, importing only their free models. A pointer so an
+	// explicit false is distinguishable from an absent key, which is what lets
+	// the default be on: a gateway that routes nothing until somebody opens
+	// the console and clicks through a catalogue of two hundred presets is a
+	// gateway that does not work out of the box.
+	//
+	// Off does not remove anything already seeded. Deleting a seeded provider
+	// is how an operator declines one; the seeder records what it has offered
+	// and never offers it twice.
+	SeedFreeProviders *bool `yaml:"seed_free_providers"`
+}
+
+// SeedFreeProvidersEnabled reports whether first-start seeding runs.
+func (c CatalogConfig) SeedFreeProvidersEnabled() bool {
+	return c.SeedFreeProviders == nil || *c.SeedFreeProviders
+}
+
+// FreeCatalogSyncEnabled reports whether the daily refresh runs. Absent means
+// on: a frozen catalogue silently drops models an operator can use for free,
+// and that failure is invisible where a refused outbound call is not.
+func (c CatalogConfig) FreeCatalogSyncEnabled() bool {
+	return c.FreeCatalogSync == nil || *c.FreeCatalogSync
 }
 
 // MediaConfig governs media the gateway fetches on a client's behalf.
