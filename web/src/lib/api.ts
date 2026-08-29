@@ -176,6 +176,7 @@ export async function* stream(
   path: string,
   body: unknown,
   onStart?: (s: StreamStart) => void,
+  signal?: AbortSignal,
 ): AsyncGenerator<string, void, unknown> {
   const res = await fetch(path, {
     method: "POST",
@@ -186,6 +187,7 @@ export async function* stream(
     },
     body: JSON.stringify(body),
     credentials: "same-origin",
+    signal,
   })
   if (!res.ok || !res.body) {
     // A 401 here is ambiguous in a way request() never sees: this path also
@@ -198,10 +200,18 @@ export async function* stream(
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) return
-    yield decoder.decode(value, { stream: true })
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return
+      yield decoder.decode(value, { stream: true })
+    }
+  } finally {
+    // A consumer that stops early — the playground's Stop button, or a
+    // component unmounting mid-answer — leaves the body unread otherwise,
+    // and the connection open behind it. Cancelling is a no-op once the
+    // stream has ended on its own.
+    void reader.cancel().catch(() => {})
   }
 }
 

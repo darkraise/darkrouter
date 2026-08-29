@@ -9,6 +9,7 @@ import {
   Switch,
   Textarea,
 } from "darkraise-ui"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "darkraise-ui"
 import { ModelCombobox, useModelCandidates } from "../shell/model-combobox"
 import { DIALECTS, type PlaygroundConfig } from "./config"
 import { parseTools } from "./chat"
@@ -35,6 +36,9 @@ export function ConfigPane({
 
   return (
     <aside className="flex w-full shrink-0 flex-col gap-4 border-l p-4 lg:w-80">
+      {/* Model and dialect decide where a prompt goes, so they stay in view.
+          Sampling and the prompt scaffolding are set once a session and fold
+          away — the transcript needs the height more than they do. */}
       <h2 className="text-sm font-medium">Request</h2>
 
       <ModelCombobox
@@ -64,6 +68,10 @@ export function ConfigPane({
         </Select>
       </div>
 
+      <Accordion type="multiple" defaultValue={[]} className="flex flex-col">
+      <AccordionItem value="sampling">
+      <AccordionTrigger className="text-sm">Sampling</AccordionTrigger>
+      <AccordionContent className="flex flex-col gap-4 pt-1">
       <div className="flex gap-2">
         <div className="flex flex-1 flex-col gap-1.5">
           <Label htmlFor="pg-temp">Temperature</Label>
@@ -87,6 +95,16 @@ export function ConfigPane({
         </div>
       </div>
 
+      <label className="flex items-center gap-2 text-sm">
+        <Switch checked={config.stream} onCheckedChange={(next) => set("stream", next)} />
+        Stream the reply
+      </label>
+      </AccordionContent>
+      </AccordionItem>
+
+      <AccordionItem value="prompt">
+      <AccordionTrigger className="text-sm">System &amp; tools</AccordionTrigger>
+      <AccordionContent className="flex flex-col gap-4 pt-1">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="pg-system">System prompt</Label>
         <Textarea
@@ -109,11 +127,9 @@ export function ConfigPane({
         />
         {toolsError && <p className="text-sm text-[hsl(var(--destructive))]">{toolsError}</p>}
       </div>
-
-      <label className="flex items-center gap-2 text-sm">
-        <Switch checked={config.stream} onCheckedChange={(next) => set("stream", next)} />
-        Stream the reply
-      </label>
+      </AccordionContent>
+      </AccordionItem>
+      </Accordion>
     </aside>
   )
 }
