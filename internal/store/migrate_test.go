@@ -54,9 +54,11 @@ func TestMigrationRealignsTheProvidersShippedAsKeylessThatAreNot(t *testing.T) {
 		}
 	}
 	// Rewind past this migration and run it again, which is the situation it
-	// exists for: rows written by an older binary, then a deploy.
+	// exists for: rows written by an older binary, then a deploy. Pinned to the
+	// version below this migration rather than to the head, so that adding a
+	// later migration does not silently leave this one unexercised.
 	if _, err := db.Write.ExecContext(ctx,
-		`UPDATE schema_version SET version = version - 1`); err != nil {
+		`UPDATE schema_version SET version = 12`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Migrate(ctx); err != nil {
