@@ -9,23 +9,31 @@ import (
 	"sync"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // testPassword and testHash are the fixture credential.
 //
-// The hash is computed once per test binary rather than per fixture: bcrypt at
-// cost 12 takes about two seconds by design, and paying that in every test that
-// wants a server turns a fast package into a slow one. The cost itself is not
-// lowered — it is what spec §3 fixes and what the verify path exercises.
+// Hashed at bcrypt's minimum cost, and computed once per test binary.
+// CompareHashAndPassword reads the cost out of the hash it is given, so a
+// fixture hashed at the production cost charges every login in this package
+// the full two seconds — and the package logs in about a hundred times. Under
+// -race that came to eight minutes, which is how internal/admin hit the
+// ten-minute test timeout the first time CI ran.
+//
+// Lowering it here lowers nothing in production: passwordCost is untouched,
+// HashPassword still uses it, and the password tests still exercise a real
+// hash at the real cost.
 const testPassword = "hunter2"
 
 var testHash = sync.OnceValue(func() string {
-	h, err := HashPassword(testPassword)
+	h, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	if err != nil {
 		panic(err)
 	}
-	return h
+	return string(h)
 })
 
 // testServer builds an admin server over a migrated database with one known
