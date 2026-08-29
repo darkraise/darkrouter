@@ -63,8 +63,12 @@ func adapters() map[string]adapter.Adapter {
 		// Two entries, one adapter. vertex renders two different payloads
 		// depending on the target's publisher, and one entry would cover half
 		// the behavior while looking complete.
-		"vertex-google":    vertexadapter.New(),
-		"vertex-anthropic": vertexadapter.New(),
+		// The same offline fetcher the gemini entry gets. Without it these two
+		// reached the network for a fixture's image URL and recorded the
+		// resolver's own error message, which made the golden file pass only
+		// on the machine that wrote it.
+		"vertex-google":    vertexadapter.NewWithFetcher(&offlineFetcher),
+		"vertex-anthropic": vertexadapter.NewWithFetcher(&offlineFetcher),
 	}
 }
 

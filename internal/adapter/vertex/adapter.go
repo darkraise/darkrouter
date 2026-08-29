@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -33,9 +34,37 @@ const (
 	AnthropicVersion = "vertex-2023-10-16"
 )
 
-type Adapter struct{}
+type Adapter struct {
+	// media renders the Google publisher's payload. Its only state is the
+	// media fetcher, which is safe for concurrent use and expensive enough not
+	// to rebuild per request.
+	//
+	// Injectable because the fetcher is the operator's decision: media.inline
+	// governs whether the gateway fetches an image URL on a client's behalf,
+	// and a Vertex adapter holding a fetcher of its own honoured that setting
+	// on the direct Gemini route while ignoring it here. The golden suite
+	// needs the same seam to keep its promise that no fixture reaches the
+	// network.
+	media *geminiadapter.Adapter
+}
 
 func New() *Adapter { return &Adapter{} }
+
+// NewWithFetcher builds the adapter against a media fetcher of the caller's.
+func NewWithFetcher(f *geminiadapter.Fetcher) *Adapter {
+	return &Adapter{media: geminiadapter.NewWithFetcher(f)}
+}
+
+// gemini is the renderer for the Google publisher, defaulted on first use so
+// that a zero Adapter — which every caller of New() holds — still works.
+func (a *Adapter) gemini() *geminiadapter.Adapter {
+	if a.media == nil {
+		return defaultGemini
+	}
+	return a.media
+}
+
+var defaultGemini = geminiadapter.New()
 
 func (a *Adapter) Kind() string { return "vertex" }
 
@@ -82,7 +111,7 @@ func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.R
 	}
 	switch publisherOf(t) {
 	case PublisherGoogle:
-		return buildGoogle(ctx, t, req)
+		return a.buildGoogle(ctx, t, req)
 	case PublisherAnthropic:
 		return buildAnthropic(ctx, t, req)
 	}
