@@ -575,7 +575,6 @@ web/src/features/playground/
     presets.ts               [3] queries and mutations
     conversations.ts         [4] queries and mutations
 
-web/vitest.config.ts                            [1] pool: "threads" (§12)
 web/src/features/settings/settings-catalog.ts   [4] the save switch
 
 internal/store/migrations/0014_playground.sql   [3] presets  [4] conversations
@@ -655,11 +654,15 @@ rule violation, and neither the mockup gate nor a typecheck will stop it.
 
 ## 12. Testing
 
-**Console.** Vitest under the **threads pool** — the default fork pool silently skips half this
-suite. Note that this is currently an unenforced requirement: `web/vitest.config.ts` sets no `pool`
-and the test script is a bare `vitest run`, so the gate below could pass with half the suite never
-executing. Pinning `pool: "threads"` in the config is part of this change, and it comes first,
-because every other test claim in this section depends on it.
+**Console.** Vitest as configured, with no `pool` pinned.
+
+An earlier draft of this section required the **threads pool**, on the belief that the default fork
+pool silently skips part of this suite. That was measured on 2026-08-29 and is **false** at the
+version in the lockfile: `npx vitest run` under `--pool=forks` and under `--pool=threads` both run
+51 files and 517 tests, all passing. The requirement is withdrawn rather than kept as harmless
+insurance — a config line justified by a false premise, carrying a comment asserting that premise,
+is worse than no line. Recorded here because the claim is the kind that gets re-derived from folklore
+every time a suite looks short.
 
 New coverage, by the stage that adds it:
 
