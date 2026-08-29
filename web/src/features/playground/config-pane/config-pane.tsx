@@ -13,6 +13,8 @@ import { DIALECTS, type PlaygroundConfig } from "../config"
 import { parseTools } from "../lib/request"
 import type { PlaygroundDialect } from "../../../lib/api-types"
 import { Sampling } from "./sampling"
+import { Reasoning } from "./reasoning"
+import { StructuredOutput } from "./structured-output"
 
 /**
  * The request, beside the surfaces that send it.
@@ -73,6 +75,20 @@ export function ConfigPane({
       <AccordionTrigger className="text-sm">Sampling</AccordionTrigger>
       <AccordionContent className="pt-1">
       <Sampling config={config} onChange={onChange} />
+      </AccordionContent>
+      </AccordionItem>
+
+      <AccordionItem value="reasoning">
+      <AccordionTrigger className="text-sm">Reasoning</AccordionTrigger>
+      <AccordionContent className="pt-1">
+        <Reasoning config={config} onChange={onChange} />
+      </AccordionContent>
+      </AccordionItem>
+
+      <AccordionItem value="schema">
+      <AccordionTrigger className="text-sm">Structured output</AccordionTrigger>
+      <AccordionContent className="pt-1">
+        <StructuredOutput config={config} onChange={onChange} />
       </AccordionContent>
       </AccordionItem>
 
