@@ -6,10 +6,6 @@ import { PresetPicker } from "./preset-picker"
 import { emptyConfig } from "../config"
 import type { PlaygroundPreset } from "../../../lib/api-types"
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, ...rest }: { children: React.ReactNode }) => <a {...rest}>{children}</a>,
-}))
-
 const saved: PlaygroundPreset = {
   id: "p1",
   name: "terse",
@@ -23,6 +19,17 @@ const saved: PlaygroundPreset = {
 vi.mock("../../../lib/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/queries")>()),
   usePlaygroundPresets: () => ({ data: [saved], isLoading: false }),
+}))
+
+const { postMock, patchMock, delMock } = vi.hoisted(() => ({
+  postMock: vi.fn(),
+  patchMock: vi.fn(),
+  delMock: vi.fn(),
+}))
+
+vi.mock("../../../lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../lib/api")>()),
+  api: { get: vi.fn(), post: postMock, patch: patchMock, del: delMock },
 }))
 
 function mounted(ui: React.ReactNode) {
@@ -56,5 +63,30 @@ describe("saving a preset", () => {
     mounted(<PresetPicker config={{ ...emptyConfig(), model: "gpt" }} onChange={() => {}} />)
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
     expect(await screen.findByLabelText(/name/i)).toBeInTheDocument()
+  })
+
+  it("offers to overwrite a name that already exists, and sends the clash's id", async () => {
+    patchMock.mockResolvedValue({ id: "p1" })
+    mounted(<PresetPicker config={{ ...emptyConfig(), model: "gpt" }} onChange={() => {}} />)
+
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    await userEvent.type(await screen.findByLabelText(/name/i), "terse")
+    await userEvent.click(await screen.findByRole("button", { name: "Overwrite" }))
+
+    expect(patchMock).toHaveBeenCalledTimes(1)
+    expect(patchMock.mock.calls[0]![0]).toBe("/api/playground/presets/p1")
+  })
+})
+
+describe("deleting a preset", () => {
+  it("removes the saved row from the Manage dialog", async () => {
+    delMock.mockResolvedValue(undefined)
+    mounted(<PresetPicker config={{ ...emptyConfig(), model: "gpt" }} onChange={() => {}} />)
+
+    await userEvent.click(screen.getByRole("button", { name: /manage presets/i }))
+    await userEvent.click(await screen.findByRole("button", { name: "Delete terse" }))
+
+    expect(delMock).toHaveBeenCalledTimes(1)
+    expect(delMock.mock.calls[0]![0]).toBe("/api/playground/presets/p1")
   })
 })
