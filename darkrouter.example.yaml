@@ -107,6 +107,23 @@ catalog:
   models_dev_url: https://models.dev/api.json
   sync_interval: 12h
   sync_timeout: 30s
+  # The curated free-tier catalogue the "import free models only" filter reads.
+  # Which models a provider's free tier covers cannot be derived from prices --
+  # a free tier is a property of your account, not of the model -- so it is a
+  # hand-maintained list, refreshed daily from the source below. Set
+  # free_catalog_sync to false to keep the catalogue this release shipped with
+  # and make no outbound request for it.
+  free_catalog_sync: true
+  free_catalog_url: https://raw.githubusercontent.com/diegosouzapw/OmniRoute/HEAD/open-sse/config/freeModelCatalog.data.ts
+  free_catalog_interval: 24h
+  # On first start, add a provider for every preset that needs no credential --
+  # AI Horde, OpenCode Free, OVHcloud AI, UncloseAI -- so the gateway can route
+  # something before anyone opens the console. Their models are imported with
+  # the free-only filter above.
+  #
+  # Offered once, not on every start: delete one and it stays deleted. Setting
+  # this to false stops future offers and removes nothing.
+  seed_free_providers: true
   discovery:
     # Discovery probes each provider's model-listing endpoint. It is outbound
     # traffic the gateway initiates on your behalf; set false to disable it and
