@@ -177,7 +177,14 @@ function TileSkeleton() {
 }
 
 /** Providers in priority order, annotated with what the window actually sent
- *  them. A provider the router cannot currently choose is drawn as idle. */
+ *  them. A provider the router cannot currently choose is drawn as idle.
+ *
+ *  A provider with no account is not in the routing path at all and is left
+ *  out: it keeps its database row after its last credential is deleted, so
+ *  drawing every such row would put a column of providers nobody has set up
+ *  beside the handful that carry traffic. It stays only while the window
+ *  still holds requests it served, because that is history the graph would
+ *  otherwise erase — along with any return arc drawn to or from it. */
 export function flowProviders(
   overview: Overview,
   byProvider: UsageRow[],
@@ -187,21 +194,23 @@ export function flowProviders(
     if (!row.key) continue
     volume.set(row.key, (volume.get(row.key) ?? 0) + row.requests)
   }
-  return overview.providers.map((tile, i) => ({
-    id: tile.id,
-    name: tile.name,
-    requests: volume.get(tile.id) ?? 0,
-    // The tile order is the priority order the API already sorts by, so the
-    // graph's column reads top-to-bottom the way the router walks it.
-    priority: i + 1,
-    // Disabled or unconfigured means the router will not pick it, whatever
-    // the window happened to contain. `degraded` still routes.
-    candidate: tile.state !== "disabled" && tile.state !== "unconfigured",
-    credentials: tile.credentials,
-    cooling: tile.cooling,
-    needsReauth: tile.needs_reauth,
-    state: tile.state,
-  }))
+  return overview.providers
+    .filter((tile) => tile.state !== "unconfigured" || (volume.get(tile.id) ?? 0) > 0)
+    .map((tile, i) => ({
+      id: tile.id,
+      name: tile.name,
+      requests: volume.get(tile.id) ?? 0,
+      // The tile order is the priority order the API already sorts by, so the
+      // graph's column reads top-to-bottom the way the router walks it.
+      priority: i + 1,
+      // Disabled or unconfigured means the router will not pick it, whatever
+      // the window happened to contain. `degraded` still routes.
+      candidate: tile.state !== "disabled" && tile.state !== "unconfigured",
+      credentials: tile.credentials,
+      cooling: tile.cooling,
+      needsReauth: tile.needs_reauth,
+      state: tile.state,
+    }))
 }
 
 export function OverviewScreen() {
@@ -330,12 +339,26 @@ export function OverviewScreen() {
                 · {SERIES_WINDOW}
               </span>
             </h2>
-            <p className="mt-1 mb-4 max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
-              Aliases on the left, providers on the right in priority order. Edge
-              thickness is share of the window; a dashed return is traffic that
-              arrived somewhere because somewhere else refused it, labelled with
-              how much. A provider that is not a candidate has no edge at all.
-            </p>
+            {/* A legend, not a paragraph. Four sentences explaining a picture
+                sit above the picture and are read once; the same facts beside
+                the marks they name are read whenever the graph is. */}
+            <ul className="mt-1 mb-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-[hsl(var(--muted-foreground))]">
+              <li className="flex items-center gap-1.5">
+                <span className="h-0.5 w-6 rounded bg-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+                thicker edge, larger share
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span
+                  className="h-0.5 w-6 rounded border-t-2 border-dashed border-[hsl(var(--muted-foreground))] bg-transparent"
+                  aria-hidden="true"
+                />
+                failed over from somewhere else
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded border border-dashed" aria-hidden="true" />
+                no edge, not a candidate
+              </li>
+            </ul>
             {o ? (
               <FlowGraph
                 aliases={aliasesFromUsage(byAlias.data?.days ?? [])}

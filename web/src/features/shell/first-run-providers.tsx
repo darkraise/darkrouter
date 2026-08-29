@@ -1,4 +1,6 @@
 import { Button, Card } from "darkraise-ui"
+import { Plus } from "lucide-react"
+import { GhostChain } from "./empty-state"
 
 // Step one is deliberately not the literal button caption below it: the two
 // would otherwise read as the same string twice, which is confusing on the
@@ -37,18 +39,14 @@ export function FirstRunProviders({ onAdd }: { onAdd: () => void }) {
       </ol>
 
       {/* Dimmed rather than absent: the shape teaches what the routing graph
-          will draw once traffic exists, without claiming any traffic does. */}
+          will draw once traffic exists, without claiming any traffic does. The
+          same wireframe every empty well on the routing side uses. */}
       <div className="mt-6 opacity-30" aria-hidden="true">
-        <div className="flex items-center gap-4">
-          <div className="h-8 w-24 rounded border border-dashed" />
-          <div className="h-px flex-1 border-t border-dashed" />
-          <div className="h-8 w-8 rounded-full border border-dashed" />
-          <div className="h-px flex-1 border-t border-dashed" />
-          <div className="h-8 w-24 rounded border border-dashed" />
-        </div>
+        <GhostChain />
       </div>
 
       <Button className="mt-6" onClick={onAdd}>
+        <Plus className="size-[var(--icon-size)]" />
         Add accounts
       </Button>
     </Card>

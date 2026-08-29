@@ -13,16 +13,31 @@ import {
 } from "darkraise-ui/components/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "darkraise-ui/components/tabs"
 import { getCsrfToken, throwOnExecutorError } from "../../lib/api"
+import { ModelCombobox, useModelCandidates } from "../shell/model-combobox"
 import type { AuxBody, AuxSurface, CountResult } from "../../lib/api-types"
 
+/**
+ * The aux tabs.
+ *
+ * `surface` is the executor's own wire vocabulary, which is plural and
+ * endpoint-shaped. `catalogSurface` is `ir.Surface` — what the catalogue
+ * stores and `/api/models` serves — which is singular and capability-shaped.
+ * The two disagree for five of the six, so a model filter written against the
+ * wire name silently matches nothing.
+ */
 export const AUX_SURFACES = [
-  { surface: "embeddings", label: "Embeddings", needsFile: false },
-  { surface: "rerank", label: "Rerank", needsFile: false },
-  { surface: "moderations", label: "Moderation", needsFile: false },
-  { surface: "images", label: "Images", needsFile: false },
-  { surface: "speech", label: "Speech", needsFile: false },
-  { surface: "transcriptions", label: "Transcription", needsFile: true },
+  { surface: "embeddings", catalogSurface: "embedding", label: "Embeddings", needsFile: false },
+  { surface: "rerank", catalogSurface: "rerank", label: "Rerank", needsFile: false },
+  { surface: "moderations", catalogSurface: "moderation", label: "Moderation", needsFile: false },
+  { surface: "images", catalogSurface: "image", label: "Images", needsFile: false },
+  { surface: "speech", catalogSurface: "tts", label: "Speech", needsFile: false },
+  { surface: "transcriptions", catalogSurface: "stt", label: "Transcription", needsFile: true },
 ] as const
+
+/** The catalogue's name for an aux surface, for the model filter. */
+export function catalogSurfaceFor(surface: AuxSurface): string {
+  return AUX_SURFACES.find((s) => s.surface === surface)?.catalogSurface ?? surface
+}
 
 const NUMERIC = new Set(["dimensions", "n", "top_n"])
 
@@ -208,12 +223,25 @@ function AuxSurfaceForm({
   onFile: (file: File) => void
   onRun: () => void
 }) {
+  // No aliases: an alias resolves to whatever chain it names, and a chain is
+  // built out of chat models. Naming one on an embeddings form would route a
+  // request the surface cannot serve.
+  const { candidates, loading } = useModelCandidates({
+    aliases: false,
+    surface: catalogSurfaceFor(surface),
+  })
   return (
     <div className="flex flex-col gap-3">
-      <Input
+      {/* Narrowed to this surface: an embeddings box offering a chat model is
+          offering a request the executor will refuse. */}
+      <ModelCombobox
+        label={`${surface} model`}
         placeholder="model"
         value={form.model ?? ""}
-        onChange={(e) => onField("model", e.target.value)}
+        onChange={(model) => onField("model", model)}
+        candidates={candidates}
+        loading={loading}
+        className="w-full"
       />
       {needsFile ? (
         <div className="flex flex-col gap-2">
@@ -354,6 +382,7 @@ type CountDialect = (typeof COUNT_DIALECTS)[number]
  *  and Task 3's handler refuses the dialect with a 400 rather than quietly
  *  substituting the local estimate for a reading. */
 export function Count() {
+  const { candidates, loading } = useModelCandidates()
   const [dialect, setDialect] = useState<CountDialect>("anthropic")
   const [model, setModel] = useState("")
   const [prompt, setPrompt] = useState("")
@@ -392,7 +421,15 @@ export function Count() {
             ))}
           </SelectContent>
         </Select>
-        <Input placeholder="model" value={model} onChange={(e) => setModel(e.target.value)} />
+        <ModelCombobox
+          label="Model or alias to count against"
+          placeholder="model"
+          value={model}
+          onChange={setModel}
+          candidates={candidates}
+          loading={loading}
+          className="w-full"
+        />
         <Textarea placeholder="Prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         <Button onClick={() => void run()} disabled={busy || model === "" || prompt === ""}>
           {busy ? "Counting…" : "Count"}

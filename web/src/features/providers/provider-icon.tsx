@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react"
 import "./provider-icon.css"
 import { BRAND_MARKS } from "./brand-marks"
+import { PROVIDER_ASSETS } from "./provider-assets"
 
 /** A hue from the identifier itself, so a provider keeps the same colour on
  *  every screen and across reloads. Random would be prettier and useless:
@@ -35,6 +36,13 @@ export function monogramText(id: string, name?: string): string {
  * resolve through the preset they were created from and both show the groq
  * mark. Without a preset — a raw provider pointing at some base URL — there
  * is no brand to claim, and the monogram says so honestly.
+ *
+ * Three sources, in order: a vector mark from `@lobehub/icons`, a logo file
+ * shipped in `public/providers`, then the monogram. The file comes second
+ * because the mark is one component in a bundle the browser already has,
+ * where the file is a request; both beat a monogram on a screen whose job is
+ * recognition. Which presets have a file is a generated manifest rather than a
+ * guess, so no tile ever asks for an image that is not there.
  */
 export function ProviderIcon({
   preset,
@@ -66,6 +74,26 @@ export function ProviderIcon({
         }}
       >
         <Mark size={Math.round(size * 0.62)} />
+      </span>
+    )
+  }
+
+  const asset = preset ? PROVIDER_ASSETS[preset] : undefined
+  if (asset) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[6px] border bg-[hsl(var(--muted))]"
+        style={{ width: size, height: size }}
+      >
+        <img
+          src={`/providers/${asset.file}`}
+          alt=""
+          className={asset.mono ? "provider-asset provider-asset-mono" : "provider-asset"}
+          style={{ width: Math.round(size * 0.68), height: Math.round(size * 0.68) }}
+          loading="lazy"
+          decoding="async"
+        />
       </span>
     )
   }

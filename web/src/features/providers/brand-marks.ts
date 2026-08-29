@@ -14,10 +14,10 @@
  * carry a gradient rather than a flat colour, which is why background is a
  * CSS value and not a hex string.
  *
- * Generated against `internal/catalog/presets.yaml`: 87 of the 197
+ * Generated against `internal/catalog/presets.yaml`: 81 of the 197
  * presets resolve to a brand, either by name, by the vendor a gateway fronts
- * (`g4f-groq` is groq), or by the family prefix (`cloudflare-ai`). The
- * remaining 110 are small aggregators with no mark anywhere, and
+ * (`ollama-cloud` is ollama), or by the family prefix (`cloudflare-ai`). The
+ * remaining 116 are small aggregators with no mark anywhere, and
  * they take the monogram in `provider-icon.tsx` -- which is why that fallback
  * is a designed state and not an error case.
  */
@@ -134,11 +134,6 @@ export const BRAND_MARKS: Record<string, BrandMark> = {
   "featherless-ai": { Mark: FeatherlessMono, background: "#FFE184", color: "#000" },
   "fireworks": { Mark: FireworksMono, background: "#5019C5", color: "#000" },
   "friendliai": { Mark: FriendliMono, background: null, color: null },
-  "g4f-gemini": { Mark: GeminiMono, background: null, color: null },
-  "g4f-groq": { Mark: GroqMono, background: "#F55036", color: "#fff" },
-  "g4f-nvidia": { Mark: NvidiaMono, background: "#74B71B", color: "#fff" },
-  "g4f-ollama": { Mark: OllamaMono, background: null, color: null },
-  "g4f-pollinations": { Mark: PollinationsMono, background: "#000", color: "#fff" },
   "gemini": { Mark: GeminiMono, background: null, color: null },
   "glm": { Mark: ChatGLMMono, background: "#4268FA", color: "#fff" },
   "groq": { Mark: GroqMono, background: "#F55036", color: "#fff" },

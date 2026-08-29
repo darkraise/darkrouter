@@ -102,6 +102,10 @@ export type RequestRow = {
   final_model?: string
   /** A word, not an HTTP code: "success", "error", and so on. */
   status: string
+  /** Where the request came from: `proxy` for a client through the gateway,
+   *  `console` for one an operator sent by hand from the playground or a
+   *  provider's test drawer. */
+  source: string
   tokens_in: number
   tokens_out: number
   cache_read_tokens: number

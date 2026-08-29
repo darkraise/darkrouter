@@ -10,9 +10,9 @@ describe("the brand map", () => {
   })
 
   it("gives a gateway the mark of the vendor it fronts", () => {
-    // g4f-groq is groq reached another way, and the mark is what tells an
-    // operator which vendor's rate limit they are about to share.
-    expect(BRAND_MARKS["g4f-groq"]?.Mark).toBe(BRAND_MARKS["groq"]?.Mark)
+    // ollama-cloud is ollama reached another way, and the mark is what tells
+    // an operator which vendor's rate limit they are about to share.
+    expect(BRAND_MARKS["ollama-cloud"]?.Mark).toBe(BRAND_MARKS["ollama"]?.Mark)
   })
 })
 

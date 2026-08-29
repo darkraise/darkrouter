@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Badge, Card, Input } from "darkraise-ui"
+import { EmptyState } from "../shell/empty-state"
 import type { Model } from "../../lib/api-types"
 import { priceLabel } from "../models/models-screen"
 
@@ -57,10 +58,10 @@ export function ProviderModels({ models, loading }: { models: Model[]; loading: 
         // Two different nothings: a provider whose catalogue has never been
         // fetched reads the same as one that offers nothing, and the fix for
         // each is different.
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          No models known for this provider yet. Run a discovery sweep, or check that the
-          catalogue has an entry for it.
-        </p>
+        <EmptyState
+          title="Nothing has asked this provider what it serves"
+          hint="A discovery sweep lists its models with one of its own keys. Run one from Health below, or check that the release ships a catalogue entry for it."
+        />
       ) : shown.length === 0 ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           No model here matches “{q.trim()}”.

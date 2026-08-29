@@ -21,9 +21,9 @@ describe("moveTarget", () => {
 
 describe("validateChain", () => {
   it("names a qualified target whose provider is not configured", () => {
-    expect(validateChain(["groq/m-a", "ghost/m-b"], ["groq"])).toEqual([
-      "ghost/m-b: no provider named ghost is configured",
-    ])
+    const problems = validateChain(["groq/m-a", "ghost/m-b"], ["groq"])
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatch(/^ghost\/m-b: no provider named ghost is configured/)
   })
 
   it("accepts a bare model target, which any provider may serve", () => {

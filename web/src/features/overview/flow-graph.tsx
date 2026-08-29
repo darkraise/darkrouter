@@ -258,7 +258,10 @@ function ProviderNode({ data }: NodeProps) {
         <span className="rf-name">{p.name}</span>
         <span className="rf-note">{providerNote(p)}</span>
         <span className="rf-right">
-          {p.candidate ? (
+          {/* Keyed on the volume rather than on candidacy: a provider taken
+              out of the path still served whatever the window recorded, and
+              "no traffic" over a row with requests behind it is false. */}
+          {p.requests > 0 ? (
             <>
               <span className="rf-count">{p.requests.toLocaleString()}</span>
               <span className="rf-pct">{(p.share * 100).toFixed(1)}%</span>

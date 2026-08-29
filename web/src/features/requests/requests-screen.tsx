@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState } from "react"
-import { useRouter, useRouterState } from "@tanstack/react-router"
+import { ChevronDown } from "lucide-react"
+import { Link, useRouter, useRouterState } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import { Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { DataTable, exportToCsv } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
-import { useRequests } from "../../lib/queries"
+import { useAliases, useModels, useProviders, useRequests } from "../../lib/queries"
 import { useSearchFilters, filterQuery } from "../../lib/search-filters"
 import type { RequestPage, RequestRow } from "../../lib/api-types"
-import { EmptyLegend } from "../shell/empty-legend"
+import { ModelCombobox } from "../shell/model-combobox"
+import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
+import { TrafficStrip } from "./traffic-strip"
 import { TraceDrawer } from "./trace-drawer"
 import { FilterSelect } from "./filter-select"
 import { SavedViewsBar } from "./saved-views-bar"
 import { buildColumns, facetRow, CSV_COLUMNS } from "./requests-columns"
 
 const FIELDS = [
+  "source",
   "provider",
   "model",
   "status",
@@ -52,6 +56,14 @@ export function newerCount(firstPage: RequestRow[], heldNewestId: string): numbe
 }
 
 /** Distinct values for a combobox, drawn from what the log actually holds. */
+/** What a filter offers: the values on this page, then everything else the
+ *  gateway knows, each once. Page values lead because they are the ones with
+ *  traffic behind them right now. */
+export function mergedOptions(fromPage: string[], known: string[]): string[] {
+  const seen = new Set(fromPage)
+  return [...fromPage, ...known.filter((k) => k !== "" && !seen.has(k)).sort()]
+}
+
 export function optionsFrom(rows: RequestRow[], field: keyof RequestRow): string[] {
   const seen = new Set<string>()
   for (const row of rows) {
@@ -90,6 +102,11 @@ export function RequestsScreen() {
   const [held, setHeld] = useState<RequestRow[] | null>(null)
 
   const first = useRequests({ ...apiFilters(filters), limit: "50" })
+  // The filter vocabularies. Cheap: all three are already cached by the
+  // screens that own them, and none refetches for this.
+  const providers = useProviders()
+  const catalog = useModels()
+  const aliases = useAliases()
 
   useEffect(() => {
     // An empty first load must keep re-freezing on every poll, same as
@@ -145,6 +162,21 @@ export function RequestsScreen() {
   const columns = useMemo(() => buildColumns(setSelected), [])
   const more = cursor ?? first.data?.next_cursor
   const filtered = Object.values(filters).some((v) => v !== "")
+
+  // The page's own values first — those are the ones with traffic behind them
+  // right now — then everything else the gateway knows about.
+  const providerOptions = mergedOptions(
+    optionsFrom(pageRows, "provider"),
+    (providers.data?.providers ?? []).map((p) => p.id),
+  )
+  const modelOptions = mergedOptions(
+    optionsFrom(pageRows, "model"),
+    (catalog.data?.models ?? []).map((m) => m.model),
+  )
+  const aliasOptions = mergedOptions(
+    optionsFrom(pageRows, "alias"),
+    aliases.data ? Object.keys(aliases.data) : [],
+  )
   const newer = newerCount(first.data?.requests ?? [], held?.[0]?.id ?? "")
 
   return (
@@ -160,23 +192,52 @@ export function RequestsScreen() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterSelect
-          label="Provider"
+        {/* Suggested from the whole catalogue, not just the page in hand: a
+            menu built from the loaded rows can only offer what is already on
+            screen, so filtering to a provider whose traffic is older than the
+            first page was impossible. These filter server-side, so free text
+            has to keep working — a model retired from the catalogue is still
+            in the log. */}
+        <ModelCombobox
+          label="Filter by provider"
+          placeholder="Any provider"
           value={filters.provider}
-          options={optionsFrom(pageRows, "provider")}
           onChange={(v) => onFilter("provider", v)}
+          candidates={providerOptions}
+          loading={providers.isPending}
+          emptyText="No provider by that name. The filter still applies."
+          className="w-44"
         />
-        <FilterSelect
-          label="Model"
+        <ModelCombobox
+          label="Filter by model"
+          placeholder="Any model"
           value={filters.model}
-          options={optionsFrom(pageRows, "model")}
           onChange={(v) => onFilter("model", v)}
+          candidates={modelOptions}
+          loading={catalog.isPending}
+          emptyText="No model by that name. The filter still applies."
+          className="w-52"
         />
-        <FilterSelect
-          label="Alias"
+        <ModelCombobox
+          label="Filter by alias"
+          placeholder="Any alias"
           value={filters.alias}
-          options={optionsFrom(pageRows, "alias")}
           onChange={(v) => onFilter("alias", v)}
+          candidates={aliasOptions}
+          loading={aliases.isPending}
+          emptyText="No alias by that name. The filter still applies."
+          className="w-40"
+        />
+        {/* Console traffic is real traffic — the playground and the provider
+            test drawer go through the same executor — so it is in this log
+            too. Separating them is a filter rather than an exclusion, because
+            "did my test work" and "what are my clients doing" are both
+            questions this screen answers. */}
+        <FilterSelect
+          label="Source"
+          value={filters.source}
+          options={["proxy", "console"]}
+          onChange={(v) => onFilter("source", v)}
         />
         <FilterSelect
           label="Surface"
@@ -234,6 +295,8 @@ export function RequestsScreen() {
 
       <SavedViewsBar fields={FIELDS} filters={filters} onApply={writeFilters} />
 
+      <TrafficStrip rows={rows} />
+
       <DataTable
         columns={columns}
         data={rows}
@@ -241,20 +304,28 @@ export function RequestsScreen() {
         virtualize={{ rowHeight: 36, height: 640 }}
       />
 
-      {rows.length === 0 &&
-        (filtered ? (
-          <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
-            No requests match these filters.
-          </p>
-        ) : (
-          <EmptyLegend
-            what="Requests appear here as clients call the gateway."
-            hint="Point a client at Connect to see the first one."
-          />
-        ))}
+      {rows.length === 0 && (
+        <div className="mt-4">
+          {filtered ? (
+            <NoMatch what="requests" onClear={clear} />
+          ) : (
+            <EmptyState
+              title="Every request the gateway serves is logged here"
+              hint="Point a client at the proxy and the first one appears within seconds, with the full attempt trail behind it."
+              action={
+                <Button asChild size="sm">
+                  <Link to="/connect">Get a client connected</Link>
+                </Button>
+              }
+              preview={<GhostRows />}
+            />
+          )}
+        </div>
+      )}
 
       {more && (
         <Button variant="secondary" className="mt-4" onClick={() => void loadMore()}>
+          <ChevronDown className="size-[var(--icon-size)]" />
           Load more
         </Button>
       )}

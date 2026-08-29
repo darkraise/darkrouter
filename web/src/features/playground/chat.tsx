@@ -3,17 +3,10 @@ import { Link, useSearch } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
-import { Textarea } from "darkraise-ui/components/textarea"
-import { Switch } from "darkraise-ui/components/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "darkraise-ui/components/select"
 import { stream, type StreamStart } from "../../lib/api"
 import { useTrace } from "../../lib/queries"
+import { DIALECTS, type PlaygroundConfig } from "./config"
+import { NO_METRICS, metricsFromTrace, traceWhenWritten, type StreamMetrics } from "./metrics"
 import type {
   PlaygroundChatBody,
   PlaygroundDialect,
@@ -132,30 +125,10 @@ export function extractUnaryText(dialect: PlaygroundDialect, body: string): stri
   }
 }
 
-export type ChatState = {
-  model: string
-  dialect: PlaygroundDialect
-  system: string
-  stream: boolean
-  /** Held as strings: an empty box and a zero are different settings, and a
-   *  number state cannot hold both. */
-  temperature: string
-  maxTokens: string
-  toolsRaw: string
+/** The shared request settings plus this surface's own conversation. The
+ *  settings live beside the tabs now; the turns belong to the chat. */
+export type ChatState = PlaygroundConfig & {
   messages: PlaygroundMessage[]
-}
-
-function emptyChatState(): ChatState {
-  return {
-    model: "",
-    dialect: "openai",
-    system: "",
-    stream: true,
-    temperature: "",
-    maxTokens: "",
-    toolsRaw: "",
-    messages: [],
-  }
 }
 
 export function parseTools(raw: string): { tools?: Record<string, unknown>[]; error?: string } {
@@ -188,8 +161,6 @@ export function chatBody(state: ChatState): PlaygroundChatBody {
   return body
 }
 
-const DIALECTS: PlaygroundDialect[] = ["openai", "anthropic", "gemini"]
-
 export function seedFromTrace(trace: RequestTrace): Partial<ChatState> {
   // The model the client asked for, not the one that served: replaying
   // against the serving provider would skip the routing decision, which is
@@ -203,8 +174,17 @@ export function seedFromTrace(trace: RequestTrace): Partial<ChatState> {
   }
 }
 
-export function Chat() {
-  const [state, setState] = useState<ChatState>(emptyChatState)
+export function Chat({
+  config,
+  onConfigChange,
+  onMetrics,
+}: {
+  config: PlaygroundConfig
+  onConfigChange: (next: PlaygroundConfig) => void
+  onMetrics: (m: StreamMetrics) => void
+}) {
+  const [messages, setMessages] = useState<PlaygroundMessage[]>([])
+  const state: ChatState = { ...config, messages }
   const [draft, setDraft] = useState("")
   const [requestId, setRequestId] = useState("")
   const [error, setError] = useState("")
@@ -220,21 +200,25 @@ export function Chat() {
   // must not re-fire and stomp on turns the operator has since typed.
   useEffect(() => {
     if (!trace.data || seed === undefined || seededFrom === seed) return
-    setState((s) => ({ ...s, ...seedFromTrace(trace.data as RequestTrace) }))
+    onConfigChange({ ...config, ...seedFromTrace(trace.data as RequestTrace) })
     setSeededFrom(seed)
   }, [trace.data, seed, seededFrom])
 
   const toolsError = parseTools(state.toolsRaw).error
 
+  // A functional update, and it has to be: a stream appends many times inside
+  // one render, and a version that read the turns this render closed over
+  // would append every chunk to the same stale array — which renders as a
+  // transcript that stays empty while the request plainly succeeds.
   function appendToLastMessage(text: string) {
     if (!text) return
-    setState((s) => {
-      const messages = s.messages.slice()
-      const lastIndex = messages.length - 1
-      const last = messages[lastIndex]
-      if (!last) return s
-      messages[lastIndex] = { ...last, content: last.content + text }
-      return { ...s, messages }
+    setMessages((prev) => {
+      const next = prev.slice()
+      const lastIndex = next.length - 1
+      const last = next[lastIndex]
+      if (!last) return prev
+      next[lastIndex] = { ...last, content: last.content + text }
+      return next
     })
   }
 
@@ -243,21 +227,25 @@ export function Chat() {
     const dialect = state.dialect
     const doStream = state.stream
     const turns = [...state.messages, { role: "user", content: draft } satisfies PlaygroundMessage]
-    setState((s) => ({
-      ...s,
-      messages: [...turns, { role: "assistant", content: "" }],
-    }))
+    setMessages([...turns, { role: "assistant", content: "" }])
     setDraft("")
     setError("")
     setRequestId("")
     setBusy(true)
+    onMetrics(NO_METRICS)
     buffer.current = ""
+    const startedAt = performance.now()
+    let ttftMs: number | null = null
+    let liveRequestId = ""
     try {
       for await (const chunk of stream(
         "/api/playground",
         chatBody({ ...state, messages: turns }),
         // The id arrives with the headers, before the body this is rendering.
-        (s: StreamStart) => setRequestId(s.requestId),
+        (s: StreamStart) => {
+          liveRequestId = s.requestId
+          setRequestId(s.requestId)
+        },
       )) {
         buffer.current += chunk
         // With streaming off the executor answers with one JSON document and
@@ -266,11 +254,25 @@ export function Chat() {
         if (doStream) {
           const { text, rest } = drainSSE(buffer.current, dialect)
           buffer.current = rest
+          // Measured on the first text, not the first chunk: a keep-alive or
+          // a role-only frame is not the model answering.
+          if (text && ttftMs === null) ttftMs = performance.now() - startedAt
           appendToLastMessage(text)
         }
       }
       if (!doStream) {
         appendToLastMessage(extractUnaryText(dialect, buffer.current))
+      }
+      const totalMs = performance.now() - startedAt
+      const measured: StreamMetrics = { ...NO_METRICS, ttftMs, totalMs }
+      onMetrics(measured)
+      // The token counts are the gateway's, fetched after the fact rather
+      // than guessed here: a client-side tokenisation would be a number that
+      // looks authoritative and is not. A trace that has not landed yet
+      // simply leaves the counts unknown.
+      if (liveRequestId) {
+        const trace = await traceWhenWritten(liveRequestId)
+        if (trace) onMetrics(metricsFromTrace(measured, trace))
       }
     } catch (err) {
       setError((err as Error).message)
@@ -281,59 +283,6 @@ export function Chat() {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Input
-          placeholder="alias or provider/model"
-          value={state.model}
-          onChange={(e) => setState((s) => ({ ...s, model: e.target.value }))}
-        />
-        <Select
-          value={state.dialect}
-          onValueChange={(v) => setState((s) => ({ ...s, dialect: v as PlaygroundDialect }))}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="dialect" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="openai">openai</SelectItem>
-            <SelectItem value="anthropic">anthropic</SelectItem>
-            <SelectItem value="gemini">gemini</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input
-          type="number"
-          placeholder="temperature"
-          value={state.temperature}
-          onChange={(e) => setState((s) => ({ ...s, temperature: e.target.value }))}
-        />
-        <Input
-          type="number"
-          placeholder="max tokens"
-          value={state.maxTokens}
-          onChange={(e) => setState((s) => ({ ...s, maxTokens: e.target.value }))}
-        />
-      </div>
-      <Textarea
-        placeholder="System prompt"
-        value={state.system}
-        onChange={(e) => setState((s) => ({ ...s, system: e.target.value }))}
-      />
-      <div>
-        <Textarea
-          placeholder='Tools, as a JSON array (e.g. [{"type":"function",...}])'
-          value={state.toolsRaw}
-          onChange={(e) => setState((s) => ({ ...s, toolsRaw: e.target.value }))}
-        />
-        {toolsError ? <p className="text-destructive mt-1 text-sm">{toolsError}</p> : null}
-      </div>
-      <label className="flex items-center gap-2 text-sm">
-        <Switch
-          checked={state.stream}
-          onCheckedChange={(checked) => setState((s) => ({ ...s, stream: checked }))}
-        />
-        Stream
-      </label>
-
       {seed !== undefined ? (
         // capture.bodies has a retention sweep and no writer, so a trace
         // carries no prompt text — the model and dialect are all a seeded

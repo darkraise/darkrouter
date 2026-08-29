@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { stream, onUnauthorized, ApiError, throwOnExecutorError } from "./api"
+import { api, stream, onUnauthorized, ApiError, throwOnExecutorError } from "./api"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -154,5 +154,71 @@ describe("throwOnExecutorError", () => {
     unsub()
 
     expect(loggedOut).toBe(false)
+  })
+})
+
+describe("the expected-rejection exemption", () => {
+  function stub401(error: string) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    )
+  }
+
+  it("keeps the operator on the page when their own password was wrong", async () => {
+    // A mistyped current password is a legitimate rejection, not a dead
+    // session. Bouncing to the login screen over a typo is the bug this
+    // exemption exists for, and it shipped once already.
+    stub401("invalid password")
+    const seen = vi.fn()
+    const off = onUnauthorized(seen)
+
+    await expect(
+      api.post("/api/auth/password", {}, { expectedRejection: "invalid password" }),
+    ).rejects.toBeInstanceOf(ApiError)
+
+    expect(seen).not.toHaveBeenCalled()
+    off()
+  })
+
+  it("still logs out when the session really died on that same call", async () => {
+    // The exemption is scoped to one message, not to the endpoint: a genuine
+    // 401 here has to log out like any other.
+    stub401("unauthorized")
+    const seen = vi.fn()
+    const off = onUnauthorized(seen)
+
+    await expect(
+      api.post("/api/auth/password", {}, { expectedRejection: "invalid password" }),
+    ).rejects.toBeInstanceOf(Error)
+
+    expect(seen).toHaveBeenCalled()
+    off()
+  })
+
+  it("logs out on a 401 from a call that named no exemption", async () => {
+    stub401("invalid password")
+    const seen = vi.fn()
+    const off = onUnauthorized(seen)
+
+    await expect(api.get("/api/providers")).rejects.toBeInstanceOf(Error)
+
+    expect(seen).toHaveBeenCalled()
+    off()
+  })
+
+  it("carries the server's message through for the page to render inline", async () => {
+    stub401("invalid password")
+    const off = onUnauthorized(() => {})
+    await expect(
+      api.post("/api/auth/password", {}, { expectedRejection: "invalid password" }),
+    ).rejects.toMatchObject({ status: 401, message: "invalid password" })
+    off()
   })
 })

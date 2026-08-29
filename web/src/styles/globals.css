@@ -1,1 +1,19 @@
 @import "darkraise-ui/styles.css";
+
+/* darkraise-ui's DataTable draws a border on `.dr-data-table-frame` and then
+   removes the one `.dr-table-wrapper` draws for itself, so the two hairlines
+   do not stack. It does that with a direct-child selector — but when
+   `virtualize` is set the component inserts `.dr-data-table-viewport` between
+   the frame and the wrapper, so the rule matches nothing and both borders
+   render. That is the doubled edge on every virtualised table in the console.
+
+   Matching by descendant instead reaches the wrapper wherever the component
+   puts it. The `.dr-data-table-frame` ancestor keeps this off standalone
+   `<Table>`, which still needs its own border.
+
+   Unlayered on purpose: the library's rules live in `@layer components`, and
+   an unlayered declaration wins over a layered one whatever the specificity.
+   Remove this once the library's own selector reaches the virtualised case. */
+.dr-data-table-frame .dr-table-wrapper {
+  border-width: 0;
+}

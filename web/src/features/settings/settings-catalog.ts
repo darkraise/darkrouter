@@ -218,14 +218,19 @@ export function formatDuration(raw: string): string {
     const days = total / 86_400
     return days === 1 ? "1 day" : `${days} days`
   }
+  // Rounded to the unit below before splitting, not after. Rounding the
+  // remainder on its own lets it reach a full unit and print it there:
+  // 1h59m30s rounded per-part gives "1h 60m", and 119.5s gives "1 min 60s".
   if (total >= 3600) {
-    const h = Math.floor(total / 3600)
-    const rest = Math.round((total % 3600) / 60)
+    const minutes = Math.round(total / 60)
+    const h = Math.floor(minutes / 60)
+    const rest = minutes % 60
     return rest === 0 ? `${h}h` : `${h}h ${rest}m`
   }
   if (total >= 60) {
-    const mins = Math.floor(total / 60)
-    const rest = Math.round(total % 60)
+    const seconds = Math.round(total)
+    const mins = Math.floor(seconds / 60)
+    const rest = seconds % 60
     return rest === 0 ? `${mins} min` : `${mins} min ${rest}s`
   }
   return `${total}s`

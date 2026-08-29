@@ -103,7 +103,7 @@ describe("the models empty state", () => {
     await waitFor(() =>
       expect(screen.getByText(/no models match these filters/i)).toBeInTheDocument(),
     )
-    expect(screen.queryByText(/discovery sweep/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/discovery fills this catalogue/i)).not.toBeInTheDocument()
   })
 
   it("still teaches discovery when the catalog itself is empty", async () => {
@@ -119,7 +119,7 @@ describe("the models empty state", () => {
     await renderAt("/")
 
     await waitFor(() =>
-      expect(screen.getByText(/discovery sweep/i)).toBeInTheDocument(),
+      expect(screen.getByText(/discovery fills this catalogue/i)).toBeInTheDocument(),
     )
     expect(screen.queryByText(/no models match these filters/i)).not.toBeInTheDocument()
   })

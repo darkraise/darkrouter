@@ -2,7 +2,15 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { AddAccountsDialog, filterPresets, planFor } from "./add-accounts-dialog"
+import {
+  AddAccountsDialog,
+  filterPresets,
+  freeOnlyChange,
+  phases,
+  planFor,
+} from "./add-accounts-dialog"
+import { progressLabel } from "./accounts"
+import { emptyAccounts } from "./account-fields"
 import type { Credential, Preset, Provider } from "../../lib/api-types"
 
 function mount(ui: React.ReactNode) {
@@ -40,9 +48,14 @@ const preset = (over: Partial<Preset> & { id: string }): Preset => ({
   ...over,
 })
 
-const provider = (id: string, credentials: Credential[] = []): Provider => ({
+const provider = (
+  id: string,
+  credentials: Credential[] = [],
+  freeModelsOnly = false,
+): Provider => ({
   id, name: id, preset: id, kind: "openaicompat", base_url: "https://x.example",
-  priority: 10, enabled: true, auth_style: "bearer", free_models_only: false, credentials,
+  priority: 10, enabled: true, auth_style: "bearer",
+  free_models_only: freeModelsOnly, credentials,
 })
 
 const cred = (id: string): Credential => ({
@@ -92,16 +105,14 @@ describe("planFor", () => {
 })
 
 describe("the wizard", () => {
-  it("walks provider, accounts, review before writing anything", async () => {
+  it("picks a provider, takes the key, and writes on the one button", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-aaaa")
-    await userEvent.click(screen.getByRole("button", { name: /review/i }))
 
-    // Still nothing sent: the review step is the last cheap place to notice a
-    // wrong key.
+    // Nothing is sent while the form is being filled in.
     expect(
       fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "POST"),
     ).toHaveLength(0)
@@ -126,7 +137,6 @@ describe("the wizard", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-bbbb")
-    await userEvent.click(screen.getByRole("button", { name: /review/i }))
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
 
     await waitFor(() => {
@@ -142,11 +152,11 @@ describe("the wizard", () => {
     })
   })
 
-  it("will not leave the account step with nothing to add", async () => {
+  it("will not submit with nothing to add", async () => {
     stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
-    expect(screen.getByRole("button", { name: /review/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /add account/i })).toBeDisabled()
   })
 
   it("removes a key the provider refuses", async () => {
@@ -155,7 +165,6 @@ describe("the wizard", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-bad")
-    await userEvent.click(screen.getByRole("button", { name: /review/i }))
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
 
     await waitFor(() => {
@@ -176,7 +185,6 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-unchecked")
     await userEvent.click(screen.getByRole("checkbox", { name: /check every key/i }))
-    await userEvent.click(screen.getByRole("button", { name: /review/i }))
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
 
     await waitFor(() => {
@@ -194,7 +202,6 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-aaaa")
     await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
-    await userEvent.click(screen.getByRole("button", { name: /review/i }))
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
 
     await waitFor(() => {
@@ -207,6 +214,31 @@ describe("the wizard", () => {
     })
   })
 
+  it("reports which account it is checking while the run is in flight", async () => {
+    // A probe is a round trip to the provider per key, so a paste of several
+    // is a wait long enough that silence reads as a hang.
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).includes("/test")) await held
+      return inner(url, init)
+    })
+
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nspare|sk-bbb")
+    await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))
+
+    expect(await screen.findByText("Checking work · 1 of 2")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar")).toBeInTheDocument()
+    release?.()
+  })
+
   it("names each pasted account from its own line", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
@@ -214,7 +246,6 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
     await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
     await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nsk-bbb")
-    await userEvent.click(screen.getByRole("button", { name: /review/i }))
     await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))
 
     await waitFor(() => {
@@ -230,5 +261,228 @@ describe("the wizard", () => {
         label: "key-2", secret: "sk-bbb",
       })
     })
+  })
+})
+
+describe("the wizard opened from an unconfigured preset", () => {
+  it("starts on the accounts step with no provider to pick", async () => {
+    // The operator named the provider by navigating to it; asking again is a
+    // step that can only be answered one way.
+    stub([preset({ id: "groq", name: "Groq" })])
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        preset={preset({ id: "groq", name: "Groq" })}
+      />,
+    )
+    expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
+  })
+
+  it("creates the provider row with the first account", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        preset={preset({ id: "groq", name: "Groq" })}
+      />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-aaaa")
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "POST",
+      )
+      expect(posts.map(([url]) => String(url))).toEqual([
+        "/api/providers",
+        "/api/providers/groq/keys",
+        "/api/providers/groq/test?key=cred-1",
+      ])
+    })
+  })
+
+  it("does not recreate a row that appeared while the page was open", async () => {
+    // A second POST would 409 against the row that is already there.
+    const fetchMock = stub(
+      [preset({ id: "groq", name: "Groq" })],
+      [provider("groq", [cred("k1")])],
+    )
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        preset={preset({ id: "groq", name: "Groq" })}
+      />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-bbbb")
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "POST",
+      )
+      expect(posts.map(([url]) => String(url))).toEqual([
+        "/api/providers/groq/keys",
+        "/api/providers/groq/test?key=cred-1",
+      ])
+    })
+  })
+})
+
+describe("freeOnlyChange", () => {
+  it("is nothing to write while the provider row is being created", () => {
+    // The flag rides along in the POST that creates it.
+    expect(
+      freeOnlyChange({ ...emptyAccounts, freeModelsOnly: true }, { needsProvider: true }),
+    ).toBe(false)
+  })
+
+  it("is a write only when it differs from what the provider holds", () => {
+    const existing = provider("groq", [cred("k1")])
+    const plan = { needsProvider: false, provider: existing }
+    expect(freeOnlyChange({ ...emptyAccounts, freeModelsOnly: true }, plan)).toBe(true)
+    expect(freeOnlyChange({ ...emptyAccounts, freeModelsOnly: false }, plan)).toBe(false)
+  })
+})
+
+describe("progressLabel", () => {
+  it("names the account and where the run has got to", () => {
+    expect(progressLabel({ done: 0, total: 3, label: "work", step: "adding" })).toBe(
+      "Adding work · 1 of 3",
+    )
+    expect(progressLabel({ done: 2, total: 3, label: "spare", step: "checking" })).toBe(
+      "Checking spare · 3 of 3",
+    )
+  })
+
+  it("does not count past the total on the last account", () => {
+    // `done` reaches the total when the run finishes, and "4 of 3" is the
+    // kind of number that makes an operator distrust the rest of the screen.
+    expect(progressLabel({ done: 3, total: 3, label: "last", step: "checking" })).toBe(
+      "Checking last · 3 of 3",
+    )
+  })
+})
+
+describe("phases", () => {
+  it("drops the picker when the provider is already settled, and never reviews", () => {
+    expect(phases(false)).toEqual(["provider", "accounts"])
+    expect(phases(true)).toEqual(["accounts"])
+  })
+})
+
+describe("the wizard opened from a provider", () => {
+  it("starts on the accounts step with no provider to pick", async () => {
+    stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    mount(
+      <AddAccountsDialog open onOpenChange={() => {}} provider={provider("groq", [cred("k1")])} />,
+    )
+
+    // Straight to the key field: an operator who navigated to this provider
+    // has already answered the question the picker asks.
+    expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /back/i })).not.toBeInTheDocument()
+  })
+
+  it("offers the free-models setting, showing what the provider holds", async () => {
+    // An unticked box over a free-only provider would misreport it, and saving
+    // would then turn the setting off without anyone asking for that.
+    stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")], true)])
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        provider={provider("groq", [cred("k1")], true)}
+      />,
+    )
+    await screen.findByLabelText(/api key/i)
+    expect(screen.getByRole("checkbox", { name: /free models only/i })).toBeChecked()
+  })
+
+  it("writes the free-models setting when it is changed", async () => {
+    const fetchMock = stub(
+      [preset({ id: "groq", name: "Groq" })],
+      [provider("groq", [cred("k1")])],
+    )
+    mount(
+      <AddAccountsDialog open onOpenChange={() => {}} provider={provider("groq", [cred("k1")])} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
+    await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          url === "/api/providers/groq" && (init as RequestInit)?.method === "PATCH",
+      )
+      expect(JSON.parse((patch?.[1] as RequestInit).body as string)).toEqual({
+        free_models_only: true,
+      })
+    })
+  })
+
+  it("leaves the setting alone when the box was not touched", async () => {
+    // Adding a key is not an occasion to rewrite a setting nobody edited.
+    const fetchMock = stub(
+      [preset({ id: "groq", name: "Groq" })],
+      [provider("groq", [cred("k1")], true)],
+    )
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        provider={provider("groq", [cred("k1")], true)}
+      />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "POST"),
+      ).not.toHaveLength(0),
+    )
+    expect(
+      fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "PATCH"),
+    ).toBe(false)
+  })
+
+  it("adds the key without recreating the provider row", async () => {
+    const fetchMock = stub(
+      [preset({ id: "groq", name: "Groq" })],
+      [provider("groq", [cred("k1")])],
+    )
+    const onDone = vi.fn()
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        onDone={onDone}
+        provider={provider("groq", [cred("k1")])}
+      />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
+    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "POST",
+      )
+      expect(posts.map(([url]) => String(url))).toEqual([
+        "/api/providers/groq/keys",
+        "/api/providers/groq/test?key=cred-1",
+      ])
+    })
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("groq"))
   })
 })

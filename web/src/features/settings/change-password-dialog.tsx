@@ -62,6 +62,10 @@ export function ChangePasswordDialog({
     setCurrent("")
     setNext("")
     setConfirm("")
+    // The rejection belongs to the attempt that produced it. Left standing, a
+    // reopened and empty form carries "invalid password" over fields nobody
+    // has typed into yet.
+    change.reset()
   }
 
   const change = useApiMutation({
@@ -89,12 +93,22 @@ export function ChangePasswordDialog({
   const wrongPassword =
     change.error instanceof ApiError && change.error.status === 401 ? change.error.message : null
 
+  // One close path, so every way out of the dialog clears the form: Escape,
+  // the overlay, the X, and Cancel.
+  function close() {
+    clear()
+    onOpenChange(false)
+  }
+
   return (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) clear()
-        onOpenChange(nextOpen)
+        if (nextOpen) {
+          onOpenChange(true)
+          return
+        }
+        close()
       }}
     >
       <DialogContent className="max-w-md">
@@ -156,7 +170,11 @@ export function ChangePasswordDialog({
             >
               Change password
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
+            {/* Routed through the same close path as Escape and the overlay.
+                Calling onOpenChange directly skipped clear(), and because the
+                dialog stays mounted the typed plaintext survived until the
+                next successful change. */}
+            <Button size="sm" variant="ghost" onClick={() => close()}>
               Cancel
             </Button>
           </div>

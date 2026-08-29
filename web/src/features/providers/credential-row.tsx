@@ -1,24 +1,10 @@
 import { useState } from "react"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-  Badge,
-  Button,
-  Input,
-  TableCell,
-  TableRow,
-} from "darkraise-ui"
+import { Badge, Button, Input, TableCell, TableRow } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Credential } from "../../lib/api-types"
+import { ConfirmButton } from "../shell/confirm-button"
 
 /**
  * One credential: its masked secret, its state, its OAuth metadata when it
@@ -37,7 +23,7 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
     mutationFn: (vars: { enabled?: boolean; secret?: string }) =>
       api.patch(`/api/providers/${providerId}/keys/${credential.id}`, vars),
     success: "Credential updated",
-    invalidates: [keys.providers, keys.health],
+    invalidates: [keys.providers, keys.health, keys.overview],
     onSuccess: () => {
       setDraftSecret("")
       setReplacing(false)
@@ -47,7 +33,7 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
   const remove = useApiMutation({
     mutationFn: () => api.del(`/api/providers/${providerId}/keys/${credential.id}`),
     success: "Credential removed",
-    invalidates: [keys.providers, keys.health],
+    invalidates: [keys.providers, keys.health, keys.overview],
   })
 
   return (
@@ -119,36 +105,43 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
             </>
           ) : (
             <>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => patch.mutate({ enabled: !credential.enabled })}
-              >
-                {credential.enabled ? "Disable" : "Enable"}
-              </Button>
+              {/* Only the half that takes capacity away asks: putting a
+                  credential back into service is not something to regret. */}
+              {credential.enabled ? (
+                <ConfirmButton
+                  size="sm"
+                  variant="ghost"
+                  title={`Disable ${credential.label}?`}
+                  description="The router stops dispatching to this credential. It keeps its secret, and enabling it again puts it straight back into service."
+                  confirmLabel="Disable"
+                  onConfirm={() => patch.mutate({ enabled: false })}
+                >
+                  Disable
+                </ConfirmButton>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => patch.mutate({ enabled: true })}
+                >
+                  Enable
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => setReplacing(true)}>
                 Replace
               </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="ghost" className="text-[hsl(var(--destructive))]">
-                    Remove
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove {credential.label}?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Requests that depended on this credential fail over to whatever else is
-                      configured, or stop routing here if nothing else is.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => remove.mutate(undefined)}>Remove</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <ConfirmButton
+                size="sm"
+                variant="ghost"
+                className="text-[hsl(var(--destructive))]"
+                title={`Remove ${credential.label}?`}
+                description="Requests that depended on this credential fail over to whatever else is configured, or stop routing here if nothing else is."
+                confirmLabel="Remove"
+                destructive
+                onConfirm={() => remove.mutate(undefined)}
+              >
+                Remove
+              </ConfirmButton>
             </>
           )}
         </div>
