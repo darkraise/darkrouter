@@ -1637,3 +1637,64 @@ git commit -m "docs(playground): record the stage 3 gate"
 **The name clash is a feature, not an error path.** The 409 carries the existing preset's id precisely so the dialog can offer to overwrite. A handler that returned a bare error, or a client that toasted it, would make saving over a preset impossible without deleting it first.
 
 **Compare's shared body is the whole point of the screen.** If a future change gives a column its own system prompt or sampling, the transcripts stop being comparable and the screen stops answering the question it exists for.
+
+---
+
+## Stage 3 result
+
+Checked live at http://localhost:8091 on 2026-08-30 against a container built
+from `81a57b8`, at 1600×1000 and 1280×800 in both light and dark.
+
+**Gate.** Web: 59 files, 582 tests, typecheck and build clean. Go: `build`,
+`vet` clean; 26 packages pass, `internal/edge` has no test files. Migration
+`0014_playground.sql` applied on first start of the new image — the container
+came up healthy and `playground_presets` is present in the running database.
+
+**Deploy.** Built with the `compose.uat.yml` overlay; container healthy;
+`/healthz` returns `config_valid: true`. The served bundle was compared byte
+for byte against `internal/admin/dist/assets/index-*.js` (`cmp`, not
+filenames) and matched.
+
+| Criterion | Result |
+|---|---|
+| D4 | Passed. A preset saved on the anthropic dialect with Top K 40 appeared in the picker immediately |
+| Round trip | Passed at both viewports. See below |
+| Overwrite | Passed. Re-typing an existing name turns the dialog's Save into **Overwrite** with an explanation, before submit rather than after an error. Overwriting updated the row in place: same id, new `updated_at`, still one row |
+| Delete | Passed. The Manage dialog removed the preset and the list updated without a reload |
+| D5 | Passed. Two columns by default, adds to four, and **Add a column** disables at four. All four moved to `streaming` within the same 100 ms poll and finished within 800 ms of each other (706–881 ms), so they run concurrently and the latencies are comparable |
+| Pane height | Passed. With every section expanded the pane scrolls its own contents (scrollHeight 1184 against clientHeight 816); the page itself never scrolls and there is no horizontal overflow at either width |
+| Contrast | **Decided: changed.** See below |
+
+**Round trip, step by step.** On anthropic with Top K 40, saved as
+`topk-check`. Switched the pane to openai and a different model, then loaded
+the preset: the model returned to `gpt-oss-120b`, the dialect switched to
+anthropic, and Top K read 40 and was enabled. Switching the dialect back to
+openai left Top K at 40 and disabled it. Nothing was lost in either
+direction. Repeated at 1280×800 in dark with the same result.
+
+**Contrast — decision.** Changed, not left. Measured rather than eyeballed:
+the disabled input's `opacity: 0.5` composited the value to rgb(143,139,138)
+on white, **3.37:1** — below the 4.5:1 floor, and in the screenshot the
+retained `40` was indistinguishable from the `default` placeholders in the
+fields beside it. A value that reads as an unset field defeats the point of
+retaining it. Fixed in `a9ce443` by keeping the value at body contrast
+(15:1 light, 16.6:1 dark) and dimming the field's border to half instead,
+and only where a value is actually present — an empty gated field keeps its
+flat disabled look, which is the honest signal there.
+
+**Second defect found and fixed.** At 1280×800 with four Compare columns the
+grid's `minmax(0, 1fr)` let each column shrink to 165px, which squeezed the
+model combobox to **48px** — a bare chevron with no readable model name.
+This is exactly the class of failure a unit test cannot see. Fixed in
+`81a57b8`: columns get a 14rem floor and the row scrolls past it. The
+1600×1000 layout is unchanged (four columns still fit without scrolling).
+
+**Noted, not changed.** The preset picker keeps showing "Load a preset" after
+a load rather than the loaded name. That is deliberate — the pane is editable
+after loading, so a bound name would go stale and lie. Recording it so a
+future reader does not mistake it for a bug.
+
+**Residual.** With four columns a long model name such as
+`openai/gpt-oss-120b` truncates in the column combobox at both widths; the
+full value is in the field and visible on focus. Raising the floor further
+would make the 1600 view scroll, which is a worse trade.
