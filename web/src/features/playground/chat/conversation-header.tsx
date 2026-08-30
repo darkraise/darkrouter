@@ -10,6 +10,11 @@ import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
 import { DIALECTS, type PlaygroundConfig } from "../config"
 import type { PlaygroundDialect } from "../../../lib/api-types"
 
+/** Long enough that a typed model name is one write rather than eleven, short
+ *  enough that an operator who types and immediately looks away still has it
+ *  stored. Closing the popover does not wait for it. */
+const COMMIT_QUIET_MS = 400
+
 /**
  * What a conversation is, above the conversation.
  *
@@ -18,10 +23,16 @@ import type { PlaygroundDialect } from "../../../lib/api-types"
  * pill's popover, the system prompt from the overflow menu. Everything else a
  * request can carry belongs to Lab, and the menu's *open in Lab* is how a
  * conversation gets there without being retyped.
+ *
+ * Showing a value and storing it are separate here, as they already are for the
+ * title. The model field reports every character it is given, and a stored row
+ * written once per character is decided by whichever of those writes lands
+ * last.
  */
 export function ConversationHeader({
   config,
   onConfigChange,
+  onConfigCommit,
   title,
   onTitleChange,
   onOpenInLab,
@@ -29,7 +40,10 @@ export function ConversationHeader({
   canDelete,
 }: {
   config: PlaygroundConfig
+  /** Every change, including a half-typed model name. What the screen shows. */
   onConfigChange: (next: PlaygroundConfig) => void
+  /** Only a value the operator has settled on. What gets stored. */
+  onConfigCommit: (next: PlaygroundConfig) => void
   title: string
   onTitleChange: (next: string) => void
   onOpenInLab: () => void
@@ -43,6 +57,41 @@ export function ConversationHeader({
   // Escape blurs the field, and blur commits; without this the abandoned draft
   // would be saved by the very keystroke that discards it.
   const abandoning = useRef(false)
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingCommit = useRef<PlaygroundConfig | null>(null)
+
+  function cancelPending() {
+    if (commitTimer.current !== null) clearTimeout(commitTimer.current)
+    commitTimer.current = null
+    pendingCommit.current = null
+  }
+
+  function commitPending() {
+    const settled = pendingCommit.current
+    cancelPending()
+    if (settled !== null) onConfigCommit(settled)
+  }
+
+  /** For the model field, which reports every character typed into it. A pause
+   *  is what says the operator has finished naming a model; closing the popover
+   *  says it sooner. */
+  function commitWhenSettled(next: PlaygroundConfig) {
+    onConfigChange(next)
+    if (commitTimer.current !== null) clearTimeout(commitTimer.current)
+    pendingCommit.current = next
+    commitTimer.current = setTimeout(commitPending, COMMIT_QUIET_MS)
+  }
+
+  /** For a value that arrives whole: a picked dialect, a saved system prompt.
+   *  It supersedes anything the model field left pending, which is these same
+   *  keystrokes with this change on top. */
+  function commitNow(next: PlaygroundConfig) {
+    cancelPending()
+    onConfigChange(next)
+    onConfigCommit(next)
+  }
+
+  useEffect(() => cancelPending, [])
 
   // The field follows the conversation, not the keystroke: selecting another
   // conversation in the rail must not leave the previous one's name in it.
@@ -65,7 +114,7 @@ export function ConversationHeader({
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-6 py-2">
-      <Popover>
+      <Popover onOpenChange={(open) => { if (!open) commitPending() }}>
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm" className="max-w-[18rem] truncate font-mono">
             {config.model === "" ? "Choose a model" : config.model}
@@ -79,7 +128,7 @@ export function ConversationHeader({
               value={config.model}
               candidates={candidates}
               loading={loading}
-              onChange={(model) => onConfigChange({ ...config, model })}
+              onChange={(model) => commitWhenSettled({ ...config, model })}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -87,7 +136,7 @@ export function ConversationHeader({
             <Select
               value={config.dialect}
               onValueChange={(dialect) =>
-                onConfigChange({ ...config, dialect: dialect as PlaygroundDialect })
+                commitNow({ ...config, dialect: dialect as PlaygroundDialect })
               }
             >
               <SelectTrigger id="pgc-dialect">
@@ -175,7 +224,7 @@ export function ConversationHeader({
             </Button>
             <Button
               onClick={() => {
-                onConfigChange({ ...config, system: draftSystem })
+                commitNow({ ...config, system: draftSystem })
                 setSystemOpen(false)
               }}
             >

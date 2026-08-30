@@ -60,6 +60,11 @@ export function ChatMode({
   const conversationRef = useRef("")
   const configRef = useRef(config)
   configRef.current = config
+  // A config commit can be scheduled by the header and fire a moment later, so
+  // the title it carries is read when it fires rather than when it was queued:
+  // a rename in between would otherwise be undone by the write that follows it.
+  const titleRef = useRef(title)
+  titleRef.current = title
 
   async function persistTurn(turn: CompletedTurn) {
     try {
@@ -118,11 +123,13 @@ export function ChatMode({
   /** Model, dialect and the system prompt are stored with the conversation, so
    *  changing one part-way through moves the row rather than only the screen.
    *  The turns that came before stay: each answer's route line already records
-   *  what actually served it. */
-  function changeConfig(next: PlaygroundConfig) {
-    setConfig(next)
+   *  what actually served it.
+   *
+   *  Called only for a value the operator has settled on. The header updates
+   *  the screen on every keystroke without coming through here. */
+  function commitConfig(next: PlaygroundConfig) {
     if (conversationRef.current !== "") {
-      update.mutate({ id: conversationRef.current, title, config: next })
+      update.mutate({ id: conversationRef.current, title: titleRef.current, config: next })
     }
   }
 
@@ -181,7 +188,8 @@ export function ChatMode({
 
         <ConversationHeader
           config={config}
-          onConfigChange={changeConfig}
+          onConfigChange={setConfig}
+          onConfigCommit={commitConfig}
           title={title}
           onTitleChange={retitle}
           onOpenInLab={() => onOpenInLab(config)}

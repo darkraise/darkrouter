@@ -101,6 +101,10 @@ export function useCreateConversation() {
         "/api/playground/conversations",
         conversationBody(vars.title, vars.config),
       ),
+    // A conversation is renamed and reconfigured from the same header, and the
+    // whole row is sent each time. Two of these in flight together would leave
+    // the stored row decided by which one the server finished last.
+    scope: { id: "playground-conversation" },
     invalidates: [keys.playgroundConversations],
   })
 }
