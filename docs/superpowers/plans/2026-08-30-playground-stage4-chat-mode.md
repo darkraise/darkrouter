@@ -37,7 +37,7 @@ These apply to every task without restating.
 
 ## Baselines before Task 1
 
-Measured on 2026-08-30 at `0aee480`. `web`: 59 files, 583 tests, all passing; `npm run typecheck` clean. Go: `go build ./...` and `go vet ./...` clean; `go test ./internal/...` passes 26 packages, `internal/edge` has no test files. Migrations run to `0014`; `//go:embed migrations/*.sql` picks up a new file with no registration step.
+Measured on 2026-08-30 at `0aee480`. `web`: 59 files, 583 tests, all passing; `npm run typecheck` clean. Go: `go build ./...` and `go vet ./...` clean; `go test ./internal/...` passes 27 packages, `internal/edge` has no test files. Migrations run to `0014`; `//go:embed migrations/*.sql` picks up a new file with no registration step.
 
 ## The decision this stage carries
 
@@ -710,7 +710,7 @@ Expected: `ok github.com/darkraise/darkrouter/internal/store`
 - [ ] **Step 8: Run the full Go gate**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go build ./... && go vet ./... && go test -count=1 ./internal/... 2>&1 | tail -30`
-Expected: build and vet silent; 26 packages `ok`, `internal/edge` reporting no test files.
+Expected: build and vet silent; 27 packages `ok`, `internal/edge` reporting no test files.
 
 - [ ] **Step 9: Commit**
 
@@ -848,7 +848,7 @@ Expected: both `ok`.
 - [ ] **Step 7: Run the full Go gate**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go build ./... && go vet ./... && go test -count=1 ./internal/... 2>&1 | tail -30`
-Expected: build and vet silent; 26 packages `ok`.
+Expected: build and vet silent; 27 packages `ok`.
 
 - [ ] **Step 8: Commit**
 
@@ -1286,7 +1286,7 @@ Expected: `ok`.
 - [ ] **Step 7: Run the full Go gate**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go build ./... && go vet ./... && go test -count=1 ./internal/... 2>&1 | tail -30`
-Expected: build and vet silent; 26 packages `ok`.
+Expected: build and vet silent; 27 packages `ok`.
 
 - [ ] **Step 8: Commit**
 
@@ -1548,7 +1548,7 @@ Expected: `ok`.
 - [ ] **Step 7: Run the full Go gate**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go build ./... && go vet ./... && go test -count=1 ./internal/... 2>&1 | tail -30`
-Expected: build and vet silent; 26 packages `ok`.
+Expected: build and vet silent; 27 packages `ok`.
 
 - [ ] **Step 8: Commit**
 
@@ -1630,7 +1630,7 @@ Expected: `ok`.
 - [ ] **Step 5: Run the full Go gate**
 
 Run: `export PATH=$PATH:/usr/local/go/bin && go build ./... && go vet ./... && go test -count=1 ./internal/... 2>&1 | tail -30`
-Expected: build and vet silent; 26 packages `ok`.
+Expected: build and vet silent; 27 packages `ok`.
 
 - [ ] **Step 6: Commit**
 
