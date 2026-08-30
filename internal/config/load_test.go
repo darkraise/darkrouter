@@ -478,3 +478,37 @@ func TestFreeCatalogSyncCanBeTurnedOff(t *testing.T) {
 		t.Error("an explicit false did not turn the refresh off")
 	}
 }
+
+func TestSaveConversationsDefaultsOnAndParsesOff(t *testing.T) {
+	// The default is on, so an unset key and an explicit false must be
+	// distinguishable. A plain bool would read every silent config as off and
+	// quietly stop the playground saving anything.
+	c, err := Parse([]byte(minimal), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.SaveConversations() {
+		t.Error("SaveConversations() = false with the key absent, want true")
+	}
+
+	off := minimal + "\nplayground:\n  save_conversations: false\n"
+	c, err = Parse([]byte(off), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SaveConversations() {
+		t.Error("SaveConversations() = true with the key set to false")
+	}
+	found := false
+	for _, k := range c.FileKeys {
+		if k == "playground.save_conversations" {
+			found = true
+		}
+	}
+	if !found {
+		// The settings screen labels a value "file" or "default" from this
+		// list, and a key missing from it is reported as a built-in default
+		// the operator never chose.
+		t.Errorf("playground.save_conversations not recorded in FileKeys: %v", c.FileKeys)
+	}
+}

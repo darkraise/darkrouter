@@ -9,12 +9,13 @@ type Config struct {
 	// Aliases map a friendly name to an ordered fallback chain. Order is the
 	// chain order, so a map of slices is the right shape: the values are
 	// ordered even though the keys are not.
-	Aliases map[string][]string `yaml:"aliases"`
-	Policy  PolicyConfig        `yaml:"policy"`
-	Log     LogConfig           `yaml:"log"`
-	Capture CaptureConfig       `yaml:"capture"`
-	Catalog CatalogConfig       `yaml:"catalog"`
-	Media   MediaConfig         `yaml:"media"`
+	Aliases    map[string][]string `yaml:"aliases"`
+	Policy     PolicyConfig        `yaml:"policy"`
+	Log        LogConfig           `yaml:"log"`
+	Capture    CaptureConfig       `yaml:"capture"`
+	Catalog    CatalogConfig       `yaml:"catalog"`
+	Media      MediaConfig         `yaml:"media"`
+	Playground PlaygroundConfig    `yaml:"playground"`
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
 	// /healthz rather than rejecting the document.
@@ -181,6 +182,23 @@ type MediaConfig struct {
 // MediaInline reports the effective setting: absent means on.
 func (c *Config) MediaInline() bool {
 	return c.Media.Inline == nil || *c.Media.Inline
+}
+
+// PlaygroundConfig governs what the console's playground is allowed to keep.
+//
+// It is the operator's own typing rather than traffic passing through the
+// gateway, which is why it is a separate key from capture.bodies rather than
+// covered by it.
+type PlaygroundConfig struct {
+	// SaveConversations is a pointer for the same reason Discovery.Enabled is:
+	// the default is on, so an explicit false in the file has to be
+	// distinguishable from a key the file never mentioned.
+	SaveConversations *bool `yaml:"save_conversations"`
+}
+
+// SaveConversations reports the effective setting: absent means on.
+func (c *Config) SaveConversations() bool {
+	return c.Playground.SaveConversations == nil || *c.Playground.SaveConversations
 }
 
 type DiscoveryConfig struct {
