@@ -362,6 +362,36 @@ export type PlaygroundPreset = {
   updated_at: string
 }
 
+/** A saved Chat-mode conversation, as the history rail lists it. */
+export type PlaygroundConversation = {
+  id: string
+  title: string
+  dialect: PlaygroundDialect
+  model: string
+  /** The console's own settings, stored and returned untouched. */
+  config: unknown
+  /** The most recent user turn, truncated by the server. The rail draws one
+   *  line of it beneath the title. */
+  preview: string
+  created_at: string
+  updated_at: string
+}
+
+export type PlaygroundStoredTurn = {
+  seq: number
+  role: string
+  content: string
+  /** Empty when the turn has no trace, which is ordinary: a turn can be stored
+   *  before the log writer's batch lands, and the log's retention sweep
+   *  outlives plenty of conversations. */
+  request_id: string
+  created_at: string
+}
+
+export type PlaygroundConversationDetail = PlaygroundConversation & {
+  messages: PlaygroundStoredTurn[]
+}
+
 export type AuxBody = {
   surface: AuxSurface
   model?: string
