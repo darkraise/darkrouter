@@ -200,6 +200,7 @@ export function ChatMode({
             routes={run.routes}
             busy={run.busy}
             model={config.model}
+            quiet
           />
           <Composer
             model={config.model}

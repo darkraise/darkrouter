@@ -8,12 +8,14 @@ export function Transcript({
   busy,
   model,
   seedNote,
+  quiet = false,
 }: {
   messages: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
   busy: boolean
   model: string
   seedNote?: string
+  quiet?: boolean
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
   const foot = useRef<HTMLDivElement | null>(null)
@@ -45,6 +47,7 @@ export function Transcript({
                 route={routes[i]}
                 // Only the last turn can still be arriving.
                 streaming={busy && i === messages.length - 1}
+                quiet={quiet}
               />
             ),
           )}
