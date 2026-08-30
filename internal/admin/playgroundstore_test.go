@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestPlaygroundPresetBlobIsOpaque(t *testing.T) {
@@ -258,5 +259,76 @@ func TestPlaygroundConversationRejectsWhatTheClientCannotRender(t *testing.T) {
 		"/api/playground/conversations/nosuch/messages",
 		`{"role":"user","content":"x"}`); w.Code != 404 {
 		t.Errorf("append to a missing conversation = %d, want 404", w.Code)
+	}
+}
+
+func TestPlaygroundConversationsListNewestFirst(t *testing.T) {
+	// The rail's whole premise: the conversation you spoke to last is the one
+	// at the top. Both rows are backdated to distinct times because the
+	// timestamps are whole seconds -- two rows written in the same second tie,
+	// and a tie under ORDER BY leaves the order undefined rather than wrong,
+	// which is a test that passes until it does not.
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+
+	ids := map[string]string{}
+	for _, title := range []string{"older", "newer"} {
+		w := do(t, s, cookie, token, "POST", "/api/playground/conversations",
+			`{"title":"`+title+`","dialect":"openai","model":"gpt","config":{}}`)
+		if w.Code != 201 {
+			t.Fatalf("create %s = %d: %s", title, w.Code, w.Body.String())
+		}
+		var made struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &made); err != nil {
+			t.Fatal(err)
+		}
+		ids[title] = made.ID
+	}
+
+	// Only updated_at moves. created_at stays where the insert put it because
+	// the listing reaps empty conversations by age, and a row backdated past
+	// that floor would be deleted before it could be ordered.
+	now := time.Now().UTC()
+	for title, ago := range map[string]time.Duration{"older": 2 * time.Hour, "newer": time.Hour} {
+		if _, err := db.Write.ExecContext(t.Context(),
+			`UPDATE playground_conversations SET updated_at = ? WHERE id = ?`,
+			now.Add(-ago).Unix(), ids[title]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	titles := func() []string {
+		w := do(t, s, cookie, token, "GET", "/api/playground/conversations", "")
+		if w.Code != 200 {
+			t.Fatalf("list = %d: %s", w.Code, w.Body.String())
+		}
+		var list []struct {
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, c := range list {
+			out = append(out, c.Title)
+		}
+		return out
+	}
+
+	if got := titles(); len(got) != 2 || got[0] != "newer" || got[1] != "older" {
+		t.Fatalf("listed %v, want [newer older]", got)
+	}
+
+	// A turn on the older conversation moves it to the top, which is the half
+	// of the ordering that depends on the append touching updated_at.
+	if w := do(t, s, cookie, token, "POST",
+		"/api/playground/conversations/"+ids["older"]+"/messages",
+		`{"role":"user","content":"still here"}`); w.Code != 201 {
+		t.Fatalf("append = %d: %s", w.Code, w.Body.String())
+	}
+	if got := titles(); len(got) != 2 || got[0] != "older" || got[1] != "newer" {
+		t.Errorf("after a new turn listed %v, want [older newer]", got)
 	}
 }
