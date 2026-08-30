@@ -157,11 +157,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/playground/presets/{id}", s.requireCSRF(s.handleDeletePlaygroundPreset))
 
 	s.mux.HandleFunc("GET /api/playground/conversations", s.requireSession(s.handleListPlaygroundConversations))
-	s.mux.HandleFunc("POST /api/playground/conversations", s.requireCSRF(s.handleCreatePlaygroundConversation))
+	s.mux.HandleFunc("POST /api/playground/conversations", s.requireCSRF(s.requireConversationSaving(s.handleCreatePlaygroundConversation)))
+	// The exact literal beside the wildcard below it: ServeMux prefers the
+	// literal, so the purge and the single delete coexist.
+	s.mux.HandleFunc("DELETE /api/playground/conversations", s.requireCSRF(s.handlePurgePlaygroundConversations))
 	s.mux.HandleFunc("GET /api/playground/conversations/{id}", s.requireSession(s.handleGetPlaygroundConversation))
-	s.mux.HandleFunc("PATCH /api/playground/conversations/{id}", s.requireCSRF(s.handleUpdatePlaygroundConversation))
+	s.mux.HandleFunc("PATCH /api/playground/conversations/{id}", s.requireCSRF(s.requireConversationSaving(s.handleUpdatePlaygroundConversation)))
 	s.mux.HandleFunc("DELETE /api/playground/conversations/{id}", s.requireCSRF(s.handleDeletePlaygroundConversation))
-	s.mux.HandleFunc("POST /api/playground/conversations/{id}/messages", s.requireCSRF(s.handleAppendPlaygroundTurn))
+	s.mux.HandleFunc("POST /api/playground/conversations/{id}/messages", s.requireCSRF(s.requireConversationSaving(s.handleAppendPlaygroundTurn)))
 
 	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
 	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
