@@ -44,6 +44,9 @@ describe("the conversation header", () => {
     await userEvent.clear(field)
     await userEvent.type(field, "renamed{Enter}")
     expect(onTitleChange).toHaveBeenCalledWith("renamed")
+    // Enter blurs, and blur commits. Calling both used to fire the change
+    // twice, which the parent turns into two PATCH requests for one rename.
+    expect(onTitleChange).toHaveBeenCalledTimes(1)
 
     onTitleChange.mockClear()
     await userEvent.clear(field)

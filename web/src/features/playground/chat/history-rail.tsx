@@ -4,7 +4,7 @@ import { relativeTime } from "../../providers/test-log-tab"
 import type { PlaygroundConversation } from "../../../lib/api-types"
 
 /**
- * Every conversation, newest first.
+ * Every conversation, in the order the caller supplies.
  *
  * This is the whole reason Chat mode is a mode rather than a tab: a chat
  * surface without retrievable history is a scratchpad, and nobody keeps a

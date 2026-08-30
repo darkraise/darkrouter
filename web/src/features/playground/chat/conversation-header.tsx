@@ -73,7 +73,7 @@ export function ConversationHeader({
         </PopoverTrigger>
         <PopoverContent className="flex w-80 flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="pgc-model">Model</Label>
+            <Label>Model</Label>
             <ModelCombobox
               label="Model or alias"
               value={config.model}
@@ -113,7 +113,8 @@ export function ConversationHeader({
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault()
-            commitTitle()
+            // Blur is what commits. Committing here as well would fire the
+            // change twice for one rename.
             e.currentTarget.blur()
           }
           if (e.key === "Escape") {
