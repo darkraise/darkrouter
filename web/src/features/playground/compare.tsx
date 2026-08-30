@@ -71,10 +71,9 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
 
   const { candidates, loading } = useModelCandidates()
   const busy = columns.some((c) => c.status === "streaming")
-  // Not gated on `busy`: run() aborts every existing controller before
-  // starting new ones, so pressing Run again is how a stuck or slow run
-  // gets abandoned rather than something that has to wait it out.
-  const canRun = prompt !== "" && columns.every((c) => c.model !== "")
+  // Gated on busy: a second run starting on top of a live one would append
+  // two runs' output into the same columns and time both at once.
+  const canRun = !busy && prompt !== "" && columns.every((c) => c.model !== "")
 
   const updateColumn = (id: string, fn: (c: Column) => Column) =>
     setColumns((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
@@ -86,9 +85,10 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
 
   function run() {
     if (!canRun) return
-    // A rerun replaces the run before it. Left alone, the previous streams
-    // append into columns this run has just reset, and the latencies beside
-    // them measure two runs at once.
+    // Defensive: the busy guard means Run cannot fire while a controller is
+    // live, so this loop should never have anything to abort. It is what
+    // keeps that true if the busy count ever stops covering a case -- which
+    // is exactly how the removed-column orphan got loose in the first place.
     for (const id of [...controllers.current.keys()]) abortColumn(id)
     // Started in one pass so they overlap: run sequentially and the latency
     // readings beside them would measure the queue, not the providers.

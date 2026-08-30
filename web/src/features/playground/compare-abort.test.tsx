@@ -66,31 +66,35 @@ describe("a Compare column that stops being watched", () => {
     // Left running, the orphan keeps costing tokens for output nothing renders,
     // and busy — which counts streaming columns — drops while it arrives, so
     // Run re-enables mid-stream.
-    await startARun()
+    render(<Compare config={{ ...emptyConfig(), model: "gpt" }} />)
     await userEvent.click(screen.getByRole("button", { name: "Add a column" }))
-    const third = screen.getAllByRole("textbox", { name: /model/i })[2]!
-    await userEvent.type(third, "gpt")
-    // Still labelled "Running…" at this point — the first run is still
-    // streaming — so an exact "Run" match would miss the very button
-    // under test.
-    await userEvent.click(screen.getByRole("button", { name: /run/i }))
-    await waitFor(() => expect(signals).toHaveLength(5))
+    for (const box of screen.getAllByRole("textbox", { name: /model/i })) {
+      await userEvent.type(box, "gpt")
+    }
+    await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
+    await userEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(signals).toHaveLength(3))
 
     const removes = screen.getAllByRole("button", { name: /remove/i })
     await userEvent.click(removes[removes.length - 1]!)
-    await waitFor(() => expect(signals[4]!.aborted).toBe(true))
-    expect(signals[3]!.aborted).toBe(false)
+    await waitFor(() => expect(signals[2]!.aborted).toBe(true))
+    expect(signals[1]!.aborted).toBe(false)
   })
 
-  it("abandons the previous run when Run is pressed again", async () => {
+  it("will not start a second run while columns are still streaming", async () => {
+    // The guard that stops two runs appending into the same columns. It is
+    // also the one a removed streaming column used to slip past: dropping out
+    // of the busy count re-enabled Run while the orphan was still arriving.
     await startARun()
-    // Still labelled "Running…" at this point — the first run is still
-    // streaming — so an exact "Run" match would miss the very button
-    // under test.
-    await userEvent.click(screen.getByRole("button", { name: /run/i }))
-    await waitFor(() => expect(signals).toHaveLength(4))
-    expect(signals[0]!.aborted).toBe(true)
-    expect(signals[1]!.aborted).toBe(true)
-    expect(signals[2]!.aborted).toBe(false)
+    expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
+
+    await userEvent.click(screen.getByRole("button", { name: "Add a column" }))
+    const third = screen.getAllByRole("textbox", { name: /model/i })[2]!
+    await userEvent.type(third, "gpt")
+    await userEvent.click(screen.getAllByRole("button", { name: /remove/i }).at(-1)!)
+
+    // Two of the original columns are still streaming, so Run stays shut.
+    expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
+    expect(signals).toHaveLength(2)
   })
 })
