@@ -6,7 +6,7 @@
  * radius, real elevation, Inter, and a faint accent graticule behind the
  * page. Values are taken verbatim from its src/app/globals.css except where
  * a measurement forced a repair — every such repair is marked REPAIRED and
- * carries both ratios, and fragments/17-light-proof.html shows them.
+ * carries both ratios, and fragments/18-light-proof.html shows them.
  *
  * Two rules are ours, not 9router's, and both are deliberate:
  *   1. Coral is BRAND only — navigation, active state, primary action. What
