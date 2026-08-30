@@ -450,6 +450,7 @@ export type ConfigBlocks = {
     sync_timeout: string
     discovery: { enabled: boolean; interval: string }
   }
+  playground: { save_conversations: boolean }
   aliases: Aliases
   policy: PolicyBlock
 }
