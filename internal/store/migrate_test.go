@@ -23,6 +23,7 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 		"requests", "request_attempts", "request_bodies",
 		"health", "usage_daily", "sessions", "settings", "aliases",
 		"proxy_tokens", "playground_presets",
+		"playground_conversations", "playground_messages",
 	}
 	for _, table := range want {
 		var name string
