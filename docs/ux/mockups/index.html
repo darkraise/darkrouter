@@ -5404,6 +5404,26 @@ body.theme-light .preset-scrim,
   color: var(--legend);
 }
 
+/* --- The page header row -------------------------------------------------- */
+
+/* Title on the left, mode toggle hard right on the same line. The two are one
+   row rather than two because the toggle is a property of the page, not a
+   control inside whichever mode happens to be showing. */
+.pgt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--section-pad);
+}
+
+.pgt-head-text {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.pgt-head-text .section-title { margin: 0; }
+
 /*
  * Task 16 — Connect ("use/connect").
  *
@@ -12680,14 +12700,20 @@ def ulid_ms(ulid: str) -&gt; int:
       </header>
       <main class="content">
 
-        <div class="segmented" aria-label="playground surface">
-          <span class="segmented-option" data-active="true">Chat</span>
-          <span class="segmented-option">Compare</span>
-          <span class="segmented-option">Auxiliary</span>
-          <span class="segmented-option">Count</span>
+        <div class="pgt-head">
+          <div class="pgt-head-text">
+            <p class="section-title">Playground</p>
+            <span class="micro">send a real request, and see what it cost</span>
+          </div>
+          <div class="segmented" aria-label="playground mode">
+            <span class="segmented-option" data-active="true">Chat</span>
+            <span class="segmented-option">Lab</span>
+          </div>
         </div>
 
-        <p style="margin-top:var(--gutter)"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; history-rail.tsx &mdash; every conversation in one 260px column, each row carrying the title, one truncated line of the last user turn and a relative timestamp: enough to recognise a conversation without opening it. The rail collapses to nothing, because a rail and a transcript are two columns an operator sometimes wants to be one.</span></p>
+        <p style="margin-top:var(--gutter)"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; playground-screen.tsx &mdash; the mode toggle sits at the right of the page header row, and it is the whole shape of the change: Chat and Lab are two modes, not two tabs among four. Lab keeps the four surfaces (Single, Compare, Auxiliary, Count) inside itself; Chat has no surface strip at all.</span></p>
+
+        <p><b class="pin" data-pin="1b">1b</b><span class="pin-note">1b &middot; history-rail.tsx &mdash; every conversation in one 260px column, each row carrying the title, one truncated line of the last user turn and a relative timestamp: enough to recognise a conversation without opening it. The rail collapses to nothing, because a rail and a transcript are two columns an operator sometimes wants to be one.</span></p>
 
         <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; conversation-header.tsx &mdash; the model as a bordered pill in mono with the dialect beside it, the title editable in place, and an overflow menu holding the system prompt, open in Lab, and delete. Chat mode shows no config pane, so these two settings are reachable from here instead.</span></p>
 

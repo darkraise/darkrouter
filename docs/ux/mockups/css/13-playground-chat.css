@@ -265,3 +265,23 @@
   align-items: center;
   color: var(--legend);
 }
+
+/* --- The page header row -------------------------------------------------- */
+
+/* Title on the left, mode toggle hard right on the same line. The two are one
+   row rather than two because the toggle is a property of the page, not a
+   control inside whichever mode happens to be showing. */
+.pgt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--section-pad);
+}
+
+.pgt-head-text {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.pgt-head-text .section-title { margin: 0; }
