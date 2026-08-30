@@ -332,3 +332,94 @@ func TestPlaygroundConversationsListNewestFirst(t *testing.T) {
 		t.Errorf("after a new turn listed %v, want [older newer]", got)
 	}
 }
+
+func TestPlaygroundConversationsGateStopsWritesAndNotReads(t *testing.T) {
+	// Section 8.2: flipping the key stops the playground keeping anything new.
+	// It does not delete what is already there, and an operator who has just
+	// turned it off still needs to see and remove that.
+	s, db := testServerFullWithConfig(t, "playground:\n  save_conversations: false\n")
+	cookie, token := login(t, s)
+
+	existing, err := db.CreatePlaygroundConversation(
+		t.Context(), "from before", "openai", "gpt", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	create := `{"title":"x","dialect":"openai","model":"gpt","config":{}}`
+	if w := do(t, s, cookie, token, "POST", "/api/playground/conversations", create); w.Code != 403 {
+		t.Errorf("create with saving off = %d, want 403", w.Code)
+	}
+	if w := do(t, s, cookie, token, "PATCH",
+		"/api/playground/conversations/"+existing.ID, create); w.Code != 403 {
+		t.Errorf("patch with saving off = %d, want 403", w.Code)
+	}
+	if w := do(t, s, cookie, token, "POST",
+		"/api/playground/conversations/"+existing.ID+"/messages",
+		`{"role":"user","content":"x"}`); w.Code != 403 {
+		t.Errorf("append with saving off = %d, want 403", w.Code)
+	}
+
+	if w := do(t, s, cookie, token, "GET", "/api/playground/conversations", ""); w.Code != 200 {
+		t.Errorf("list with saving off = %d, want 200", w.Code)
+	}
+	if w := do(t, s, cookie, token, "GET",
+		"/api/playground/conversations/"+existing.ID, ""); w.Code != 200 {
+		t.Errorf("read with saving off = %d, want 200", w.Code)
+	}
+	if w := do(t, s, cookie, token, "DELETE",
+		"/api/playground/conversations/"+existing.ID, ""); w.Code != 204 {
+		t.Errorf("delete with saving off = %d, want 204", w.Code)
+	}
+}
+
+func TestPlaygroundConversationsPurgeEmptiesEverything(t *testing.T) {
+	// The purge is what the settings screen offers when an operator decides
+	// the playground should not have kept their prompts. It must reach the
+	// messages too, or it is a lie told with a confirmation dialog.
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+
+	for _, title := range []string{"one", "two"} {
+		c, err := db.CreatePlaygroundConversation(
+			t.Context(), title, "openai", "gpt", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.AppendPlaygroundTurn(t.Context(), c.ID, "user", "hello", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	w := do(t, s, cookie, token, "DELETE", "/api/playground/conversations", "")
+	if w.Code != 200 {
+		t.Fatalf("purge = %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Deleted != 2 {
+		t.Errorf("purge reported %d, want 2", out.Deleted)
+	}
+
+	for _, table := range []string{"playground_conversations", "playground_messages"} {
+		var count int
+		if err := db.Read.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Errorf("%s still holds %d rows after the purge", table, count)
+		}
+	}
+
+	// The purge and the single delete share a path prefix. ServeMux prefers
+	// the exact literal, and a regression that routed the purge through the
+	// wildcard would answer 404 for an id of "" rather than emptying anything.
+	if w := do(t, s, cookie, token, "DELETE", "/api/playground/conversations", ""); w.Code != 200 {
+		t.Errorf("purge on an empty table = %d, want 200", w.Code)
+	}
+}

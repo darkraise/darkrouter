@@ -359,3 +359,36 @@ func (s *Server) handleAppendPlaygroundTurn(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusCreated, map[string]int{"seq": turn.Seq})
 }
+
+// requireConversationSaving refuses a write when the operator has turned
+// playground.save_conversations off.
+//
+// Reads and deletes stay open deliberately. The key governs what the playground
+// may keep from here on; an operator who has just turned it off still needs to
+// see what was kept before and to remove it, and a switch that also hid the
+// history would leave prompt text on disk with no way to reach it.
+func (s *Server) requireConversationSaving(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Config != nil && !s.deps.Config.Current().SaveConversations() {
+			writeError(w, http.StatusForbidden,
+				"playground.save_conversations is off, so conversations are not saved")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// handlePurgePlaygroundConversations empties both tables.
+//
+// It is the settings screen's action rather than a side effect of the config
+// value changing: config is file-backed and reloadable, and a setting whose
+// reload deleted data would mean an edit to a file on disk silently destroying
+// the operator's history.
+func (s *Server) handlePurgePlaygroundConversations(w http.ResponseWriter, r *http.Request) {
+	n, err := s.deps.DB.PurgePlaygroundConversations(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
+}
