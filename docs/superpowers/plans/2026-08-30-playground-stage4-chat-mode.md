@@ -2048,7 +2048,7 @@ Expected: PASS.
 - [ ] **Step 7: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 60 files, 596 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 8: Commit**
 
@@ -2258,7 +2258,7 @@ Expected: PASS, all eight tests in the file.
 - [ ] **Step 7: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 60 files, 599 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 8: Commit**
 
@@ -2548,7 +2548,7 @@ Expected: PASS.
 - [ ] **Step 8: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 61 files, 605 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 9: Commit**
 
@@ -3071,7 +3071,7 @@ Expected: PASS.
 - [ ] **Step 6: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 63 files, 614 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 7: Commit**
 
@@ -3558,7 +3558,7 @@ The composer's textarea carries `aria-label="Message"` and its send control is a
 - [ ] **Step 6: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 64 files, 619 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 7: Commit**
 
@@ -3726,7 +3726,7 @@ Expected: PASS. Every assertion already in `message.test.tsx` and `transcript.te
 - [ ] **Step 6: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 64 files, 621 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 7: Commit**
 
@@ -3902,7 +3902,7 @@ Expected: PASS.
 - [ ] **Step 7: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 64 files, 624 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 8: Commit**
 
@@ -4139,7 +4139,7 @@ Expected: PASS — both files, six tests. The four assertions already in `compar
 - [ ] **Step 6: Run the frontend gate**
 
 Run: `cd web && npm test 2>&1 | tail -8 && npm run typecheck 2>&1 | tail -5`
-Expected: 65 files, 626 tests, all passing; typecheck silent.
+Expected: every test passing and typecheck silent. The file and test counts rise by what this task adds; do not treat a count that differs from any number quoted elsewhere in this plan as a discrepancy — run the suite and trust it.
 
 - [ ] **Step 7: Commit**
 
