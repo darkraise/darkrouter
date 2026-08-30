@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import { ToggleGroup, ToggleGroupItem } from "darkraise-ui"
@@ -35,6 +35,15 @@ export function PlaygroundScreen() {
     rememberMode(next)
     void navigate({ to: "/playground", search: (prev) => ({ ...prev, mode: next }) })
   }
+
+  // The seed above runs once, and the router does not remount a route when
+  // only its search changes -- so without this, Back after a mode switch moves
+  // the URL to ?mode=chat and leaves Lab on screen. The navigate choose() then
+  // makes lands on the href the browser is already showing, which the router
+  // treats as the same location and does not push.
+  useEffect(() => {
+    if (isMode(search.mode)) choose(search.mode)
+  }, [search.mode])
 
   return (
     <div className="-m-6 flex h-[calc(100%+3rem)] min-h-0 flex-col">
