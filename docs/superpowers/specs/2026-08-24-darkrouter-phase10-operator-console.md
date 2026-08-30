@@ -51,7 +51,7 @@ instrument someone calibrated.
 Values are taken from `src/app/globals.css` verbatim wherever they measured clean, and repaired
 where they did not. Nine did not: 9router's light mode ships a success green at 2.54:1 and an
 amber at 2.15:1 — both under the 3:1 floor that applies to a shape and not merely to text — and
-its brand at text size reaches 3.23:1. `fragments/17-light-proof.html` shows all nine beside the
+its brand at text size reaches 3.23:1. `fragments/18-light-proof.html` shows all nine beside the
 values that replace them, and the repair is part of the adoption, not a deviation from it.
 
 The structural idea is **elevation**. The ground is the darkest surface in dark mode and the
