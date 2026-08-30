@@ -4441,3 +4441,91 @@ git commit -m "docs(playground): record the stage 4 gate"
 **The listing endpoint deletes rows, and it will bite the next test author.** `GET /api/playground/conversations` runs `ReapEmptyPlaygroundConversations` before it lists, with a one-hour floor keyed on `created_at`. §8.5 asks for exactly that — an abandoned conversation goes when the rail next loads — but it makes a read-shaped endpoint destructive, and it caught two test authors inside one stage: a test that backdates `created_at` to control ordering has its own fixture deleted by the call under test. Backdate `updated_at` alone; `created_at` is the reaper's column, not the ordering's.
 
 **Master is well ahead of `origin/master`.** Pushing is a decision for the human, not for whoever executes this plan.
+
+## Stage 4 result
+
+Checked live at http://localhost:8091 on 2026-08-30 against a container built
+from `e44f575`, at 1600×1000 and 1280×800 in both light and dark, sidebar
+collapsed and expanded.
+
+**Gate.** Web: 65 files, 625 tests, typecheck and build clean. Go: `build`,
+`vet` clean; 28 packages pass, `internal/edge` has no test files. Migration
+`0015_playground_conversations.sql` applied on first start of the new image —
+the container came up healthy and both `playground_conversations` and
+`playground_messages` are present in the running database (checked with
+Python's `sqlite3` module against a copy of the `.db`/`-wal`/`-shm` files,
+since neither the host nor the container ships a standalone `sqlite3`
+binary).
+
+**Deploy.** Built with the `compose.uat.yml` overlay; container healthy;
+`/healthz` returns `config_valid: true`. The served bundle was compared byte
+for byte against `internal/admin/dist/assets/index-*.js` (`cmp`, not
+filenames) and matched.
+
+| Criterion | Result |
+|---|---|
+| Mode switch | Passed. Toggle in `PageHeader`, right-aligned; `?mode=chat` on the URL round-trips through the radiogroup |
+| Back button | **Failed.** Confirmed exactly as predicted — see below |
+| D6 | Passed. System prompt and full transcript both returned after a cold reload and picking the conversation from the rail |
+| D7 | Passed. One exchange → one conversation, two messages; second exchange → still one conversation, four messages, title unchanged |
+| Rail | Passed. Titles from the first turn, preview truncates, collapses to nothing and back, both as a full-width rail and as a `lg`-breakpoint sheet |
+| Quiet route line | Passed for fresh turns (mark + duration, expands to provider/tokens/cost/trace). Lab's Single tab always expanded. See the restored-message finding below, adjacent to this row but not a failure of it |
+| Open in Lab | Passed. Model, dialect, and system prompt all pre-populated in the config pane |
+| Lab unchanged | Passed. Four tabs, config pane, preset picker match stage 3; first tab named Single; metrics strip present from mount showing em dashes |
+| Delete straight after the first turn | Passed, including with a cold reload immediately before send to rule out a warm query cache. Enabled, worked immediately, no dead control |
+| Purge | Passed. Confirmation names exactly what it destroys; rail empty and stays empty across a reload |
+| Settings header | No wrapping at 1600×1000 or 1280×800 at medium font, nor at 1600×1000 extra-large. At 1280×800 extra-large the three actions drop to a second row below the title — each still one line, nothing clipped — read as acceptable responsive behaviour, not a defect |
+| Save key off | Passed. Row read Off/default/hot after a config reload; a new turn showed in the transcript with a toast explaining it was not saved, and the rail stayed empty |
+| Narrow width | Passed. Below `lg` the rail becomes a sheet and the transcript takes the width |
+| D9 | **Failed.** Run correctly disables for the whole run and re-enables once every column settles, but removing a column does not stop its request — see below |
+
+**Back button — confirmed defect.** From a fresh load, toggling Chat then
+Lab and pressing Back returns the URL to `?mode=chat` while the screen keeps
+showing Lab: the mode toggle reads Lab checked, and the body still renders
+Lab's four tabs and config pane. Exactly the failure the brief predicted —
+the mode is seeded from the URL once at mount and TanStack Router does not
+remount the route when only the search param changes. The address bar and
+the screen disagree about which mode is active; worth an effect that
+re-syncs mode from the URL on a `popstate`/search change.
+
+**D9 — confirmed defect.** A three-column Compare run against Groq's `fast`
+alias, with a column removed mid-stream (verified via a synchronous
+`browser_evaluate` click sequence, since Groq answers in ~2.5s — faster than
+sequential tool round-trips could catch). The network log shows all three
+`/api/playground` POSTs completing with `200 OK` at full duration
+(2436/2489/2513ms); only two results ever rendered in the UI, and the trace
+link for the removed column's request was never shown anywhere on screen —
+but that request ran to completion server-side regardless, meaning it was
+still billed and still consumed the provider's rate limit. Removing a column
+stops it from being *displayed*, not from *running*.
+
+**Adjacent finding — restored conversations lose routing detail.** Not a
+failure of the "Quiet route line" row, which only requires this for
+freshly-sent turns and gets it, but the same code path degrades after a
+reload: a freshly-sent answer's mark is the real provider logo and expands
+to `provider · duration · tokens in/out · cost · trace`; the same answer
+after a reload shows a blank dashed placeholder for the mark and expands to
+only a `trace` link — no provider, duration, tokens, or cost. A restored
+conversation cannot show what a turn cost without following the trace link
+out to Requests.
+
+**§4.1 judgment — transcript width: left capped and centred, not changed.**
+Measured: at 1600×1000 with the rail open the transcript is `max-w-3xl`
+(768px computed), centred in an 1084px content area, leaving 158px of empty
+margin on *each* side (not only the right, as the framing suggested — the
+column is genuinely centred). Decided to leave it capped: 768px sits in the
+conventional line-length range for prose, Chat mode explicitly produces
+multi-paragraph answers (D9's own test prompt was a five-paragraph essay),
+left-aligning against the rail would stretch that to ~1080px — well past
+comfortable reading width — and there's no content that would justify
+reclaiming the margin the way Lab's functional config pane justifies Lab's
+asymmetric layout. Recorded as a design decision, not a defect.
+
+**Adjacent, outside this stage's scope.** Every row under "Signed-in
+browsers" in Settings reads `since Invalid Date` — pre-existing, unrelated
+to Chat mode, visible on the same page as one of this stage's own additions.
+Not investigated further.
+
+Full report, including the check-by-check verbatim command output and
+in-context screenshots, is at
+`.superpowers/sdd/2026-08-30-playground-stage4-chat-mode/task-16-report.md`.
