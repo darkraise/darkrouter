@@ -62,6 +62,11 @@ export function useChatRun(
   const [error, setError] = useState("")
   const abort = useRef<AbortController | null>(null)
   const buffer = useRef("")
+  // Bumped by anything that replaces the transcript, so a run that is still
+  // waiting on its trace cannot write into the state that succeeded it.
+  // stop() deliberately does not bump: a stopped run keeps its half answer
+  // and still reports it.
+  const generation = useRef(0)
 
   // A functional update, and it has to be: a stream appends many times inside
   // one render, and a version that read the turns this render closed over
@@ -99,12 +104,15 @@ export function useChatRun(
     const startedAt = performance.now()
     let ttftMs: number | null = null
     let liveRequestId = ""
+    const myGeneration = generation.current
+    const superseded = () => generation.current !== myGeneration
     // The rendered text lives in a functional setState, so it is never in a
     // variable this scope can read. A completed turn has to be reported with
     // its whole answer, so it is accumulated here as well as appended.
     let answer = ""
     let failed = false
     const emit = (text: string) => {
+      if (superseded()) return
       if (!text) return
       answer += text
       appendToLastMessage(text)
@@ -144,7 +152,7 @@ export function useChatRun(
       // simply leaves the counts unknown.
       if (liveRequestId) {
         const trace = await traceWhenWritten(liveRequestId)
-        if (trace) {
+        if (trace && !superseded()) {
           onMetrics(metricsFromTrace(measured, trace))
           // The route lands under the turn it served, so a transcript of six
           // answers says which provider produced each rather than only the
@@ -164,7 +172,14 @@ export function useChatRun(
     }
     // After the finally, so a stopped run still reports: the turns already
     // written stay, and a half answer is what the tokens were spent on.
-    if (!failed) onTurn?.({ prompt, answer, requestId: liveRequestId })
+    //
+    // Reported when there is something the operator can see, or when the run
+    // simply finished. A hard failure with nothing streamed has no turn worth
+    // keeping; a failure part-way through has the text it already spent
+    // tokens on, and the transcript still shows it.
+    if (!superseded() && (answer !== "" || !failed)) {
+      onTurn?.({ prompt, answer, requestId: liveRequestId })
+    }
   }
 
   /** Ends the run in flight. The turns already written stay: a half answer is
@@ -174,6 +189,7 @@ export function useChatRun(
   }
 
   function clear() {
+    generation.current++
     setMessages([])
     setRoutes({})
     setError("")
@@ -183,6 +199,7 @@ export function useChatRun(
   /** Aborts anything in flight first: a stream left running would append its
    *  next chunk into the transcript that has just replaced it. */
   function load(next: PlaygroundMessage[], nextRoutes: Record<number, TurnRoute>) {
+    generation.current++
     abort.current?.abort()
     setMessages(next)
     setRoutes(nextRoutes)
