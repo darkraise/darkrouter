@@ -371,6 +371,12 @@ func TestPlaygroundConversationsGateStopsWritesAndNotReads(t *testing.T) {
 		"/api/playground/conversations/"+existing.ID, ""); w.Code != 204 {
 		t.Errorf("delete with saving off = %d, want 204", w.Code)
 	}
+	// The purge is the settings screen's answer to "delete what you already
+	// kept". Behind the gate it would be unreachable exactly when an operator
+	// most wants it.
+	if w := do(t, s, cookie, token, "DELETE", "/api/playground/conversations", ""); w.Code != 200 {
+		t.Errorf("purge with saving off = %d, want 200", w.Code)
+	}
 }
 
 func TestPlaygroundConversationsPurgeEmptiesEverything(t *testing.T) {
