@@ -2257,7 +2257,7 @@ Expected: every test passing and typecheck silent. The file and test counts rise
 
 ```bash
 git add web/src/features/playground/lib/use-chat-run.ts web/src/features/playground/lib/use-chat-run.test.tsx
-git commit -m "feat(playground): report a finished turn and reopen one"
+git commit -m "feat(playground): report a turn and reopen one"
 ```
 
 ---
@@ -2546,7 +2546,7 @@ Expected: every test passing and typecheck silent. The file and test counts rise
 
 ```bash
 git add web/src/features/playground/mode.ts web/src/features/playground/mode.test.ts web/src/features/playground/lab-mode.tsx web/src/features/playground/playground-screen.tsx web/src/features/playground/metrics.tsx
-git commit -m "feat(playground): split the screen into Chat and Lab"
+git commit -m "feat(playground): split the screen into two modes"
 ```
 
 ---
@@ -3896,7 +3896,7 @@ Expected: every test passing and typecheck silent. The file and test counts rise
 
 ```bash
 git add web/src/lib/api-types.ts web/src/features/settings/settings-catalog.ts web/src/features/settings/settings-catalog.test.ts web/src/features/settings/settings-screen.tsx web/src/features/settings/settings-screen.test.tsx
-git commit -m "feat(settings): show the save key and offer the purge"
+git commit -m "feat(settings): show the key and offer the purge"
 ```
 
 ---
