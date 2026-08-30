@@ -6,6 +6,7 @@ import { AlertTriangle, Boxes, Clock, FileText, Server, ShieldAlert } from "luci
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
+import { usePurgeConversations } from "../playground/lib/conversations"
 import { keys, useConfig, usePolicy, useSessions } from "../../lib/queries"
 import type { ConfigResponse, PolicyBlock } from "../../lib/api-types"
 import {
@@ -365,6 +366,8 @@ export function SettingsScreen() {
     },
   })
 
+  const purgeConversations = usePurgeConversations()
+
   const warnings = config.data?.warnings ?? []
 
   return (
@@ -374,6 +377,18 @@ export function SettingsScreen() {
         description="What the gateway is set to, and where each setting comes from"
         actions={
           <div className="flex gap-2">
+            <ConfirmButton
+              size="sm"
+              variant="outline"
+              destructive
+              disabled={purgeConversations.isPending}
+              title="Delete every saved conversation?"
+              description="Every conversation the playground has kept, and every message in them, is removed. This cannot be undone. Turning the setting off stops new ones being saved; this is what removes the ones already there."
+              confirmLabel="Delete"
+              onConfirm={() => purgeConversations.mutate()}
+            >
+              Delete saved conversations
+            </ConfirmButton>
             <ConfirmButton
               size="sm"
               variant="outline"

@@ -63,6 +63,7 @@ const cfg = (): ConfigResponse => ({
       sync_timeout: "30s",
       discovery: { enabled: true, interval: "6h" },
     },
+    playground: { save_conversations: true },
     aliases: { fast: ["groq/a"] },
     policy: {
       cooldown: { max: "30m" },
@@ -210,6 +211,12 @@ function stubSettingsFetch(overrides: {
         headers: { "Content-Type": "application/json" },
       })
     }
+    if (url === "/api/playground/conversations" && method === "DELETE") {
+      return new Response(JSON.stringify({ deleted: 2 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
     return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
   })
   vi.stubGlobal("fetch", fetchMock)
@@ -343,5 +350,34 @@ describe("the read-only section on the page", () => {
     // policy.retry.max_attempts is an input up the page; its dotted key must
     // appear once, under that field, not again as a read-only row.
     expect(screen.getAllByText("policy.retry.max_attempts")).toHaveLength(1)
+  })
+})
+
+describe("the saved-conversation purge", () => {
+  it("asks before it destroys, and says what it destroys", async () => {
+    // A separate action from the key on purpose: config is file-backed and
+    // reloadable, and a setting whose reload deleted data would mean an edit
+    // to a file on disk silently destroying the operator's history.
+    const { fetchMock } = stubSettingsFetch({})
+    mount(<SettingsScreen />)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /delete saved conversations/i }),
+    )
+    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument()
+
+    // Nothing has been destroyed by opening the dialog.
+    expect(
+      fetchMock.mock.calls.some(([u, i]) =>
+        u === "/api/playground/conversations" && (i as RequestInit)?.method === "DELETE"),
+    ).toBe(false)
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }))
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([u, i]) =>
+          u === "/api/playground/conversations" && (i as RequestInit)?.method === "DELETE"),
+      ).toBe(true),
+    )
   })
 })
