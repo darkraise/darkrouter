@@ -8,6 +8,8 @@ import type {
   DiscoveryHealthResponse,
   Healthz,
   Overview,
+  PlaygroundConversation,
+  PlaygroundConversationDetail,
   PlaygroundPreset,
   PolicyBlock,
   PresetsResponse,
@@ -36,6 +38,8 @@ export const keys = {
   providers: ["providers"] as const,
   presets: ["presets"] as const,
   playgroundPresets: ["playground-presets"] as const,
+  playgroundConversations: ["playground-conversations"] as const,
+  playgroundConversation: (id: string) => ["playground-conversations", id] as const,
   models: ["models"] as const,
   aliases: ["aliases"] as const,
   config: ["config"] as const,
@@ -135,6 +139,26 @@ export function usePlaygroundPresets(extra?: Extra<PlaygroundPreset[]>) {
   return useQuery({
     queryKey: keys.playgroundPresets,
     queryFn: () => api.get<PlaygroundPreset[]>("/api/playground/presets"),
+    ...extra,
+  })
+}
+
+export function usePlaygroundConversations(extra?: Extra<PlaygroundConversation[]>) {
+  return useQuery({
+    queryKey: keys.playgroundConversations,
+    queryFn: () => api.get<PlaygroundConversation[]>("/api/playground/conversations"),
+    ...extra,
+  })
+}
+
+export function usePlaygroundConversation(
+  id: string,
+  extra?: Extra<PlaygroundConversationDetail>,
+) {
+  return useQuery({
+    queryKey: keys.playgroundConversation(id),
+    queryFn: () =>
+      api.get<PlaygroundConversationDetail>(`/api/playground/conversations/${id}`),
     ...extra,
   })
 }
