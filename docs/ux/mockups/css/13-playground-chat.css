@@ -1,0 +1,267 @@
+/* --- 13 use/playground — chat -------------------------------------------- */
+
+/* Everything here is prefixed pgt-: the fragments are concatenated into one
+   document, so pg- (the lab screen) and pgc- (compare) are already taken and
+   a shared name would silently repaint another screen. The stream cursor is
+   deliberately not redefined — .pgc-caret is the one this set already has. */
+
+/* A fixed height, not a content height: the rail, the transcript and the
+   composer are three regions that hold their own scroll, and a mockup that
+   grows with its sample text stops showing that. */
+.pgt-frame {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: 720px;
+  margin-top: var(--gutter);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* --- The history rail ---------------------------------------------------- */
+
+.pgt-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.pgt-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pgt-rail-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.pgt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: var(--legend);
+}
+
+.pgt-rail-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pgt-rail-foot {
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pgt-new {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.pgt-conv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pgt-conv-active {
+  background: var(--surface-2);
+}
+
+/* All three rows truncate rather than wrap. The rail is for recognising a
+   conversation, not for reading it, and a wrapped preview would let one row
+   push the rest of the history below the fold. */
+.pgt-conv-title,
+.pgt-conv-preview,
+.pgt-conv-when {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pgt-conv-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.pgt-conv-preview {
+  font-size: 12px;
+  color: var(--legend);
+}
+
+.pgt-conv-when {
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* --- The transcript column ----------------------------------------------- */
+
+.pgt-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pgt-conv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pgt-model {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.pgt-dialect {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--legend);
+}
+
+/* An editable title reads as text until it is touched, so it carries no box
+   here — only the dotted underline that says the words themselves are the
+   field. */
+.pgt-title-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-bottom: 1px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.pgt-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.pgt-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 768px;
+  margin: 0 auto;
+}
+
+/* --- Turns --------------------------------------------------------------- */
+
+/* The asymmetry is the whole affordance: a user turn is right and only as
+   wide as it needs, an answer is full width on the page's own ground. It
+   lets someone scan who said what without reading either. */
+.pgt-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pgt-bubble {
+  max-width: 78%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.pgt-answer {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* The provider's mark in the gutter. Which provider answered is the first
+   thing an operator needs from a turn, so it is the one thing the quiet
+   route line never gives up. */
+.pgt-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.pgt-answer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* pre-wrap because an answer arrives with the model's own line breaks and
+   indentation, and code loses its meaning without them. */
+.pgt-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.pgt-route {
+  margin: 0;
+  font-size: 12px;
+  color: var(--legend);
+}
+
+/* Underlined because the reading is a control: the duration alone is all a
+   conversation needs, and one click brings the rest of the line back. */
+.pgt-route-quiet {
+  width: fit-content;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-style: dotted;
+}
+
+/* --- The composer -------------------------------------------------------- */
+
+.pgt-composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 768px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pgt-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  color: var(--legend);
+}
