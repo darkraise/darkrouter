@@ -3797,26 +3797,51 @@ describe("the two settings that govern prompt text at rest", () => {
 })
 ```
 
-Append to `web/src/features/settings/settings-screen.test.tsx`, following that file's existing mounting helper and mocks:
+Append to `web/src/features/settings/settings-screen.test.tsx`. That file does **not** mock the `api` module — it drives requests through `stubSettingsFetch(...)` and `vi.stubGlobal("fetch", ...)`, and its mounting helper is `mount`, not `mounted`. Extend the stub with a purge branch first, inside `stubSettingsFetch`'s `fetchMock`, immediately before its final catch-all `return`:
+
+```ts
+    if (url === "/api/playground/conversations" && method === "DELETE") {
+      return new Response(JSON.stringify({ deleted: 2 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+```
+
+Then append the test:
 
 ```tsx
-it("offers the purge behind a confirmation that says what it destroys", async () => {
-  // The purge is a separate action from the key on purpose: config is
-  // file-backed and reloadable, and a setting whose reload deleted data would
-  // mean an edit to a file on disk silently destroying the operator's history.
-  mounted(<SettingsScreen />)
-  await userEvent.click(
-    await screen.findByRole("button", { name: /delete saved conversations/i }),
-  )
-  expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument()
-  await userEvent.click(screen.getByRole("button", { name: "Delete" }))
-  await waitFor(() =>
-    expect(delMock).toHaveBeenCalledWith("/api/playground/conversations"),
-  )
+describe("the saved-conversation purge", () => {
+  it("asks before it destroys, and says what it destroys", async () => {
+    // A separate action from the key on purpose: config is file-backed and
+    // reloadable, and a setting whose reload deleted data would mean an edit
+    // to a file on disk silently destroying the operator's history.
+    const { fetchMock } = stubSettingsFetch({})
+    mount(<SettingsScreen />)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /delete saved conversations/i }),
+    )
+    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument()
+
+    // Nothing has been destroyed by opening the dialog.
+    expect(
+      fetchMock.mock.calls.some(([u, i]) =>
+        u === "/api/playground/conversations" && (i as RequestInit)?.method === "DELETE"),
+    ).toBe(false)
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }))
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([u, i]) =>
+          u === "/api/playground/conversations" && (i as RequestInit)?.method === "DELETE"),
+      ).toBe(true),
+    )
+  })
 })
 ```
 
-Read the top of `settings-screen.test.tsx` first and reuse its existing `api` mock and mounting helper verbatim; if it does not already mock `api.del`, extend the existing mock object rather than adding a second `vi.mock` for the same module.
+`ConfirmButton` renders an `AlertDialog` whose confirming control is a button labelled by its `confirmLabel`, so `{ name: "Delete" }` resolves it. Read the file's existing tests before writing: they are the pattern for both the fetch stub and the mount.
 
 - [ ] **Step 2: Run them to verify they fail**
 
