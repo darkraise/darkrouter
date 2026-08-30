@@ -4370,6 +4370,7 @@ Password from `.uat-credentials`; never copy it into a tracked file. At **1600×
 | Check | What passing looks like |
 |---|---|
 | Mode switch | The toggle sits in the `PageHeader`, right-aligned. Choosing Chat, reloading, and landing back in Chat. `?mode=lab` on the URL overriding a stored Chat |
+| Back button | Toggle Chat then Lab, then press the browser's Back button. The URL returns to `?mode=chat`; check whether the toggle follows it. The mode is held in state seeded once at mount, and TanStack Router does not remount a route when only its search changes, so this may well be out of sync — decide there and then whether a broken Back button is worth an effect that syncs the mode from the URL |
 | D6 | Send a turn with a system prompt set from the overflow menu. Reload the page, pick the conversation from the rail: the transcript returns and the system prompt is still in the dialog |
 | D7 | After one exchange the rail shows one conversation, and the conversation holds exactly two messages. Send a second exchange: still one conversation, now four messages. Two conversations for one exchange is the failure to watch for |
 | Rail | Titles derived from the first turn, not a column of "New chat". The preview line truncating rather than wrapping. Collapse to nothing and back |
