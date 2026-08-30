@@ -21,6 +21,7 @@ function header(over: Record<string, unknown> = {}) {
   const props = {
     config: { ...emptyConfig(), model: "gpt" },
     onConfigChange: noop,
+    onConfigCommit: noop,
     title: "speculative decoding",
     onTitleChange: noop,
     onOpenInLab: noop,

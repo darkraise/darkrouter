@@ -184,6 +184,26 @@ describe("Chat mode", () => {
     )
   })
 
+  it("saves the model once the typing settles, not once per keystroke", async () => {
+    // The combobox reports every character, so a PATCH per report leaves the
+    // stored model decided by whichever of eleven concurrent writes lands
+    // last -- invisible until the conversation is reopened tomorrow.
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+
+    await userEvent.click(screen.getByRole("button", { name: /claude/ }))
+    await userEvent.clear(screen.getByLabelText("Model or alias"))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt-4o-mini")
+    // The field still keeps up with the typing; only the write waits.
+    expect(screen.getByLabelText("Model or alias")).toHaveValue("gpt-4o-mini")
+
+    await waitFor(() => expect(patchMock).toHaveBeenCalled(), { timeout: 2000 })
+    expect(patchMock).toHaveBeenCalledTimes(1)
+    const [, body] = patchMock.mock.calls[0] as [string, { model: string }]
+    expect(body.model).toBe("gpt-4o-mini")
+  })
+
   it("patches the row when the model changes part-way through", async () => {
     // Section 8.5: the transcript keeps the turns that came before, and each
     // answer's route line already records what actually served it.
