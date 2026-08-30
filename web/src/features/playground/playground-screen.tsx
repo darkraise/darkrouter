@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
 import { ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { LabMode } from "./lab-mode"
+import { ChatMode } from "./chat/chat-mode"
 import { emptyConfig, type PlaygroundConfig } from "./config"
 import { initialMode, isMode, rememberMode, type PlaygroundMode } from "./mode"
 
@@ -47,7 +48,16 @@ export function PlaygroundScreen() {
           </ToggleGroup>
         }
       />
-      {mode === "chat" ? null : <LabMode config={labConfig} onConfigChange={setLabConfig} />}
+      {mode === "chat" ? (
+        <ChatMode
+          onOpenInLab={(next) => {
+            setLabConfig(next)
+            choose("lab")
+          }}
+        />
+      ) : (
+        <LabMode config={labConfig} onConfigChange={setLabConfig} />
+      )}
     </div>
   )
 }
