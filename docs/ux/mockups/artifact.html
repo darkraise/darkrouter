@@ -5130,6 +5130,274 @@ body.theme-light .preset-scrim,
   background: var(--accent-ink);
 }
 
+/* --- 13 use/playground — chat -------------------------------------------- */
+
+/* Everything here is prefixed pgt-: the fragments are concatenated into one
+   document, so pg- (the lab screen) and pgc- (compare) are already taken and
+   a shared name would silently repaint another screen. The stream cursor is
+   deliberately not redefined — .pgc-caret is the one this set already has. */
+
+/* A fixed height, not a content height: the rail, the transcript and the
+   composer are three regions that hold their own scroll, and a mockup that
+   grows with its sample text stops showing that. */
+.pgt-frame {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: 720px;
+  margin-top: var(--gutter);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* --- The history rail ---------------------------------------------------- */
+
+.pgt-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.pgt-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pgt-rail-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.pgt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: var(--legend);
+}
+
+.pgt-rail-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pgt-rail-foot {
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pgt-new {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.pgt-conv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pgt-conv-active {
+  background: var(--surface-2);
+}
+
+/* All three rows truncate rather than wrap. The rail is for recognising a
+   conversation, not for reading it, and a wrapped preview would let one row
+   push the rest of the history below the fold. */
+.pgt-conv-title,
+.pgt-conv-preview,
+.pgt-conv-when {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pgt-conv-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.pgt-conv-preview {
+  font-size: 12px;
+  color: var(--legend);
+}
+
+.pgt-conv-when {
+  font-size: 11px;
+  color: var(--legend);
+}
+
+/* --- The transcript column ----------------------------------------------- */
+
+.pgt-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pgt-conv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pgt-model {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.pgt-dialect {
+  flex: 0 0 auto;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--legend);
+}
+
+/* An editable title reads as text until it is touched, so it carries no box
+   here — only the dotted underline that says the words themselves are the
+   field. */
+.pgt-title-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-bottom: 1px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.pgt-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.pgt-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 768px;
+  margin: 0 auto;
+}
+
+/* --- Turns --------------------------------------------------------------- */
+
+/* The asymmetry is the whole affordance: a user turn is right and only as
+   wide as it needs, an answer is full width on the page's own ground. It
+   lets someone scan who said what without reading either. */
+.pgt-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pgt-bubble {
+  max-width: 78%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.pgt-answer {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* The provider's mark in the gutter. Which provider answered is the first
+   thing an operator needs from a turn, so it is the one thing the quiet
+   route line never gives up. */
+.pgt-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--legend);
+}
+
+.pgt-answer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* pre-wrap because an answer arrives with the model's own line breaks and
+   indentation, and code loses its meaning without them. */
+.pgt-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.pgt-route {
+  margin: 0;
+  font-size: 12px;
+  color: var(--legend);
+}
+
+/* Underlined because the reading is a control: the duration alone is all a
+   conversation needs, and one click brings the rest of the line back. */
+.pgt-route-quiet {
+  width: fit-content;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-style: dotted;
+}
+
+/* --- The composer -------------------------------------------------------- */
+
+.pgt-composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 768px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pgt-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  color: var(--legend);
+}
+
 /*
  * Task 16 — Connect ("use/connect").
  *
@@ -6754,7 +7022,7 @@ body.theme-light .preset-scrim,
         <kbd>A</kbd> annotations &middot; <kbd>T</kbd> light mode
       </p>
     </header>
-    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-14-connect"><span class="toc-n">13</span>use/connect</a></li><li><a href="#s-15-settings"><span class="toc-n">14</span>settings</a></li><li><a href="#s-16-login"><span class="toc-n">15</span>sign in</a></li><li><a href="#s-17-first-run"><span class="toc-n">16</span>operate/overview &mdash; first run</a></li><li><a href="#s-18-light-proof"><span class="toc-n">17</span>contrast proof</a></li></ol></nav>
+    <nav class="toc"><ol><li><a href="#s-00-design-language"><span class="toc-n">00</span>design language</a></li><li><a href="#s-01-ladder-specimen"><span class="toc-n">01</span>ladder specimen</a></li><li><a href="#s-02-overview"><span class="toc-n">02</span>operate/overview</a></li><li><a href="#s-03-requests"><span class="toc-n">03</span>operate/requests</a></li><li><a href="#s-04-request-trace"><span class="toc-n">04</span>operate/requests &mdash; request trace</a></li><li><a href="#s-05-usage"><span class="toc-n">05</span>operate/usage</a></li><li><a href="#s-06-providers"><span class="toc-n">06</span>configure/providers</a></li><li><a href="#s-07-provider-detail"><span class="toc-n">07</span>configure/providers &mdash; provider detail</a></li><li><a href="#s-08-preset-browser"><span class="toc-n">08</span>configure/providers &mdash; preset browser</a></li><li><a href="#s-09-models"><span class="toc-n">09</span>configure/models</a></li><li><a href="#s-10-routing"><span class="toc-n">10</span>configure/routing</a></li><li><a href="#s-11-playground"><span class="toc-n">11</span>use/playground</a></li><li><a href="#s-12-playground-compare"><span class="toc-n">12</span>use/playground</a></li><li><a href="#s-13-playground-chat"><span class="toc-n">13</span>use/playground &mdash; chat</a></li><li><a href="#s-14-connect"><span class="toc-n">14</span>use/connect</a></li><li><a href="#s-15-settings"><span class="toc-n">15</span>settings</a></li><li><a href="#s-16-login"><span class="toc-n">16</span>sign in</a></li><li><a href="#s-17-first-run"><span class="toc-n">17</span>operate/overview &mdash; first run</a></li><li><a href="#s-18-light-proof"><span class="toc-n">18</span>contrast proof</a></li></ol></nav>
 <section class="screen" id="s-00-design-language" data-screen-title="design language">
   <p class="legend">
     A numbered pin marks one enforced rule; press <kbd>A</kbd> to reveal the
@@ -12342,6 +12610,190 @@ def ulid_ms(ulid: str) -&gt; int:
             </div>
           </div>
 
+        </div>
+
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="s-13-playground-chat" data-screen-title="use/playground &mdash; chat">
+  <p class="legend">
+    Chat mode: a conversation the operator can come back to. The history rail
+    on the left retrieves one by its title, the line it last opened with and
+    how long ago; the header strip carries the two settings a conversation
+    actually needs; and under every answer the route line says who served it
+    and how long it took, without turning the transcript into an instrument
+    panel. There is no config pane and no metrics strip here &mdash; that is
+    the mode. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light mode.
+  </p>
+
+  <div class="chrome">
+    <nav class="rail">
+      <a class="rail-brand" href="#">
+        <span class="rail-logo"><svg class="rail-logo-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="1.5"/><path d="M12 2v3.5M12 8.5v7M12 18.5V22"/><path d="M2 7h8.5M2 17h8.5M2 12h16"/><rect x="10.5" y="5.5" width="3" height="3"/><rect x="10.5" y="15.5" width="3" height="3"/><rect x="18" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg></span>
+        <span class="rail-brand-text">
+          <span class="rail-brand-name">darkrouter</span>
+          <span class="rail-brand-version mono">v0.10.0</span>
+        </span>
+      </a>
+      <div class="rail-group">
+        <p class="legend-caps">Operate</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h9.5M6 9h9.5M6 13.5h9.5"/><circle cx="3" cy="4.5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="3" cy="13.5" r="1"/></svg><span>Requests</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15V9M7.5 15V4M12 15V11M16.5 15V6.5"/></svg><span>Usage</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Configure</p>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="4.5" rx="1.5"/><rect x="2.5" y="10.5" width="13" height="4.5" rx="1.5"/><circle cx="5.5" cy="5.25" r="0.9"/><circle cx="5.5" cy="12.75" r="0.9"/></svg><span>Providers</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5 16 6 9 9.5 2 6z"/><path d="M2 10 9 13.5 16 10"/></svg><span>Models</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="4" r="1.8"/><circle cx="14" cy="9" r="1.8"/><circle cx="4" cy="14" r="1.8"/><path d="M4 5.8v6.4M5.8 4h4.9a1.5 1.5 0 0 1 1.5 1.5V7M5.8 14h4.9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg><span>Routing</span></a>
+      </div>
+      <div class="rail-group">
+        <p class="legend-caps">Use</p>
+        <a class="rail-item" href="#" data-active="true"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M5.5 7.5 8 10l-2.5 2.5M10 12.5h4"/></svg><span>Playground</span></a>
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 10.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M10.5 7.5a3.5 3.5 0 0 0-5 0L3 10a3.5 3.5 0 0 0 5 5l1-1"/></svg><span>Connect</span></a>
+      </div>
+      <div class="rail-foot">
+        <a class="rail-item" href="#"><svg class="rail-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M16.5 9h-2M3.5 9h-2M14.3 3.7l-1.4 1.4M5.1 12.9l-1.4 1.4M14.3 14.3l-1.4-1.4M5.1 5.1 3.7 3.7"/></svg><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="chrome-main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 class="topbar-title">Playground</h2>
+          <p class="topbar-route mono">use/playground</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-btn" type="button"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.75"/><path d="M2.25 9h13.5M9 2.25a10.5 10.5 0 0 1 0 13.5a10.5 10.5 0 0 1 0-13.5"/></svg><span>English</span><span class="topbar-caret">&#9662;</span></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="theme"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="3.4"/><path d="M9 1.6v1.8M9 14.6v1.8M16.4 9h-1.8M3.4 9H1.6M14.2 3.8l-1.3 1.3M5.1 12.9l-1.3 1.3M14.2 14.2l-1.3-1.3M5.1 5.1 3.8 3.8"/></svg></button>
+          <button class="topbar-btn topbar-btn-icon" type="button" aria-label="sign out"><svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 12.5V15a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 2 15V3a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 3v2.5"/><path d="M7.5 9h8.5M13 6l3 3-3 3"/></svg></button>
+        </div>
+      </header>
+      <main class="content">
+
+        <div class="segmented" aria-label="playground surface">
+          <span class="segmented-option" data-active="true">Chat</span>
+          <span class="segmented-option">Compare</span>
+          <span class="segmented-option">Auxiliary</span>
+          <span class="segmented-option">Count</span>
+        </div>
+
+        <p style="margin-top:var(--gutter)"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; history-rail.tsx &mdash; every conversation in one 260px column, each row carrying the title, one truncated line of the last user turn and a relative timestamp: enough to recognise a conversation without opening it. The rail collapses to nothing, because a rail and a transcript are two columns an operator sometimes wants to be one.</span></p>
+
+        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; conversation-header.tsx &mdash; the model as a bordered pill in mono with the dialect beside it, the title editable in place, and an overflow menu holding the system prompt, open in Lab, and delete. Chat mode shows no config pane, so these two settings are reachable from here instead.</span></p>
+
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; message.tsx &mdash; the route line under an answer has two readings. Quiet is Chat mode's default: the provider mark in the gutter and the duration alone, one click from the rest. Expanded is what that click reveals, and what Lab always shows: provider/model, duration, tokens, cost and the trace.</span></p>
+
+        <div class="pgt-frame">
+
+          <aside class="pgt-rail">
+            <div class="pgt-rail-head">
+              <span class="pgt-rail-title">Conversations</span>
+              <button class="pgt-icon-btn" type="button" aria-label="Hide conversations">
+                <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2"/><path d="M7 3v12"/><path d="M12.5 7 10.5 9l2 2"/></svg>
+              </button>
+            </div>
+
+            <div class="pgt-rail-list">
+
+              <div class="pgt-conv">
+                <span class="pgt-conv-title">Failover on the together ladder</span>
+                <span class="pgt-conv-preview">Why did the second attempt go to groq when together&hellip;</span>
+                <span class="pgt-conv-when">4 minutes ago</span>
+              </div>
+
+              <div class="pgt-conv pgt-conv-active" aria-current="true">
+                <span class="pgt-conv-title">ULID timestamps</span>
+                <span class="pgt-conv-preview">Parse a ULID into its 48-bit millisecond timestamp&hellip;</span>
+                <span class="pgt-conv-when">2 hours ago</span>
+              </div>
+
+              <div class="pgt-conv">
+                <span class="pgt-conv-title">Cost of the nightly batch</span>
+                <span class="pgt-conv-preview">Roughly what does 2,000 summarisations a day cost&hellip;</span>
+                <span class="pgt-conv-when">Yesterday</span>
+              </div>
+
+              <div class="pgt-conv">
+                <span class="pgt-conv-title">Anthropic thinking budgets</span>
+                <span class="pgt-conv-preview">Does a budget in tokens map onto an effort tier at&hellip;</span>
+                <span class="pgt-conv-when">3 days ago</span>
+              </div>
+
+            </div>
+
+            <div class="pgt-rail-foot">
+              <button class="control control-ghost pgt-new" type="button">
+                <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5h13v8h-7L5 15.5v-3H2.5z"/><path d="M9 6.5v4M7 8.5h4"/></svg>
+                <span>New</span>
+              </button>
+            </div>
+          </aside>
+
+          <div class="pgt-column">
+
+            <div class="pgt-conv-head">
+              <button class="control pgt-model" type="button">gpt-oss-120b</button>
+              <span class="pgt-dialect">openai</span>
+              <span class="pgt-title-field">ULID timestamps</span>
+              <button class="pgt-icon-btn" type="button" aria-label="More">
+                <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="9" r="1"/><circle cx="9" cy="9" r="1"/><circle cx="14" cy="9" r="1"/></svg>
+              </button>
+            </div>
+
+            <div class="pgt-scroll">
+              <div class="pgt-thread">
+
+                <div class="pgt-user">
+                  <p class="pgt-bubble">Which of the two you looked at would you put first in the ladder for a summarisation workload?</p>
+                </div>
+
+                <div class="pgt-answer">
+                  <span class="pgt-mark" aria-hidden="true">gq</span>
+                  <div class="pgt-answer-body">
+                    <p class="pgt-text">Put groq first. At 1,800 input tokens it answers in about a fifth of the time and costs roughly a hundredth as much, and summarisation is the surface where the gap in output quality is narrowest. Keep the anthropic entry underneath it as the failover.</p>
+                    <p class="pgt-route"><span class="mono">groq/llama-3.3-70b-versatile</span> &middot; 840ms &middot; 12 in &middot; 240 out &middot; $0.0015 &middot; <a href="#" class="link">trace</a></p>
+                  </div>
+                </div>
+
+                <div class="pgt-user">
+                  <p class="pgt-bubble">Parse a ULID into its 48-bit millisecond timestamp. Crockford base32, no dependencies.</p>
+                </div>
+
+                <div class="pgt-answer">
+                  <span class="pgt-mark" aria-hidden="true">oa</span>
+                  <div class="pgt-answer-body">
+                    <p class="pgt-text">The first ten characters carry the timestamp, most significant first:
+
+_B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+def ulid_ms(u: str) -&gt; int:
+    return reduce(lambda m, c: m * 32 + _B32.index(c), u[:10], 0)</p>
+                    <p class="pgt-route pgt-route-quiet">1.2s</p>
+                  </div>
+                </div>
+
+                <div class="pgt-user">
+                  <p class="pgt-bubble">Does that hold for a ULID that was generated on a machine with a skewed clock?</p>
+                </div>
+
+                <div class="pgt-answer">
+                  <span class="pgt-mark" aria-hidden="true">oa</span>
+                  <div class="pgt-answer-body">
+                    <p class="pgt-text">It holds for the decoding &mdash; the ten characters are whatever milliseconds the generator believed at the time, so a skewed clock produces a decodable timestamp that is simply<span class="pgc-caret"></span></p>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="pgt-composer">
+              <span class="field-input pgt-input">Ask the router something</span>
+              <button class="control control-primary" type="button">Send</button>
+            </div>
+
+          </div>
         </div>
 
       </main>
