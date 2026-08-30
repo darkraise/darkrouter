@@ -101,9 +101,8 @@ export function useCreateConversation() {
         "/api/playground/conversations",
         conversationBody(vars.title, vars.config),
       ),
-    // A conversation is renamed and reconfigured from the same header, and the
-    // whole row is sent each time. Two of these in flight together would leave
-    // the stored row decided by which one the server finished last.
+    // Shares the update hook's scope, so a create and the updates that follow
+    // it are applied in the order they were made rather than raced.
     scope: { id: "playground-conversation" },
     invalidates: [keys.playgroundConversations],
   })
@@ -134,6 +133,11 @@ export function useUpdateConversation() {
         `/api/playground/conversations/${vars.id}`,
         conversationBody(vars.title, vars.config),
       ),
+    // A conversation is renamed and reconfigured from the same header, and the
+    // whole row is sent each time. Two of these in flight together would leave
+    // the stored row decided by which one the server finished last, so a model
+    // name typed in two bursts could be stored as its shorter prefix.
+    scope: { id: "playground-conversation" },
     invalidates: [keys.playgroundConversations],
   })
 }
