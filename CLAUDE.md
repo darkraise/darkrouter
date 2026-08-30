@@ -19,6 +19,15 @@ it is a size that silently opts out of a setting the operator changed.
 In a stylesheet, where a utility class cannot be applied, use the same scale
 through its token — `font-size: var(--text-sm)` — never a pixel value.
 
+**The one exception: `docs/ux/mockups/`.** The mockup set is a standalone HTML
+document with its own stylesheet. It never loads darkraise-ui and never
+participates in the font-size axis, so a pixel size there cannot silently opt
+out of a setting an operator changed — which is the entire reason for the rule
+above. Pixel sizes in `docs/ux/mockups/css/` are therefore allowed, and
+`qa.py`'s 30px ceiling is the only limit that applies to them. This was
+deferred twice and reviewed twice; it is written here so it stops being
+re-litigated. Everything under `web/` is bound by the rule without exception.
+
 ## Verifying a change in the running console
 
 The admin console at **http://localhost:8091** needs a password, so a change

@@ -194,3 +194,40 @@ describe("formatDuration rounding", () => {
     expect(formatDuration("24h")).toBe("1 day")
   })
 })
+
+describe("the two settings that govern prompt text at rest", () => {
+  it("shows them under one heading, so the distinction is offered rather than inferred", () => {
+    const withPlayground = cfg({
+      blocks: {
+        ...cfg().blocks,
+        playground: { save_conversations: true },
+      },
+      fields: {
+        ...cfg().fields,
+        "playground.save_conversations": { source: "default", hot_reloadable: true },
+      },
+    } as Partial<ConfigResponse>)
+
+    const logging = settingGroups(withPlayground).find((g) => g.group.id === "logging")
+    const fields = logging?.rows.map((r) => r.field) ?? []
+    expect(fields).toContain("capture.bodies")
+    expect(fields).toContain("playground.save_conversations")
+    // An operator who turned body capture off for privacy would reasonably
+    // expect that stance to cover the playground. It does not, and the
+    // heading has to say so rather than leave it to be discovered.
+    expect(logging?.group.blurb).toMatch(/your own/i)
+  })
+
+  it("reads the switch as On and Off rather than as a raw boolean", () => {
+    const withPlayground = cfg({
+      blocks: { ...cfg().blocks, playground: { save_conversations: false } },
+    } as Partial<ConfigResponse>)
+    expect(
+      settingRow(
+        withPlayground,
+        "playground.save_conversations",
+        SETTINGS["playground.save_conversations"]!,
+      ).display,
+    ).toBe("Off")
+  })
+})

@@ -1,6 +1,7 @@
 import {
   useMutation,
   useQueryClient,
+  type MutationScope,
   type QueryKey,
   type UseMutationOptions,
 } from "@tanstack/react-query"
@@ -21,11 +22,16 @@ export function useApiMutation<TData, TVars>(opts: {
   success?: string | ((data: TData, vars: TVars) => string)
   /** Cache entries the write invalidates. */
   invalidates?: QueryKey[]
+  /** Runs writes sharing this id one at a time, in the order they were made.
+   *  Without it two writes to the same row are concurrent, and the row keeps
+   *  whichever response the server happened to finish last. */
+  scope?: MutationScope
   onSuccess?: UseMutationOptions<TData, Error, TVars>["onSuccess"]
 }) {
   const queryClient = useQueryClient()
   return useMutation<TData, Error, TVars>({
     mutationFn: opts.mutationFn,
+    scope: opts.scope,
     onSuccess: (data, vars, ctx, mutation) => {
       if (opts.success) {
         toast.success(

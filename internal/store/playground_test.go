@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestPlaygroundPresetRoundTripsItsBlobUntouched(t *testing.T) {
@@ -164,5 +165,227 @@ func TestPlaygroundPresetStoresTheExactBytesItWasGiven(t *testing.T) {
 	}
 	if string(after.Config) != string(updated) {
 		t.Errorf("updated config = %s, want %s", after.Config, updated)
+	}
+}
+
+func TestPlaygroundConversationRoundTripsItsBlobUntouched(t *testing.T) {
+	// A conversation reopened next week has to restore the system prompt that
+	// produced its transcript, so the blob is stored exactly as it arrived --
+	// unknown fields included.
+	ctx := context.Background()
+	db := migrated(t)
+
+	blob := json.RawMessage(`{"system":"be brief","topK":"40","unknownFutureField":7}`)
+	made, err := db.CreatePlaygroundConversation(ctx, "New chat", "anthropic", "claude", blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made.ID == "" {
+		t.Fatal("no id assigned")
+	}
+
+	got, turns, found, err := db.PlaygroundConversationByID(ctx, made.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("conversation not found after create")
+	}
+	if len(turns) != 0 {
+		t.Errorf("new conversation has %d turns, want 0", len(turns))
+	}
+	if string(got.Config) != string(blob) {
+		t.Errorf("config = %s, want %s", got.Config, blob)
+	}
+	if got.Title != "New chat" || got.Dialect != "anthropic" || got.Model != "claude" {
+		t.Errorf("columns did not round-trip: %+v", got)
+	}
+}
+
+func TestPlaygroundTurnsTakeTheNextSeqAndBumpTheConversation(t *testing.T) {
+	// seq is what orders a transcript, and the unique index means the store
+	// has to hand out the next one rather than the caller guessing it.
+	ctx := context.Background()
+	db := migrated(t)
+
+	c, err := db.CreatePlaygroundConversation(ctx, "New chat", "openai", "gpt", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendPlaygroundTurn(ctx, c.ID, "user", "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	second, err := db.AppendPlaygroundTurn(ctx, c.ID, "assistant", "hi", "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Seq != 1 {
+		t.Errorf("second turn seq = %d, want 1", second.Seq)
+	}
+
+	_, turns, _, err := db.PlaygroundConversationByID(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("read %d turns, want 2", len(turns))
+	}
+	if turns[0].Role != "user" || turns[0].Content != "hello" {
+		t.Errorf("first turn = %+v", turns[0])
+	}
+	// A turn stored before the log writer's batch lands has no trace, and the
+	// UI has to treat that as ordinary rather than as a missing row.
+	if turns[0].RequestID != "" {
+		t.Errorf("first turn request id = %q, want empty", turns[0].RequestID)
+	}
+	if turns[1].RequestID != "req-1" {
+		t.Errorf("second turn request id = %q, want req-1", turns[1].RequestID)
+	}
+
+	list, err := db.PlaygroundConversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("listed %d conversations, want 1", len(list))
+	}
+	// The rail shows the most recent user turn under the title.
+	if list[0].Preview != "hello" {
+		t.Errorf("preview = %q, want hello", list[0].Preview)
+	}
+	// Backdated first, because the bump is what orders the history rail and
+	// both writes otherwise land in the same whole second -- an assertion
+	// that compares them as they stand can never see the touch happen. Both
+	// columns move, because the touch overwrites updated_at with the current
+	// second and only an older created_at leaves the bump visible.
+	backdated := time.Now().UTC().Add(-time.Hour).Unix()
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE playground_conversations SET created_at = ?, updated_at = ? WHERE id = ?`,
+		backdated, backdated, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendPlaygroundTurn(ctx, c.ID, "user", "again", ""); err != nil {
+		t.Fatal(err)
+	}
+	list, err = db.PlaygroundConversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list[0].UpdatedAt.After(list[0].CreatedAt) {
+		t.Errorf("appending did not move updated_at %v past created_at %v",
+			list[0].UpdatedAt, list[0].CreatedAt)
+	}
+	if list[0].Preview != "again" {
+		t.Errorf("preview = %q, want the most recent user turn", list[0].Preview)
+	}
+}
+
+func TestPlaygroundConversationDeleteTakesItsTurnsWithIt(t *testing.T) {
+	// ON DELETE CASCADE only fires because PRAGMA foreign_keys is in the DSN.
+	// A test that only checked the parent row would pass with the pragma off
+	// and leave orphaned prompt text in the database.
+	ctx := context.Background()
+	db := migrated(t)
+
+	c, err := db.CreatePlaygroundConversation(ctx, "New chat", "openai", "gpt", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendPlaygroundTurn(ctx, c.ID, "user", "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := db.DeletePlaygroundConversation(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("delete reported no row")
+	}
+
+	var orphans int
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM playground_messages`).Scan(&orphans); err != nil {
+		t.Fatal(err)
+	}
+	if orphans != 0 {
+		t.Errorf("%d messages survived their conversation", orphans)
+	}
+}
+
+func TestPlaygroundConversationPurgeEmptiesBothTables(t *testing.T) {
+	// The purge is what the settings screen offers when an operator decides
+	// the playground should not have kept their prompts. Leaving messages
+	// behind would make it a lie.
+	ctx := context.Background()
+	db := migrated(t)
+
+	for _, title := range []string{"one", "two"} {
+		c, err := db.CreatePlaygroundConversation(ctx, title, "openai", "gpt", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.AppendPlaygroundTurn(ctx, c.ID, "user", "hello", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := db.PurgePlaygroundConversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("purged %d conversations, want 2", n)
+	}
+	for _, table := range []string{"playground_conversations", "playground_messages"} {
+		var count int
+		if err := db.Read.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Errorf("%s still holds %d rows", table, count)
+		}
+	}
+}
+
+func TestPlaygroundReapSparesAConversationStillBeingWritten(t *testing.T) {
+	// The reap exists for a client that created a conversation and died before
+	// its first turn. A conversation created a moment ago is the ordinary case
+	// and reaping it would delete the one the operator is typing into.
+	ctx := context.Background()
+	db := migrated(t)
+
+	fresh, err := db.CreatePlaygroundConversation(ctx, "New chat", "openai", "gpt", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := db.CreatePlaygroundConversation(ctx, "has a turn", "openai", "gpt", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendPlaygroundTurn(ctx, kept.ID, "user", "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := db.ReapEmptyPlaygroundConversations(ctx, time.Now().UTC().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("reaped %d conversations, want 0", n)
+	}
+
+	n, err = db.ReapEmptyPlaygroundConversations(ctx, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("reaped %d conversations, want 1", n)
+	}
+	if _, _, found, err := db.PlaygroundConversationByID(ctx, fresh.ID); err != nil || found {
+		t.Errorf("empty conversation survived the reap (found=%v, err=%v)", found, err)
+	}
+	if _, _, found, err := db.PlaygroundConversationByID(ctx, kept.ID); err != nil || !found {
+		t.Errorf("conversation with a turn was reaped (found=%v, err=%v)", found, err)
 	}
 }

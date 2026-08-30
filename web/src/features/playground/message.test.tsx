@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { AssistantTurn, UserTurn, formatCost, routeFromTrace, type TurnRoute } from "./message"
 import type { RequestTrace, TraceAttempt } from "../../lib/api-types"
@@ -148,5 +149,39 @@ describe("what the provider dropped", () => {
     const { container } = render(<AssistantTurn text="a" route={route({ warnings: [] })} />)
     expect(container.textContent).not.toMatch(/dropped/i)
     expect(container.textContent).not.toMatch(/not expressible/i)
+  })
+})
+
+describe("the route line in Chat mode", () => {
+  const route = {
+    requestId: "01TRACE",
+    provider: "groq",
+    model: "llama",
+    totalMs: 1240,
+    tokensIn: 12,
+    tokensOut: 40,
+    costMicros: 1500,
+    failedOver: [],
+    warnings: [],
+  }
+
+  it("quiets to the duration, and expands to the whole line on click", async () => {
+    // A twenty-minute conversation does not want cost and token counts under
+    // every turn. It does want them under the one turn being questioned,
+    // which is what makes this a disclosure rather than a removal.
+    render(<AssistantTurn text="an answer" route={route} quiet />)
+    expect(screen.getByText("1.2s")).toBeInTheDocument()
+    expect(screen.queryByText(/12 in/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "trace" })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /routing detail/i }))
+    expect(screen.getByText(/12 in · 40 out/)).toBeInTheDocument()
+    expect(screen.getByText("groq")).toBeInTheDocument()
+  })
+
+  it("stays expanded in Lab, where measurement is the point", () => {
+    render(<AssistantTurn text="an answer" route={route} />)
+    expect(screen.getByText(/12 in · 40 out/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /routing detail/i })).not.toBeInTheDocument()
   })
 })

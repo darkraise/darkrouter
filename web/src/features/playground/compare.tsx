@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button, Textarea } from "darkraise-ui"
 import { stream, type StreamStart } from "../../lib/api"
 import { chatBody } from "./lib/request"
@@ -19,6 +19,7 @@ async function runColumn(
   model: string,
   prompt: string,
   config: PlaygroundConfig,
+  signal: AbortSignal,
   update: (fn: (c: Column) => Column) => void,
 ): Promise<void> {
   const started = performance.now()
@@ -33,17 +34,25 @@ async function runColumn(
       // nobody asked.
       chatBody({ ...config, model, stream: true, messages: turns }),
       (s: StreamStart) => update((c) => ({ ...c, requestId: s.requestId })),
+      signal,
     )) {
       buffer += chunk
       const { text, rest } = drainSSE(buffer, config.dialect)
       buffer = rest
       if (text) update((c) => ({ ...c, text: c.text + text }))
     }
-    update((c) => ({ ...c, status: "done" }))
+    update((c) => ({ ...c, status: "done", latencyMs: performance.now() - started }))
   } catch (err) {
-    update((c) => ({ ...c, error: (err as Error).message, status: "error" }))
-  } finally {
-    update((c) => ({ ...c, latencyMs: performance.now() - started }))
+    // An abort is the column being removed or the run being replaced, not a
+    // provider failing. It leaves nothing behind: the column is either gone
+    // or about to be reset by the run that replaced this one.
+    if ((err as Error).name === "AbortError") return
+    update((c) => ({
+      ...c,
+      error: (err as Error).message,
+      status: "error",
+      latencyMs: performance.now() - started,
+    }))
   }
 }
 
@@ -53,22 +62,61 @@ async function runColumn(
  *  different request shape. */
 export function Compare({ config }: { config: PlaygroundConfig }) {
   const counter = useRef(MIN_COLUMNS)
+  // One per column, so removing a column can stop the request it started.
+  // Without this the orphan keeps arriving into state nothing renders, and
+  // `busy` — which counts streaming columns — drops while it is still coming.
+  const controllers = useRef(new Map<string, AbortController>())
   const [prompt, setPrompt] = useState("")
   const [columns, setColumns] = useState<Column[]>(() => [emptyColumn("c0"), emptyColumn("c1")])
 
   const { candidates, loading } = useModelCandidates()
   const busy = columns.some((c) => c.status === "streaming")
+  // Gated on busy: a second run starting on top of a live one would append
+  // two runs' output into the same columns and time both at once.
   const canRun = !busy && prompt !== "" && columns.every((c) => c.model !== "")
 
   const updateColumn = (id: string, fn: (c: Column) => Column) =>
     setColumns((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
 
+  function abortColumn(id: string) {
+    controllers.current.get(id)?.abort()
+    controllers.current.delete(id)
+  }
+
+  // Removing a column already stops its request; navigating away did not, and
+  // an operator who leaves mid-run left four streams arriving into state
+  // nothing renders. The ref holds one Map for the component's whole life, so
+  // capturing it here is the same Map the cleanup drains.
+  useEffect(() => {
+    const live = controllers.current
+    return () => {
+      for (const controller of live.values()) controller.abort()
+      live.clear()
+    }
+  }, [])
+
   function run() {
     if (!canRun) return
+    // Defensive: the busy guard means Run cannot fire while a controller is
+    // live, so this loop should never have anything to abort. It is what
+    // keeps that true if the busy count ever stops covering a case -- which
+    // is exactly how the removed-column orphan got loose in the first place.
+    for (const id of [...controllers.current.keys()]) abortColumn(id)
     // Started in one pass so they overlap: run sequentially and the latency
     // readings beside them would measure the queue, not the providers.
     for (const column of columns) {
-      void runColumn(column.model, prompt, config, (fn) => updateColumn(column.id, fn))
+      const controller = new AbortController()
+      controllers.current.set(column.id, controller)
+      void runColumn(column.model, prompt, config, controller.signal, (fn) =>
+        updateColumn(column.id, fn),
+      ).finally(() => {
+        // Only if it is still this column's controller: a rerun has already
+        // replaced the entry, and deleting it would leave the new run
+        // unstoppable.
+        if (controllers.current.get(column.id) === controller) {
+          controllers.current.delete(column.id)
+        }
+      })
     }
   }
 
@@ -105,7 +153,10 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
               loading={loading}
               removable={columns.length > MIN_COLUMNS}
               onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
-              onRemove={() => setColumns((cs) => cs.filter((c) => c.id !== column.id))}
+              onRemove={() => {
+                abortColumn(column.id)
+                setColumns((cs) => cs.filter((c) => c.id !== column.id))
+              }}
             />
           ))}
         </div>
