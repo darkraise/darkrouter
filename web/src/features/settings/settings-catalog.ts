@@ -150,7 +150,7 @@ export const SETTINGS: Record<string, SettingMeta> = {
   "playground.save_conversations": {
     name: "Save playground conversations",
     description:
-      "Keeps Chat mode's conversations so you can return to one tomorrow. Off stops new ones being written; it does not delete what is already there — the button above the table does that.",
+      "Keeps Chat mode's conversations so you can return to one tomorrow. Off stops new ones being written; it does not delete what is already there — the button at the top of the page does that.",
     group: "logging",
   },
   "server.proxy_listen": {
