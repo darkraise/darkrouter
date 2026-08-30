@@ -12,6 +12,21 @@ import { routeFromTrace, type TurnRoute } from "../message"
 import type { PlaygroundConfig } from "../config"
 import type { PlaygroundMessage } from "../../../lib/api-types"
 
+/**
+ * One turn that finished, reported to whoever wants to keep it.
+ *
+ * The hook does not store anything itself. Lab's Single tab and Chat mode
+ * share this loop and disagree about persistence -- section 8.2 says Lab's
+ * tabs persist nothing -- so the decision belongs at the call site, and a
+ * callback is the smallest thing that can carry it.
+ */
+export type CompletedTurn = {
+  prompt: string
+  answer: string
+  /** Empty when the response carried no id. */
+  requestId: string
+}
+
 export type ChatRun = {
   messages: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
@@ -20,6 +35,9 @@ export type ChatRun = {
   send: (prompt: string) => Promise<void>
   stop: () => void
   clear: () => void
+  /** Replaces the transcript wholesale, for a conversation reopened from the
+   *  history rail. */
+  load: (messages: PlaygroundMessage[], routes: Record<number, TurnRoute>) => void
 }
 
 /**
@@ -33,6 +51,7 @@ export type ChatRun = {
 export function useChatRun(
   config: PlaygroundConfig,
   onMetrics: (m: StreamMetrics) => void,
+  onTurn?: (turn: CompletedTurn) => void,
 ): ChatRun {
   const [messages, setMessages] = useState<PlaygroundMessage[]>([])
   // Keyed by the index of the assistant turn it belongs to. Kept beside the
@@ -80,6 +99,16 @@ export function useChatRun(
     const startedAt = performance.now()
     let ttftMs: number | null = null
     let liveRequestId = ""
+    // The rendered text lives in a functional setState, so it is never in a
+    // variable this scope can read. A completed turn has to be reported with
+    // its whole answer, so it is accumulated here as well as appended.
+    let answer = ""
+    let failed = false
+    const emit = (text: string) => {
+      if (!text) return
+      answer += text
+      appendToLastMessage(text)
+    }
     try {
       for await (const chunk of stream(
         "/api/playground",
@@ -100,11 +129,11 @@ export function useChatRun(
           // Measured on the first text, not the first chunk: a keep-alive or
           // a role-only frame is not the model answering.
           if (text && ttftMs === null) ttftMs = performance.now() - startedAt
-          appendToLastMessage(text)
+          emit(text)
         }
       }
       if (!doStream) {
-        appendToLastMessage(extractUnaryText(dialect, buffer.current))
+        emit(extractUnaryText(dialect, buffer.current))
       }
       const totalMs = performance.now() - startedAt
       const measured: StreamMetrics = { ...NO_METRICS, ttftMs, totalMs }
@@ -125,11 +154,17 @@ export function useChatRun(
       }
     } catch (err) {
       // Stopping is the operator's decision, not a failure to report at them.
-      if ((err as Error).name !== "AbortError") setError((err as Error).message)
+      if ((err as Error).name !== "AbortError") {
+        setError((err as Error).message)
+        failed = true
+      }
     } finally {
       abort.current = null
       setBusy(false)
     }
+    // After the finally, so a stopped run still reports: the turns already
+    // written stay, and a half answer is what the tokens were spent on.
+    if (!failed) onTurn?.({ prompt, answer, requestId: liveRequestId })
   }
 
   /** Ends the run in flight. The turns already written stay: a half answer is
@@ -145,5 +180,15 @@ export function useChatRun(
     onMetrics(NO_METRICS)
   }
 
-  return { messages, routes, busy, error, send, stop, clear }
+  /** Aborts anything in flight first: a stream left running would append its
+   *  next chunk into the transcript that has just replaced it. */
+  function load(next: PlaygroundMessage[], nextRoutes: Record<number, TurnRoute>) {
+    abort.current?.abort()
+    setMessages(next)
+    setRoutes(nextRoutes)
+    setError("")
+    onMetrics(NO_METRICS)
+  }
+
+  return { messages, routes, busy, error, send, stop, clear, load }
 }

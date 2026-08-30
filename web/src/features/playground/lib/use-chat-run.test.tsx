@@ -121,4 +121,74 @@ describe("running one chat turn", () => {
     expect(result.current.messages).toHaveLength(0)
     expect(result.current.routes).toEqual({})
   })
+  it("reports one completed turn, with the id its trace will carry", async () => {
+    // Chat mode persists from here. Lab's Single tab passes no callback and
+    // persists nothing, which is what keeps the two surfaces sharing one loop
+    // without sharing a storage decision.
+    yields(frame("Hel"), frame("lo"))
+    traceMock.mockResolvedValue(null)
+    const turns: unknown[] = []
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    expect(turns).toEqual([{ prompt: "hi", answer: "Hello", requestId: "01TRACE" }])
+  })
+
+  it("reports nothing for a turn that failed", async () => {
+    // A failed run leaves an empty assistant bubble on screen and nothing
+    // worth keeping. Persisting it would put a blank turn in the transcript
+    // the operator reopens tomorrow.
+    streamMock.mockImplementation(async function* () {
+      throw new Error("upstream refused")
+      // eslint-disable-next-line no-unreachable
+      yield ""
+    })
+    const turns: unknown[] = []
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    expect(result.current.error).toBe("upstream refused")
+    expect(turns).toEqual([])
+  })
+
+  it("loads a stored transcript over whatever is on screen", async () => {
+    yields(frame("x"))
+    traceMock.mockResolvedValue(null)
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    act(() =>
+      result.current.load(
+        [
+          { role: "user", content: "from last week" },
+          { role: "assistant", content: "an answer" },
+        ],
+        {
+          1: {
+            requestId: "01OLD", provider: "", model: "",
+            totalMs: null, tokensIn: null, tokensOut: null, costMicros: null,
+            failedOver: [], warnings: [],
+          },
+        },
+      ),
+    )
+
+    expect(result.current.messages).toEqual([
+      { role: "user", content: "from last week" },
+      { role: "assistant", content: "an answer" },
+    ])
+    expect(result.current.routes[1]?.requestId).toBe("01OLD")
+    expect(result.current.error).toBe("")
+  })
 })
