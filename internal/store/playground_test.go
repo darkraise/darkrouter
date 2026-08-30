@@ -253,8 +253,30 @@ func TestPlaygroundTurnsTakeTheNextSeqAndBumpTheConversation(t *testing.T) {
 	if list[0].Preview != "hello" {
 		t.Errorf("preview = %q, want hello", list[0].Preview)
 	}
-	if !list[0].UpdatedAt.After(list[0].CreatedAt) && list[0].UpdatedAt.Before(list[0].CreatedAt) {
-		t.Errorf("updated_at %v is before created_at %v", list[0].UpdatedAt, list[0].CreatedAt)
+	// Backdated first, because the bump is what orders the history rail and
+	// both writes otherwise land in the same whole second -- an assertion
+	// that compares them as they stand can never see the touch happen. Both
+	// columns move, because the touch overwrites updated_at with the current
+	// second and only an older created_at leaves the bump visible.
+	backdated := time.Now().UTC().Add(-time.Hour).Unix()
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE playground_conversations SET created_at = ?, updated_at = ? WHERE id = ?`,
+		backdated, backdated, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendPlaygroundTurn(ctx, c.ID, "user", "again", ""); err != nil {
+		t.Fatal(err)
+	}
+	list, err = db.PlaygroundConversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list[0].UpdatedAt.After(list[0].CreatedAt) {
+		t.Errorf("appending did not move updated_at %v past created_at %v",
+			list[0].UpdatedAt, list[0].CreatedAt)
+	}
+	if list[0].Preview != "again" {
+		t.Errorf("preview = %q, want the most recent user turn", list[0].Preview)
 	}
 }
 
