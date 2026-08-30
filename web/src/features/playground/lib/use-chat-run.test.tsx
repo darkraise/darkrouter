@@ -121,4 +121,129 @@ describe("running one chat turn", () => {
     expect(result.current.messages).toHaveLength(0)
     expect(result.current.routes).toEqual({})
   })
+  it("reports one completed turn, with the id its trace will carry", async () => {
+    // Chat mode persists from here. Lab's Single tab passes no callback and
+    // persists nothing, which is what keeps the two surfaces sharing one loop
+    // without sharing a storage decision.
+    yields(frame("Hel"), frame("lo"))
+    traceMock.mockResolvedValue(null)
+    const turns: unknown[] = []
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    expect(turns).toEqual([{ prompt: "hi", answer: "Hello", requestId: "01TRACE" }])
+  })
+
+  it("reports nothing for a turn that failed", async () => {
+    // A failed run leaves an empty assistant bubble on screen and nothing
+    // worth keeping. Persisting it would put a blank turn in the transcript
+    // the operator reopens tomorrow.
+    streamMock.mockImplementation(async function* () {
+      throw new Error("upstream refused")
+      // eslint-disable-next-line no-unreachable
+      yield ""
+    })
+    const turns: unknown[] = []
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    expect(result.current.error).toBe("upstream refused")
+    expect(turns).toEqual([])
+  })
+
+  it("loads a stored transcript over whatever is on screen", async () => {
+    yields(frame("x"))
+    traceMock.mockResolvedValue(null)
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    act(() =>
+      result.current.load(
+        [
+          { role: "user", content: "from last week" },
+          { role: "assistant", content: "an answer" },
+        ],
+        {
+          1: {
+            requestId: "01OLD", provider: "", model: "",
+            totalMs: null, tokensIn: null, tokensOut: null, costMicros: null,
+            failedOver: [], warnings: [],
+          },
+        },
+      ),
+    )
+
+    expect(result.current.messages).toEqual([
+      { role: "user", content: "from last week" },
+      { role: "assistant", content: "an answer" },
+    ])
+    expect(result.current.routes[1]?.requestId).toBe("01OLD")
+    expect(result.current.error).toBe("")
+  })
+  it("does not let a superseded run write into the transcript that replaced it", async () => {
+    // traceWhenWritten takes no signal, so a run whose stream has ended sits
+    // in a wait of up to a second and a half. Reopening a conversation in that
+    // window used to stamp the old run's route, metrics and turn onto the new
+    // one -- which, once Chat mode persists from onTurn, writes one
+    // conversation's turn into another.
+    yields(frame("old answer"))
+    let releaseTrace: (v: unknown) => void = () => {}
+    traceMock.mockImplementation(
+      () => new Promise((resolve) => { releaseTrace = resolve }),
+    )
+    const metrics: unknown[] = []
+    const turns: unknown[] = []
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, (m) => metrics.push(m), (t) => turns.push(t)),
+    )
+    void result.current.send("hi")
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+
+    act(() => result.current.load([{ role: "user", content: "from last week" }], {}))
+    const metricsAfterLoad = metrics.length
+
+    await act(async () => {
+      releaseTrace({ id: "01TRACE", attempts: [], warnings: [] })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    expect(result.current.messages).toEqual([{ role: "user", content: "from last week" }])
+    expect(result.current.routes).toEqual({})
+    expect(turns).toEqual([])
+    expect(metrics).toHaveLength(metricsAfterLoad)
+  })
+
+  it("keeps a turn that failed part-way through, because its text is on screen", async () => {
+    // A stopped run reports its half answer; a run that failed mid-stream is
+    // the same situation from the transcript's point of view, and storing
+    // nothing would leave the screen and the stored conversation disagreeing.
+    streamMock.mockImplementation(async function* () {
+      yield frame("half an ")
+      throw new Error("upstream went away")
+    })
+    const turns: { answer: string }[] = []
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    expect(result.current.error).toBe("upstream went away")
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.answer).toBe("half an ")
+  })
 })

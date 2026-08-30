@@ -156,6 +156,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/playground/presets/{id}", s.requireCSRF(s.handleUpdatePlaygroundPreset))
 	s.mux.HandleFunc("DELETE /api/playground/presets/{id}", s.requireCSRF(s.handleDeletePlaygroundPreset))
 
+	s.mux.HandleFunc("GET /api/playground/conversations", s.requireSession(s.handleListPlaygroundConversations))
+	s.mux.HandleFunc("POST /api/playground/conversations", s.requireCSRF(s.requireConversationSaving(s.handleCreatePlaygroundConversation)))
+	// The exact literal beside the wildcard below it: ServeMux prefers the
+	// literal, so the purge and the single delete coexist.
+	s.mux.HandleFunc("DELETE /api/playground/conversations", s.requireCSRF(s.handlePurgePlaygroundConversations))
+	s.mux.HandleFunc("GET /api/playground/conversations/{id}", s.requireSession(s.handleGetPlaygroundConversation))
+	s.mux.HandleFunc("PATCH /api/playground/conversations/{id}", s.requireCSRF(s.requireConversationSaving(s.handleUpdatePlaygroundConversation)))
+	s.mux.HandleFunc("DELETE /api/playground/conversations/{id}", s.requireCSRF(s.handleDeletePlaygroundConversation))
+	s.mux.HandleFunc("POST /api/playground/conversations/{id}/messages", s.requireCSRF(s.requireConversationSaving(s.handleAppendPlaygroundTurn)))
+
 	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
 	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
 	s.mux.HandleFunc("GET /api/models", s.requireSession(s.handleModels))
@@ -190,15 +200,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/password", s.requireCSRF(s.handleChangePassword))
 	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
 
-	// A mistyped API path must answer as an API path. Without these two an
+	// A mistyped API path must answer as an API path. Without these an
 	// unknown /api/… would fall through to the SPA and return HTML, and the
 	// client would report a JSON parse error instead of the missing route.
-	s.mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotFound, "no such endpoint")
-	})
-	s.mux.HandleFunc("POST /api/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotFound, "no such endpoint")
-	})
+	// Every verb, not only the two that are common: a mistyped DELETE
+	// answering 200 with index.html is exactly the failure this prevents.
+	for _, method := range []string{"GET", "POST", "PATCH", "PUT", "DELETE"} {
+		s.mux.HandleFunc(method+" /api/", func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "no such endpoint")
+		})
+	}
 
 	// Registered last and at the root so every exact API path above wins:
 	// http.ServeMux prefers the longest matching pattern.

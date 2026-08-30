@@ -26,10 +26,18 @@ import (
 // raw YAML appended under an aliases: block, or empty for none.
 func configStoreFor(t *testing.T, aliases string) *config.Store {
 	t.Helper()
+	return configStoreWith(t, aliases, "")
+}
+
+// configStoreWith adds arbitrary top-level YAML after the aliases, for a test
+// that needs a key the minimal document does not carry.
+func configStoreWith(t *testing.T, aliases, extra string) *config.Store {
+	t.Helper()
 	body := "server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\n"
 	if aliases != "" {
 		body += "aliases:\n" + aliases
 	}
+	body += extra
 	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -51,12 +59,24 @@ func testServerFull(t *testing.T) (*Server, *store.DB) {
 
 func testServerFullWithAliases(t *testing.T, aliases string) (*Server, *store.DB) {
 	t.Helper()
+	return testServerFullWith(t, aliases, "")
+}
+
+// testServerFullWithConfig is testServerFull with extra top-level YAML in the
+// config document, for a test that turns a key off.
+func testServerFullWithConfig(t *testing.T, extra string) (*Server, *store.DB) {
+	t.Helper()
+	return testServerFullWith(t, "", extra)
+}
+
+func testServerFullWith(t *testing.T, aliases, extra string) (*Server, *store.DB) {
+	t.Helper()
 	db := store.MigratedForTest(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := configStoreFor(t, aliases)
+	cfg := configStoreWith(t, aliases, extra)
 	// Mirrors cmd/darkrouter: aliases and policy are overlaid from SQLite, so
 	// a test that writes through the API sees the same snapshot a request
 	// would. Without it the write lands in the database and nowhere else.

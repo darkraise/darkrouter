@@ -73,10 +73,13 @@ export function AssistantTurn({
   text,
   route,
   streaming = false,
+  quiet = false,
 }: {
   text: string
   route?: TurnRoute
   streaming?: boolean
+  /** Chat mode's reading: the duration only, until the operator asks. */
+  quiet?: boolean
 }) {
   return (
     <div className="flex gap-3">
@@ -104,7 +107,7 @@ export function AssistantTurn({
             {streaming ? <Caret /> : null}
           </div>
         )}
-        {route ? <RouteLine route={route} /> : null}
+        {route ? <RouteLine route={route} quiet={quiet} /> : null}
         {route && route.warnings.length > 0 ? <TurnWarnings warnings={route.warnings} /> : null}
       </div>
 
@@ -140,6 +143,11 @@ function Caret() {
   )
 }
 
+/** The reading a quiet line keeps, and the first thing the full line says. */
+function shortDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
+
 /**
  * The route, under the answer it explains.
  *
@@ -147,11 +155,31 @@ function Caret() {
  * answered, how long it took, what it spent. A failover is the exception and
  * is drawn as one — it is the most interesting thing that can happen to a
  * request, and a number in a row would bury it.
+ *
+ * Quiet is Chat mode's reading of the same line. Twenty turns each carrying
+ * cost, tokens and a trace link is an instrument panel under a conversation;
+ * the duration alone still says the answer was routed, and one click gets the
+ * rest back. Lab never quiets, because measurement is what Lab is for.
  */
-function RouteLine({ route }: { route: TurnRoute }) {
+function RouteLine({ route, quiet = false }: { route: TurnRoute; quiet?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (quiet && !expanded) {
+    return (
+      <button
+        type="button"
+        aria-label="Show routing detail"
+        onClick={() => setExpanded(true)}
+        className="w-fit text-sm text-[hsl(var(--legend))] underline-offset-2 hover:underline"
+      >
+        {route.totalMs === null ? "routed" : shortDuration(route.totalMs)}
+      </button>
+    )
+  }
+
   const parts: string[] = []
   if (route.totalMs !== null) {
-    parts.push(route.totalMs >= 1000 ? `${(route.totalMs / 1000).toFixed(1)}s` : `${route.totalMs}ms`)
+    parts.push(shortDuration(route.totalMs))
   }
   if (route.tokensIn !== null && route.tokensOut !== null) {
     parts.push(`${route.tokensIn} in · ${route.tokensOut} out`)

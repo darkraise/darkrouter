@@ -46,7 +46,8 @@ export const GROUPS: Group[] = [
   {
     id: "logging",
     title: "Logging and capture",
-    blurb: "What is recorded about each request, and how long it is kept.",
+    blurb:
+      "What is recorded about each request, and how long it is kept. Two of these keep prompt text on disk and they are not the same thing: body capture records other people's traffic passing through the gateway, and saved conversations record your own typing in the playground.",
   },
   {
     id: "server",
@@ -144,6 +145,12 @@ export const SETTINGS: Record<string, SettingMeta> = {
   "capture.retention": {
     name: "Keep bodies for",
     description: "Bodies are deleted on their own schedule, usually sooner than the records.",
+    group: "logging",
+  },
+  "playground.save_conversations": {
+    name: "Save playground conversations",
+    description:
+      "Keeps Chat mode's conversations so you can return to one tomorrow. Off stops new ones being written; it does not delete what is already there — the button at the top of the page does that.",
     group: "logging",
   },
   "server.proxy_listen": {
@@ -323,7 +330,9 @@ function groupForPrefix(field: string): GroupId {
   if (field.startsWith("policy.cooldown")) return "failure"
   if (field.startsWith("policy")) return "requests"
   if (field.startsWith("catalog") || field.startsWith("media")) return "catalogue"
-  if (field.startsWith("log") || field.startsWith("capture")) return "logging"
+  if (field.startsWith("log") || field.startsWith("capture") || field.startsWith("playground")) {
+    return "logging"
+  }
   return "server"
 }
 
