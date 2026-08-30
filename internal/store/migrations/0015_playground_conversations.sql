@@ -1,10 +1,15 @@
 -- Saved Chat-mode conversations, and the turns in them.
 --
--- This is the first place darkrouter retains prompt text at rest. Spec section
--- 8.2 argues the case at length and the short form is: this table holds the
--- operator's own typing rather than traffic passing through the gateway, it
--- grows only when a person types into it, and it is emptied by a purge the
--- settings screen offers rather than by a retention sweep.
+-- This is the first place darkrouter retains prompt text automatically and in
+-- bulk. Spec section 8.2 argues the case at length and the short form is: this
+-- table holds the operator's own typing rather than traffic passing through the
+-- gateway, it grows only when a person types into it, and it is emptied by a
+-- purge the settings screen offers rather than by a retention sweep.
+--
+-- It is not the first prompt text on disk: playground_presets.config already
+-- holds a saved preset's system prompt. That one is governed by neither
+-- playground.save_conversations nor the purge, and is removed by deleting the
+-- preset in the preset picker.
 --
 -- config is the same opaque JSON object playground_presets carries. Without it
 -- a conversation reopened tomorrow loses the system prompt that produced its

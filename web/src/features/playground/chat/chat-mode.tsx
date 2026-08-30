@@ -32,7 +32,9 @@ import type { PlaygroundConversation } from "../../../lib/api-types"
  * The saving is deliberately invisible. A history rail behind an explicit Save
  * button does not get used, and a conversation the operator has to remember to
  * keep is one they will lose. What that costs is stated in spec section 8.2:
- * this is the first place darkrouter retains prompt text at rest.
+ * this is the first place darkrouter retains prompt text automatically and in
+ * bulk. A saved preset already keeps its system prompt, and neither the key nor
+ * the purge reaches that one.
  */
 export function ChatMode({
   onOpenInLab,

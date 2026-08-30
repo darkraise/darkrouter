@@ -412,7 +412,14 @@ Phase 10 §2 put request/response body capture explicitly out of scope, on the g
 "wiring the writer is its own decision about storing prompt content on disk". `capture.bodies` and
 its retention sweep exist and nothing writes `request_bodies`; the trace drawer's Bodies panel is
 permanently empty and says so. Saved conversations would make the playground the first place in
-darkrouter where prompt text is retained at rest.
+darkrouter where prompt text is retained **automatically and in bulk**.
+
+**Not the first place it is retained at all.** A saved preset (§8.1) already keeps its system prompt
+in `playground_presets.config`, so prompt text reaches the disk before Chat mode exists. The
+difference is one of consent rather than of kind: a preset is one prompt the operator named and
+chose to keep, a conversation is every prompt they type, saved without being asked. Neither
+`playground.save_conversations` nor the purge below covers a preset -- its prompt is removed by
+deleting that preset in the preset picker.
 
 The decision taken here, and it should be reviewed as a decision rather than absorbed as a detail:
 
