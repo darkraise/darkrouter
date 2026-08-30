@@ -85,6 +85,14 @@ capture:
   max_bytes: 256000
   retention: 72h
 
+# Chat mode in the playground saves each conversation so it can be reopened
+# tomorrow. This file is the only place to turn that off: the settings screen
+# shows the key read-only, as it does every value the gateway reads from here.
+# Turning it off stops new conversations being saved. It does not delete what
+# is already stored -- the purge on the settings screen does that.
+playground:
+  save_conversations: true
+
 # Anthropic and Gemini providers use the same shape; only `kind` differs. Any
 # inbound dialect can be served by any of them.
 #
