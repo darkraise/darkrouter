@@ -369,7 +369,11 @@ func (s *Server) handleAppendPlaygroundTurn(w http.ResponseWriter, r *http.Reque
 // history would leave prompt text on disk with no way to reach it.
 func (s *Server) requireConversationSaving(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.deps.Config != nil && !s.deps.Config.Current().SaveConversations() {
+		// A missing Config refuses rather than permits. It is not reachable in
+		// production, but this gate is the whole of the control section 8.2
+		// rests its prompt-at-rest argument on, and an unanswerable "may the
+		// playground keep this?" has to resolve to no.
+		if s.deps.Config == nil || !s.deps.Config.Current().SaveConversations() {
 			writeError(w, http.StatusForbidden,
 				"playground.save_conversations is off, so conversations are not saved")
 			return
