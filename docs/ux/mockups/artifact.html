@@ -5214,9 +5214,9 @@ body.theme-light .preset-scrim,
   background: var(--surface-2);
 }
 
-/* All three rows truncate rather than wrap. The rail is for recognising a
-   conversation, not for reading it, and a wrapped preview would let one row
-   push the rest of the history below the fold. */
+/* Each of a row's three lines truncates rather than wraps. The rail is for
+   recognising a conversation, not for reading it, and a wrapped preview would
+   let one row push the rest of the history below the fold. */
 .pgt-conv-title,
 .pgt-conv-preview,
 .pgt-conv-when {
@@ -5263,15 +5263,8 @@ body.theme-light .preset-scrim,
   font-size: 12px;
 }
 
-.pgt-dialect {
-  flex: 0 0 auto;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--legend);
-}
-
 /* An editable title reads as text until it is touched, so it carries no box
-   here — only the dotted underline that says the words themselves are the
+   here — only the dashed underline that says the words themselves are the
    field. */
 .pgt-title-field {
   flex: 1 1 auto;
@@ -12705,11 +12698,11 @@ def ulid_ms(ulid: str) -&gt; int:
 
         <p style="margin-top:var(--gutter)"><b class="pin" data-pin="1">1</b><span class="pin-note">1 &middot; playground-screen.tsx &mdash; the mode toggle sits at the right of the page header row, and it is the whole shape of the change: Chat and Lab are two modes, not two tabs among four. Lab keeps the four surfaces (Single, Compare, Auxiliary, Count) inside itself; Chat has no surface strip at all.</span></p>
 
-        <p><b class="pin" data-pin="1b">1b</b><span class="pin-note">1b &middot; history-rail.tsx &mdash; every conversation in one 260px column, each row carrying the title, one truncated line of the last user turn and a relative timestamp: enough to recognise a conversation without opening it. The rail collapses to nothing, because a rail and a transcript are two columns an operator sometimes wants to be one.</span></p>
+        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; history-rail.tsx &mdash; every conversation in one 260px column, each row carrying the title, one truncated line of the last user turn and a relative timestamp: enough to recognise a conversation without opening it. The rail collapses to nothing, because a rail and a transcript are two columns an operator sometimes wants to be one.</span></p>
 
-        <p><b class="pin" data-pin="2">2</b><span class="pin-note">2 &middot; conversation-header.tsx &mdash; the model as a bordered pill in mono with the dialect beside it, the title editable in place, and an overflow menu holding the system prompt, open in Lab, and delete. Chat mode shows no config pane, so these two settings are reachable from here instead.</span></p>
+        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; conversation-header.tsx &mdash; the model as a bordered pill in mono, the dialect beside it inside the pill's own popover, the title editable in place, and an overflow menu holding the system prompt, open in Lab, and delete. Chat mode shows no config pane, so these two settings are reachable from here instead.</span></p>
 
-        <p><b class="pin" data-pin="3">3</b><span class="pin-note">3 &middot; message.tsx &mdash; the route line under an answer has two readings. Quiet is Chat mode's default: the provider mark in the gutter and the duration alone, one click from the rest. Expanded is what that click reveals, and what Lab always shows: provider/model, duration, tokens, cost and the trace.</span></p>
+        <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; message.tsx &mdash; the route line under an answer has two readings. Quiet is Chat mode's default: the provider mark in the gutter and the duration alone, one click from the rest. Expanded is what that click reveals, and what Lab always shows: provider/model, duration, tokens, cost and the trace.</span></p>
 
         <div class="pgt-frame">
 
@@ -12761,7 +12754,6 @@ def ulid_ms(ulid: str) -&gt; int:
 
             <div class="pgt-conv-head">
               <button class="control pgt-model" type="button">gpt-oss-120b</button>
-              <span class="pgt-dialect">openai</span>
               <span class="pgt-title-field">ULID timestamps</span>
               <button class="pgt-icon-btn" type="button" aria-label="More">
                 <svg class="topbar-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="9" r="1"/><circle cx="9" cy="9" r="1"/><circle cx="14" cy="9" r="1"/></svg>
