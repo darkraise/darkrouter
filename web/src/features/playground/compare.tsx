@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button, Textarea } from "darkraise-ui"
 import { stream, type StreamStart } from "../../lib/api"
 import { chatBody } from "./lib/request"
@@ -82,6 +82,18 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
     controllers.current.get(id)?.abort()
     controllers.current.delete(id)
   }
+
+  // Removing a column already stops its request; navigating away did not, and
+  // an operator who leaves mid-run left four streams arriving into state
+  // nothing renders. The ref holds one Map for the component's whole life, so
+  // capturing it here is the same Map the cleanup drains.
+  useEffect(() => {
+    const live = controllers.current
+    return () => {
+      for (const controller of live.values()) controller.abort()
+      live.clear()
+    }
+  }, [])
 
   function run() {
     if (!canRun) return

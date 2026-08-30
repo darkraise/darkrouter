@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { stream, type StreamStart } from "../../../lib/api"
 import { chatBody, parseTools, type ChatState } from "./request"
 import { drainSSE, extractUnaryText } from "./stream"
@@ -181,6 +181,12 @@ export function useChatRun(
       onTurn?.({ prompt, answer, requestId: liveRequestId })
     }
   }
+
+  // Leaving the surface is as much an end to the run as pressing Stop. Both
+  // callers -- Chat mode and Lab's Single tab -- can be navigated away from
+  // mid-answer, and the stream would otherwise keep arriving into state that
+  // has been unmounted.
+  useEffect(() => () => abort.current?.abort(), [])
 
   /** Ends the run in flight. The turns already written stay: a half answer is
    *  still an answer, and it is what the tokens were spent on. */
