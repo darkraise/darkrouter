@@ -454,7 +454,8 @@ encryption at rest, the honest answer is the switch, not a cipher.
 not reflection — the comment says so and names the credential it exists to keep out — so the key
 needs a new entry in `internal/config`, an entry in that list, and a read-only row on the settings
 screen. It is a `*bool`, not a `bool`: the default is on, and a plain `bool` cannot tell a key the
-file never mentioned from one the file set to `false`. `CooldownConfig.TripAfter` is the precedent.
+file never mentioned from one the file set to `false`. `catalog.discovery.enabled` is the
+precedent, down to the `Enabled == nil || *Enabled` read in `configapi.go`.
 The purge is the UI's `DELETE /api/playground/conversations` call, not a side effect of the config
 value changing. Config is file-backed and reloadable, and a setting whose *reload* deletes data
 would mean an edit to a file on disk silently destroying the operator's history. Flipping the key in
