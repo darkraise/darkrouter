@@ -115,6 +115,10 @@ func applyDefaults(c *Config) {
 		on := true
 		c.Catalog.Discovery.Enabled = &on
 	}
+	if c.Playground.SaveConversations == nil {
+		on := true
+		c.Playground.SaveConversations = &on
+	}
 	if c.Catalog.Discovery.Interval == 0 {
 		c.Catalog.Discovery.Interval = 15 * time.Minute
 	}

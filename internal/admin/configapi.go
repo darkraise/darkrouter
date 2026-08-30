@@ -40,6 +40,7 @@ var configFields = []string{
 	"capture.bodies",
 	"capture.max_bytes",
 	"capture.retention",
+	"playground.save_conversations",
 	"catalog.models_dev_url",
 	"catalog.sync_interval",
 	"catalog.sync_timeout",
@@ -123,9 +124,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 					"interval": cfg.Catalog.Discovery.Interval.String(),
 				},
 			},
-			"media":   map[string]any{"inline": cfg.MediaInline()},
-			"aliases": cfg.Aliases,
-			"policy":  policyBlock(cfg.Policy),
+			"media":      map[string]any{"inline": cfg.MediaInline()},
+			"playground": map[string]any{"save_conversations": cfg.SaveConversations()},
+			"aliases":    cfg.Aliases,
+			"policy":     policyBlock(cfg.Policy),
 		},
 	}
 	if cfgErr != nil {
