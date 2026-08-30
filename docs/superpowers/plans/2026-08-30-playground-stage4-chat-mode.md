@@ -4377,6 +4377,7 @@ Password from `.uat-credentials`; never copy it into a tracked file. At **1600×
 | Quiet route line | Chat's answers showing the mark and the duration only, expanding on click to provider, tokens, cost and the trace link. Lab's Single tab still always expanded |
 | Open in Lab | The overflow menu's *Open in Lab* switching modes with the model, dialect and system prompt already in the config pane |
 | Lab unchanged | The four tabs, the config pane and the preset picker exactly as stage 3 left them, with the first tab now named Single and the metrics strip present from the start showing em dashes |
+| Delete straight after the first turn | Send one message, wait for the rail to show the new conversation, then delete it from the overflow menu **immediately**. The menu looks the conversation up in the rail's list, which may not have refetched yet — if the button does nothing, that is a dead control an operator will hit |
 | Purge | Settings offering *Delete saved conversations* with a confirmation naming what it destroys. After confirming, the rail is empty and stays empty across a reload |
 | Save key off | With `playground:\n  save_conversations: false` in `darkrouter.yaml` and a reload, the settings row reads Off, a new turn does not appear in the rail, and the existing conversations are still readable |
 | Narrow width | At 1280×800 the rail still fits beside the transcript; below `lg` it becomes a sheet and the transcript takes the width |
