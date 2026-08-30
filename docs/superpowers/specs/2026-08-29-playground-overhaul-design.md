@@ -422,8 +422,14 @@ The decision taken here, and it should be reviewed as a decision rather than abs
   runs and their transcripts are disposable by design.
 - Conversations persist until deleted. There is no retention sweep, because unlike the request log
   this table grows only when a person types into it.
-- Settings gains a switch, `playground.save_conversations`, default on. Turning it off stops new
-  writes and purges every stored conversation, in one action with one confirmation.
+- Settings gains the key `playground.save_conversations`, default on, and a purge. The key is
+  **read-only on the settings screen** and changed in `darkrouter.yaml`: `EDITABLE` in
+  `settings-catalog.ts` carries only `policy.*`, because everything else the gateway reads comes
+  from the file and has no write endpoint — which is why `capture.bodies` is a read-only row today.
+  The purge is its own confirmed action in the settings `PageHeader`, beside Reload config and Sync
+  catalog. Two controls rather than one, and deliberately: this section already refuses to let a
+  config reload delete data, and a single switch that both flipped the key and emptied the tables
+  would be exactly that.
 - The stored text is the operator's own prompts and the models' replies. It is not client traffic,
   and nothing in this design starts capturing that.
 
@@ -445,8 +451,10 @@ or inspect conversations with `sqlite3`. If the operator's prompts are sensitive
 encryption at rest, the honest answer is the switch, not a cipher.
 
 **Settings plumbing.** `configFields` in `internal/admin/configapi.go:33` is a deliberate allowlist,
-not reflection — the comment says so and names the credential it exists to keep out — so the switch
-needs a new key in `internal/config`, an entry in that list, and a control on the settings screen.
+not reflection — the comment says so and names the credential it exists to keep out — so the key
+needs a new entry in `internal/config`, an entry in that list, and a read-only row on the settings
+screen. It is a `*bool`, not a `bool`: the default is on, and a plain `bool` cannot tell a key the
+file never mentioned from one the file set to `false`. `CooldownConfig.TripAfter` is the precedent.
 The purge is the UI's `DELETE /api/playground/conversations` call, not a side effect of the config
 value changing. Config is file-backed and reloadable, and a setting whose *reload* deletes data
 would mean an edit to a file on disk silently destroying the operator's history. Flipping the key in
@@ -793,6 +801,7 @@ silently into a layout rewrite.
 | 16 | Four separately shippable stages, layout first | One plan delivered whole, which puts the daily annoyance behind several weeks of work that might be cut |
 | 17 | Two migrations, split on the stage boundary | One migration, which would put the prompt-at-rest tables on disk in service of a stage that might never ship |
 | 18 | Mockups drawn per stage, none for stage 1 | Drawing all of them up front, where a cut stage wastes the work and stage 1 has no new design to draw |
+| 19 | The save key is a read-only row plus a separate purge action | One console toggle doing both — no file-backed key is writable from the console, and decision 13's section forbids a reload that deletes data |
 
 ## 15. Review history
 
@@ -822,7 +831,13 @@ decomposition is honest.
 ## 16. Open decisions
 
 None. The one that was open — §8.2, whether the playground may retain prompt text at rest — was put
-to the owner during design and approved on 2026-08-29, with the auto-save, the settings switch and
-the purge as described. It is recorded in §8.2 at length rather than in a line here because it
+to the owner during design and approved on 2026-08-29, with the auto-save, the settings key and
+the purge as described. **Re-reviewed on 2026-08-30**, at the top of stage 4 and before any of it
+was built, because a decision that reverses a boundary deserves reconsidering at the moment it
+becomes irreversible rather than only when it was cheap. It was upheld, on a ground §8.2 had not
+stated: the `localStorage` fallback also stores prompt text at rest, on the browser's disk, where
+no settings key governs it, no purge reaches it and `sqlite3` cannot inspect it. The fallback does
+not keep the question closed; it answers it less visibly. The honest form of *do not retain prompt
+text* is dropping the history rail, not relocating it. That review also found decision 19. It is recorded in §8.2 at length rather than in a line here because it
 reverses a boundary phase 10 drew deliberately, and a future reader finding saved prompts on disk
 should be able to find out why without reconstructing it.
