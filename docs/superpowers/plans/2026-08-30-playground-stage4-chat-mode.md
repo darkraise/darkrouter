@@ -4410,4 +4410,6 @@ git commit -m "docs(playground): record the stage 4 gate"
 
 **Two follow-ups from stage 3's reviews are deliberately not in this plan.** The two Go handlers that answer 500 where a 409-with-id would be better — PATCH renaming a preset onto a taken name, and the create TOCTOU race — stay open. Neither path is reachable from the UI: §8.5 ships no rename affordance, and the race needs two concurrent saves of the same name from one operator. They are real and they are not observable.
 
+**The listing endpoint deletes rows, and it will bite the next test author.** `GET /api/playground/conversations` runs `ReapEmptyPlaygroundConversations` before it lists, with a one-hour floor keyed on `created_at`. §8.5 asks for exactly that — an abandoned conversation goes when the rail next loads — but it makes a read-shaped endpoint destructive, and it caught two test authors inside one stage: a test that backdates `created_at` to control ordering has its own fixture deleted by the call under test. Backdate `updated_at` alone; `created_at` is the reaper's column, not the ordering's.
+
 **Master is well ahead of `origin/master`.** Pushing is a decision for the human, not for whoever executes this plan.
