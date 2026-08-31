@@ -68,6 +68,12 @@ func NewSyncer(db *store.DB, src provider.Source, cat *Store, opts SyncOptions) 
 	}
 	fb := FallbackDoc()
 	s.doc.Store(&fb)
+	// The store prices against this rather than against the snapshot compiled
+	// into the binary. Registered here rather than at the call site so a
+	// syncer and the store it rebuilds cannot be wired up half way.
+	if cat != nil {
+		cat.SetDoc(s.Doc)
+	}
 	return s
 }
 
@@ -165,11 +171,12 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			MaxOutputTokens: meta.MaxOutputTokens,
 			// Limits and pricing always come from models.dev when the join
 			// succeeded: precedence is per field, not per record.
-			Capabilities:           caps,
-			CapabilitiesSource:     source,
-			InputMicrosPerMTok:     meta.InputMicrosPerMTok,
-			OutputMicrosPerMTok:    meta.OutputMicrosPerMTok,
-			CacheReadMicrosPerMTok: meta.CacheReadMicrosPerMTok,
+			Capabilities:            caps,
+			CapabilitiesSource:      source,
+			InputMicrosPerMTok:      meta.InputMicrosPerMTok,
+			OutputMicrosPerMTok:     meta.OutputMicrosPerMTok,
+			CacheReadMicrosPerMTok:  meta.CacheReadMicrosPerMTok,
+			CacheWriteMicrosPerMTok: meta.CacheWriteMicrosPerMTok,
 		})
 	}
 

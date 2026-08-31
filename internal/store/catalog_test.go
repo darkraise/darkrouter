@@ -193,3 +193,29 @@ func TestModelOverridesReadPartially(t *testing.T) {
 		t.Errorf("surfaces overridden to %v, want nil", o.Surfaces)
 	}
 }
+
+func TestUpsertMetadataRoundTripsCacheWritePricing(t *testing.T) {
+	// A cache write is billed at its own rate, usually above the input rate.
+	// Without a column for it the row prices every cached write at zero.
+	ctx := context.Background()
+	db := catalogDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id) VALUES ('p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "m",
+		InputMicrosPerMTok:      300_000,
+		OutputMicrosPerMTok:     1_500_000,
+		CacheReadMicrosPerMTok:  30_000,
+		CacheWriteMicrosPerMTok: 375_000,
+		CapabilitiesSource:      "models_dev",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := db.Models(ctx)
+	if rows[0].CacheWriteMicrosPerMTok != 375_000 {
+		t.Errorf("cache write price = %d, want 375000",
+			rows[0].CacheWriteMicrosPerMTok)
+	}
+}

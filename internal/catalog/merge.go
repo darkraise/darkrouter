@@ -85,10 +85,11 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 		m.ContextWindow = row.ContextWindow
 		m.MaxOutputTokens = row.MaxOutputTokens
 		m.Pricing = Pricing{
-			InputMicrosPerMTok:     row.InputMicrosPerMTok,
-			OutputMicrosPerMTok:    row.OutputMicrosPerMTok,
-			CacheReadMicrosPerMTok: row.CacheReadMicrosPerMTok,
-			Known:                  row.PriceKnown,
+			InputMicrosPerMTok:      row.InputMicrosPerMTok,
+			OutputMicrosPerMTok:     row.OutputMicrosPerMTok,
+			CacheReadMicrosPerMTok:  row.CacheReadMicrosPerMTok,
+			CacheWriteMicrosPerMTok: row.CacheWriteMicrosPerMTok,
+			Known:                   row.PriceKnown,
 		}
 		m.Source = SourceInferred
 	}
