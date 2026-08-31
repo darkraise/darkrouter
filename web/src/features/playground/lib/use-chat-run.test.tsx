@@ -144,7 +144,8 @@ describe("running one chat turn", () => {
     // the operator reopens tomorrow.
     streamMock.mockImplementation(async function* () {
       throw new Error("upstream refused")
-      // eslint-disable-next-line no-unreachable
+      // Unreachable, and there to make this a generator: stream()'s callers
+      // consume it with for-await, which a plain throwing function cannot feed.
       yield ""
     })
     const turns: unknown[] = []
