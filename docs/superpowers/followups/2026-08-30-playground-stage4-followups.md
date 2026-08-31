@@ -59,16 +59,26 @@ than the ~2.4 s of its siblings, and the warning
 canceled` — which is `forwardStream`'s post-commit read error, i.e. the cancel
 reaching the executor's own read loop.
 
-**New adjacent finding, from that row.** A client-cancelled stream is recorded
-as `status: "success"` with `tokens_in`/`tokens_out` 0 and `cost_micros` 0.
-`internal/exec/forward.go` treats a post-commit read failure as
-`OutcomeSuccess` (failover is impossible once bytes are on the wire), so
-`exec.go`'s `actionFinish` writes "success" — and the usage chunk, which
-arrives last, never arrived. The tokens the provider did generate before the
-cut are therefore invisible to the spend figures and to the budget gate.
-`rec.Status = "cancelled"` and `OutcomeClientCancelled` both already exist but
-are reachable only pre-commit. Under-reporting, not over-billing; worth its
-own decision.
+**Adjacent finding, raised and settled 2026-08-31 — a post-commit cancel is a
+success. Decided; do not re-litigate.**
+
+A client-cancelled stream is recorded as `status: "success"` with
+`tokens_in`/`tokens_out` 0 and `cost_micros` 0. `internal/exec/forward.go`
+treats a post-commit read failure as `OutcomeSuccess` — failover is impossible
+once bytes are on the wire — so `exec.go`'s `actionFinish` writes "success",
+and the usage chunk, which arrives last, never arrived.
+
+That classification stands. Bytes reached the client and the answer on screen
+is real, which is what "success" says; a cancel is the client's own choice,
+not a fault of the route. `rec.Status = "cancelled"` and
+`OutcomeClientCancelled` stay pre-commit, where they describe a request that
+never delivered anything.
+
+Nothing follows from the decision, because nothing else was recoverable.
+`TokensIn` and `TokensOut` are non-nullable `int64`, so 0 is the only value
+the row can carry, and `CostMicros` is priced from them. The provider does
+bill for what it generated before the cut, so spend under-reports by that
+much — a known and accepted gap, not a defect. No code change.
 
 ## 2. `npm run lint` is broken — RESOLVED
 
