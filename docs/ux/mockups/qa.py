@@ -24,6 +24,98 @@ CSS_PARTIALS = HERE / "css"
 # &#x1F600;) — a glyph escape, not a colour that escaped the token system.
 HEX = re.compile(r"""(?<!&)(?<!url\()(?<!href=")(?<!href=')#[0-9a-fA-F]{3,8}\b""")
 
+# A hex is not the only way colour escapes the token system, and a gate that
+# claims "no colour literal in a fragment" while catching only hexes is worse
+# than one that says what it does. rgba() and hsla() stay legal -- the hex
+# message points at them, because a translucent scrim cannot be expressed as a
+# token -- so only the opaque forms are caught here.
+COLOUR_FUNC = re.compile(
+    r"""\b(?:rgb|hsl|hwb|lab|lch|oklab|oklch)\s*\(""", re.IGNORECASE
+)
+
+# The CSS named colours, minus the two keywords that name no colour of their
+# own: transparent, and currentColor, which is the token system working.
+NAMED_COLOURS = (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque black "
+    "blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse "
+    "chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan "
+    "darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta "
+    "darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen "
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet "
+    "deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite "
+    "forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green "
+    "greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender "
+    "lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan "
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink "
+    "lightsalmon lightseagreen lightskyblue lightslategray lightslategrey "
+    "lightsteelblue lightyellow lime limegreen linen magenta maroon "
+    "mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen "
+    "mediumslateblue mediumspringgreen mediumturquoise mediumvioletred "
+    "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace "
+    "olive olivedrab orange orangered orchid palegoldenrod palegreen "
+    "paleturquoise palevioletred papayawhip peachpuff peru pink plum "
+    "powderblue purple rebeccapurple red rosybrown royalblue saddlebrown "
+    "salmon sandybrown seagreen seashell sienna silver skyblue slateblue "
+    "slategray slategrey snow springgreen steelblue tan teal thistle tomato "
+    "turquoise violet wheat white whitesmoke yellow yellowgreen"
+).split()
+
+# Matched only where a value is expected. A fragment's prose says "Orange" as
+# a word and a class can be named .plum; a bare keyword anywhere would flag
+# both, and a gate with false positives gets switched off.
+_NAMES = "|".join(NAMED_COLOURS)
+_COLOUR_PROPS = (
+    r"(?:color|background|background-color|border|border-\w+|border-\w+-color|"
+    r"outline|outline-color|fill|stroke|stop-color|flood-color|lighting-color|"
+    r"box-shadow|text-shadow|text-decoration-color|caret-color|accent-color|"
+    r"column-rule-color)"
+)
+NAMED_DECL = re.compile(
+    rf"""{_COLOUR_PROPS}\s*:\s*[^;{{}}"']*?\b({_NAMES})\b""", re.IGNORECASE
+)
+# SVG presentation attributes take the same values without the colon, which is
+# how fill="#FF0000" would read as fill="red".
+NAMED_ATTR = re.compile(
+    rf"""\b(?:fill|stroke|stop-color|flood-color|lighting-color)\s*=\s*"""
+    rf"""["']\s*({_NAMES})\s*["']""",
+    re.IGNORECASE,
+)
+
+
+COMMENT = re.compile(r"/\*.*?\*/|<!--.*?-->", re.DOTALL)
+
+
+def without_comments(text: str) -> str:
+    """Blanks comments, keeping every offset so line numbers still hold.
+
+    A comment naming a colour is discussing one, not declaring one -- the
+    preset scrim's header explains which near-black it was picked against --
+    and a gate that cannot tell those apart is one nobody leaves switched on.
+    """
+    return COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
+def colour_problems(path: Path, text: str) -> list[str]:
+    """Every way a colour literal escapes the token system, in one place."""
+    problems = []
+    text = without_comments(text)
+    for m in HEX.finditer(text):
+        line = text.count("\n", 0, m.start()) + 1
+        problems.append(f"{path.name}:{line}: raw hex {m.group(0)} — use var(--token) or rgba()")
+    for m in COLOUR_FUNC.finditer(text):
+        line = text.count("\n", 0, m.start()) + 1
+        problems.append(
+            f"{path.name}:{line}: opaque {m.group(0).strip()}) — use var(--token); "
+            "rgba()/hsla() are for translucency a token cannot carry"
+        )
+    for pattern in (NAMED_DECL, NAMED_ATTR):
+        for m in pattern.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            problems.append(
+                f"{path.name}:{line}: named colour {m.group(1)!r} — use var(--token)"
+            )
+    return problems
+
 # Attributes that fetch, wherever they appear. The optional scheme catches
 # protocol-relative URLs, which fetch just as happily as an absolute one.
 FETCHING_ATTR = re.compile(
@@ -116,9 +208,7 @@ def check_fragment(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     problems = []
 
-    for m in HEX.finditer(text):
-        line = text.count("\n", 0, m.start()) + 1
-        problems.append(f"{path.name}:{line}: raw hex {m.group(0)} — use var(--token) or rgba()")
+    problems += colour_problems(path, text)
 
     for pattern in (FETCHING_ATTR, CSS_FETCH, LOADING_HREF):
         for m in pattern.finditer(text):
@@ -151,11 +241,7 @@ def check_fragment(path: Path) -> list[str]:
 
 def check_css_partial(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
-    problems = []
-    for m in HEX.finditer(text):
-        line = text.count("\n", 0, m.start()) + 1
-        problems.append(f"{path.name}:{line}: raw hex {m.group(0)} — use var(--token) or rgba()")
-    return problems
+    return colour_problems(path, text)
 
 
 def check_index(path: Path) -> list[str]:
