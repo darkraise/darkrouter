@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatMode } from "./chat-mode"
+import { ApiError } from "../../../lib/api"
 import type { PlaygroundConversation, PlaygroundConversationDetail } from "../../../lib/api-types"
 
 // A reopened assistant turn carries a request_id, so the transcript renders a
@@ -106,6 +107,27 @@ describe("Chat mode", () => {
       onStart?.({ requestId: "01NEW" })
       yield `data: ${JSON.stringify({ choices: [{ delta: { content: "an answer" } }] })}\n\n`
     })
+  })
+
+  it("keeps the transcript when saving is off and the create is refused", async () => {
+    // playground.save_conversations off makes every write a 403. The answer
+    // on screen was paid for either way, so a refused save must not take it
+    // down -- verified live at the stage 4 gate, pinned by nothing until now.
+    postMock.mockRejectedValue(
+      new ApiError(403, "playground.save_conversations is off, so conversations are not saved"),
+    )
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
+    await userEvent.keyboard("{Escape}")
+    await send("hello there")
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled())
+    // The turn stays on screen, and the header still says this is a new chat
+    // because no conversation was created to name.
+    expect(await screen.findByText("an answer")).toBeInTheDocument()
+    expect(screen.getByText("hello there")).toBeInTheDocument()
+    expect(screen.getByLabelText("Conversation title")).toHaveValue("New chat")
   })
 
   it("keeps a title typed before the first send", async () => {
