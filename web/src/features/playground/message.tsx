@@ -220,6 +220,18 @@ function RouteLine({ route, quiet = false }: { route: TurnRoute; quiet?: boolean
           trace
         </Link>
       ) : null}
+      {/* Only where there is a quiet state to go back to. Lab never quiets,
+          so collapsing there would hide what the screen exists to show. */}
+      {quiet ? (
+        <button
+          type="button"
+          aria-label="Hide routing detail"
+          onClick={() => setExpanded(false)}
+          className="underline-offset-2 hover:underline"
+        >
+          less
+        </button>
+      ) : null}
     </div>
   )
 }
