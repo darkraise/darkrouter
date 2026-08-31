@@ -105,6 +105,31 @@ describe("Chat mode", () => {
     })
   })
 
+  it("keeps a title typed before the first send", async () => {
+    // retitle cannot persist before a conversation exists, so the typed name
+    // lived only in local state and titleFromPrompt then overwrote it.
+    postMock.mockImplementation((path: string, body: unknown) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: (body as { title: string }).title })
+        : Promise.resolve({ seq: 0 }),
+    )
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
+    await userEvent.keyboard("{Escape}")
+
+    const field = screen.getByLabelText("Conversation title")
+    await userEvent.clear(field)
+    await userEvent.type(field, "speculative decoding{Enter}")
+    await send("hello there")
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+    const [, createBody] = postMock.mock.calls.find(
+      (c) => c[0] === "/api/playground/conversations",
+    ) as [string, { title: string }]
+    expect(createBody.title).toBe("speculative decoding")
+  })
+
   it("saves exactly one user turn and one assistant turn per exchange", async () => {
     // The count is the assertion. A second create, or a duplicated message,
     // is the failure this feature makes easy and expensive.
