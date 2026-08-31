@@ -106,8 +106,14 @@ warnings, none of them mechanical:
   (`UntilMs` alignment); `gofmt -l internal/` is now empty.
 - ~~`ConfigBlocks` omits the `media` block~~ — fixed 2026-08-31, together with
   the missing `media:` block in `darkrouter.example.yaml`, as the note asked.
-- `qa.py`'s colour check only catches hex literals, so `rgb()` and named
-  colours would pass a gate that claims "no colour literal in a fragment".
+- ~~`qa.py`'s colour check only catches hex literals~~ — fixed 2026-08-31.
+  Adds the opaque colour functions and the CSS named colours; `rgba()` and
+  `hsla()` stay legal, since the hex message already points at them for
+  translucency a token cannot carry. Named colours are matched only where a
+  value is expected, because a fragment's prose says "Orange" and a class can
+  be named `.plum`. Comments are blanked first, offsets preserved, so the
+  preset scrim's header can go on naming the near-black it was picked
+  against. Probed both ways: four escape forms fail, five legal ones pass.
 - ~~Settings' "Signed-in browsers" rows all read "since Invalid Date"~~ —
   fixed 2026-08-31. Root cause was a unit mismatch, not a formatting one:
   `CreateSession` writes `UnixMilli`, but `SessionRows` decoded with
@@ -121,10 +127,11 @@ warnings, none of them mechanical:
 - ~~Several mockup stylesheet headers cite plan task numbers~~ — fixed
   2026-08-31. All 13 `Task N — ` header prefixes stripped; each header already
   named its screen, so nothing was lost. `qa.py` still passes (19 fragments).
-  **Not done:** the in-body cross-references ("reused by Task 9", "Task 3/4's
-  `.table`"). Those carry real information about which mockups share a class,
-  and a mechanical strip would destroy it — converting each to a screen name
-  is a separate judgement pass, not a cheap one.
+  The in-body cross-references followed on 2026-08-31, written as the screens
+  they mean rather than stripped: Task 9 is Providers, Task 7 is Request
+  trace, Task 12 is the model catalog, Tasks 3 and 4 are the design language
+  board and the ladder specimen, and Task 2 is the shared kit, which owns no
+  screen at all. `index.html` and `artifact.html` rebuilt.
 
 ## 4. Deferred minors from the per-task reviews
 
@@ -150,12 +157,37 @@ churned working code for no reader's benefit. Done:
 - Two tests: the 404s on an unknown conversation id, and
   `settings-catalog.test.ts`, which passed with its catalogue entry deleted.
 
-Left as they are: the partial-turn persist and the empty-assistant-message
-(both consistent with Stop's documented semantics -- only the comment on the
-first is out of date), Back writing the mode preference, the one-way route
-disclosure (spec section 6 as written, and a design decision), the Radix
-focus-return, the `bodyFor` duplication (its own rule: only if a third caller
-appears), the `applyDefaults` ordering, and the remaining test-coverage gaps.
+**Second pass, 2026-08-31 — the rest resolved.** A stop before the first
+token no longer stores a turn: an abort is now told apart from a completion,
+so a half answer is still kept and a provider's genuinely empty answer is
+still kept, but a run that streamed nothing is not. The quiet route line
+gained a collapse, verified live. The mode sync now seeds from `initialMode`,
+so Back to a bare `/playground` lands where a fresh load of that URL would —
+and it sets the mode directly rather than routing through `choose`, which is
+what stops Back writing the stored preference and stops it pushing `?mode=`
+back onto the URL it just left. `load` clears `busy` itself rather than
+waiting a microtask for the aborted run. The `save_conversations` default
+moved out of the discovery cluster. The unmount abort's comment now names the
+behaviour it carries.
+
+The system-prompt dialog's focus return turned out not to be a defect: focus
+does come back to the menu trigger. Held by a test now, so a Radix upgrade
+that breaks it is caught.
+
+Test coverage closed: the store-level update and its miss, the 200-row cap
+and the 200-char preview, the save gate's error body, `mode.ts`'s two
+`localStorage` catch branches, the `"routed"` fallback, the client's
+saving-off path, and the popover's commit flush. `compare-abort`'s
+near-tautological length check became one that discriminates — that removing
+a never-run column aborts neither live column — and its helper clears each
+box before naming it. `chat-mode`'s per-keystroke case types in one tick, so
+a loaded runner or a smaller `COMMIT_QUIET_MS` can no longer fail it for a
+reason unrelated to the behaviour.
+
+Still left, deliberately: the `bodyFor` duplication, by its own rule that a
+third caller has to appear first; the `emit` superseded-guard, which would
+need a test written to fit it rather than to describe it; and the purge
+button's position, defended twice and checked live.
 
 ### Behaviour worth a second look
 
