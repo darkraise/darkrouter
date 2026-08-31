@@ -111,6 +111,26 @@ describe("running one chat turn", () => {
     expect(turns).toHaveLength(0)
   })
 
+  it("is ready to send the moment a conversation is loaded", async () => {
+    // load aborts whatever was in flight, but the abort clears busy a
+    // microtask later. Until it did, the composer sat disabled on a
+    // conversation the operator had already opened.
+    streamMock.mockImplementation(async function* () {
+      yield frame("half")
+      await new Promise(() => {})
+    })
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    void act(() => {
+      void result.current.send("hi")
+    })
+    await waitFor(() => expect(result.current.busy).toBe(true))
+
+    act(() => result.current.load([], {}))
+    expect(result.current.busy).toBe(false)
+  })
+
   it("files the route under the turn it served", async () => {
     // A transcript of six answers has to say which provider produced each,
     // not only the last.
