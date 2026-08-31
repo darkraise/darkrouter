@@ -120,6 +120,33 @@ warnings, none of them mechanical:
 
 Each was rated Minor by its reviewer and parked. Grouped by kind.
 
+**Triaged 2026-08-31.** Seven were done and the rest were left deliberately,
+because several are defensible as they stand and doing them all would have
+churned working code for no reader's benefit. Done:
+
+- A reopened conversation now fetches each turn's trace and shows the same
+  provider, duration, tokens and cost a fresh answer does. This was filed as
+  a placeholder question; the placeholder was the symptom. A turn whose trace
+  the log has swept now draws a settled mark rather than the dashed one, and
+  a turn with no route at all keeps the dashed mark, because that one really
+  is still arriving.
+- A title typed before the first send is kept rather than overwritten by
+  `titleFromPrompt`, with the create-promise memo folded in alongside it.
+- The conversation list key is `["playground-conversations", "list"]`, so
+  appending a turn no longer refetches the open conversation.
+- A pending model commit is flushed on unmount rather than cancelled.
+- The destructive GET says so on the handler.
+- `relativeTime` moved to `lib/`, and `rows.Err()` is wrapped.
+- Two tests: the 404s on an unknown conversation id, and
+  `settings-catalog.test.ts`, which passed with its catalogue entry deleted.
+
+Left as they are: the partial-turn persist and the empty-assistant-message
+(both consistent with Stop's documented semantics -- only the comment on the
+first is out of date), Back writing the mode preference, the one-way route
+disclosure (spec section 6 as written, and a design decision), the Radix
+focus-return, the `bodyFor` duplication (its own rule: only if a third caller
+appears), the `applyDefaults` ordering, and the remaining test-coverage gaps.
+
 ### Behaviour worth a second look
 
 - **A pending model commit is dropped on unmount rather than flushed.**
