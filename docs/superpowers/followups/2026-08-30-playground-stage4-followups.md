@@ -26,54 +26,95 @@ Two decisions already taken, recorded so they are not re-litigated:
 
 ---
 
-## 1. A removed Compare column still bills
+## 1. A removed Compare column still bills — RESOLVED, not a defect
 
-**The only open item that costs money.** Removing a column mid-stream aborts
-the client's fetch — which correctly stops the orphan writing into the UI and
-fixed a related Run-re-enables bug — but the provider call runs to completion
-server-side.
+**Diagnosed 2026-08-31 with server-side logging. The premise was wrong: the
+provider call *is* cancelled.** This item carried forward the live gate's
+pre-fix measurement. `158c69c fix(playground): abort a compare column's
+request` landed after that gate ran, and nobody re-measured.
 
-Measured at the live gate: three `POST /api/playground` requests, all `200 OK`
-at full duration (2436/2489/2513 ms), with the removed column's trace never
-shown anywhere in the UI.
+Method: a temporary log line in `handlePlayground` recording when
+`r.Context()` is cancelled and when the handler returns, against a real
+three-column Compare run through Groq, with column 3 removed 1202 ms in by a
+synchronous `browser_evaluate` click sequence.
 
-The cancellation chain reads as intact on both sides: `stream()` passes the
-signal to `fetch` (`web/src/lib/api.ts`), `handlePlayground` derives from
-`r.Context()` (`internal/admin/playground.go:272`), and `attempt` builds the
-outbound request from a context descended from it (`internal/exec/exec.go`).
-So the remaining suspicion is the browser/HTTP layer — a fetch aborted after
-headers have arrived does not necessarily close a keep-alive HTTP/1.1
-connection, and a network panel shows the request as completed either way.
+```
+DIAG playground …703404: start
+DIAG playground …703404: ctx DONE after 1.200626054s err=context canceled
+DIAG playground …703404: handler RETURNED after 1.200666981s
+DIAG playground …655824: handler RETURNED after 2.261813516s   (kept column)
+DIAG playground …614537: handler RETURNED after 2.386607127s   (kept column)
+```
 
-**This needs a server-side log line, not another code review.** Log where the
-executor's context is cancelled, remove a column mid-stream, and see whether
-the server ever hears about it. It either closes, or it is a fetch-layer
-limitation to document and accept.
+The removed column's context is cancelled at the instant of removal and the
+handler returns immediately; the two kept columns run their full ~2.3 s. Two
+controls confirm the reading: a `curl` killed mid-stream cancels at 1.996 s,
+and a bare `fetch`/`AbortController` in the console page cancels at 1.521 s,
+matching the client's own abort timestamp to the millisecond. The chain is
+intact end to end, and the browser's fetch abort does close the connection.
 
-## 2. `npm run lint` is broken
+The request row for the removed column corroborates it: `total_ms` 1200 rather
+than the ~2.4 s of its siblings, and the warning
+`passthrough -> groq/…: upstream connection failed after commit: context
+canceled` — which is `forwardStream`'s post-commit read error, i.e. the cancel
+reaching the executor's own read loop.
 
-ESLint 9 with no `eslint.config.js` anywhere under `web/`. The command fails
-loudly with the migration-guide error rather than silently passing, so nobody
-is relying on a false green — but the project has no working lint gate.
+**New adjacent finding, from that row.** A client-cancelled stream is recorded
+as `status: "success"` with `tokens_in`/`tokens_out` 0 and `cost_micros` 0.
+`internal/exec/forward.go` treats a post-commit read failure as
+`OutcomeSuccess` (failover is impossible once bytes are on the wire), so
+`exec.go`'s `actionFinish` writes "success" — and the usage chunk, which
+arrives last, never arrived. The tokens the provider did generate before the
+cut are therefore invisible to the spend figures and to the budget gate.
+`rec.Status = "cancelled"` and `OutcomeClientCancelled` both already exist but
+are reachable only pre-commit. Under-reporting, not over-billing; worth its
+own decision.
 
-Adding a config may surface a large backlog at once. Worth its own scoped
-decision rather than being swept into something else.
+## 2. `npm run lint` is broken — RESOLVED
+
+`web/eslint.config.js` now exists: `@eslint/js` recommended,
+`typescript-eslint` recommended, and `eslint-plugin-react-hooks` recommended,
+with `no-unused-vars` configured to allow the codebase's `^_` discard
+convention (`toStoredConfig`'s two stripped columns, `drain`'s thrown-away
+chunk). Both plugins are saved to `devDependencies`.
+
+The backlog was small: **7 problems across 6 of 163 files**, and 0 errors once
+the `^_` convention is configured. `npm run lint` exits 0. What remains is 4
+warnings, none of them mechanical:
+
+- three `react-hooks/exhaustive-deps` (`chat-tab.tsx:34`, `chat-mode.tsx:107`,
+  `playground-screen.tsx:46`) — all deliberate omissions in effects whose
+  re-firing behaviour is the point. Adding the deps would change behaviour,
+  so they are left visible rather than silenced or "fixed".
+- one stale `eslint-disable no-unreachable` in
+  `use-chat-run.test.tsx:147`, which typescript-eslint disables in favour of
+  the compiler's own check.
 
 ## 3. Pre-existing, unrelated to stage 4
 
-- `internal/admin/cursor.go` is not gofmt-clean (unformatted on `master`
-  before this branch).
-- `ConfigBlocks` in `web/src/lib/api-types.ts` omits the `media` block that
-  `internal/admin/configapi.go` emits on `GET /api/config`. Harmless —
-  TypeScript simply does not know the field exists. Fold into whichever change
-  adds `media:` to `darkrouter.example.yaml`, which is also absent.
+- ~~`internal/admin/cursor.go` is not gofmt-clean~~ — fixed 2026-08-31
+  (`UntilMs` alignment); `gofmt -l internal/` is now empty.
+- ~~`ConfigBlocks` omits the `media` block~~ — fixed 2026-08-31, together with
+  the missing `media:` block in `darkrouter.example.yaml`, as the note asked.
 - `qa.py`'s colour check only catches hex literals, so `rgb()` and named
   colours would pass a gate that claims "no colour literal in a fragment".
-- Settings' "Signed-in browsers" rows all read "since Invalid Date".
-- Several mockup stylesheet headers cite plan task numbers ("Task 16 —
-  Connect"; both `16-login.css` and `17-first-run.css` claim "Task 18"), which
-  `CLAUDE.md`'s comment rule forbids. They predate this branch and refer to a
-  different plan's numbering.
+- ~~Settings' "Signed-in browsers" rows all read "since Invalid Date"~~ —
+  fixed 2026-08-31. Root cause was a unit mismatch, not a formatting one:
+  `CreateSession` writes `UnixMilli`, but `SessionRows` decoded with
+  `time.Unix(sec, 0)` and filtered with `now.Unix()`. Every row landed in the
+  year 58633, which `new Date()` cannot parse (a five-digit year needs the
+  `+058633` form) — hence "Invalid Date". The seconds filter also meant
+  `expires_at > ?` was true for every row, so **expired sessions were listed
+  as revocable browsers**. `CreateSession`, `TouchSession` and the sweep were
+  all already correct; `SessionRows` was the only seconds-based reader, so
+  authentication was never affected. Pinned by two store tests.
+- ~~Several mockup stylesheet headers cite plan task numbers~~ — fixed
+  2026-08-31. All 13 `Task N — ` header prefixes stripped; each header already
+  named its screen, so nothing was lost. `qa.py` still passes (19 fragments).
+  **Not done:** the in-body cross-references ("reused by Task 9", "Task 3/4's
+  `.table`"). Those carry real information about which mockups share a class,
+  and a mechanical strip would destroy it — converting each to a screen name
+  is a separate judgement pass, not a cheap one.
 
 ## 4. Deferred minors from the per-task reviews
 
