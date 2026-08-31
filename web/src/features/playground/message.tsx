@@ -90,6 +90,14 @@ export function AssistantTurn({
         <div className="sticky top-4 mt-0.5">
         {route?.provider ? (
           <ProviderIcon preset={route.provider} id={route.provider} name={route.provider} size={28} />
+        ) : route ? (
+          // Settled, but the trace could not be fetched -- swept by log
+          // retention, most likely. Solid rather than dashed: the turn is
+          // finished, and a dashed mark reads as one still on its way.
+          <div
+            className="size-7 rounded-[var(--radius)] border bg-[hsl(var(--muted))]"
+            title="This answer's trace is no longer in the request log"
+          />
         ) : (
           // Before the trace lands there is nothing true to draw, so the
           // gutter keeps its width and stays empty rather than guessing.
