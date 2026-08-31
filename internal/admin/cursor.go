@@ -27,7 +27,7 @@ type RequestFilters struct {
 	// not silently page into production ones.
 	Source  string
 	SinceMs int64
-	UntilMs   int64
+	UntilMs int64
 }
 
 // Hash identifies the filter set a cursor was minted under.
