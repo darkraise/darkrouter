@@ -1,5 +1,5 @@
 /*
- * Task 18 — Login ("sign in"), the one screen in the set with no console
+ * Login ("sign in"), the one screen in the set with no console
  * chrome. There is no rail and no top bar because neither exists before a
  * session does, so the card sits alone on --ground and the frame around it
  * is the browser window rather than a panel on a page.
