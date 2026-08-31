@@ -250,9 +250,17 @@ describe("Chat mode", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /claude/ }))
     await userEvent.clear(screen.getByLabelText("Model or alias"))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt-4o-mini")
+    // delay: null so the eleven keystrokes land in one tick. With the default
+    // per-key delay the gap between two of them is real wall-clock time, and
+    // on a loaded runner -- or if COMMIT_QUIET_MS ever drops -- it can exceed
+    // the quiet period and commit early, failing the count below for a reason
+    // that has nothing to do with the behaviour under test.
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt-4o-mini", {
+      delay: null,
+    })
     // The field still keeps up with the typing; only the write waits.
     expect(screen.getByLabelText("Model or alias")).toHaveValue("gpt-4o-mini")
+    expect(patchMock).not.toHaveBeenCalled()
 
     await waitFor(() => expect(patchMock).toHaveBeenCalled(), { timeout: 2000 })
     expect(patchMock).toHaveBeenCalledTimes(1)

@@ -107,6 +107,16 @@ describe("an answered turn", () => {
 })
 
 describe("the quiet route line", () => {
+  it("says routed when the trace carried no duration", async () => {
+    // A restored turn whose trace the log has swept has a route and no
+    // numbers. The quiet line still has to say something, and "routed" is
+    // the one thing that is true without inventing a figure.
+    render(<AssistantTurn text="hi" route={route({ totalMs: null })} quiet />)
+    expect(screen.getByRole("button", { name: "Show routing detail" })).toHaveTextContent(
+      "routed",
+    )
+  })
+
   it("expands and collapses again", async () => {
     // The disclosure was one-way: once opened there was no control to shut
     // it, so a transcript read end to end filled up with detail nobody asked

@@ -45,11 +45,20 @@ function hangs() {
   })
 }
 
+/** Names every column, then runs. Clears first and checks the result, so the
+ *  helper still names each column "gpt" if a column ever starts out carrying
+ *  one -- typing into a filled box would otherwise quietly produce "gptgpt". */
+async function nameEveryColumn() {
+  for (const box of screen.getAllByRole("textbox", { name: /model/i })) {
+    await userEvent.clear(box)
+    await userEvent.type(box, "gpt")
+    expect(box).toHaveValue("gpt")
+  }
+}
+
 async function startARun() {
   render(<Compare config={{ ...emptyConfig(), model: "gpt" }} />)
-  for (const box of screen.getAllByRole("textbox", { name: /model/i })) {
-    await userEvent.type(box, "gpt")
-  }
+  await nameEveryColumn()
   await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
   await userEvent.click(screen.getByRole("button", { name: "Run" }))
   await waitFor(() => expect(signals).toHaveLength(2))
@@ -68,9 +77,7 @@ describe("a Compare column that stops being watched", () => {
     // Run re-enables mid-stream.
     render(<Compare config={{ ...emptyConfig(), model: "gpt" }} />)
     await userEvent.click(screen.getByRole("button", { name: "Add a column" }))
-    for (const box of screen.getAllByRole("textbox", { name: /model/i })) {
-      await userEvent.type(box, "gpt")
-    }
+    await nameEveryColumn()
     await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
     await userEvent.click(screen.getByRole("button", { name: "Run" }))
     await waitFor(() => expect(signals).toHaveLength(3))
@@ -95,6 +102,10 @@ describe("a Compare column that stops being watched", () => {
 
     // Two of the original columns are still streaming, so Run stays shut.
     expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
-    expect(signals).toHaveLength(2)
+    // And removing the never-run third column aborted neither of them. A
+    // length check alone could not fail here -- nothing had started a third
+    // stream -- so it said nothing about which controller the removal hit.
+    expect(signals[0]!.aborted).toBe(false)
+    expect(signals[1]!.aborted).toBe(false)
   })
 })

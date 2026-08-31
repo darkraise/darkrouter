@@ -256,6 +256,10 @@ export function useChatRun(
     setMessages(next)
     setRoutes(nextRoutes)
     setError("")
+    // Cleared here rather than left to the aborted run's finally, which is a
+    // microtask away: for that beat the composer stays disabled on a
+    // conversation the operator has already opened.
+    setBusy(false)
     onMetrics(NO_METRICS)
     void hydrate(nextRoutes, mine)
   }
