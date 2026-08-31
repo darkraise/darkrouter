@@ -119,6 +119,11 @@ export function useAppendTurn() {
         content: vars.content,
         request_id: vars.requestId,
       }),
+    // seq is assigned by the server in the order the appends arrive, and one
+    // exchange sends two. Two exchanges whose saves overlap -- the second
+    // model round trip outlasting the first pair of local writes -- would
+    // otherwise interleave, and a transcript is only its seq order.
+    scope: { id: "playground-turns" },
     invalidates: [keys.playgroundConversations],
   })
 }
