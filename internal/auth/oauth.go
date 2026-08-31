@@ -81,9 +81,14 @@ type wireToken struct {
 	ErrorDescription string `json:"error_description"`
 }
 
+// tokenClient is what a caller that supplies none gets. Not http.DefaultClient:
+// that has no timeout, so a token endpoint which accepts the connection and
+// then says nothing hangs any call path whose context carries no deadline.
+var tokenClient = &http.Client{Timeout: 30 * time.Second}
+
 func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Values) (Token, error) {
 	if c == nil {
-		c = http.DefaultClient
+		c = tokenClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
 		strings.NewReader(form.Encode()))
