@@ -90,6 +90,44 @@ describe("an answered turn", () => {
     // under the reader when it does.
     const { container } = render(<AssistantTurn text="hi" />)
     expect(container.querySelector(".size-7")).not.toBeNull()
+    // Dashed is the loading mark, and this turn genuinely is still loading.
+    expect(container.querySelector(".border-dashed")).not.toBeNull()
+  })
+
+  it("marks a settled turn whose trace is gone as settled, not as loading", () => {
+    // A restored turn whose trace the log has swept has a route but no
+    // provider. Drawing the dashed mark there says "still on its way" about
+    // an answer that arrived days ago and never will again.
+    const { container } = render(
+      <AssistantTurn text="hi" route={route({ provider: "", totalMs: null })} />,
+    )
+    expect(container.querySelector(".size-7")).not.toBeNull()
+    expect(container.querySelector(".border-dashed")).toBeNull()
+  })
+})
+
+describe("the quiet route line", () => {
+  it("says routed when the trace carried no duration", async () => {
+    // A restored turn whose trace the log has swept has a route and no
+    // numbers. The quiet line still has to say something, and "routed" is
+    // the one thing that is true without inventing a figure.
+    render(<AssistantTurn text="hi" route={route({ totalMs: null })} quiet />)
+    expect(screen.getByRole("button", { name: "Show routing detail" })).toHaveTextContent(
+      "routed",
+    )
+  })
+
+  it("expands and collapses again", async () => {
+    // The disclosure was one-way: once opened there was no control to shut
+    // it, so a transcript read end to end filled up with detail nobody asked
+    // to keep on screen.
+    render(<AssistantTurn text="hi" route={route()} quiet />)
+    await userEvent.click(screen.getByRole("button", { name: "Show routing detail" }))
+    expect(screen.getByText("trace")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide routing detail" }))
+    expect(screen.queryByText("trace")).toBeNull()
+    expect(screen.getByRole("button", { name: "Show routing detail" })).toBeInTheDocument()
   })
 })
 

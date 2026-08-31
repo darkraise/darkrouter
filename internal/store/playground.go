@@ -282,7 +282,7 @@ func (d *DB) PlaygroundConversationByID(
 		turns = append(turns, t)
 	}
 	if err := rows.Err(); err != nil {
-		return PlaygroundConversation{}, nil, false, err
+		return PlaygroundConversation{}, nil, false, fmt.Errorf("read playground turns: %w", err)
 	}
 	return c, turns, true, nil
 }

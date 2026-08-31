@@ -89,6 +89,48 @@ describe("running one chat turn", () => {
     expect(result.current.error).toBe("")
   })
 
+  it("stores nothing when the run is stopped before the first token", async () => {
+    // A half answer is still an answer; no answer is not. Reporting the turn
+    // here stored an assistant row with no content, which the transcript
+    // then re-rendered as an empty bubble every time the conversation was
+    // reopened.
+    streamMock.mockImplementation(async function* () {
+      throw Object.assign(new Error("aborted"), { name: "AbortError" })
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    traceMock.mockResolvedValue(null)
+
+    const turns: unknown[] = []
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(turns).toHaveLength(0)
+  })
+
+  it("is ready to send the moment a conversation is loaded", async () => {
+    // load aborts whatever was in flight, but the abort clears busy a
+    // microtask later. Until it did, the composer sat disabled on a
+    // conversation the operator had already opened.
+    streamMock.mockImplementation(async function* () {
+      yield frame("half")
+      await new Promise(() => {})
+    })
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    void act(() => {
+      void result.current.send("hi")
+    })
+    await waitFor(() => expect(result.current.busy).toBe(true))
+
+    act(() => result.current.load([], {}))
+    expect(result.current.busy).toBe(false)
+  })
+
   it("files the route under the turn it served", async () => {
     // A transcript of six answers has to say which provider produced each,
     // not only the last.
@@ -144,7 +186,8 @@ describe("running one chat turn", () => {
     // the operator reopens tomorrow.
     streamMock.mockImplementation(async function* () {
       throw new Error("upstream refused")
-      // eslint-disable-next-line no-unreachable
+      // Unreachable, and there to make this a generator: stream()'s callers
+      // consume it with for-await, which a plain throwing function cannot feed.
       yield ""
     })
     const turns: unknown[] = []

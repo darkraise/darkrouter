@@ -81,9 +81,14 @@ type wireToken struct {
 	ErrorDescription string `json:"error_description"`
 }
 
+// tokenClient is what a caller that supplies none gets. Not http.DefaultClient:
+// that has no timeout, so a token endpoint which accepts the connection and
+// then says nothing hangs any call path whose context carries no deadline.
+var tokenClient = &http.Client{Timeout: 30 * time.Second}
+
 func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Values) (Token, error) {
 	if c == nil {
-		c = http.DefaultClient
+		c = tokenClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
 		strings.NewReader(form.Encode()))
@@ -173,6 +178,19 @@ type oauthAccount struct {
 	// before the endpoint is called again, so "no retries" holds within the
 	// process as well as across ticks.
 	dead bool
+}
+
+// Forget drops the cached state for one credential.
+//
+// The cache is keyed on credential id, and both halves of what it holds are
+// derived from a secret that can be replaced underneath it: the access token,
+// which would otherwise go on being presented after a rotation, and the dead
+// mark, which is process-lifetime and would otherwise outlive the credential
+// that earned it. A no-op for a credential never seen.
+func (m *Manager) Forget(credID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.oauth, credID)
 }
 
 func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authorizer, error) {

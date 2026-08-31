@@ -294,6 +294,15 @@ func (s *Server) reloadProviders(ctx context.Context) {
 	}
 }
 
+// forgetCredential drops any in-memory state the auth manager derived from a
+// credential's old secret. Reached through an assertion rather than through
+// AuthResolver so that interface stays the one method the probe needs.
+func (s *Server) forgetCredential(credID string) {
+	if f, ok := s.deps.Auth.(interface{ Forget(string) }); ok {
+		f.Forget(credID)
+	}
+}
+
 type addCredentialBody struct {
 	Label  string `json:"label"`
 	Secret string `json:"secret"`

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatMode } from "./chat-mode"
+import { ApiError } from "../../../lib/api"
 import type { PlaygroundConversation, PlaygroundConversationDetail } from "../../../lib/api-types"
 
 // A reopened assistant turn carries a request_id, so the transcript renders a
@@ -34,7 +35,8 @@ const detail: PlaygroundConversationDetail = {
   ],
 }
 
-const { postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() => ({
+const { getMock, postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() => ({
+  getMock: vi.fn(),
   postMock: vi.fn(),
   patchMock: vi.fn(),
   delMock: vi.fn(),
@@ -44,7 +46,7 @@ const { postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() =>
 
 vi.mock("../../../lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/api")>()),
-  api: { get: vi.fn(), post: postMock, patch: patchMock, del: delMock },
+  api: { get: getMock, post: postMock, patch: patchMock, del: delMock },
   stream: streamMock,
 }))
 
@@ -89,6 +91,8 @@ async function send(text: string) {
 
 describe("Chat mode", () => {
   beforeEach(() => {
+    getMock.mockReset()
+    getMock.mockRejectedValue(new Error("no trace"))
     postMock.mockReset()
     patchMock.mockReset()
     delMock.mockReset()
@@ -103,6 +107,52 @@ describe("Chat mode", () => {
       onStart?.({ requestId: "01NEW" })
       yield `data: ${JSON.stringify({ choices: [{ delta: { content: "an answer" } }] })}\n\n`
     })
+  })
+
+  it("keeps the transcript when saving is off and the create is refused", async () => {
+    // playground.save_conversations off makes every write a 403. The answer
+    // on screen was paid for either way, so a refused save must not take it
+    // down -- verified live at the stage 4 gate, pinned by nothing until now.
+    postMock.mockRejectedValue(
+      new ApiError(403, "playground.save_conversations is off, so conversations are not saved"),
+    )
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
+    await userEvent.keyboard("{Escape}")
+    await send("hello there")
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled())
+    // The turn stays on screen, and the header still says this is a new chat
+    // because no conversation was created to name.
+    expect(await screen.findByText("an answer")).toBeInTheDocument()
+    expect(screen.getByText("hello there")).toBeInTheDocument()
+    expect(screen.getByLabelText("Conversation title")).toHaveValue("New chat")
+  })
+
+  it("keeps a title typed before the first send", async () => {
+    // retitle cannot persist before a conversation exists, so the typed name
+    // lived only in local state and titleFromPrompt then overwrote it.
+    postMock.mockImplementation((path: string, body: unknown) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: (body as { title: string }).title })
+        : Promise.resolve({ seq: 0 }),
+    )
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
+    await userEvent.keyboard("{Escape}")
+
+    const field = screen.getByLabelText("Conversation title")
+    await userEvent.clear(field)
+    await userEvent.type(field, "speculative decoding{Enter}")
+    await send("hello there")
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+    const [, createBody] = postMock.mock.calls.find(
+      (c) => c[0] === "/api/playground/conversations",
+    ) as [string, { title: string }]
+    expect(createBody.title).toBe("speculative decoding")
   })
 
   it("saves exactly one user turn and one assistant turn per exchange", async () => {
@@ -171,6 +221,34 @@ describe("Chat mode", () => {
     expect(screen.getByLabelText("System prompt")).toHaveValue("answer in one line")
   })
 
+  it("recovers a reopened turn's route from its stored request id", async () => {
+    // The store keeps only the request id, so before this a restored answer
+    // said "routed" and nothing else -- no provider, no duration, no cost --
+    // and drew a gutter that read as still loading, forever.
+    getMock.mockResolvedValue({
+      id: "01OLD",
+      provider: "groq",
+      model: "claude",
+      final_model: "claude",
+      total_ms: 2400,
+      tokens_in: 88,
+      tokens_out: 921,
+      cost_micros: 566,
+      attempts: [{ provider: "groq", model: "claude" }],
+      warnings: [],
+    })
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+
+    expect(getMock).toHaveBeenCalledWith("/api/requests/01OLD")
+    // The duration replaces the bare "routed" the stored row could offer.
+    // The duration replaces the bare "routed" that the stored row alone
+    // could offer. (The button's accessible name is its aria-label, so the
+    // reading is the text.)
+    expect(await screen.findByText("2.4s")).toBeInTheDocument()
+  })
+
   it("hands the whole configuration to Lab", async () => {
     const onOpenInLab = vi.fn()
     mounted(onOpenInLab)
@@ -194,9 +272,17 @@ describe("Chat mode", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /claude/ }))
     await userEvent.clear(screen.getByLabelText("Model or alias"))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt-4o-mini")
+    // delay: null so the eleven keystrokes land in one tick. With the default
+    // per-key delay the gap between two of them is real wall-clock time, and
+    // on a loaded runner -- or if COMMIT_QUIET_MS ever drops -- it can exceed
+    // the quiet period and commit early, failing the count below for a reason
+    // that has nothing to do with the behaviour under test.
+    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt-4o-mini", {
+      delay: null,
+    })
     // The field still keeps up with the typing; only the write waits.
     expect(screen.getByLabelText("Model or alias")).toHaveValue("gpt-4o-mini")
+    expect(patchMock).not.toHaveBeenCalled()
 
     await waitFor(() => expect(patchMock).toHaveBeenCalled(), { timeout: 2000 })
     expect(patchMock).toHaveBeenCalledTimes(1)

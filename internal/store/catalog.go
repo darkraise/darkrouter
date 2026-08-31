@@ -26,9 +26,10 @@ type ModelRow struct {
 	ContextWindow      int
 	MaxOutputTokens    int
 
-	InputMicrosPerMTok     int64
-	OutputMicrosPerMTok    int64
-	CacheReadMicrosPerMTok int64
+	InputMicrosPerMTok      int64
+	OutputMicrosPerMTok     int64
+	CacheReadMicrosPerMTok  int64
+	CacheWriteMicrosPerMTok int64
 	// PriceKnown separates "free" from "we never found out". Both read back as
 	// zero, and the UI shows them differently.
 	PriceKnown bool
@@ -54,24 +55,25 @@ type ModelOverride struct {
 // fields by construction: a metadata refresh must not resurrect a model
 // discovery retired.
 type MetadataRow struct {
-	ProviderID             string
-	ModelID                string
-	Publisher              string
-	Surfaces               []string
-	Capabilities           ModelCapabilities
-	CapabilitiesSource     string
-	ContextWindow          int
-	MaxOutputTokens        int
-	InputMicrosPerMTok     int64
-	OutputMicrosPerMTok    int64
-	CacheReadMicrosPerMTok int64
+	ProviderID              string
+	ModelID                 string
+	Publisher               string
+	Surfaces                []string
+	Capabilities            ModelCapabilities
+	CapabilitiesSource      string
+	ContextWindow           int
+	MaxOutputTokens         int
+	InputMicrosPerMTok      int64
+	OutputMicrosPerMTok     int64
+	CacheReadMicrosPerMTok  int64
+	CacheWriteMicrosPerMTok int64
 }
 
 const modelColumns = `provider_id, model_id, publisher, surfaces, capabilities,
 	capabilities_source, context_window, max_output_tokens,
 	input_price_micros_per_mtok, output_price_micros_per_mtok,
-	cache_read_price_micros_per_mtok, discovered_at, state,
-	missing_streak, last_seen_at`
+	cache_read_price_micros_per_mtok, cache_write_price_micros_per_mtok,
+	discovered_at, state, missing_streak, last_seen_at`
 
 // Models returns every catalogued model, including the ones discovery has
 // retired. The snapshot filters; the store reports.
@@ -86,14 +88,16 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 	var out []ModelRow
 	for rows.Next() {
 		var (
-			r                          ModelRow
-			surfaces, caps             string
-			ctxWin, maxOut             sql.NullInt64
-			inPrice, outPrice, cachePr sql.NullInt64
-			discovered, lastSeen       sql.NullInt64
+			r                     ModelRow
+			surfaces, caps        string
+			ctxWin, maxOut        sql.NullInt64
+			inPrice, outPrice     sql.NullInt64
+			cacheRead, cacheWrite sql.NullInt64
+			discovered, lastSeen  sql.NullInt64
 		)
 		if err := rows.Scan(&r.ProviderID, &r.ModelID, &r.Publisher, &surfaces, &caps,
-			&r.CapabilitiesSource, &ctxWin, &maxOut, &inPrice, &outPrice, &cachePr,
+			&r.CapabilitiesSource, &ctxWin, &maxOut, &inPrice, &outPrice,
+			&cacheRead, &cacheWrite,
 			&discovered, &r.State, &r.MissingStreak, &lastSeen); err != nil {
 			return nil, fmt.Errorf("scan model: %w", err)
 		}
@@ -107,7 +111,8 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 		r.MaxOutputTokens = int(maxOut.Int64)
 		r.InputMicrosPerMTok = inPrice.Int64
 		r.OutputMicrosPerMTok = outPrice.Int64
-		r.CacheReadMicrosPerMTok = cachePr.Int64
+		r.CacheReadMicrosPerMTok = cacheRead.Int64
+		r.CacheWriteMicrosPerMTok = cacheWrite.Int64
 		r.PriceKnown = inPrice.Valid || outPrice.Valid
 		if lastSeen.Valid {
 			r.LastSeenAt = time.UnixMilli(lastSeen.Int64).UTC()
@@ -180,7 +185,8 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 		    publisher = ?, surfaces = ?, capabilities = ?, capabilities_source = ?,
 		    context_window = ?, max_output_tokens = ?,
 		    input_price_micros_per_mtok = ?, output_price_micros_per_mtok = ?,
-		    cache_read_price_micros_per_mtok = ?
+		    cache_read_price_micros_per_mtok = ?,
+		    cache_write_price_micros_per_mtok = ?
 		  WHERE provider_id = ? AND model_id = ?`)
 	if err != nil {
 		return fmt.Errorf("prepare metadata write: %w", err)
@@ -201,6 +207,7 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 			nullableInt(r.ContextWindow), nullableInt(r.MaxOutputTokens),
 			nullableInt64(r.InputMicrosPerMTok), nullableInt64(r.OutputMicrosPerMTok),
 			nullableInt64(r.CacheReadMicrosPerMTok),
+			nullableInt64(r.CacheWriteMicrosPerMTok),
 			r.ProviderID, r.ModelID); err != nil {
 			return fmt.Errorf("write metadata for %s/%s: %w", r.ProviderID, r.ModelID, err)
 		}

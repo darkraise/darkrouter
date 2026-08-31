@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
 import { keys } from "./queries"
 import { POLL } from "./api"
 
@@ -40,6 +41,23 @@ describe("query keys", () => {
     expect(JSON.stringify(keys.trace("r1"))).not.toBe(
       JSON.stringify(keys.trace("r2")),
     )
+  })
+
+  it("does not invalidate an open conversation when the rail changes", () => {
+    // TanStack matches a query key by prefix, so a list key that is a prefix
+    // of the detail key refetches the whole open conversation on every write
+    // to the rail -- two per exchange, and the body grows with the transcript.
+    const client = new QueryClient()
+    const detail = keys.playgroundConversation("01ABC")
+    client.setQueryData(detail, { id: "01ABC" })
+    client.setQueryData(keys.playgroundConversations, [])
+
+    void client.invalidateQueries({ queryKey: keys.playgroundConversations })
+
+    expect(client.getQueryState(detail)?.isInvalidated).toBe(false)
+    expect(
+      client.getQueryState(keys.playgroundConversations)?.isInvalidated,
+    ).toBe(true)
   })
 })
 

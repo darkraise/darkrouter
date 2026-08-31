@@ -17,6 +17,8 @@ type RefreshOptions struct {
 	// than the per-request delta so the worker normally wins the race and no
 	// request ever pays for a refresh.
 	Ahead time.Duration
+	// PerCredential bounds one credential's renewal.
+	PerCredential time.Duration
 }
 
 func (o RefreshOptions) withDefaults() RefreshOptions {
@@ -25,6 +27,9 @@ func (o RefreshOptions) withDefaults() RefreshOptions {
 	}
 	if o.Ahead <= 0 {
 		o.Ahead = 15 * time.Minute
+	}
+	if o.PerCredential <= 0 {
+		o.PerCredential = 30 * time.Second
 	}
 	return o
 }
@@ -97,29 +102,45 @@ func (w *RefreshWorker) Once(ctx context.Context) {
 		return
 	}
 	for _, row := range rows {
-		style := row.Style
-		if style == "" {
-			style = StyleOAuth
+		if ctx.Err() != nil {
+			return
 		}
-		az, err := w.mgr.For(ctx, Target{
-			ProviderID: row.ProviderID, Style: style, Preset: row.Preset,
-		}, Credential{ID: row.ID, Kind: row.Kind, Secret: row.Secret})
-		if err != nil || az == nil {
-			if err != nil {
-				log.Printf("token refresh: %s: %v", row.ID, err)
-			}
-			continue
-		}
-		// A throwaway request: the authorizer's only observable effect here is
-		// the refresh it performs on the way to setting a header nobody reads.
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://refresh.invalid", nil)
+		w.renew(ctx, row)
+	}
+}
+
+// renew runs one credential's refresh under a bound of its own.
+//
+// The pass is sequential and its context lives as long as the process, so a
+// token endpoint that accepts the connection and never answers would otherwise
+// stop every credential behind it — and every later tick with it, since Run
+// calls Once synchronously.
+func (w *RefreshWorker) renew(ctx context.Context, row StoredCredential) {
+	ctx, cancel := context.WithTimeout(ctx, w.opts.PerCredential)
+	defer cancel()
+
+	style := row.Style
+	if style == "" {
+		style = StyleOAuth
+	}
+	az, err := w.mgr.For(ctx, Target{
+		ProviderID: row.ProviderID, Style: style, Preset: row.Preset,
+	}, Credential{ID: row.ID, Kind: row.Kind, Secret: row.Secret})
+	if err != nil || az == nil {
 		if err != nil {
-			continue
-		}
-		if err := az(ctx, req); err != nil {
-			// Already classified: a terminal refusal disabled the credential
-			// inside the authorizer, and a transient one is retried next tick.
 			log.Printf("token refresh: %s: %v", row.ID, err)
 		}
+		return
+	}
+	// A throwaway request: the authorizer's only observable effect here is
+	// the refresh it performs on the way to setting a header nobody reads.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://refresh.invalid", nil)
+	if err != nil {
+		return
+	}
+	if err := az(ctx, req); err != nil {
+		// Already classified: a terminal refusal disabled the credential
+		// inside the authorizer, and a transient one is retried next tick.
+		log.Printf("token refresh: %s: %v", row.ID, err)
 	}
 }

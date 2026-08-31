@@ -451,6 +451,7 @@ export type ConfigBlocks = {
     discovery: { enabled: boolean; interval: string }
   }
   playground: { save_conversations: boolean }
+  media: { inline: boolean }
   aliases: Aliases
   policy: PolicyBlock
 }

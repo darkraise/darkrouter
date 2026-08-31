@@ -99,28 +99,19 @@ func (s *Store) Reload() error {
 	return nil
 }
 
+// restartOnlyWarnings names every restart-only field this edit changed.
+//
+// Driven by the same table RestartOnly is built from, so a field cannot be
+// cold in one and hot in the other.
 func restartOnlyWarnings(prev, next *Config) []string {
 	if prev == nil {
 		return nil
 	}
 	var out []string
-	if prev.Server.ProxyListen != next.Server.ProxyListen {
-		out = append(out, "server.proxy_listen changed; takes effect on restart")
-	}
-	if prev.Server.AdminListen != next.Server.AdminListen {
-		out = append(out, "server.admin_listen changed; takes effect on restart")
-	}
-	if prev.Policy.Timeout.Connect != next.Policy.Timeout.Connect {
-		out = append(out, "policy.timeout.connect changed; takes effect on restart")
-	}
-	if prev.Policy.Timeout.FirstByte != next.Policy.Timeout.FirstByte {
-		out = append(out, "policy.timeout.first_byte changed; takes effect on restart")
-	}
-	if prev.Catalog.SyncInterval != next.Catalog.SyncInterval {
-		out = append(out, "catalog.sync_interval changed; takes effect on restart")
-	}
-	if prev.Catalog.Discovery.Interval != next.Catalog.Discovery.Interval {
-		out = append(out, "catalog.discovery.interval changed; takes effect on restart")
+	for _, f := range restartOnlyFields {
+		if f.value(prev) != f.value(next) {
+			out = append(out, f.name+" changed; takes effect on restart")
+		}
 	}
 	return out
 }

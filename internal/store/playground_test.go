@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -387,5 +388,77 @@ func TestPlaygroundReapSparesAConversationStillBeingWritten(t *testing.T) {
 	}
 	if _, _, found, err := db.PlaygroundConversationByID(ctx, kept.ID); err != nil || !found {
 		t.Errorf("conversation with a turn was reaped (found=%v, err=%v)", found, err)
+	}
+}
+
+func TestUpdatePlaygroundConversationOverwritesAndReportsAMiss(t *testing.T) {
+	// Exercised through HTTP by the PATCH round trip, but never at this
+	// level, so nothing held the bool that tells a 200 from a 404.
+	ctx := context.Background()
+	db := migrated(t)
+
+	made, err := db.CreatePlaygroundConversation(ctx, "New chat", "openai", "gpt",
+		json.RawMessage(`{"system":"first"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blob := json.RawMessage(`{"system":"second","unknownFutureField":7}`)
+	ok, err := db.UpdatePlaygroundConversation(ctx, made.ID, "renamed", "anthropic", "claude", blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("update of an existing conversation reported a miss")
+	}
+
+	got, _, found, err := db.PlaygroundConversationByID(ctx, made.ID)
+	if err != nil || !found {
+		t.Fatalf("read back: err=%v found=%v", err, found)
+	}
+	if got.Title != "renamed" || got.Dialect != "anthropic" || got.Model != "claude" {
+		t.Errorf("columns did not update: %+v", got)
+	}
+	if string(got.Config) != string(blob) {
+		t.Errorf("config = %s, want %s", got.Config, blob)
+	}
+
+	ok, err = db.UpdatePlaygroundConversation(ctx, "nope", "x", "openai", "m",
+		json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Error("update of an unknown id reported a hit, which the API turns into a 200")
+	}
+}
+
+func TestPlaygroundListCapsRowsAndTruncatesThePreview(t *testing.T) {
+	// Both bounds are decisions rather than accidents -- the rail draws one
+	// line and the query is not a search tool -- so both are worth holding.
+	ctx := context.Background()
+	db := migrated(t)
+
+	long := strings.Repeat("x", previewChars+50)
+	for i := 0; i < conversationListLimit+5; i++ {
+		made, err := db.CreatePlaygroundConversation(ctx, "c", "openai", "gpt",
+			json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.AppendPlaygroundTurn(ctx, made.ID, "user", long, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.PlaygroundConversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != conversationListLimit {
+		t.Errorf("listed %d rows, want the %d cap", len(rows), conversationListLimit)
+	}
+	if got := len(rows[0].Preview); got != previewChars {
+		t.Errorf("preview is %d chars, want it truncated to %d", got, previewChars)
 	}
 }

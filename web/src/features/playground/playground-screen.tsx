@@ -38,12 +38,19 @@ export function PlaygroundScreen() {
 
   // The seed above runs once, and the router does not remount a route when
   // only its search changes -- so without this, Back after a mode switch moves
-  // the URL to ?mode=chat and leaves Lab on screen. The navigate choose() then
-  // makes lands on the href the browser is already showing, which the router
-  // treats as the same location and does not push.
+  // the URL to ?mode=chat and leaves Lab on screen.
+  //
+  // It sets the mode rather than routing through choose(). Back is the
+  // browser restoring a location, not the operator picking a mode, so it must
+  // neither write the preference nor navigate -- and navigating would push
+  // ?mode= back onto a bare /playground and undo the Back that just happened.
+  // initialMode rather than isMode, so Back to a bare /playground lands where
+  // a fresh load of that same URL would.
   useEffect(() => {
-    if (isMode(search.mode)) choose(search.mode)
-  }, [search.mode])
+    setMode(initialMode(search))
+    // search is a fresh object each render; its two fields are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.mode, search.seed])
 
   return (
     <div className="-m-6 flex h-[calc(100%+3rem)] min-h-0 flex-col">
