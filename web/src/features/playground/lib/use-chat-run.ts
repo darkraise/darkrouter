@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { stream, type StreamStart } from "../../../lib/api"
+import { api, stream, type StreamStart } from "../../../lib/api"
 import { chatBody, parseTools, type ChatState } from "./request"
 import { drainSSE, extractUnaryText } from "./stream"
 import {
@@ -10,7 +10,7 @@ import {
 } from "../metrics"
 import { routeFromTrace, type TurnRoute } from "../message"
 import type { PlaygroundConfig } from "../config"
-import type { PlaygroundMessage } from "../../../lib/api-types"
+import type { PlaygroundMessage, RequestTrace } from "../../../lib/api-types"
 
 /**
  * One turn that finished, reported to whoever wants to keep it.
@@ -111,6 +111,7 @@ export function useChatRun(
     // its whole answer, so it is accumulated here as well as appended.
     let answer = ""
     let failed = false
+    let aborted = false
     const emit = (text: string) => {
       if (superseded()) return
       if (!text) return
@@ -162,7 +163,9 @@ export function useChatRun(
       }
     } catch (err) {
       // Stopping is the operator's decision, not a failure to report at them.
-      if ((err as Error).name !== "AbortError") {
+      if ((err as Error).name === "AbortError") {
+        aborted = true
+      } else {
         setError((err as Error).message)
         failed = true
       }
@@ -177,7 +180,13 @@ export function useChatRun(
     // simply finished. A hard failure with nothing streamed has no turn worth
     // keeping; a failure part-way through has the text it already spent
     // tokens on, and the transcript still shows it.
-    if (!superseded() && (answer !== "" || !failed)) {
+    //
+    // A stop before the first token is neither: nothing was streamed and
+    // nothing failed, and storing it puts an assistant row with no content
+    // into the conversation, which is re-rendered as an empty bubble every
+    // time it is reopened. A run that finished on its own with an empty
+    // answer is still kept -- that is the provider's answer, not an absence.
+    if (!superseded() && (answer !== "" || (!failed && !aborted))) {
       onTurn?.({ prompt, answer, requestId: liveRequestId })
     }
   }
@@ -186,6 +195,11 @@ export function useChatRun(
   // callers -- Chat mode and Lab's Single tab -- can be navigated away from
   // mid-answer, and the stream would otherwise keep arriving into state that
   // has been unmounted.
+  //
+  // It inherits Stop's semantics too, which is a behaviour change worth
+  // naming: onTurn fires with whatever had streamed, so navigating away
+  // mid-answer persists the partial turn rather than discarding it. A half
+  // answer is still an answer, and the tokens were spent either way.
   useEffect(() => () => abort.current?.abort(), [])
 
   /** Ends the run in flight. The turns already written stay: a half answer is
@@ -204,13 +218,50 @@ export function useChatRun(
 
   /** Aborts anything in flight first: a stream left running would append its
    *  next chunk into the transcript that has just replaced it. */
+  /**
+   * Fills in what a restored turn's stored request id already points at.
+   *
+   * A turn read back from the store knows only its request id, so without
+   * this a reopened conversation cannot say who served it, how long it took
+   * or what it cost -- the operator has to follow the trace link out to
+   * Requests for every answer. The trace is long written by now, so this is a
+   * plain fetch rather than traceWhenWritten's wait-and-retry, which exists
+   * for a run whose record is still in the log writer's batch.
+   */
+  async function hydrate(nextRoutes: Record<number, TurnRoute>, mine: number) {
+    const unresolved = Object.entries(nextRoutes).filter(
+      ([, r]) => r.requestId !== "" && r.provider === "",
+    )
+    await Promise.all(
+      unresolved.map(async ([index, r]) => {
+        try {
+          const trace = await api.get<RequestTrace>(`/api/requests/${r.requestId}`)
+          if (!trace) return
+          // The transcript has been replaced since this went out, so this
+          // trace belongs to a conversation the operator has already left.
+          if (generation.current !== mine) return
+          setRoutes((prev) => ({ ...prev, [Number(index)]: routeFromTrace(trace) }))
+        } catch {
+          // Swept by log retention, or never written. The turn keeps the mark
+          // it has rather than inventing numbers for it.
+        }
+      }),
+    )
+  }
+
   function load(next: PlaygroundMessage[], nextRoutes: Record<number, TurnRoute>) {
     generation.current++
     abort.current?.abort()
+    const mine = generation.current
     setMessages(next)
     setRoutes(nextRoutes)
     setError("")
+    // Cleared here rather than left to the aborted run's finally, which is a
+    // microtask away: for that beat the composer stays disabled on a
+    // conversation the operator has already opened.
+    setBusy(false)
     onMetrics(NO_METRICS)
+    void hydrate(nextRoutes, mine)
   }
 
   return { messages, routes, busy, error, send, stop, clear, load }

@@ -381,6 +381,9 @@ type providerSpec struct {
 	id, kind, upstreamURL string
 	models                []string
 	priority              int
+	// preset names the shipped preset the row inherits from. Empty is the
+	// common case; a test that needs a non-static auth style sets it.
+	preset string
 }
 
 // newExecutorRaw writes the fixture config and builds the store every
@@ -401,6 +404,9 @@ func newExecutorRaw(t testing.TB, specs []providerSpec, apiKeySecret string,
 			"\n    api_key: ${K}\n    models: [" + strings.Join(s.models, ", ") + "]\n"
 		if s.priority != 0 {
 			body += "    priority: " + strconv.Itoa(s.priority) + "\n"
+		}
+		if s.preset != "" {
+			body += "    preset: " + s.preset + "\n"
 		}
 	}
 	if total > 0 {

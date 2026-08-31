@@ -64,6 +64,7 @@ const cfg = (): ConfigResponse => ({
       discovery: { enabled: true, interval: "6h" },
     },
     playground: { save_conversations: true },
+    media: { inline: true },
     aliases: { fast: ["groq/a"] },
     policy: {
       cooldown: { max: "30m" },

@@ -425,8 +425,13 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 
 	apiKey, authorizer, credErr := e.credentialFor(ctx, p, c)
 	if credErr != nil {
-		return attemptResult{Outcome: adapter.OutcomeFatal, Path: PathIR,
-			Err: &ir.Error{Type: ir.ErrDarkrouter, Message: credErr.Error()}}
+		// The same classification applyAuthorizer's failure gets, and for the
+		// same reason: a credential this gateway cannot even construct is a
+		// fact about that credential, not about the providers further down the
+		// chain. Fatal ended the chain here, so one malformed subscription
+		// token took down every request naming a model it also served.
+		return attemptResult{Outcome: adapter.OutcomeRetryableCredential, Path: PathIR,
+			Err: &ir.Error{Type: ir.ErrAuthentication, Message: credErr.Error()}}
 	}
 	tgt := &adapter.Target{
 		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,

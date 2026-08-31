@@ -115,10 +115,6 @@ func applyDefaults(c *Config) {
 		on := true
 		c.Catalog.Discovery.Enabled = &on
 	}
-	if c.Playground.SaveConversations == nil {
-		on := true
-		c.Playground.SaveConversations = &on
-	}
 	if c.Catalog.Discovery.Interval == 0 {
 		c.Catalog.Discovery.Interval = 15 * time.Minute
 	}
@@ -127,6 +123,10 @@ func applyDefaults(c *Config) {
 	}
 	if c.Catalog.Discovery.Concurrency == 0 {
 		c.Catalog.Discovery.Concurrency = 8
+	}
+	if c.Playground.SaveConversations == nil {
+		on := true
+		c.Playground.SaveConversations = &on
 	}
 	if c.Policy.Retry.MaxAttempts == 0 {
 		c.Policy.Retry.MaxAttempts = 4

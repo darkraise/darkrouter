@@ -93,6 +93,13 @@ capture:
 playground:
   save_conversations: true
 
+# Media a client references by address rather than by value. Inlining means
+# Darkrouter fetches it on the client's behalf, which is outbound traffic to
+# an address the client chose; the fetcher constrains that but cannot make it
+# risk-free. Absent means on.
+media:
+  inline: true
+
 # Anthropic and Gemini providers use the same shape; only `kind` differs. Any
 # inbound dialect can be served by any of them.
 #

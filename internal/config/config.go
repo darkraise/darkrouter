@@ -107,19 +107,53 @@ type TimeoutConfig struct {
 // and the catalog fields for the same reason one step out: each worker captures
 // its options struct when it is constructed, and whether a worker starts at all
 // is decided there too.
-var RestartOnly = []string{
-	"server.proxy_listen",
-	"server.admin_listen",
-	"policy.timeout.connect",
-	"policy.timeout.first_byte",
-	"catalog.sync_interval",
-	"catalog.free_catalog_interval",
-	"catalog.free_catalog_url",
-	"catalog.free_catalog_sync",
-	"catalog.discovery.interval",
+var RestartOnly = restartOnlyNames()
+
+// restartOnlyFields pairs each restart-only field with the value a reload
+// compares it by. One table rather than two lists, because a name present in
+// only one of them is the failure this fixes: the console offered a field as
+// hot-reloadable while the process went on using the old value, or the reload
+// warned about a field nothing said was cold.
+var restartOnlyFields = []struct {
+	name string
+	// value must return something comparable. A pointer field is normalized,
+	// since two reloads produce different pointers to the same bool.
+	value func(*Config) any
+}{
+	{"server.proxy_listen", func(c *Config) any { return c.Server.ProxyListen }},
+	{"server.admin_listen", func(c *Config) any { return c.Server.AdminListen }},
+	{"policy.timeout.connect", func(c *Config) any { return c.Policy.Timeout.Connect }},
+	{"policy.timeout.first_byte", func(c *Config) any { return c.Policy.Timeout.FirstByte }},
+	{"catalog.models_dev_url", func(c *Config) any { return c.Catalog.ModelsDevURL }},
+	{"catalog.sync_interval", func(c *Config) any { return c.Catalog.SyncInterval }},
+	{"catalog.sync_timeout", func(c *Config) any { return c.Catalog.SyncTimeout }},
+	{"catalog.free_catalog_interval", func(c *Config) any { return c.Catalog.FreeCatalogInterval }},
+	{"catalog.free_catalog_url", func(c *Config) any { return c.Catalog.FreeCatalogURL }},
+	{"catalog.free_catalog_sync", func(c *Config) any { return optionalBool(c.Catalog.FreeCatalogSync) }},
+	{"catalog.discovery.interval", func(c *Config) any { return c.Catalog.Discovery.Interval }},
+	// Not just the interval: whether the sweeper is constructed at all is
+	// decided once, at startup, from this.
+	{"catalog.discovery.enabled", func(c *Config) any { return optionalBool(c.Catalog.Discovery.Enabled) }},
 	// The adapters map is constructed once at startup and the Gemini adapter
 	// captures its fetcher there.
-	"media.inline",
+	{"media.inline", func(c *Config) any { return optionalBool(c.Media.Inline) }},
+}
+
+func restartOnlyNames() []string {
+	out := make([]string, 0, len(restartOnlyFields))
+	for _, f := range restartOnlyFields {
+		out = append(out, f.name)
+	}
+	return out
+}
+
+// optionalBool makes an absent key and an explicit value comparable, which
+// matters because absent is what the defaults read as "on".
+func optionalBool(p *bool) [2]bool {
+	if p == nil {
+		return [2]bool{false, false}
+	}
+	return [2]bool{true, *p}
 }
 
 // CatalogConfig governs the two background workers that keep the model catalog

@@ -121,10 +121,28 @@ type Store struct {
 	// routing until something rebuilds again. The request path never takes
 	// this: Snapshot stays a lock-free atomic load.
 	rebuilding sync.Mutex
+	// doc supplies the newest models.dev document. Nil means the embedded
+	// snapshot, which is what a cold start with no network has.
+	doc atomic.Pointer[func() Doc]
 }
 
 func NewStore(db *store.DB, src provider.Source) *Store {
 	return &Store{db: db, src: src}
+}
+
+// SetDoc names the source of the live models.dev document.
+func (s *Store) SetDoc(fn func() Doc) { s.doc.Store(&fn) }
+
+// liveDoc returns the newest document available, or the embedded one. An empty
+// live document is treated as absent: the syncer serves one before its first
+// fetch, and pricing every model as unknown would be worse than being stale.
+func (s *Store) liveDoc() Doc {
+	if fn := s.doc.Load(); fn != nil && *fn != nil {
+		if d := (*fn)(); len(d) > 0 {
+			return d
+		}
+	}
+	return FallbackDoc()
 }
 
 // empty is shared: it is immutable, so one instance serves every Store that
@@ -177,11 +195,13 @@ func (s *Store) Rebuild(ctx context.Context) error {
 	merged := Merge(MergeInput{
 		Providers: providers,
 		Presets:   Embedded(),
-		// The live document is written into the models rows by the sync
-		// worker, so the merge reads the embedded fallback here. That is what
-		// makes a cold start with no network produce real prices rather than
-		// waiting twelve hours for the first sync.
-		Doc:       FallbackDoc(),
+		// The newest document the syncer holds, falling back to the snapshot
+		// compiled into the binary. The fallback is what makes a cold start
+		// with no network produce real prices rather than waiting twelve hours
+		// for the first sync; preferring the live one is what stops a
+		// successful sync being invisible, since mergeOne reads the document
+		// rather than the row whenever the join succeeds.
+		Doc:       s.liveDoc(),
 		Rows:      rows,
 		Overrides: overrides,
 	})

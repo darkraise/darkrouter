@@ -1,11 +1,11 @@
 /*
- * Task 5 — Overview screen partial.
+ * Overview screen partial.
  *
  * New component classes this screen introduces: .config-banner (alarm
  * strip), .live-strip/.live-tile/.live-tile-caption (readout-over-sparkline
- * tiles), .sparkline (svg trend line, reused by Task 9), .load-bar (per-tile
+ * tiles), .sparkline (svg trend line, reused by Providers), .load-bar (per-tile
  * refresh indicator), .health-tile (provider tiles, .health-tile
- * reused by Task 9), .ops-footer (reused by Task 9). Everything else in
+ * reused by Providers), .ops-footer (reused by Providers). Everything else in
  * this screen composes .well/.table/.row/a.row/.chip/.chip-failover/.mono/
  * .readout/.unit/.micro/.data-emph/.section-title/.legend-caps/.region from
  * darkrouter-ui.css unchanged.
@@ -182,7 +182,8 @@
 }
 
 /* --- Region 4: recent failovers -----------------------------------------
-   .row is reused verbatim from Task 3/4's .table; a.row's underline reset
+   .row is reused verbatim from the design language board and the ladder
+   specimen's .table; a.row's underline reset
    lives in darkrouter-ui.css, shared with Usage's rank tables. */
 
 /* --- Region 5: ops footer -----------------------------------------------

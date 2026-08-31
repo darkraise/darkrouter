@@ -1,5 +1,5 @@
 /*
- * Task 7 — Request trace ("operate/requests" detail view).
+ * Request trace ("operate/requests" detail view).
  *
  * New component classes this screen introduces: .trace-header (+ -row/-id/
  * -route/-route-sep/-route-arrow/-route-target), .trace-copy-btn,
@@ -168,7 +168,7 @@
 }
 
 /* --- Region 5: warnings ---------------------------------------------------
-   Named by Task 7's own Interfaces contract as a leaf class with no later
+   Named by this screen's own Interfaces contract as a leaf class with no later
    consumer. The box is .table's own recipe restated under its own name
    rather than reused as .table, since a future warnings screen may want to
    style severity without touching the request/candidate tables' own

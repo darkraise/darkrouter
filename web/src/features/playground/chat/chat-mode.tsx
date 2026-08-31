@@ -36,6 +36,10 @@ import type { PlaygroundConversation } from "../../../lib/api-types"
  * bulk. A saved preset already keeps its system prompt, and neither the key nor
  * the purge reaches that one.
  */
+/** The name a conversation carries until it has one. Anything else in the
+ *  field is the operator's own, and outranks a title derived from the prompt. */
+const UNTITLED = "New chat"
+
 export function ChatMode({
   onOpenInLab,
 }: {
@@ -44,7 +48,7 @@ export function ChatMode({
   const [config, setConfig] = useState<PlaygroundConfig>(emptyConfig)
   const [activeId, setActiveId] = useState("")
   const [loadedId, setLoadedId] = useState("")
-  const [title, setTitle] = useState("New chat")
+  const [title, setTitle] = useState(UNTITLED)
   const [collapsed, setCollapsed] = useState(false)
   const [railOpen, setRailOpen] = useState(false)
 
@@ -67,15 +71,23 @@ export function ChatMode({
   // a rename in between would otherwise be undone by the write that follows it.
   const titleRef = useRef(title)
   titleRef.current = title
+  // The create is memoized on its own promise rather than on the id it
+  // resolves to: two exchanges completing while the first create is still in
+  // flight would both read an empty conversationRef and make two
+  // conversations for one thread.
+  const creating = useRef<Promise<PlaygroundConversation> | null>(null)
 
   async function persistTurn(turn: CompletedTurn) {
     try {
       let id = conversationRef.current
       if (id === "") {
-        const made = await create.mutateAsync({
-          title: titleFromPrompt(turn.prompt),
-          config: configRef.current,
-        })
+        if (creating.current === null) {
+          creating.current = create.mutateAsync({
+            title: titleRef.current === UNTITLED ? titleFromPrompt(turn.prompt) : titleRef.current,
+            config: configRef.current,
+          })
+        }
+        const made = await creating.current
         id = made.id
         conversationRef.current = id
         setActiveId(id)
@@ -91,6 +103,9 @@ export function ChatMode({
     } catch {
       // useApiMutation has already reported it through the toaster. Losing a
       // saved turn must not take the transcript on screen down with it.
+      // Cleared so a failed create does not make every later send await the
+      // same rejected promise.
+      creating.current = null
     }
   }
 
@@ -104,13 +119,17 @@ export function ChatMode({
     setConfig(configOfConversation(detail.data))
     setTitle(detail.data.title)
     setLoadedId(detail.data.id)
+    // useChatRun returns a fresh object each render, so listing run would make
+    // this fire every render rather than once per conversation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data, loadedId])
 
   function startNew() {
     conversationRef.current = ""
+    creating.current = null
     setActiveId("")
     setLoadedId("")
-    setTitle("New chat")
+    setTitle(UNTITLED)
     run.load([], {})
     setRailOpen(false)
   }

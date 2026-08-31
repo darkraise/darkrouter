@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ConversationHeader } from "./conversation-header"
@@ -71,6 +71,71 @@ describe("the conversation header", () => {
     await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
     await userEvent.click(screen.getByRole("menuitem", { name: /open in lab/i }))
     expect(onOpenInLab).toHaveBeenCalled()
+  })
+
+  it("flushes a pending model commit on unmount rather than dropping it", async () => {
+    // The model field commits after a quiet period. Switching to Lab inside
+    // that window unmounts the header, and a cancelled timer loses a change
+    // the operator made -- silently, which is the part that matters.
+    const onConfigCommit = vi.fn()
+    const view = header({ onConfigCommit })
+    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "x")
+    expect(onConfigCommit).not.toHaveBeenCalled()
+
+    view.unmount()
+    expect(onConfigCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gptx" }),
+    )
+  })
+
+  it("commits a pending model the moment the popover closes", async () => {
+    // The popover is uncontrolled, so the flush depends on Radix running the
+    // close handler rather than leaving the pending write to the quiet-period
+    // timer. Closing is the operator saying they are done sooner than the
+    // pause would.
+    const onConfigCommit = vi.fn()
+    header({ onConfigCommit })
+    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "x")
+    expect(onConfigCommit).not.toHaveBeenCalled()
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(onConfigCommit).toHaveBeenCalledWith(expect.objectContaining({ model: "gptx" })),
+    )
+    // Once, not once per keystroke and again on the timer.
+    expect(onConfigCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it("commits a picked dialect straight away", async () => {
+    // A dialect arrives whole rather than a character at a time, so there is
+    // no settling to wait for -- and it supersedes whatever the model field
+    // left pending, which is those same keystrokes with this change on top.
+    const onConfigCommit = vi.fn()
+    header({ onConfigCommit })
+    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
+    await userEvent.click(screen.getByLabelText("Dialect"))
+    await userEvent.click(await screen.findByRole("option", { name: "anthropic" }))
+
+    expect(onConfigCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ dialect: "anthropic" }),
+    )
+  })
+
+  it("returns focus to the menu trigger when the dialog closes", async () => {
+    // The menu item preventDefaults its own focus return so the dialog can
+    // take focus, which leaves the dialog nothing to hand it back to: focus
+    // lands on document.body and the next Tab starts from the top of the
+    // page, a long way from where the operator was working.
+    header()
+    const trigger = screen.getByRole("button", { name: "Conversation actions" })
+    await userEvent.click(trigger)
+    await userEvent.click(screen.getByRole("menuitem", { name: /system prompt/i }))
+    expect(screen.getByLabelText("System prompt")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it("edits the system prompt, which is the one Lab setting a conversation needs", async () => {

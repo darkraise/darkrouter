@@ -31,6 +31,10 @@ export function ChatTab({
     if (!trace.data || seed === undefined || seededFrom === seed) return
     onConfigChange({ ...config, ...seedFromTrace(trace.data as RequestTrace) })
     setSeededFrom(seed)
+    // config is read here and written by the same call, and onConfigChange is
+    // a fresh identity each render: listing either re-fires the effect on its
+    // own result, which is the stomp the guard above exists to prevent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trace.data, seed, seededFrom])
 
   const seedNote =

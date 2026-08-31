@@ -219,15 +219,26 @@ describe("the two settings that govern prompt text at rest", () => {
   })
 
   it("reads the switch as On and Off rather than as a raw boolean", () => {
-    const withPlayground = cfg({
+    // settingRow derives display from the value alone, so passing the
+    // catalogue entry through a non-null assertion let this pass with the
+    // entry deleted -- and a setting missing from the catalogue is exactly
+    // what it should catch. Assert the entry before using it.
+    const meta = SETTINGS["playground.save_conversations"]
+    expect(meta).toBeDefined()
+    expect(meta?.group).toBe("logging")
+
+    const off = cfg({
       blocks: { ...cfg().blocks, playground: { save_conversations: false } },
     } as Partial<ConfigResponse>)
     expect(
-      settingRow(
-        withPlayground,
-        "playground.save_conversations",
-        SETTINGS["playground.save_conversations"]!,
-      ).display,
+      settingRow(off, "playground.save_conversations", meta!).display,
     ).toBe("Off")
+
+    const on = cfg({
+      blocks: { ...cfg().blocks, playground: { save_conversations: true } },
+    } as Partial<ConfigResponse>)
+    expect(
+      settingRow(on, "playground.save_conversations", meta!).display,
+    ).toBe("On")
   })
 })

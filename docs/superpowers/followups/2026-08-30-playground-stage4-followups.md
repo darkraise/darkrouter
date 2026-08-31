@@ -26,58 +26,178 @@ Two decisions already taken, recorded so they are not re-litigated:
 
 ---
 
-## 1. A removed Compare column still bills
+## 1. A removed Compare column still bills — RESOLVED, not a defect
 
-**The only open item that costs money.** Removing a column mid-stream aborts
-the client's fetch — which correctly stops the orphan writing into the UI and
-fixed a related Run-re-enables bug — but the provider call runs to completion
-server-side.
+**Diagnosed 2026-08-31 with server-side logging. The premise was wrong: the
+provider call *is* cancelled.** This item carried forward the live gate's
+pre-fix measurement. `158c69c fix(playground): abort a compare column's
+request` landed after that gate ran, and nobody re-measured.
 
-Measured at the live gate: three `POST /api/playground` requests, all `200 OK`
-at full duration (2436/2489/2513 ms), with the removed column's trace never
-shown anywhere in the UI.
+Method: a temporary log line in `handlePlayground` recording when
+`r.Context()` is cancelled and when the handler returns, against a real
+three-column Compare run through Groq, with column 3 removed 1202 ms in by a
+synchronous `browser_evaluate` click sequence.
 
-The cancellation chain reads as intact on both sides: `stream()` passes the
-signal to `fetch` (`web/src/lib/api.ts`), `handlePlayground` derives from
-`r.Context()` (`internal/admin/playground.go:272`), and `attempt` builds the
-outbound request from a context descended from it (`internal/exec/exec.go`).
-So the remaining suspicion is the browser/HTTP layer — a fetch aborted after
-headers have arrived does not necessarily close a keep-alive HTTP/1.1
-connection, and a network panel shows the request as completed either way.
+```
+DIAG playground …703404: start
+DIAG playground …703404: ctx DONE after 1.200626054s err=context canceled
+DIAG playground …703404: handler RETURNED after 1.200666981s
+DIAG playground …655824: handler RETURNED after 2.261813516s   (kept column)
+DIAG playground …614537: handler RETURNED after 2.386607127s   (kept column)
+```
 
-**This needs a server-side log line, not another code review.** Log where the
-executor's context is cancelled, remove a column mid-stream, and see whether
-the server ever hears about it. It either closes, or it is a fetch-layer
-limitation to document and accept.
+The removed column's context is cancelled at the instant of removal and the
+handler returns immediately; the two kept columns run their full ~2.3 s. Two
+controls confirm the reading: a `curl` killed mid-stream cancels at 1.996 s,
+and a bare `fetch`/`AbortController` in the console page cancels at 1.521 s,
+matching the client's own abort timestamp to the millisecond. The chain is
+intact end to end, and the browser's fetch abort does close the connection.
 
-## 2. `npm run lint` is broken
+The request row for the removed column corroborates it: `total_ms` 1200 rather
+than the ~2.4 s of its siblings, and the warning
+`passthrough -> groq/…: upstream connection failed after commit: context
+canceled` — which is `forwardStream`'s post-commit read error, i.e. the cancel
+reaching the executor's own read loop.
 
-ESLint 9 with no `eslint.config.js` anywhere under `web/`. The command fails
-loudly with the migration-guide error rather than silently passing, so nobody
-is relying on a false green — but the project has no working lint gate.
+**Adjacent finding, raised and settled 2026-08-31 — a post-commit cancel is a
+success. Decided; do not re-litigate.**
 
-Adding a config may surface a large backlog at once. Worth its own scoped
-decision rather than being swept into something else.
+A client-cancelled stream is recorded as `status: "success"` with
+`tokens_in`/`tokens_out` 0 and `cost_micros` 0. `internal/exec/forward.go`
+treats a post-commit read failure as `OutcomeSuccess` — failover is impossible
+once bytes are on the wire — so `exec.go`'s `actionFinish` writes "success",
+and the usage chunk, which arrives last, never arrived.
+
+That classification stands. Bytes reached the client and the answer on screen
+is real, which is what "success" says; a cancel is the client's own choice,
+not a fault of the route. `rec.Status = "cancelled"` and
+`OutcomeClientCancelled` stay pre-commit, where they describe a request that
+never delivered anything.
+
+Nothing follows from the decision, because nothing else was recoverable.
+`TokensIn` and `TokensOut` are non-nullable `int64`, so 0 is the only value
+the row can carry, and `CostMicros` is priced from them. The provider does
+bill for what it generated before the cut, so spend under-reports by that
+much — a known and accepted gap, not a defect. No code change.
+
+## 2. `npm run lint` is broken — RESOLVED
+
+`web/eslint.config.js` now exists: `@eslint/js` recommended,
+`typescript-eslint` recommended, and `eslint-plugin-react-hooks` recommended,
+with `no-unused-vars` configured to allow the codebase's `^_` discard
+convention (`toStoredConfig`'s two stripped columns, `drain`'s thrown-away
+chunk). Both plugins are saved to `devDependencies`.
+
+The backlog was small: **7 problems across 6 of 163 files**, and 0 errors once
+the `^_` convention is configured. `npm run lint` exits 0. What remains is 4
+warnings, none of them mechanical:
+
+- three `react-hooks/exhaustive-deps` (`chat-tab.tsx:34`, `chat-mode.tsx:107`,
+  `playground-screen.tsx:46`) — all deliberate omissions in effects whose
+  re-firing behaviour is the point. Adding the deps would change behaviour,
+  so they are left visible rather than silenced or "fixed".
+- one stale `eslint-disable no-unreachable` in
+  `use-chat-run.test.tsx:147`, which typescript-eslint disables in favour of
+  the compiler's own check.
 
 ## 3. Pre-existing, unrelated to stage 4
 
-- `internal/admin/cursor.go` is not gofmt-clean (unformatted on `master`
-  before this branch).
-- `ConfigBlocks` in `web/src/lib/api-types.ts` omits the `media` block that
-  `internal/admin/configapi.go` emits on `GET /api/config`. Harmless —
-  TypeScript simply does not know the field exists. Fold into whichever change
-  adds `media:` to `darkrouter.example.yaml`, which is also absent.
-- `qa.py`'s colour check only catches hex literals, so `rgb()` and named
-  colours would pass a gate that claims "no colour literal in a fragment".
-- Settings' "Signed-in browsers" rows all read "since Invalid Date".
-- Several mockup stylesheet headers cite plan task numbers ("Task 16 —
-  Connect"; both `16-login.css` and `17-first-run.css` claim "Task 18"), which
-  `CLAUDE.md`'s comment rule forbids. They predate this branch and refer to a
-  different plan's numbering.
+- ~~`internal/admin/cursor.go` is not gofmt-clean~~ — fixed 2026-08-31
+  (`UntilMs` alignment); `gofmt -l internal/` is now empty.
+- ~~`ConfigBlocks` omits the `media` block~~ — fixed 2026-08-31, together with
+  the missing `media:` block in `darkrouter.example.yaml`, as the note asked.
+- ~~`qa.py`'s colour check only catches hex literals~~ — fixed 2026-08-31.
+  Adds the opaque colour functions and the CSS named colours; `rgba()` and
+  `hsla()` stay legal, since the hex message already points at them for
+  translucency a token cannot carry. Named colours are matched only where a
+  value is expected, because a fragment's prose says "Orange" and a class can
+  be named `.plum`. Comments are blanked first, offsets preserved, so the
+  preset scrim's header can go on naming the near-black it was picked
+  against. Probed both ways: four escape forms fail, five legal ones pass.
+- ~~Settings' "Signed-in browsers" rows all read "since Invalid Date"~~ —
+  fixed 2026-08-31. Root cause was a unit mismatch, not a formatting one:
+  `CreateSession` writes `UnixMilli`, but `SessionRows` decoded with
+  `time.Unix(sec, 0)` and filtered with `now.Unix()`. Every row landed in the
+  year 58633, which `new Date()` cannot parse (a five-digit year needs the
+  `+058633` form) — hence "Invalid Date". The seconds filter also meant
+  `expires_at > ?` was true for every row, so **expired sessions were listed
+  as revocable browsers**. `CreateSession`, `TouchSession` and the sweep were
+  all already correct; `SessionRows` was the only seconds-based reader, so
+  authentication was never affected. Pinned by two store tests.
+- ~~Several mockup stylesheet headers cite plan task numbers~~ — fixed
+  2026-08-31. All 13 `Task N — ` header prefixes stripped; each header already
+  named its screen, so nothing was lost. `qa.py` still passes (19 fragments).
+  The in-body cross-references followed on 2026-08-31, written as the screens
+  they mean rather than stripped: Task 9 is Providers, Task 7 is Request
+  trace, Task 12 is the model catalog, Tasks 3 and 4 are the design language
+  board and the ladder specimen, and Task 2 is the shared kit, which owns no
+  screen at all. `index.html` and `artifact.html` rebuilt.
 
 ## 4. Deferred minors from the per-task reviews
 
 Each was rated Minor by its reviewer and parked. Grouped by kind.
+
+**Triaged 2026-08-31.** Seven were done and the rest were left deliberately,
+because several are defensible as they stand and doing them all would have
+churned working code for no reader's benefit. Done:
+
+- A reopened conversation now fetches each turn's trace and shows the same
+  provider, duration, tokens and cost a fresh answer does. This was filed as
+  a placeholder question; the placeholder was the symptom. A turn whose trace
+  the log has swept now draws a settled mark rather than the dashed one, and
+  a turn with no route at all keeps the dashed mark, because that one really
+  is still arriving.
+- A title typed before the first send is kept rather than overwritten by
+  `titleFromPrompt`, with the create-promise memo folded in alongside it.
+- The conversation list key is `["playground-conversations", "list"]`, so
+  appending a turn no longer refetches the open conversation.
+- A pending model commit is flushed on unmount rather than cancelled.
+- The destructive GET says so on the handler.
+- `relativeTime` moved to `lib/`, and `rows.Err()` is wrapped.
+- Two tests: the 404s on an unknown conversation id, and
+  `settings-catalog.test.ts`, which passed with its catalogue entry deleted.
+
+**Second pass, 2026-08-31 — the rest resolved.** A stop before the first
+token no longer stores a turn: an abort is now told apart from a completion,
+so a half answer is still kept and a provider's genuinely empty answer is
+still kept, but a run that streamed nothing is not. The quiet route line
+gained a collapse, verified live. The mode sync now seeds from `initialMode`,
+so Back to a bare `/playground` lands where a fresh load of that URL would —
+and it sets the mode directly rather than routing through `choose`, which is
+what stops Back writing the stored preference and stops it pushing `?mode=`
+back onto the URL it just left. `load` clears `busy` itself rather than
+waiting a microtask for the aborted run. The `save_conversations` default
+moved out of the discovery cluster. The unmount abort's comment now names the
+behaviour it carries.
+
+The system-prompt dialog's focus return turned out not to be a defect: focus
+does come back to the menu trigger. Held by a test now, so a Radix upgrade
+that breaks it is caught.
+
+Test coverage closed: the store-level update and its miss, the 200-row cap
+and the 200-char preview, the save gate's error body, `mode.ts`'s two
+`localStorage` catch branches, the `"routed"` fallback, the client's
+saving-off path, and the popover's commit flush. `compare-abort`'s
+near-tautological length check became one that discriminates — that removing
+a never-run column aborts neither live column — and its helper clears each
+box before naming it. `chat-mode`'s per-keystroke case types in one tick, so
+a loaded runner or a smaller `COMMIT_QUIET_MS` can no longer fail it for a
+reason unrelated to the behaviour.
+
+**Third pass** caught two the second had glossed. The auto-save item has two
+windows, and only the create-promise memo had closed the first —
+`useAppendTurn` carried no mutation scope while its create and update
+siblings both did, so appends from overlapping exchanges could interleave and
+scramble `seq`. It has one now. And the popover coverage was thinner than
+claimed: the close-flush and the dialect pick are both held now, the latter
+by actually picking one rather than asserting the control exists.
+
+Still left, deliberately: the `bodyFor` duplication, by its own rule that a
+third caller has to appear first; the `emit` superseded-guard, which would
+need a test written to fit it rather than to describe it; and the purge
+button's position, defended twice and checked live.
+
+Nothing else is open.
 
 ### Behaviour worth a second look
 
