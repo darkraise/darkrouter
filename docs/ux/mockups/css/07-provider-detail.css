@@ -1,5 +1,5 @@
 /*
- * Task 10 — Provider detail ("configure/providers", one provider open).
+ * Provider detail ("configure/providers", one provider open).
  *
  * A leaf screen: nothing later consumes what is declared here except the two
  * names the task's own Interfaces contract reserves for it, .credential-row

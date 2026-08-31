@@ -1,5 +1,5 @@
 /*
- * Task 7 — Request trace ("operate/requests" detail view).
+ * Request trace ("operate/requests" detail view).
  *
  * New component classes this screen introduces: .trace-header (+ -row/-id/
  * -route/-route-sep/-route-arrow/-route-target), .trace-copy-btn,
