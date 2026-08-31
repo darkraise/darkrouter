@@ -73,6 +73,22 @@ describe("the conversation header", () => {
     expect(onOpenInLab).toHaveBeenCalled()
   })
 
+  it("flushes a pending model commit on unmount rather than dropping it", async () => {
+    // The model field commits after a quiet period. Switching to Lab inside
+    // that window unmounts the header, and a cancelled timer loses a change
+    // the operator made -- silently, which is the part that matters.
+    const onConfigCommit = vi.fn()
+    const view = header({ onConfigCommit })
+    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "x")
+    expect(onConfigCommit).not.toHaveBeenCalled()
+
+    view.unmount()
+    expect(onConfigCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gptx" }),
+    )
+  })
+
   it("edits the system prompt, which is the one Lab setting a conversation needs", async () => {
     const onConfigChange = vi.fn()
     header({ onConfigChange })

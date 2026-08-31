@@ -91,7 +91,13 @@ export function ConversationHeader({
     onConfigCommit(next)
   }
 
-  useEffect(() => cancelPending, [])
+  // Flushed on unmount, not cancelled: a model name typed and then abandoned
+  // by switching to Lab inside the quiet period is still a change the operator
+  // made, and dropping it says nothing. Held in a ref because the cleanup runs
+  // once and would otherwise close over the first render's commit callback.
+  const flushOnUnmount = useRef(commitPending)
+  flushOnUnmount.current = commitPending
+  useEffect(() => () => flushOnUnmount.current(), [])
 
   // The field follows the conversation, not the keystroke: selecting another
   // conversation in the rail must not leave the previous one's name in it.
