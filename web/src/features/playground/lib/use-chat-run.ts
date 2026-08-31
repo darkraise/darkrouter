@@ -111,6 +111,7 @@ export function useChatRun(
     // its whole answer, so it is accumulated here as well as appended.
     let answer = ""
     let failed = false
+    let aborted = false
     const emit = (text: string) => {
       if (superseded()) return
       if (!text) return
@@ -162,7 +163,9 @@ export function useChatRun(
       }
     } catch (err) {
       // Stopping is the operator's decision, not a failure to report at them.
-      if ((err as Error).name !== "AbortError") {
+      if ((err as Error).name === "AbortError") {
+        aborted = true
+      } else {
         setError((err as Error).message)
         failed = true
       }
@@ -177,7 +180,13 @@ export function useChatRun(
     // simply finished. A hard failure with nothing streamed has no turn worth
     // keeping; a failure part-way through has the text it already spent
     // tokens on, and the transcript still shows it.
-    if (!superseded() && (answer !== "" || !failed)) {
+    //
+    // A stop before the first token is neither: nothing was streamed and
+    // nothing failed, and storing it puts an assistant row with no content
+    // into the conversation, which is re-rendered as an empty bubble every
+    // time it is reopened. A run that finished on its own with an empty
+    // answer is still kept -- that is the provider's answer, not an absence.
+    if (!superseded() && (answer !== "" || (!failed && !aborted))) {
       onTurn?.({ prompt, answer, requestId: liveRequestId })
     }
   }
@@ -186,6 +195,11 @@ export function useChatRun(
   // callers -- Chat mode and Lab's Single tab -- can be navigated away from
   // mid-answer, and the stream would otherwise keep arriving into state that
   // has been unmounted.
+  //
+  // It inherits Stop's semantics too, which is a behaviour change worth
+  // naming: onTurn fires with whatever had streamed, so navigating away
+  // mid-answer persists the partial turn rather than discarding it. A half
+  // answer is still an answer, and the tokens were spent either way.
   useEffect(() => () => abort.current?.abort(), [])
 
   /** Ends the run in flight. The turns already written stay: a half answer is

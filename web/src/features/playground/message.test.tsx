@@ -106,6 +106,21 @@ describe("an answered turn", () => {
   })
 })
 
+describe("the quiet route line", () => {
+  it("expands and collapses again", async () => {
+    // The disclosure was one-way: once opened there was no control to shut
+    // it, so a transcript read end to end filled up with detail nobody asked
+    // to keep on screen.
+    render(<AssistantTurn text="hi" route={route()} quiet />)
+    await userEvent.click(screen.getByRole("button", { name: "Show routing detail" }))
+    expect(screen.getByText("trace")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide routing detail" }))
+    expect(screen.queryByText("trace")).toBeNull()
+    expect(screen.getByRole("button", { name: "Show routing detail" })).toBeInTheDocument()
+  })
+})
+
 describe("a typed turn", () => {
   it("keeps the operator's line breaks and does not render their markdown", () => {
     // What they typed is what was sent. Rendering it would show something

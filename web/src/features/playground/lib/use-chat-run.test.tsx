@@ -89,6 +89,28 @@ describe("running one chat turn", () => {
     expect(result.current.error).toBe("")
   })
 
+  it("stores nothing when the run is stopped before the first token", async () => {
+    // A half answer is still an answer; no answer is not. Reporting the turn
+    // here stored an assistant row with no content, which the transcript
+    // then re-rendered as an empty bubble every time the conversation was
+    // reopened.
+    streamMock.mockImplementation(async function* () {
+      throw Object.assign(new Error("aborted"), { name: "AbortError" })
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    traceMock.mockResolvedValue(null)
+
+    const turns: unknown[] = []
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}, (t) => turns.push(t)),
+    )
+    await act(() => result.current.send("hi"))
+
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(turns).toHaveLength(0)
+  })
+
   it("files the route under the turn it served", async () => {
     // A transcript of six answers has to say which provider produced each,
     // not only the last.
