@@ -4,7 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 )
 
 // newSessionID mints an opaque id. 32 bytes of randomness, base64url: the id is
@@ -91,7 +94,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		// Only over TLS. On the plain-HTTP LAN default this must stay false or
 		// the browser drops the cookie and login silently never works.
-		Secure: r.TLS != nil,
+		Secure: servedOverTLS(r),
 		MaxAge: int(sessionTTL.Seconds()),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -105,9 +108,49 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not end the session")
 		return
 	}
+	// Same attributes as the cookie it clears: a browser holding a Secure
+	// cookie under this name will not accept a non-Secure Set-Cookie for it,
+	// which would leave the operator logged in after clicking Log out.
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+		Secure: servedOverTLS(r),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+}
+
+// servedOverTLS reports whether the browser's own connection is HTTPS.
+//
+// r.TLS answers it for a direct connection and is nil behind a reverse proxy
+// that terminates TLS — which the shipped Caddyfile does, proxying plain HTTP
+// to the admin port. Reading the scheme off the connection alone therefore
+// left the intended HTTPS deployment issuing session cookies without Secure.
+//
+// The forwarded header is evidence only when the peer that set it is a proxy
+// rather than a client, so it is read only from a loopback or private address.
+// Without that, anyone able to reach the port directly could set the flag and
+// lock an operator out of a console the browser would then refuse to send the
+// cookie to.
+func servedOverTLS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if !peerIsLocal(r.RemoteAddr) {
+		return false
+	}
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
+}
+
+func peerIsLocal(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
