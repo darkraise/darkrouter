@@ -43,6 +43,9 @@ export function PlaygroundScreen() {
   // treats as the same location and does not push.
   useEffect(() => {
     if (isMode(search.mode)) choose(search.mode)
+    // choose is redefined every render and navigates; listing it would turn a
+    // one-shot URL sync into a navigation on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.mode])
 
   return (

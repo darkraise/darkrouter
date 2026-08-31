@@ -104,6 +104,9 @@ export function ChatMode({
     setConfig(configOfConversation(detail.data))
     setTitle(detail.data.title)
     setLoadedId(detail.data.id)
+    // useChatRun returns a fresh object each render, so listing run would make
+    // this fire every render rather than once per conversation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data, loadedId])
 
   function startNew() {
