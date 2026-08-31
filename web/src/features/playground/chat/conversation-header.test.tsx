@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ConversationHeader } from "./conversation-header"
@@ -87,6 +87,21 @@ describe("the conversation header", () => {
     expect(onConfigCommit).toHaveBeenCalledWith(
       expect.objectContaining({ model: "gptx" }),
     )
+  })
+
+  it("returns focus to the menu trigger when the dialog closes", async () => {
+    // The menu item preventDefaults its own focus return so the dialog can
+    // take focus, which leaves the dialog nothing to hand it back to: focus
+    // lands on document.body and the next Tab starts from the top of the
+    // page, a long way from where the operator was working.
+    header()
+    const trigger = screen.getByRole("button", { name: "Conversation actions" })
+    await userEvent.click(trigger)
+    await userEvent.click(screen.getByRole("menuitem", { name: /system prompt/i }))
+    expect(screen.getByLabelText("System prompt")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it("edits the system prompt, which is the one Lab setting a conversation needs", async () => {
