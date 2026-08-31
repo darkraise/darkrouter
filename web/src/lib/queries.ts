@@ -38,7 +38,10 @@ export const keys = {
   providers: ["providers"] as const,
   presets: ["presets"] as const,
   playgroundPresets: ["playground-presets"] as const,
-  playgroundConversations: ["playground-conversations"] as const,
+  // "list" rather than the bare prefix: TanStack matches by prefix, so a bare
+  // ["playground-conversations"] would make every write to the rail invalidate
+  // whichever conversation is open as well.
+  playgroundConversations: ["playground-conversations", "list"] as const,
   playgroundConversation: (id: string) => ["playground-conversations", id] as const,
   models: ["models"] as const,
   aliases: ["aliases"] as const,
