@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -363,6 +364,11 @@ func TestPlaygroundConversationsGateStopsWritesAndNotReads(t *testing.T) {
 	create := `{"title":"x","dialect":"openai","model":"gpt","config":{}}`
 	if w := do(t, s, cookie, token, "POST", "/api/playground/conversations", create); w.Code != 403 {
 		t.Errorf("create with saving off = %d, want 403", w.Code)
+	} else if !strings.Contains(w.Body.String(), "playground.save_conversations") {
+		// The status alone would pass against a 403 raised for any other
+		// reason -- a CSRF miss, say. The body is what tells the operator
+		// which setting to change, and it names the key deliberately.
+		t.Errorf("403 body = %s, want it to name the setting", w.Body.String())
 	}
 	if w := do(t, s, cookie, token, "PATCH",
 		"/api/playground/conversations/"+existing.ID, create); w.Code != 403 {
