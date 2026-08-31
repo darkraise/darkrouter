@@ -184,10 +184,20 @@ box before naming it. `chat-mode`'s per-keystroke case types in one tick, so
 a loaded runner or a smaller `COMMIT_QUIET_MS` can no longer fail it for a
 reason unrelated to the behaviour.
 
+**Third pass** caught two the second had glossed. The auto-save item has two
+windows, and only the create-promise memo had closed the first —
+`useAppendTurn` carried no mutation scope while its create and update
+siblings both did, so appends from overlapping exchanges could interleave and
+scramble `seq`. It has one now. And the popover coverage was thinner than
+claimed: the close-flush and the dialect pick are both held now, the latter
+by actually picking one rather than asserting the control exists.
+
 Still left, deliberately: the `bodyFor` duplication, by its own rule that a
 third caller has to appear first; the `emit` superseded-guard, which would
 need a test written to fit it rather than to describe it; and the purge
 button's position, defended twice and checked live.
+
+Nothing else is open.
 
 ### Behaviour worth a second look
 
