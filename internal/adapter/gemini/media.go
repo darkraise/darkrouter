@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,7 +33,8 @@ var (
 // public image address has to be fetched by the gateway. That makes Darkrouter
 // issue requests to client-supplied addresses, and the constraints here are
 // what keep that from being server-side request forgery: http and https only,
-// no redirects, a byte cap enforced on the reader rather than read off
+// a dial-time check that the resolved address is on the public internet, no
+// redirects, a byte cap enforced on the reader rather than read off
 // Content-Length, and a short timeout.
 type Fetcher struct {
 	Client   *http.Client
@@ -55,10 +57,24 @@ func NewFetcher() *Fetcher {
 				// A redirect to an internal address is the standard bypass.
 				return http.ErrUseLastResponse
 			},
+			Transport: guardedTransport(),
 		},
 		MaxBytes: DefaultMaxInlineBytes,
 		Inline:   true,
 	}
+}
+
+// guardedTransport refuses to connect to anything off the public internet.
+// Cloned from the default so the pooling and proxy behaviour a bare transport
+// would lose stays intact.
+func guardedTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   guardConn,
+	}).DialContext
+	return t
 }
 
 // passthroughURI reports whether Gemini accepts this URI as fileData. Anything
