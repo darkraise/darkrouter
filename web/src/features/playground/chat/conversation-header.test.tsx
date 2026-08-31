@@ -89,6 +89,40 @@ describe("the conversation header", () => {
     )
   })
 
+  it("commits a pending model the moment the popover closes", async () => {
+    // The popover is uncontrolled, so the flush depends on Radix running the
+    // close handler rather than leaving the pending write to the quiet-period
+    // timer. Closing is the operator saying they are done sooner than the
+    // pause would.
+    const onConfigCommit = vi.fn()
+    header({ onConfigCommit })
+    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
+    await userEvent.type(screen.getByLabelText("Model or alias"), "x")
+    expect(onConfigCommit).not.toHaveBeenCalled()
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(onConfigCommit).toHaveBeenCalledWith(expect.objectContaining({ model: "gptx" })),
+    )
+    // Once, not once per keystroke and again on the timer.
+    expect(onConfigCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it("commits a picked dialect straight away", async () => {
+    // A dialect arrives whole rather than a character at a time, so there is
+    // no settling to wait for -- and it supersedes whatever the model field
+    // left pending, which is those same keystrokes with this change on top.
+    const onConfigCommit = vi.fn()
+    header({ onConfigCommit })
+    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
+    await userEvent.click(screen.getByLabelText("Dialect"))
+    await userEvent.click(await screen.findByRole("option", { name: "anthropic" }))
+
+    expect(onConfigCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ dialect: "anthropic" }),
+    )
+  })
+
   it("returns focus to the menu trigger when the dialog closes", async () => {
     // The menu item preventDefaults its own focus return so the dialog can
     // take focus, which leaves the dialog nothing to hand it back to: focus
