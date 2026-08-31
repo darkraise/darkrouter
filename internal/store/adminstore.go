@@ -766,7 +766,7 @@ type SessionRow struct {
 func (d *DB) SessionRows(ctx context.Context, now time.Time) ([]SessionRow, error) {
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT id, created_at, expires_at FROM sessions
-		  WHERE expires_at > ? ORDER BY created_at DESC, id`, now.Unix())
+		  WHERE expires_at > ? ORDER BY created_at DESC, id`, now.UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -781,8 +781,8 @@ func (d *DB) SessionRows(ctx context.Context, now time.Time) ([]SessionRow, erro
 		if err := rows.Scan(&r.ID, &created, &expires); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
-		r.CreatedAt = time.Unix(created, 0).UTC()
-		r.ExpiresAt = time.Unix(expires, 0).UTC()
+		r.CreatedAt = time.UnixMilli(created).UTC()
+		r.ExpiresAt = time.UnixMilli(expires).UTC()
 		out = append(out, r)
 	}
 	return out, rows.Err()

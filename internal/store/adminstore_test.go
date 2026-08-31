@@ -953,3 +953,46 @@ func TestDiscoveryHealthIsEmptySliceNotNil(t *testing.T) {
 		t.Fatalf("want no rows before any provider is catalogued, got %+v", got)
 	}
 }
+
+func TestSessionRowsReadTheStoredMilliseconds(t *testing.T) {
+	// CreateSession writes UnixMilli. A reader that decodes those as seconds
+	// puts every row about 56,000 years into the future, which is both a
+	// nonsense timestamp on screen and an expiry filter that can never
+	// exclude anything.
+	db := migrated(t)
+	ctx := context.Background()
+	before := time.Now().Add(-time.Minute)
+	if err := db.CreateSession(ctx, "sess-live", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.SessionRows(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].CreatedAt.Before(before) || rows[0].CreatedAt.After(time.Now().Add(time.Minute)) {
+		t.Errorf("created_at is %s, want roughly now", rows[0].CreatedAt)
+	}
+	if got := rows[0].ExpiresAt.Sub(rows[0].CreatedAt); got < 59*time.Minute || got > 61*time.Minute {
+		t.Errorf("expiry is %s after creation, want about an hour", got)
+	}
+}
+
+func TestSessionRowsOmitAnExpiredSession(t *testing.T) {
+	// The listing is the screen an operator revokes from. A row that expired
+	// last week is not a browser anyone can sign out.
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateSession(ctx, "sess-dead", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.SessionRows(ctx, time.Now().Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("got %d rows, want none: an expired session was listed", len(rows))
+	}
+}
