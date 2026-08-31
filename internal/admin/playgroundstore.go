@@ -246,6 +246,16 @@ func readTurnBody(w http.ResponseWriter, r *http.Request) (playgroundTurnBody, b
 // ago in another tab is the ordinary case and must survive.
 const reapAge = time.Hour
 
+// handleListPlaygroundConversations lists the rail, and deletes as a side
+// effect.
+//
+// A GET that writes is worth stating plainly. Spec section 8.5 asks for the
+// reap and the listing is the only call guaranteed to happen often enough to
+// carry it, so the destructive part is deliberate -- but it sits behind
+// requireSession rather than requireCSRF, and it surprises people. It has
+// already cost two test authors their fixtures: a test that backdates
+// created_at to control ordering has the rows it just wrote reaped by the
+// call it is exercising. Backdate updated_at instead.
 func (s *Server) handleListPlaygroundConversations(w http.ResponseWriter, r *http.Request) {
 	// Housekeeping, not the caller's business: a rail that fails to load
 	// because a stale empty row could not be removed would be a worse

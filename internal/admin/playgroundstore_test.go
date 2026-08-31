@@ -115,6 +115,20 @@ func TestPlaygroundPresetUpdateAndDeleteAnswer404ForAnUnknownID(t *testing.T) {
 	}
 }
 
+func TestPlaygroundConversationUpdateAndDeleteAnswer404ForAnUnknownID(t *testing.T) {
+	// Presets have had this since stage 3; conversations answer 404 in code
+	// but nothing held them to it.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	body := `{"title":"t","dialect":"openai","model":"m","config":{}}`
+	if w := do(t, s, cookie, token, "PATCH", "/api/playground/conversations/nope", body); w.Code != 404 {
+		t.Errorf("patch unknown = %d, want 404", w.Code)
+	}
+	if w := do(t, s, cookie, token, "DELETE", "/api/playground/conversations/nope", ""); w.Code != 404 {
+		t.Errorf("delete unknown = %d, want 404", w.Code)
+	}
+}
+
 func TestPlaygroundConversationRoundTripsThroughTheAPI(t *testing.T) {
 	// The whole point of storing the config blob is that a conversation
 	// reopened next week still knows the system prompt that shaped it.
