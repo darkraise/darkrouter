@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { stream, type StreamStart } from "../../../lib/api"
+import { api, stream, type StreamStart } from "../../../lib/api"
 import { chatBody, parseTools, type ChatState } from "./request"
 import { drainSSE, extractUnaryText } from "./stream"
 import {
@@ -10,7 +10,7 @@ import {
 } from "../metrics"
 import { routeFromTrace, type TurnRoute } from "../message"
 import type { PlaygroundConfig } from "../config"
-import type { PlaygroundMessage } from "../../../lib/api-types"
+import type { PlaygroundMessage, RequestTrace } from "../../../lib/api-types"
 
 /**
  * One turn that finished, reported to whoever wants to keep it.
@@ -204,13 +204,46 @@ export function useChatRun(
 
   /** Aborts anything in flight first: a stream left running would append its
    *  next chunk into the transcript that has just replaced it. */
+  /**
+   * Fills in what a restored turn's stored request id already points at.
+   *
+   * A turn read back from the store knows only its request id, so without
+   * this a reopened conversation cannot say who served it, how long it took
+   * or what it cost -- the operator has to follow the trace link out to
+   * Requests for every answer. The trace is long written by now, so this is a
+   * plain fetch rather than traceWhenWritten's wait-and-retry, which exists
+   * for a run whose record is still in the log writer's batch.
+   */
+  async function hydrate(nextRoutes: Record<number, TurnRoute>, mine: number) {
+    const unresolved = Object.entries(nextRoutes).filter(
+      ([, r]) => r.requestId !== "" && r.provider === "",
+    )
+    await Promise.all(
+      unresolved.map(async ([index, r]) => {
+        try {
+          const trace = await api.get<RequestTrace>(`/api/requests/${r.requestId}`)
+          if (!trace) return
+          // The transcript has been replaced since this went out, so this
+          // trace belongs to a conversation the operator has already left.
+          if (generation.current !== mine) return
+          setRoutes((prev) => ({ ...prev, [Number(index)]: routeFromTrace(trace) }))
+        } catch {
+          // Swept by log retention, or never written. The turn keeps the mark
+          // it has rather than inventing numbers for it.
+        }
+      }),
+    )
+  }
+
   function load(next: PlaygroundMessage[], nextRoutes: Record<number, TurnRoute>) {
     generation.current++
     abort.current?.abort()
+    const mine = generation.current
     setMessages(next)
     setRoutes(nextRoutes)
     setError("")
     onMetrics(NO_METRICS)
+    void hydrate(nextRoutes, mine)
   }
 
   return { messages, routes, busy, error, send, stop, clear, load }

@@ -34,7 +34,8 @@ const detail: PlaygroundConversationDetail = {
   ],
 }
 
-const { postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() => ({
+const { getMock, postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() => ({
+  getMock: vi.fn(),
   postMock: vi.fn(),
   patchMock: vi.fn(),
   delMock: vi.fn(),
@@ -44,7 +45,7 @@ const { postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() =>
 
 vi.mock("../../../lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/api")>()),
-  api: { get: vi.fn(), post: postMock, patch: patchMock, del: delMock },
+  api: { get: getMock, post: postMock, patch: patchMock, del: delMock },
   stream: streamMock,
 }))
 
@@ -89,6 +90,8 @@ async function send(text: string) {
 
 describe("Chat mode", () => {
   beforeEach(() => {
+    getMock.mockReset()
+    getMock.mockRejectedValue(new Error("no trace"))
     postMock.mockReset()
     patchMock.mockReset()
     delMock.mockReset()
@@ -194,6 +197,34 @@ describe("Chat mode", () => {
     await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
     await userEvent.click(screen.getByRole("menuitem", { name: /system prompt/i }))
     expect(screen.getByLabelText("System prompt")).toHaveValue("answer in one line")
+  })
+
+  it("recovers a reopened turn's route from its stored request id", async () => {
+    // The store keeps only the request id, so before this a restored answer
+    // said "routed" and nothing else -- no provider, no duration, no cost --
+    // and drew a gutter that read as still loading, forever.
+    getMock.mockResolvedValue({
+      id: "01OLD",
+      provider: "groq",
+      model: "claude",
+      final_model: "claude",
+      total_ms: 2400,
+      tokens_in: 88,
+      tokens_out: 921,
+      cost_micros: 566,
+      attempts: [{ provider: "groq", model: "claude" }],
+      warnings: [],
+    })
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+
+    expect(getMock).toHaveBeenCalledWith("/api/requests/01OLD")
+    // The duration replaces the bare "routed" the stored row could offer.
+    // The duration replaces the bare "routed" that the stored row alone
+    // could offer. (The button's accessible name is its aria-label, so the
+    // reading is the text.)
+    expect(await screen.findByText("2.4s")).toBeInTheDocument()
   })
 
   it("hands the whole configuration to Lab", async () => {

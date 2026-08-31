@@ -90,6 +90,19 @@ describe("an answered turn", () => {
     // under the reader when it does.
     const { container } = render(<AssistantTurn text="hi" />)
     expect(container.querySelector(".size-7")).not.toBeNull()
+    // Dashed is the loading mark, and this turn genuinely is still loading.
+    expect(container.querySelector(".border-dashed")).not.toBeNull()
+  })
+
+  it("marks a settled turn whose trace is gone as settled, not as loading", () => {
+    // A restored turn whose trace the log has swept has a route but no
+    // provider. Drawing the dashed mark there says "still on its way" about
+    // an answer that arrived days ago and never will again.
+    const { container } = render(
+      <AssistantTurn text="hi" route={route({ provider: "", totalMs: null })} />,
+    )
+    expect(container.querySelector(".size-7")).not.toBeNull()
+    expect(container.querySelector(".border-dashed")).toBeNull()
   })
 })
 
