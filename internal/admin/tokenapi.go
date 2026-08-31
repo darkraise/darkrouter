@@ -122,5 +122,14 @@ func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
 	// old one, so the provider gets a clean slate rather than inheriting a
 	// cooldown earned by a key that no longer exists.
 	s.clearCooldowns(r.Context(), providerID, keyID)
+	// And whatever the auth manager holds for it: an OAuth account is cached
+	// under the credential id, so a replaced secret would otherwise keep
+	// presenting the token the old one minted, and a credential that was
+	// terminally refused would stay refused for the life of the process.
+	s.forgetCredential(keyID)
+	// Disabling a credential is the emergency revocation control and replacing
+	// one is a rotation. Both are worthless if the decrypted set the router
+	// serves from keeps the old value until an unrelated mutation reloads it.
+	s.reloadProviders(r.Context())
 	writeJSON(w, http.StatusOK, changed)
 }

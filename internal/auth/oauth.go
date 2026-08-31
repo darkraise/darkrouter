@@ -175,6 +175,19 @@ type oauthAccount struct {
 	dead bool
 }
 
+// Forget drops the cached state for one credential.
+//
+// The cache is keyed on credential id, and both halves of what it holds are
+// derived from a secret that can be replaced underneath it: the access token,
+// which would otherwise go on being presented after a rotation, and the dead
+// mark, which is process-lifetime and would otherwise outlive the credential
+// that earned it. A no-op for a credential never seen.
+func (m *Manager) Forget(credID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.oauth, credID)
+}
+
 func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authorizer, error) {
 	if m.deps.OAuth == nil {
 		return nil, fmt.Errorf("provider %q uses oauth but no preset data is available", t.ProviderID)
