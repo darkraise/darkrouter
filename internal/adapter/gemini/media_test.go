@@ -63,14 +63,25 @@ func TestPartPassesAFilesAPIURIThrough(t *testing.T) {
 	}
 }
 
-func TestPartInlinesAPublicURL(t *testing.T) {
+// localFetcher is a Fetcher whose dial-time egress guard is lifted, because
+// every httptest server listens on loopback and the guard exists precisely to
+// refuse that. The tests that use it are about what happens once a connection
+// is made — the size cap, a non-2xx status, the base64 round trip. The guard
+// itself is tested in ssrf_test.go, against an unmodified NewFetcher.
+func localFetcher() *Fetcher {
+	f := NewFetcher()
+	f.Client.Transport = http.DefaultTransport
+	return f
+}
+
+func TestPartInlinesAReachableURL(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte{0x89, 0x50, 0x4e, 0x47})
 	}))
 	defer up.Close()
 
-	got, warns := NewFetcher().part(context.Background(), &ir.Media{URL: up.URL + "/a.png"}, "image")
+	got, warns := localFetcher().part(context.Background(), &ir.Media{URL: up.URL + "/a.png"}, "image")
 	if len(warns) != 0 {
 		t.Fatalf("warnings = %+v", warns)
 	}
@@ -92,13 +103,16 @@ func TestPartDropsAnOversizedURL(t *testing.T) {
 	}))
 	defer up.Close()
 
-	f := NewFetcher()
+	f := localFetcher()
 	f.MaxBytes = 10
 	got, warns := f.part(context.Background(), &ir.Media{URL: up.URL + "/big.png"}, "image")
 	if got != nil {
 		t.Fatalf("part = %v, want nil", got)
 	}
-	if !hasWarning(warns, "messages[].image") {
+	// The reason, not just the warning: the drop has to be the size cap rather
+	// than any other refusal on the way to it.
+	if !hasWarning(warns, "messages[].image") ||
+		!strings.Contains(warns[0].Reason, "exceeded the inline cap") {
 		t.Errorf("warnings = %+v", warns)
 	}
 }
@@ -109,9 +123,12 @@ func TestPartDropsAFailedFetch(t *testing.T) {
 	}))
 	defer up.Close()
 
-	got, warns := NewFetcher().part(context.Background(), &ir.Media{URL: up.URL + "/gone.png"}, "image")
+	got, warns := localFetcher().part(context.Background(), &ir.Media{URL: up.URL + "/gone.png"}, "image")
 	if got != nil || !hasWarning(warns, "messages[].image") {
 		t.Fatalf("part = %v, warnings = %+v", got, warns)
+	}
+	if !strings.Contains(warns[0].Reason, "did not return 2xx") {
+		t.Errorf("reason = %q, want the status to be what dropped it", warns[0].Reason)
 	}
 }
 
@@ -139,7 +156,7 @@ func TestADisabledFetcherDropsRemoteURLsWithAWarning(t *testing.T) {
 	}))
 	defer up.Close()
 
-	f := NewFetcher()
+	f := localFetcher()
 	f.Inline = false
 	got, warns := f.part(context.Background(), &ir.Media{URL: up.URL + "/a.png"}, "image")
 	if got != nil {
