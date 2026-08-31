@@ -7,8 +7,9 @@
  * .unit, .micro, .prose, .legend-caps, .section-title, .region, .measure,
  * .combo (+ -trigger/-chevron), .switch (+ -track/-knob/-label).
  * Reused from earlier screens' partials: .json-tree and its key/string/
- * punct/toggle/depth family plus .readout-tile and .trace-id (Task 7),
- * .range-track, .range-fill, .range-input and .link-out (Task 12).
+ * punct/toggle/depth family plus .readout-tile and .trace-id (Request
+ * trace), .range-track, .range-fill, .range-input and .link-out (the model
+ * catalog).
  *
  * Everything below is prefixed pg- because three other screens are being
  * drawn against this stylesheet at the same time and a bare .turn or

@@ -574,8 +574,8 @@ a.row { text-decoration: none; }
 
 /* --- State pip -----------------------------------------------------
    A provider identity pip: what a provider IS. Colour comes from a
-   data-state attribute, not a modifier class, since Task 2 owns no screen
-   that needs named variants yet. */
+   data-state attribute, not a modifier class, since the shared kit owns no
+   screen that needs named variants yet. */
 
 .state-pip {
   display: inline-block;
