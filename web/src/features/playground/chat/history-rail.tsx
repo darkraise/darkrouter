@@ -1,6 +1,6 @@
 import { Button } from "darkraise-ui"
 import { MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react"
-import { relativeTime } from "../../providers/test-log-tab"
+import { relativeTime } from "../../../lib/time"
 import type { PlaygroundConversation } from "../../../lib/api-types"
 
 /**
