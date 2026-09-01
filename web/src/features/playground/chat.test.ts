@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { drainSSE, extractUnaryText } from "./lib/stream"
+import { drainSSE, extractUnaryReasoning, extractUnaryText } from "./lib/stream"
 import { parseTools, chatBody, seedFromTrace } from "./lib/request"
 import type { RequestTrace } from "../../lib/api-types"
 
@@ -109,7 +109,7 @@ describe("drainSSE", () => {
   })
 
   it("ignores the openai [DONE] sentinel", () => {
-    expect(drainSSE("data: [DONE]\n\n", "openai")).toEqual({ text: "", rest: "" })
+    expect(drainSSE("data: [DONE]\n\n", "openai")).toEqual({ text: "", reasoning: "", rest: "" })
   })
 
   it("reads text only from an anthropic content_block_delta frame", () => {
@@ -124,7 +124,7 @@ describe("drainSSE", () => {
     expect(drainSSE(buffer, "anthropic").text).toBe("Hello")
   })
 
-  it("ignores an anthropic thinking_delta, which carries no `text`", () => {
+  it("keeps an anthropic thinking_delta out of the answer", () => {
     const frame =
       'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reasoning..."}}\n\n'
     expect(drainSSE(frame, "anthropic").text).toBe("")
@@ -142,6 +142,49 @@ describe("drainSSE", () => {
     const frame =
       'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"thinking","thought":true},{"text":"answer"}]},"index":0}]}\n\n'
     expect(drainSSE(frame, "gemini").text).toBe("answer")
+  })
+
+  it("reads openai reasoning out of its own field, not the answer's", () => {
+    // The two arrive on the same frame shape under different names, and
+    // splicing them would put a paragraph of the model's working in front of
+    // the sentence it was asked for.
+    const frame =
+      'data: {"choices":[{"delta":{"reasoning_content":"let me think"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":"42"}}]}\n\n'
+    const out = drainSSE(frame, "openai")
+    expect(out.text).toBe("42")
+    expect(out.reasoning).toBe("let me think")
+  })
+
+  it("reads openai reasoning under the upstream's own spelling too", () => {
+    // On the passthrough path the client sees the provider's body, not the
+    // gateway's translation of it. Groq streams `reasoning` beside a
+    // `channel` marker and never `reasoning_content`, so reading only the
+    // gateway's spelling made every reasoning model reached that way look
+    // like it had not reasoned. Fixture copied off the live wire.
+    const frame =
+      'data: {"choices":[{"index":0,"delta":{"reasoning":"We need","channel":"analysis"}}]}\n\n' +
+      'data: {"choices":[{"index":0,"delta":{"content":"5 minutes"}}]}\n\n'
+    const out = drainSSE(frame, "openai")
+    expect(out.reasoning).toBe("We need")
+    expect(out.text).toBe("5 minutes")
+  })
+
+  it("reads an anthropic thinking_delta as reasoning", () => {
+    const frame =
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"weighing it"}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}\n\n'
+    const out = drainSSE(frame, "anthropic")
+    expect(out.text).toBe("done")
+    expect(out.reasoning).toBe("weighing it")
+  })
+
+  it("reads a gemini thought part as reasoning", () => {
+    const frame =
+      'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"thinking","thought":true},{"text":"answer"}]},"index":0}]}\n\n'
+    const out = drainSSE(frame, "gemini")
+    expect(out.text).toBe("answer")
+    expect(out.reasoning).toBe("thinking")
   })
 
   it("holds an incomplete frame back for the next chunk", () => {
@@ -190,5 +233,48 @@ describe("extractUnaryText", () => {
       modelVersion: "m", responseId: "r1",
     })
     expect(extractUnaryText("gemini", body)).toBe("Hello")
+  })
+})
+
+describe("extractUnaryReasoning", () => {
+  it("reads openai's reasoning_content off the message", () => {
+    const body = JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "42", reasoning_content: "working" } }],
+    })
+    expect(extractUnaryReasoning("openai", body)).toBe("working")
+    expect(extractUnaryText("openai", body)).toBe("42")
+  })
+
+  it("reads openai's bare `reasoning` off the message as well", () => {
+    const body = JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "42", reasoning: "working" } }],
+    })
+    expect(extractUnaryReasoning("openai", body)).toBe("working")
+  })
+
+  it("reads anthropic's thinking blocks and leaves the text alone", () => {
+    const body = JSON.stringify({
+      content: [
+        { type: "thinking", thinking: "weighing it", signature: "sig" },
+        { type: "text", text: "done" },
+      ],
+    })
+    expect(extractUnaryReasoning("anthropic", body)).toBe("weighing it")
+    expect(extractUnaryText("anthropic", body)).toBe("done")
+  })
+
+  it("does not collect a redacted_thinking block, which is not readable", () => {
+    // It carries ciphertext the client is not meant to read, so rendering it
+    // under "Thinking" would show an operator a wall of base64 and call it
+    // the model's reasoning.
+    const body = JSON.stringify({
+      content: [{ type: "redacted_thinking", data: "AAAAB3Nz" }, { type: "text", text: "done" }],
+    })
+    expect(extractUnaryReasoning("anthropic", body)).toBe("")
+  })
+
+  it("says nothing rather than throwing for a body that carries none", () => {
+    expect(extractUnaryReasoning("gemini", JSON.stringify({ candidates: [] }))).toBe("")
+    expect(extractUnaryReasoning("openai", "not json")).toBe("")
   })
 })

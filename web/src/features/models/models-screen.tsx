@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react"
-import { PageHeader } from "darkraise-ui/layout"
 import { Link } from "@tanstack/react-router"
 import { Badge, Button } from "darkraise-ui"
 import { ModelCombobox } from "../shell/model-combobox"
@@ -254,11 +253,6 @@ export function ModelsScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Models"
-        description="What it can route to, and which providers serve each one"
-      />
-
       {/* Suggesting, not constraining: both stay substring filters, so a
           partial name still narrows the table — but the catalogue is right
           here, and making an operator remember an exact model id to filter by

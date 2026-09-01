@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Button, Textarea } from "darkraise-ui"
+import { Plus } from "lucide-react"
+import { ConfigPane } from "./config-pane/config-pane"
 import { stream, type StreamStart } from "../../lib/api"
 import { chatBody } from "./lib/request"
 import { drainSSE } from "./lib/stream"
@@ -56,11 +58,26 @@ async function runColumn(
   }
 }
 
-/** Up to four models against the same prompt, run concurrently through the
- *  exact request chat sends — chatBody is shared rather than rebuilt, so a
- *  difference in the transcripts reflects the models, not a second, slightly
- *  different request shape. */
-export function Compare({ config }: { config: PlaygroundConfig }) {
+/**
+ * Up to four models against the same prompt, run concurrently through the
+ * exact request chat sends — chatBody is shared rather than rebuilt, so a
+ * difference in the transcripts reflects the models, not a second, slightly
+ * different request shape.
+ *
+ * The count of models is stated above the control that changes it. Adding a
+ * third model was always possible and never visible: "Add a column" sat as a
+ * ghost button beside Run, said nothing about how many were already being
+ * compared, and gave no reason when it stopped working at four. The cap is
+ * the readable width of a column, so it is worth saying rather than enforcing
+ * silently.
+ */
+export function Compare({
+  config,
+  onConfigChange,
+}: {
+  config: PlaygroundConfig
+  onConfigChange: (next: PlaygroundConfig) => void
+}) {
   const counter = useRef(MIN_COLUMNS)
   // One per column, so removing a column can stop the request it started.
   // Without this the orphan keeps arriving into state nothing renders, and
@@ -120,47 +137,90 @@ export function Compare({ config }: { config: PlaygroundConfig }) {
     }
   }
 
+  const atCap = columns.length >= MAX_COLUMNS
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
-      <Textarea placeholder="Prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <div className="flex items-center gap-2">
-        <Button onClick={run} disabled={!canRun}>
-          {busy ? "Running…" : "Run"}
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={columns.length >= MAX_COLUMNS}
-          onClick={() => setColumns((cs) => [...cs, emptyColumn(`c${counter.current++}`)])}
-        >
-          Add a column
-        </Button>
-      </div>
-      {/* Columns have a floor and the row scrolls past it. Left to shrink
-          freely, a fourth column on a narrow screen squeezes the model
-          combobox down to its chevron, and a comparison whose columns no
-          longer say which model they ran is worse than one that scrolls. */}
-      <div className="overflow-x-auto">
-        <div
-          className="grid gap-4"
-          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(14rem, 1fr))` }}
-        >
-          {columns.map((column, index) => (
-            <CompareColumn
-              key={column.id}
-              column={column}
-              index={index}
-              candidates={candidates}
-              loading={loading}
-              removable={columns.length > MIN_COLUMNS}
-              onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
-              onRemove={() => {
-                abortColumn(column.id)
-                setColumns((cs) => cs.filter((c) => c.id !== column.id))
-              }}
-            />
-          ))}
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+        <Textarea
+          aria-label="Prompt"
+          placeholder="Prompt"
+          rows={3}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-[hsl(var(--legend))]">
+            Models{" "}
+            <span className="tabular-nums text-[hsl(var(--foreground))]">
+              {columns.length} / {MAX_COLUMNS}
+            </span>
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={atCap}
+            // Said on the control rather than left to be inferred from a
+            // button that has quietly stopped responding.
+            title={
+              atCap
+                ? "Four is the most that stays readable side by side"
+                : "Compare another model against the same prompt"
+            }
+            onClick={() => setColumns((cs) => [...cs, emptyColumn(`c${counter.current++}`)])}
+          >
+            <Plus className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
+            Add model
+          </Button>
+          {atCap ? (
+            <span className="text-sm text-[hsl(var(--legend))]">
+              Four is the most that stays readable side by side.
+            </span>
+          ) : null}
+          <Button className="ml-auto" onClick={run} disabled={!canRun}>
+            {busy ? "Running…" : "Run"}
+          </Button>
+        </div>
+
+        {/* Columns have a floor and the row scrolls past it. Left to shrink
+            freely, a fourth column on a narrow screen squeezes the model
+            combobox down to its chevron, and a comparison whose columns no
+            longer say which model they ran is worse than one that scrolls. */}
+        <div className="overflow-x-auto">
+          <div
+            className="grid gap-4"
+            style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(14rem, 1fr))` }}
+          >
+            {columns.map((column, index) => (
+              <CompareColumn
+                key={column.id}
+                column={column}
+                index={index}
+                candidates={candidates}
+                loading={loading}
+                removable={columns.length > MIN_COLUMNS}
+                onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
+                onRemove={() => {
+                  abortColumn(column.id)
+                  setColumns((cs) => cs.filter((c) => c.id !== column.id))
+                }}
+              />
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* Every column is sent under these, which is what makes the comparison
+          one. The model field is off: naming a single model here would be a
+          control contradicting the four beside it.
+
+          The column is drawn here rather than by the pane. The pane is three
+          screens' worth of fields and one screen's worth of chrome would have
+          to be wrong on two of them. */}
+      <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-l p-4 lg:w-80">
+        <ConfigPane config={config} onChange={onConfigChange} showModel={false} />
+      </aside>
     </div>
   )
 }

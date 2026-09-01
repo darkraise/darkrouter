@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react"
 import { describe, it, expect } from "vitest"
-import { ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection } from "./trace-drawer"
+import {
+  ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection, metaValue,
+} from "./trace-drawer"
 import type { TraceAttempt } from "../../lib/api-types"
 
 const attempt = (over: Partial<TraceAttempt> & { seq: number }): TraceAttempt => ({
@@ -133,5 +135,25 @@ describe("the surface metadata section", () => {
     render(<SurfaceMetaSection meta={{ region: "us-east" }} />)
     expect(screen.getByText("region")).toBeInTheDocument()
     expect(screen.getByText("us-east")).toBeInTheDocument()
+  })
+})
+
+describe("a surface metadata value", () => {
+  it("prints a scalar as itself", () => {
+    expect(metaValue(3)).toBe("3")
+    expect(metaValue("wav")).toBe("wav")
+    expect(metaValue(false)).toBe("false")
+  })
+
+  it("prints a nested value as JSON rather than as [object Object]", () => {
+    // surface_meta is Record<string, unknown> and is written from arbitrary
+    // JSON on the Go side. Every writer emits scalars today; nothing in the
+    // type says the next one must.
+    expect(metaValue({ w: 1024, h: 768 })).toBe('{"w":1024,"h":768}')
+    expect(metaValue(["a", "b"])).toBe('["a","b"]')
+  })
+
+  it("does not print null as the word object", () => {
+    expect(metaValue(null)).toBe("null")
   })
 })

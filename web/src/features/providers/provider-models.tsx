@@ -1,5 +1,8 @@
 import { useState } from "react"
-import { Badge, Card, Input } from "darkraise-ui"
+import {
+  Badge, Card, Input,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "darkraise-ui"
 import { EmptyState } from "../shell/empty-state"
 import type { Model } from "../../lib/api-types"
 import { priceLabel } from "../models/models-screen"
@@ -67,42 +70,59 @@ export function ProviderModels({ models, loading }: { models: Model[]; loading: 
           No model here matches “{q.trim()}”.
         </p>
       ) : (
-        <ul className="flex max-h-96 flex-col divide-y divide-[hsl(var(--border))] overflow-y-auto">
-          {shown.map((m) => (
-            <li key={m.model} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-              <span className="min-w-0 flex-1 truncate font-mono text-sm" title={m.model}>
-                {m.model}
-              </span>
-              <span className="flex shrink-0 flex-wrap items-center gap-1">
-                {/* Only when it is not the default: llm on every row of a list
-                    that is mostly llm is noise, and embedding on the one row
-                    that is not is the fact worth reading. */}
-                {m.surfaces
-                  .filter((surface) => surface !== "llm")
-                  .map((surface) => (
-                    <Badge key={surface} variant="secondary">
-                      {surface}
-                    </Badge>
-                  ))}
-                {m.tools && <Badge variant="outline">tools</Badge>}
-                {m.vision && <Badge variant="outline">vision</Badge>}
-                {m.reasoning && <Badge variant="outline">reasoning</Badge>}
-                {/* Guessed rather than read: §6.4 routes these with a warning,
-                    and an operator needs to know which they are. */}
-                {m.inferred && <Badge variant="amber">inferred</Badge>}
-              </span>
-              <span className="w-12 shrink-0 text-right font-mono text-sm text-[hsl(var(--legend))]">
-                {contextLabel(m.context_window)}
-              </span>
-              <span
-                className="w-40 shrink-0 text-right font-mono text-sm text-[hsl(var(--legend))]"
-                title="input / output per million tokens"
-              >
-                {priceLabel(m.pricing)}
-              </span>
-            </li>
-          ))}
-        </ul>
+        // A table, because it is one: four columns, and until now none of
+        // them was named. The context and price columns were explained only
+        // by a title attribute, which never appears on touch and never on
+        // keyboard focus -- so two of the four columns were unlabelled for
+        // most readers. Scrolls rather than paginates, as before: the list is
+        // bounded by one provider's catalogue.
+        <div className="max-h-96 overflow-y-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Model</TableHead>
+                <TableHead>Capabilities</TableHead>
+                <TableHead className="text-right">Context</TableHead>
+                <TableHead className="text-right">$ / M tokens</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {shown.map((m) => (
+                <TableRow key={m.model}>
+                  <TableCell className="max-w-0 truncate font-mono" title={m.model}>
+                    {m.model}
+                  </TableCell>
+                  <TableCell>
+                    <span className="flex flex-wrap items-center gap-1">
+                      {/* Only when it is not the default: llm on every row of
+                          a list that is mostly llm is noise, and embedding on
+                          the one row that is not is the fact worth reading. */}
+                      {m.surfaces
+                        .filter((surface) => surface !== "llm")
+                        .map((surface) => (
+                          <Badge key={surface} variant="secondary">
+                            {surface}
+                          </Badge>
+                        ))}
+                      {m.tools && <Badge variant="outline">tools</Badge>}
+                      {m.vision && <Badge variant="outline">vision</Badge>}
+                      {m.reasoning && <Badge variant="outline">reasoning</Badge>}
+                      {/* Guessed rather than read: §6.4 routes these with a
+                          warning, and an operator needs to know which. */}
+                      {m.inferred && <Badge variant="amber">inferred</Badge>}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-[hsl(var(--legend))]">
+                    {contextLabel(m.context_window)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono whitespace-nowrap text-[hsl(var(--legend))]">
+                    {priceLabel(m.pricing)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </Card>
   )

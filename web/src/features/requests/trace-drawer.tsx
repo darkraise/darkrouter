@@ -115,6 +115,25 @@ export function BodiesPanel({ bodies }: { bodies?: TraceBody[] }) {
  * mistake the Bodies panel exists to avoid — so this checks key count and
  * renders nothing, heading included, when there is nothing to show.
  */
+/**
+ * One metadata value, rendered so a reader can act on it.
+ *
+ * `String(value)` prints `[object Object]` for anything that is not a scalar,
+ * and `surface_meta` is typed `Record<string, unknown>` — every writer in
+ * internal/exec emits scalars today, but nothing in the type or the column
+ * says they must, and `[object Object]` is the sort of thing that ships
+ * because no test ever handed it an object.
+ *
+ * Not a tree: this is a flat map of two or three values, and a two-column
+ * list reads better than a collapsible view of the same thing. JSON is the
+ * fallback for the shape that has no better rendering.
+ */
+export function metaValue(value: unknown): string {
+  if (value === null) return "null"
+  if (typeof value === "object") return JSON.stringify(value)
+  return String(value)
+}
+
 export function SurfaceMetaSection({
   meta,
 }: {
@@ -129,7 +148,7 @@ export function SurfaceMetaSection({
         {entries.map(([key, value]) => (
           <Fragment key={key}>
             <dt className="text-[hsl(var(--legend))]">{key}</dt>
-            <dd className="font-mono">{String(value)}</dd>
+            <dd className="font-mono break-all">{metaValue(value)}</dd>
           </Fragment>
         ))}
       </dl>
@@ -227,7 +246,17 @@ export function TraceDrawer({
                       <p className="text-sm text-[hsl(var(--legend))]">
                         {row.label} · {row.ms.toLocaleString()}ms
                       </p>
-                      <div className="h-2 w-full rounded bg-[hsl(var(--muted))]">
+                      {/* The bar is the only part of this row that carries
+                          the proportion, and it had no role, so it did not
+                          exist for assistive tech. Hidden rather than
+                          labelled: the paragraph above already states the
+                          phase and its milliseconds, and a progressbar
+                          announcing the same number again is one reading
+                          twice. */}
+                      <div
+                        className="h-2 w-full rounded bg-[hsl(var(--muted))]"
+                        aria-hidden="true"
+                      >
                         <div
                           className="h-2 rounded bg-[hsl(var(--legend))]"
                           style={{ width: `${row.fraction * 100}%` }}

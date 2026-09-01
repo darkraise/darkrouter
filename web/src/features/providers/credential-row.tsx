@@ -1,5 +1,10 @@
 import { useState } from "react"
-import { Badge, Button, Input, TableCell, TableRow } from "darkraise-ui"
+import {
+  Badge, Button,
+  PasswordInput, PasswordInputControl, PasswordInputField,
+  PasswordInputVisibilityTrigger,
+  TableCell, TableRow,
+} from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
@@ -71,20 +76,23 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
         <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
           {replacing ? (
             <>
-              <Input
-                placeholder="new secret"
-                type="password"
-                autoFocus
-                value={draftSecret}
-                onChange={(e) => setDraftSecret(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setReplacing(false)
-                    setDraftSecret("")
-                  }
-                }}
-                className="w-40"
-              />
+              <PasswordInput className="w-40">
+                <PasswordInputControl>
+                  <PasswordInputField
+                    placeholder="new secret"
+                    autoFocus
+                    value={draftSecret}
+                    onChange={(e) => setDraftSecret(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setReplacing(false)
+                        setDraftSecret("")
+                      }
+                    }}
+                  />
+                  <PasswordInputVisibilityTrigger />
+                </PasswordInputControl>
+              </PasswordInput>
               <Button
                 size="sm"
                 disabled={draftSecret === ""}

@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react"
 import { AssistantTurn, UserTurn, type TurnRoute } from "./message"
+import type { TurnThinking } from "./lib/use-chat-run"
 import type { PlaygroundMessage } from "../../lib/api-types"
 
 export function Transcript({
   messages,
   routes,
+  thinking = {},
   busy,
   model,
   seedNote,
@@ -12,6 +14,8 @@ export function Transcript({
 }: {
   messages: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
+  /** The model's own working per answer, where it sent any. */
+  thinking?: Record<number, TurnThinking>
   busy: boolean
   model: string
   seedNote?: string
@@ -45,6 +49,7 @@ export function Transcript({
                 key={i}
                 text={m.content}
                 route={routes[i]}
+                thinking={thinking[i]}
                 // Only the last turn can still be arriving.
                 streaming={busy && i === messages.length - 1}
                 quiet={quiet}

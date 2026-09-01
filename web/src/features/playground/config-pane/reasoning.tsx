@@ -1,7 +1,8 @@
 import {
-  Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "darkraise-ui"
 import { GatedField, retainedValueClass } from "./gated-field"
+import { NumberBox } from "../../shell/number-box"
 import { reasonFor } from "../dialect-support"
 import type { PlaygroundConfig } from "../config"
 
@@ -52,12 +53,14 @@ export function Reasoning({
 
       <GatedField reason={budgetWhy}>
         <Label htmlFor="pg-budget">Budget</Label>
-        <Input
-          id="pg-budget" type="number" placeholder="tokens"
+        <NumberBox
+          id="pg-budget"
+          suffix="tokens"
+          precision={0}
           disabled={budgetWhy !== null}
+          retainValue
           value={config.reasoningBudget}
-          onChange={(e) => set("reasoningBudget", e.target.value)}
-          className={retainedValueClass(config.reasoningBudget)}
+          onChange={(next) => set("reasoningBudget", next)}
         />
       </GatedField>
     </div>

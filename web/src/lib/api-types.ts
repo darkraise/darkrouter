@@ -109,6 +109,10 @@ export type RequestRow = {
   tokens_in: number
   tokens_out: number
   cache_read_tokens: number
+  /** Output tokens the model spent reasoning rather than answering. Counted
+   *  inside `tokens_out` rather than beside it, so it explains that total
+   *  instead of adding to it. Served on the trace only. */
+  reasoning_tokens?: number
   cost_micros: number | null
   ttft_ms: number | null
   total_ms: number | null

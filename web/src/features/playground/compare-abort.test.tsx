@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Compare } from "./compare"
@@ -57,11 +58,30 @@ async function nameEveryColumn() {
 }
 
 async function startARun() {
-  render(<Compare config={{ ...emptyConfig(), model: "gpt" }} />)
+  renderCompare({ ...emptyConfig(), model: "gpt" })
   await nameEveryColumn()
   await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
   await userEvent.click(screen.getByRole("button", { name: "Run" }))
   await waitFor(() => expect(signals).toHaveLength(2))
+}
+
+// Compare carries the request pane that every column is sent under, and the
+// pane's preset picker reads a list. Stubbed rather than served, so these
+// tests stay about the columns.
+vi.mock("../../lib/queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queries")>()),
+  usePlaygroundPresets: () => ({ data: [] }),
+}))
+
+/** Compare carries the request pane now, whose preset picker both reads a
+ *  query and owns a mutation. Both need a client above them. */
+function renderCompare(config: Parameters<typeof Compare>[0]["config"]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={client}>
+      <Compare config={config} onConfigChange={() => {}} />
+    </QueryClientProvider>,
+  )
 }
 
 describe("a Compare column that stops being watched", () => {
@@ -75,8 +95,8 @@ describe("a Compare column that stops being watched", () => {
     // Left running, the orphan keeps costing tokens for output nothing renders,
     // and busy — which counts streaming columns — drops while it arrives, so
     // Run re-enables mid-stream.
-    render(<Compare config={{ ...emptyConfig(), model: "gpt" }} />)
-    await userEvent.click(screen.getByRole("button", { name: "Add a column" }))
+    renderCompare({ ...emptyConfig(), model: "gpt" })
+    await userEvent.click(screen.getByRole("button", { name: "Add model" }))
     await nameEveryColumn()
     await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
     await userEvent.click(screen.getByRole("button", { name: "Run" }))
@@ -95,7 +115,7 @@ describe("a Compare column that stops being watched", () => {
     await startARun()
     expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
 
-    await userEvent.click(screen.getByRole("button", { name: "Add a column" }))
+    await userEvent.click(screen.getByRole("button", { name: "Add model" }))
     const third = screen.getAllByRole("textbox", { name: /model/i })[2]!
     await userEvent.type(third, "gpt")
     await userEvent.click(screen.getAllByRole("button", { name: /remove/i }).at(-1)!)

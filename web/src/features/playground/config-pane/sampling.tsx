@@ -1,5 +1,6 @@
-import { Input, Label, Switch, Textarea } from "darkraise-ui"
+import { Label, Switch, Textarea } from "darkraise-ui"
 import { GatedField, retainedValueClass } from "./gated-field"
+import { NumberBox } from "../../shell/number-box"
 import { reasonFor } from "../dialect-support"
 import type { PlaygroundConfig } from "../config"
 
@@ -19,22 +20,24 @@ export function Sampling({
       <div className="flex gap-2">
         <GatedField reason={why("temperature")}>
           <Label htmlFor="pg-temp">Temperature</Label>
-          <Input
-            id="pg-temp" type="number" placeholder="default"
+          <NumberBox
+            id="pg-temp"
+            placeholder="default" step={0.1}
             disabled={why("temperature") !== null}
+            retainValue
             value={config.temperature}
-            onChange={(e) => set("temperature", e.target.value)}
-            className={retainedValueClass(config.temperature)}
+            onChange={(next) => set("temperature", next)}
           />
         </GatedField>
         <GatedField reason={why("maxTokens")}>
           <Label htmlFor="pg-max">Max tokens</Label>
-          <Input
-            id="pg-max" type="number" placeholder="default"
+          <NumberBox
+            id="pg-max"
+            placeholder="default" precision={0}
             disabled={why("maxTokens") !== null}
+            retainValue
             value={config.maxTokens}
-            onChange={(e) => set("maxTokens", e.target.value)}
-            className={retainedValueClass(config.maxTokens)}
+            onChange={(next) => set("maxTokens", next)}
           />
         </GatedField>
       </div>
@@ -42,22 +45,24 @@ export function Sampling({
       <div className="flex gap-2">
         <GatedField reason={why("topP")}>
           <Label htmlFor="pg-topp">Top P</Label>
-          <Input
-            id="pg-topp" type="number" step="0.01" placeholder="default"
+          <NumberBox
+            id="pg-topp"
+            placeholder="default" step={0.01}
             disabled={why("topP") !== null}
+            retainValue
             value={config.topP}
-            onChange={(e) => set("topP", e.target.value)}
-            className={retainedValueClass(config.topP)}
+            onChange={(next) => set("topP", next)}
           />
         </GatedField>
         <GatedField reason={why("topK")}>
           <Label htmlFor="pg-topk">Top K</Label>
-          <Input
-            id="pg-topk" type="number" placeholder="default"
+          <NumberBox
+            id="pg-topk"
+            placeholder="default" precision={0}
             disabled={why("topK") !== null}
+            retainValue
             value={config.topK}
-            onChange={(e) => set("topK", e.target.value)}
-            className={retainedValueClass(config.topK)}
+            onChange={(next) => set("topK", next)}
           />
         </GatedField>
       </div>
@@ -73,10 +78,19 @@ export function Sampling({
         />
       </GatedField>
 
-      <label className="flex items-center gap-2 text-sm">
-        <Switch checked={config.stream} onCheckedChange={(next) => set("stream", next)} />
-        Stream the reply
-      </label>
+      {/* Named through htmlFor rather than by wrapping. Switch renders a
+          `role="switch"` button, and a button takes its accessible name from
+          aria-label or its own subtree — never from an enclosing label — so
+          the wrapped version announced as "switch, off" with no indication of
+          what it switched. */}
+      <div className="flex items-center gap-2">
+        <Switch
+          id="pg-stream"
+          checked={config.stream}
+          onCheckedChange={(next) => set("stream", next)}
+        />
+        <Label htmlFor="pg-stream">Stream the reply</Label>
+      </div>
     </div>
   )
 }

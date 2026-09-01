@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { PageHeader } from "darkraise-ui/layout"
 import {
   Badge,
   Button,
@@ -147,11 +146,6 @@ export function ConnectScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Connect"
-        description="How to point a client at this gateway"
-      />
-
       <Card className="mb-6 p-4">
         <h2 className="mb-3 text-sm font-medium">Base URLs</h2>
         <div className="flex flex-col gap-2">
@@ -245,7 +239,14 @@ export function ConnectScreen() {
         </div>
 
         {minted?.secret && (
-          <div className="mt-4 rounded border border-[hsl(var(--warning))] p-3">
+          // A region rather than an alert: role="alert" would read the
+          // secret itself aloud the moment it appeared. This names the block
+          // so it can be found, and leaves reading it to the operator.
+          <div
+            role="region"
+            aria-label="New key"
+            className="mt-4 rounded border border-[hsl(var(--warning))] p-3"
+          >
             <p className="text-sm font-medium">
               Copy this now — it is not stored and cannot be shown again.
             </p>

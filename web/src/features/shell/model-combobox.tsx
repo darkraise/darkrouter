@@ -117,11 +117,15 @@ export function ModelCombobox({
   emptyText = "Nothing in the catalogue matches. It will still be sent.",
   loading = false,
   className,
+  id,
 }: {
   value: string
   onChange: (next: string) => void
   candidates: string[]
   label: string
+  /** Set where a visible <Label> stands over the field, so clicking the label
+   *  reaches the input. The accessible name still comes from `label`. */
+  id?: string
   placeholder?: string
   /** What the popover says when nothing matches. The default speaks for a
    *  field whose value is about to be sent; a filter is not sending anything
@@ -161,6 +165,7 @@ export function ModelCombobox({
     >
       <ComboboxControl className="relative">
         <ComboboxInput
+          id={id}
           aria-label={label}
           className="pr-8 font-mono text-sm"
           placeholder={placeholder}

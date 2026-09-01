@@ -220,8 +220,8 @@ describe("running one chat turn", () => {
         {
           1: {
             requestId: "01OLD", provider: "", model: "",
-            totalMs: null, tokensIn: null, tokensOut: null, costMicros: null,
-            failedOver: [], warnings: [],
+            totalMs: null, tokensIn: null, tokensOut: null, reasoningTokens: 0,
+            costMicros: null, failedOver: [], warnings: [],
           },
         },
       ),

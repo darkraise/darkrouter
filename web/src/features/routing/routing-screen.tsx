@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react"
 import { Plus } from "lucide-react"
-import { PageHeader } from "darkraise-ui/layout"
 import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
@@ -483,11 +482,6 @@ export function RoutingScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Routing"
-        description="How it chooses, and what it would choose right now"
-      />
-
       <StrategyCard policy={policy.data} providers={providerRows} />
 
       {aliases.data && (

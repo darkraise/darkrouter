@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { PageHeader } from "darkraise-ui/layout"
 import { Banner, Button, Card } from "darkraise-ui"
 import { useConfig, useOverview, useProviders, useUsage } from "../../lib/queries"
 import type { FailoverRow, Overview, UsageRow } from "../../lib/api-types"
@@ -233,11 +232,6 @@ export function OverviewScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Overview"
-        description="Is it working, and what did it just do"
-      />
-
       {config.data && !config.data.valid && (
         <Banner variant="destructive" className="mb-6">
           <p className="text-sm font-medium">Config invalid</p>

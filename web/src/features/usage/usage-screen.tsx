@@ -1,6 +1,5 @@
 import "./chart-scope.css"
 import { Link } from "@tanstack/react-router"
-import { PageHeader } from "darkraise-ui/layout"
 import {
   Button,
   Card,
@@ -219,7 +218,6 @@ export function UsageScreen() {
 
   return (
     <>
-      <PageHeader title="Usage" description="What it cost, and where it went" />
       {/* Tokens burned by an attempt that failed before commit never reach
           usage_daily, so every figure here understates reality exactly when
           failover fires. Fixing the underlying gap is its own project; until

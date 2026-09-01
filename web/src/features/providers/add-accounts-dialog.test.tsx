@@ -104,12 +104,15 @@ describe("planFor", () => {
   })
 })
 
+// The picker rows are listbox options, not toggle buttons: single choice
+// among two hundred, which is what "option" means and what aria-pressed did
+// not. Selecting one still advances the wizard.
 describe("the wizard", () => {
   it("picks a provider, takes the key, and writes on the one button", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-aaaa")
 
     // Nothing is sent while the form is being filled in.
@@ -135,7 +138,7 @@ describe("the wizard", () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-bbbb")
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
 
@@ -155,7 +158,7 @@ describe("the wizard", () => {
   it("will not submit with nothing to add", async () => {
     stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     expect(screen.getByRole("button", { name: /add account/i })).toBeDisabled()
   })
 
@@ -163,7 +166,7 @@ describe("the wizard", () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])], false)
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-bad")
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
 
@@ -182,7 +185,7 @@ describe("the wizard", () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])], false)
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-unchecked")
     await userEvent.click(screen.getByRole("checkbox", { name: /check every key/i }))
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
@@ -199,7 +202,7 @@ describe("the wizard", () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-aaaa")
     await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
     await userEvent.click(screen.getByRole("button", { name: /add account/i }))
@@ -229,7 +232,7 @@ describe("the wizard", () => {
     })
 
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
     await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nspare|sk-bbb")
     await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))
@@ -243,7 +246,7 @@ describe("the wizard", () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /groq/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
     await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nsk-bbb")
     await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))

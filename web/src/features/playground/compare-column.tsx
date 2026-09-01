@@ -30,7 +30,12 @@ const DOT: Record<ColumnStatus, string> = {
 /** Named rather than drawn only as a colour: a dot alone tells a screen
  *  reader nothing, and colour alone tells a colourblind reader nothing. */
 function StatusDot({ status }: { status: ColumnStatus }) {
-  return <span role="status" aria-label={status} className={`size-2 shrink-0 rounded-full ${DOT[status]}`} />
+  // role="img" rather than role="status": status is a live region, so a dot
+  // per column re-announced on every idle -> streaming -> done transition and
+  // four columns running at once talked over each other. The label is read
+  // when the dot is reached instead. target-pill.tsx names its state the same
+  // way.
+  return <span role="img" aria-label={status} className={`size-2 shrink-0 rounded-full ${DOT[status]}`} />
 }
 
 export function CompareColumn({
