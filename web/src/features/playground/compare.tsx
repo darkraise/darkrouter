@@ -25,7 +25,7 @@ async function runColumn(
   update: (fn: (c: Column) => Column) => void,
 ): Promise<void> {
   const started = performance.now()
-  update((c) => ({ ...emptyColumn(c.id), model: c.model, status: "streaming" }))
+  update((c) => ({ ...emptyColumn(c.id), model, status: "streaming" }))
   let buffer = ""
   try {
     const turns: PlaygroundMessage[] = [{ role: "user", content: prompt }]
@@ -48,7 +48,14 @@ async function runColumn(
     // An abort is the column being removed or the run being replaced, not a
     // provider failing. It leaves nothing behind: the column is either gone
     // or about to be reset by the run that replaced this one.
-    if ((err as Error).name === "AbortError") return
+    if ((err as Error).name === "AbortError") {
+      update((c) => ({
+        ...c,
+        status: "stopped",
+        latencyMs: performance.now() - started,
+      }))
+      return
+    }
     update((c) => ({
       ...c,
       error: (err as Error).message,
@@ -74,9 +81,11 @@ async function runColumn(
 export function Compare({
   config,
   onConfigChange,
+  active = true,
 }: {
   config: PlaygroundConfig
   onConfigChange: (next: PlaygroundConfig) => void
+  active?: boolean
 }) {
   const counter = useRef(MIN_COLUMNS)
   // One per column, so removing a column can stop the request it started.
@@ -111,6 +120,11 @@ export function Compare({
       live.clear()
     }
   }, [])
+
+  useEffect(() => {
+    if (active) return
+    for (const id of [...controllers.current.keys()]) abortColumn(id)
+  }, [active])
 
   function run() {
     if (!canRun) return
@@ -147,6 +161,7 @@ export function Compare({
           placeholder="Prompt"
           rows={3}
           value={prompt}
+          disabled={busy}
           onChange={(e) => setPrompt(e.target.value)}
         />
 
@@ -160,7 +175,7 @@ export function Compare({
           <Button
             variant="outline"
             size="sm"
-            disabled={atCap}
+            disabled={busy || atCap}
             // Said on the control rather than left to be inferred from a
             // button that has quietly stopped responding.
             title={
@@ -200,6 +215,7 @@ export function Compare({
                 candidates={candidates}
                 loading={loading}
                 removable={columns.length > MIN_COLUMNS}
+                disabled={busy}
                 onModel={(model) => updateColumn(column.id, (c) => ({ ...c, model }))}
                 onRemove={() => {
                   abortColumn(column.id)
@@ -219,7 +235,7 @@ export function Compare({
           screens' worth of fields and one screen's worth of chrome would have
           to be wrong on two of them. */}
       <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-l p-4 lg:w-80">
-        <ConfigPane config={config} onChange={onConfigChange} showModel={false} />
+        <ConfigPane config={config} onChange={onConfigChange} showModel={false} locked={busy} />
       </aside>
     </div>
   )

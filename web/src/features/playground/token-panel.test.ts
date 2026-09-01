@@ -12,6 +12,7 @@ function route(over: Partial<TurnRoute> = {}): TurnRoute {
     tokensOut: 50,
     reasoningTokens: 0,
     costMicros: 200,
+    costCoverage: "complete",
     failedOver: [],
     warnings: [],
     ...over,
@@ -27,15 +28,18 @@ describe("what a conversation has spent", () => {
     expect(total.tokensOut).toBe(100)
     expect(total.costMicros).toBe(400)
     expect(total.counted).toBe(2)
+    expect(total.priced).toBe(2)
+    expect(total.partialPrices).toBe(0)
   })
 
   it("counts a turn whose trace carried no price as spent but unpriced", () => {
     // A model with no pricing row still consumed tokens. Dropping the turn
     // would understate the context; inventing a cost would be worse.
-    const total = consumptionOf({ 1: route({ costMicros: null }) }, 1)
+    const total = consumptionOf({ 1: route({ costMicros: null, costCoverage: "unknown" }) }, 1)
     expect(total.tokensIn).toBe(100)
     expect(total.costMicros).toBe(0)
     expect(total.counted).toBe(1)
+    expect(total.priced).toBe(0)
   })
 
   it("skips a turn with no counts at all, and says how many it skipped", () => {
@@ -69,7 +73,19 @@ describe("what a conversation has spent", () => {
       reasoningTokens: 0,
       costMicros: 0,
       counted: 0,
+      priced: 0,
+      partialPrices: 0,
       turns: 0,
     })
+  })
+
+  it("sums known partial cost without presenting it as the whole bill", () => {
+    const total = consumptionOf({
+      1: route({ costMicros: 125, costCoverage: "partial" }),
+      3: route({ costMicros: 375, costCoverage: "complete" }),
+    }, 2)
+    expect(total.costMicros).toBe(500)
+    expect(total.priced).toBe(1)
+    expect(total.partialPrices).toBe(1)
   })
 })

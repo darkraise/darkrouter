@@ -3,9 +3,9 @@ import { AUX_SURFACES } from "./surfaces"
 import type { AuxSurface } from "../../../lib/api-types"
 
 /**
- * The six tools, as a rail rather than a tab strip.
+ * The seven tools, as a rail rather than a tab strip.
  *
- * A tab strip stretched edge to edge across the page put six equal-weight
+ * A tab strip stretched edge to edge across the page put equal-weight
  * words above a form and said nothing about what any of them did. The rail is
  * the same shape Chat's conversations take, so the two surfaces read as one
  * screen — and it has room for the line that says what each tool is for,

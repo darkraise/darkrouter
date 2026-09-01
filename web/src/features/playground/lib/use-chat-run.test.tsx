@@ -6,6 +6,9 @@ import { emptyConfig } from "../config"
 const frame = (text: string) =>
   `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
 
+const reasoningFrame = (text: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: text } }] })}\n\n`
+
 const streamMock = vi.hoisted(() => vi.fn())
 const traceMock = vi.hoisted(() => vi.fn())
 
@@ -87,6 +90,53 @@ describe("running one chat turn", () => {
     await waitFor(() => expect(result.current.busy).toBe(false))
     expect(result.current.messages[1]!.content).toBe("par")
     expect(result.current.error).toBe("")
+  })
+
+  it("settles unary reasoning when the complete response arrives", async () => {
+    yields(JSON.stringify({
+      choices: [{ message: { reasoning_content: "worked it out", content: "answer" } }],
+    }))
+    traceMock.mockResolvedValue(null)
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m", stream: false }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+
+    expect(result.current.thinking[1]?.text).toBe("worked it out")
+    expect(result.current.thinking[1]?.ms).toEqual(expect.any(Number))
+  })
+
+  it("settles streamed reasoning when the request fails", async () => {
+    streamMock.mockImplementation(async function* () {
+      yield reasoningFrame("working")
+      throw new Error("upstream refused")
+    })
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+
+    expect(result.current.error).toBe("upstream refused")
+    expect(result.current.thinking[1]?.text).toBe("working")
+    expect(result.current.thinking[1]?.ms).toEqual(expect.any(Number))
+  })
+
+  it("settles streamed reasoning when the operator stops", async () => {
+    streamMock.mockImplementation(async function* () {
+      yield reasoningFrame("working")
+      throw Object.assign(new Error("aborted"), { name: "AbortError" })
+    })
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+
+    expect(result.current.error).toBe("")
+    expect(result.current.thinking[1]?.text).toBe("working")
+    expect(result.current.thinking[1]?.ms).toEqual(expect.any(Number))
   })
 
   it("stores nothing when the run is stopped before the first token", async () => {
@@ -222,6 +272,7 @@ describe("running one chat turn", () => {
             requestId: "01OLD", provider: "", model: "",
             totalMs: null, tokensIn: null, tokensOut: null, reasoningTokens: 0,
             costMicros: null, failedOver: [], warnings: [],
+            costCoverage: "unknown",
           },
         },
       ),
@@ -267,6 +318,57 @@ describe("running one chat turn", () => {
     expect(result.current.routes).toEqual({})
     expect(turns).toEqual([])
     expect(metrics).toHaveLength(metricsAfterLoad)
+  })
+
+  it("does not let an old run clear the controller or busy state of a newer run", async () => {
+    let releaseTrace: (value: unknown) => void = () => {}
+    let secondSignal: AbortSignal | undefined
+    streamMock
+      .mockImplementationOnce(async function* (
+        _path: string,
+        _body: unknown,
+        onStart?: (s: { requestId: string }) => void,
+      ) {
+        onStart?.({ requestId: "01OLD" })
+        yield frame("old")
+      })
+      .mockImplementationOnce(async function* (
+        _path: string,
+        _body: unknown,
+        _onStart?: (s: { requestId: string }) => void,
+        signal?: AbortSignal,
+      ) {
+        secondSignal = signal
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          })
+        })
+        yield ""
+      })
+    traceMock.mockImplementationOnce(
+      () => new Promise((resolve) => { releaseTrace = resolve }),
+    )
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    void result.current.send("old prompt")
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+
+    act(() => result.current.load([], {}))
+    void result.current.send("new prompt")
+    await waitFor(() => expect(secondSignal).toBeDefined())
+
+    await act(async () => {
+      releaseTrace(null)
+      await Promise.resolve()
+    })
+
+    expect(result.current.busy).toBe(true)
+    act(() => result.current.stop())
+    expect(secondSignal?.aborted).toBe(true)
+    await waitFor(() => expect(result.current.busy).toBe(false))
   })
 
   it("keeps a turn that failed part-way through, because its text is on screen", async () => {

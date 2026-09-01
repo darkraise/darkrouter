@@ -162,13 +162,18 @@ const TRACE_RETRY_MS = 300
  * after a second and a half is deliberate — the timings are already shown, and
  * a spinner that never resolves would be worse than two em dashes.
  */
-export async function traceWhenWritten(id: string): Promise<RequestTrace | null> {
+export async function traceWhenWritten(
+  id: string,
+  signal?: AbortSignal,
+): Promise<RequestTrace | null> {
   for (let attempt = 0; attempt < TRACE_ATTEMPTS; attempt++) {
+    if (signal?.aborted) return null
     // Waits first, deliberately. The writer's timer means the very first
     // attempt is not merely likely to miss, it is certain to — and a fetch
     // that 404s still prints in the browser console, so trying immediately
     // buys nothing and leaves an error beside every successful run.
     await new Promise((resolve) => setTimeout(resolve, TRACE_RETRY_MS))
+    if (signal?.aborted) return null
     try {
       return await api.get<RequestTrace>(`/api/requests/${id}`)
     } catch {
@@ -177,4 +182,3 @@ export async function traceWhenWritten(id: string): Promise<RequestTrace | null>
   }
   return null
 }
-

@@ -53,12 +53,14 @@ export function HistoryRail({
   onSelect,
   onNew,
   onDelete,
+  idPrefix = "conversation",
 }: {
   conversations: PlaygroundConversation[]
   activeId: string
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (conversation: PlaygroundConversation) => void
+  idPrefix?: string
 }) {
   return (
     // Fills the panel it was given rather than holding a width of its own.
@@ -87,7 +89,7 @@ export function HistoryRail({
               <li key={c.id} className="group relative">
                 <button
                   type="button"
-                  id={`conversation-${c.id}`}
+                  id={`${idPrefix}-${c.id}`}
                   onClick={() => onSelect(c.id)}
                   aria-current={c.id === activeId ? "true" : undefined}
                   className={`flex w-full flex-col gap-0.5 rounded-[var(--radius)] px-2 py-2 text-left text-sm transition-colors hover:bg-[hsl(var(--muted))] ${
@@ -118,7 +120,7 @@ export function HistoryRail({
                 <button
                   type="button"
                   aria-label="Delete conversation"
-                  aria-describedby={`conversation-${c.id}`}
+                  aria-describedby={`${idPrefix}-${c.id}`}
                   onClick={() => onDelete(c)}
                   className="absolute top-2 right-2 rounded-[var(--radius)] text-[hsl(var(--legend))] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-[hsl(var(--destructive))]"
                 >

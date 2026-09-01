@@ -328,7 +328,7 @@ export type ProbeResult = {
 // --- playground ---
 
 export type AuxSurface =
-  | "embeddings" | "rerank" | "moderations"
+  | "count" | "embeddings" | "rerank" | "moderations"
   | "images" | "speech" | "transcriptions"
 
 export type PlaygroundMessage = { role: string; content: string }
@@ -410,7 +410,7 @@ export type AuxBody = {
  *  dialect-specific body — `{"input_tokens": n}` for the OpenAI-style count,
  *  `{"totalTokens": n}` for Gemini's — and reports whether the count is
  *  exact or approximated in the `X-Darkrouter-Estimated` response header,
- *  never in the body. `CountResult` is what `readCount(res, body)` builds
+ *  never in the body. `CountResult` is what `readCount(res)` builds
  *  after reading both: the normalised result a client assembles, not a
  *  server claim. */
 export type CountResult = { tokens: number; estimated: boolean }

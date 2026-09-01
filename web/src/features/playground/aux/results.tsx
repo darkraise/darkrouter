@@ -98,6 +98,18 @@ function ScoreRow({
 }
 
 function Outcome({ outcome }: { outcome: AuxOutcome }) {
+  if (outcome.kind === "count") {
+    return (
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-2xl tabular-nums">
+          {outcome.tokens.toLocaleString("en-US")} tokens
+        </span>
+        <Badge variant={outcome.estimated ? "secondary" : "green"}>
+          {outcome.estimated ? "Estimated locally" : "Native count"}
+        </Badge>
+      </div>
+    )
+  }
   if (outcome.kind === "embedding") return <VectorStrip vector={outcome.vector} />
 
   if (outcome.kind === "rerank") {

@@ -175,7 +175,7 @@ export function TraceDrawer({
             {trace.data && (
               <Link
                 to="/playground"
-                search={{ seed: trace.data.id }}
+                search={{ mode: "chat", seed: trace.data.id }}
                 className="text-sm underline"
               >
                 Open in playground
@@ -227,6 +227,11 @@ export function TraceDrawer({
                   // the number cannot be reconciled against an invoice.
                   <span className="ml-2 text-[hsl(var(--legend))]">
                     +{trace.data.cache_read_tokens} cached
+                  </span>
+                )}
+                {(trace.data.reasoning_tokens ?? 0) > 0 && (
+                  <span className="block text-[hsl(var(--legend))]">
+                    of which reasoning {trace.data.reasoning_tokens}
                   </span>
                 )}
               </dd>

@@ -102,3 +102,17 @@ describe("a transcription result", () => {
     expect(screen.getByText("what the caller said")).toBeInTheDocument()
   })
 })
+
+describe("a token-count result", () => {
+  it("distinguishes a native count from a local estimate", () => {
+    const { rerender } = render(
+      <RunCard run={runOf({ kind: "count", tokens: 42, estimated: false })} />,
+    )
+    expect(screen.getByText("42 tokens")).toBeInTheDocument()
+    expect(screen.getByText("Native count")).toBeInTheDocument()
+
+    rerender(<RunCard run={runOf({ kind: "count", tokens: 39, estimated: true })} />)
+    expect(screen.getByText("39 tokens")).toBeInTheDocument()
+    expect(screen.getByText("Estimated locally")).toBeInTheDocument()
+  })
+})

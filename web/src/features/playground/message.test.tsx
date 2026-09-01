@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AssistantTurn, UserTurn, formatCost, routeFromTrace, type TurnRoute } from "./message"
 import type { RequestTrace, TraceAttempt } from "../../lib/api-types"
 
@@ -25,6 +25,7 @@ const trace = (over: Partial<RequestTrace> = {}): RequestTrace =>
 const route = (over: Partial<TurnRoute> = {}): TurnRoute => ({
   requestId: "01ABC", provider: "groq", model: "llama-3.3", totalMs: 900,
   tokensIn: 12, tokensOut: 30, reasoningTokens: 0, costMicros: null,
+  costCoverage: "unknown",
   failedOver: [], warnings: [], ...over,
 })
 
@@ -54,6 +55,9 @@ describe("reading the route off a trace", () => {
 })
 
 describe("an answered turn", () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
+  })
   it("shows who answered and what it took", () => {
     render(<AssistantTurn text="hello" route={route()} />)
     expect(screen.getByText(/groq/)).toBeInTheDocument()
@@ -84,6 +88,38 @@ describe("an answered turn", () => {
     expect(screen.queryByLabelText("Copy this answer")).toBeNull()
     rerender(<AssistantTurn text="done" route={route()} />)
     expect(screen.getByLabelText("Copy this answer")).toBeInTheDocument()
+  })
+
+  it("reports that copying is unavailable instead of claiming success", async () => {
+    render(<AssistantTurn text="done" route={route()} />)
+    await userEvent.click(screen.getByLabelText("Copy this answer"))
+    expect(screen.getByRole("alert")).toHaveTextContent(/clipboard is unavailable/i)
+    expect(screen.queryByLabelText("Copied")).toBeNull()
+  })
+
+  it("reports a rejected clipboard write", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("not allowed")) },
+    })
+    render(<AssistantTurn text="done" route={route()} />)
+    await userEvent.click(screen.getByLabelText("Copy this answer"))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not copy/i)
+  })
+
+  it("reports success only after the clipboard write resolves", async () => {
+    let finish: () => void = () => {}
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn(() => new Promise<void>((resolve) => { finish = resolve })) },
+    })
+    render(<AssistantTurn text="done" route={route()} />)
+    await userEvent.click(screen.getByLabelText("Copy this answer"))
+    expect(screen.queryByLabelText("Copied")).toBeNull()
+
+    finish()
+
+    expect(await screen.findByLabelText("Copied")).toBeInTheDocument()
   })
 
   it("keeps the gutter before the trace lands", () => {
@@ -149,6 +185,34 @@ describe("cost", () => {
     expect(formatCost(3_400)).toBe("$0.0034")
     expect(formatCost(12)).toBe("<$0.0001")
   })
+
+  it("includes failed-attempt burn in the turn cost", () => {
+    const r = routeFromTrace(trace({ attempts: [
+      attempt("first", { outcome: "retryable_provider", cost_micros: 125 }),
+      attempt("second", { cost_micros: 375 }),
+    ] }))
+    expect(r.costMicros).toBe(500)
+    expect(r.costCoverage).toBe("complete")
+  })
+
+  it("marks a sum partial when any attempt has no price", () => {
+    const r = routeFromTrace(trace({ attempts: [
+      attempt("first", { outcome: "retryable_provider", cost_micros: null }),
+      attempt("second", { cost_micros: 375 }),
+    ] }))
+    expect(r.costMicros).toBe(375)
+    expect(r.costCoverage).toBe("partial")
+  })
+
+  it("keeps an entirely unpriced route unknown", () => {
+    const r = routeFromTrace(trace({ attempts: [attempt("only", { cost_micros: null })] }))
+    expect(r.costMicros).toBeNull()
+    expect(r.costCoverage).toBe("unknown")
+  })
+
+  it("renders known zero as zero rather than as missing", () => {
+    expect(formatCost(0)).toBe("$0.0000")
+  })
 })
 
 describe("what the provider dropped", () => {
@@ -201,6 +265,7 @@ describe("the route line in Chat mode", () => {
     tokensOut: 40,
     reasoningTokens: 0,
     costMicros: 1500,
+    costCoverage: "complete" as const,
     failedOver: [],
     warnings: [],
   }

@@ -1,4 +1,6 @@
-import { Button, Input, Label, Textarea } from "darkraise-ui"
+import {
+  Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea,
+} from "darkraise-ui"
 import {
   FileUpload,
   FileUploadDropzone,
@@ -7,7 +9,7 @@ import {
 } from "darkraise-ui/components/file-upload"
 import { Play, Square } from "lucide-react"
 import { NumberBox } from "../../shell/number-box"
-import { SURFACE_FIELDS, type FieldSpec, type FormSurface } from "./surfaces"
+import { isAuxReady, SURFACE_FIELDS, type FieldSpec, type FormSurface } from "./surfaces"
 import type { AuxSurface } from "../../../lib/api-types"
 
 /**
@@ -40,7 +42,7 @@ export function ToolInputs({
 }) {
   const fields: FieldSpec[] = needsFile ? [] : SURFACE_FIELDS[surface as FormSurface]
   const primaryKey = fields.find((f) => f.primary)?.key
-  const ready = needsFile ? (form.file_b64 ?? "") !== "" : true
+  const ready = isAuxReady(surface, form)
 
   // Drawn in the order each tool declares, not with the primary hoisted to
   // the top. Rerank asks for a query and then the documents it ranks; a rule
@@ -53,7 +55,18 @@ export function ToolInputs({
         className={f.multiline ? "flex flex-col gap-1.5" : "flex min-w-[10rem] flex-col gap-1.5"}
       >
         <Label htmlFor={id}>{f.label}</Label>
-        {f.multiline ? (
+        {f.options ? (
+          <Select value={form[f.key] ?? ""} onValueChange={(value) => onField(f.key, value)}>
+            <SelectTrigger id={id}>
+              <SelectValue placeholder={`Choose ${f.label.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {f.options.map((option) => (
+                <SelectItem key={option} value={option}>{option}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : f.multiline ? (
           <Textarea
             id={id}
             rows={3}

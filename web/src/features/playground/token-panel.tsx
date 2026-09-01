@@ -16,6 +16,10 @@ export type Consumption = {
   costMicros: number
   /** Turns that contributed a token count. */
   counted: number
+  /** Turns whose complete attempt chain was priced. */
+  priced: number
+  /** Turns with some, but not all, attempt prices. */
+  partialPrices: number
   /** Assistant turns in the transcript, whether or not they contributed. */
   turns: number
 }
@@ -29,15 +33,23 @@ export function consumptionOf(
   let reasoningTokens = 0
   let costMicros = 0
   let counted = 0
+  let priced = 0
+  let partialPrices = 0
   for (const route of Object.values(routes)) {
-    if (route.tokensIn === null && route.tokensOut === null) continue
-    tokensIn += route.tokensIn ?? 0
-    tokensOut += route.tokensOut ?? 0
-    reasoningTokens += route.reasoningTokens
-    costMicros += route.costMicros ?? 0
-    counted += 1
+    if (route.tokensIn !== null || route.tokensOut !== null) {
+      tokensIn += route.tokensIn ?? 0
+      tokensOut += route.tokensOut ?? 0
+      reasoningTokens += route.reasoningTokens
+      counted += 1
+    }
+    if (route.costMicros !== null) costMicros += route.costMicros
+    if (route.costCoverage === "complete") priced += 1
+    if (route.costCoverage === "partial") partialPrices += 1
   }
-  return { tokensIn, tokensOut, reasoningTokens, costMicros, counted, turns }
+  return {
+    tokensIn, tokensOut, reasoningTokens, costMicros,
+    counted, priced, partialPrices, turns,
+  }
 }
 
 /** Grouped thousands, because a six-figure context is the number an operator
@@ -78,6 +90,9 @@ export function TokenPanel({
 }) {
   const tps = tokensPerSecond(metrics)
   const partial = consumption.counted < consumption.turns
+  const hasKnownPrice = consumption.priced + consumption.partialPrices > 0
+  const partialCost = hasKnownPrice &&
+    (consumption.priced < consumption.turns || consumption.partialPrices > 0)
   return (
     <Card className="flex shrink-0 flex-col gap-3 p-4">
       <h2 className="text-sm font-medium">Consumption</h2>
@@ -102,8 +117,13 @@ export function TokenPanel({
         ) : null}
         <Reading
           label="cost"
-          value={consumption.costMicros > 0 ? formatCost(consumption.costMicros) : "—"}
+          value={hasKnownPrice ? formatCost(consumption.costMicros) : "—"}
         />
+        {partialCost ? (
+          <p className="pt-1 text-sm text-[hsl(var(--legend))]">
+            Cost includes only known prices; at least one answer or attempt is unpriced.
+          </p>
+        ) : null}
         {partial ? (
           // The honest caveat rather than a total that quietly understates.
           // A reopened conversation refetches each turn's trace, and one the
