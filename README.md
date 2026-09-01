@@ -4,9 +4,10 @@ A self-hosted LLM gateway. One endpoint, many providers, deterministic failover.
 
 ## Status
 
-All nine phases are complete. Three inbound dialects — OpenAI, Anthropic, and
-Gemini — route to any provider kind, including SigV4-signed Bedrock,
-service-account-backed Vertex, and OAuth-backed Anthropic subscriptions, with
+The gateway and operator console are implemented. Three inbound dialects —
+OpenAI, Anthropic, and Gemini — route to any provider kind, including
+SigV4-signed Bedrock, service-account-backed Vertex, and OAuth-backed
+Anthropic subscriptions, with
 deterministic failover, persistence, health tracking, an admin dashboard, and
 a catalog that merges shipped presets, models.dev metadata, and live
 discovery. A request whose dialect already matches the chosen provider's wire
@@ -38,7 +39,8 @@ terminal.
 
 ## Deploy
 
-`.github/workflows/ci.yml` vets, tests with `-race`, and then builds and pushes
+`.github/workflows/ci.yml` tests and lints the console, vets and tests the Go
+code with `-race`, and then builds and pushes
 `darkraise/darkrouter` — `latest` from master, semver tags from a `v*` tag, and
 an immutable `sha-` tag on every build, which is what a rollback pins to once
 `latest` has moved. Set two repository secrets: `DOCKERHUB_USERNAME` and
@@ -209,17 +211,13 @@ export DARKROUTER_ADMIN_PASSWORD_HASH="$(echo -n 'your-password' | darkrouter ha
 Without it the gateway still proxies — that is its job — but every login is
 refused and `/healthz` carries a warning saying so.
 
-Four screens plus settings: **Overview** (provider health, error rate, requests
-per minute), **Requests** (a filterable log; selecting a row opens the full
-trace), **Catalog** (every model across every provider, with inferred metadata
-marked), **Playground** (send a prompt, watch it stream, jump to its trace), and
-**Settings** (provider and credential CRUD, plus a read-only view of
-`darkrouter.yaml`).
-
-Aliases and policy are **not** editable in the UI. They live in
-`darkrouter.yaml` and get rendered read-only with a reload button, which is the
-structural reason the API stays at twenty-two endpoints instead of growing
-without bound.
+Nine destinations cover operations and configuration: **Overview**,
+**Requests**, **Usage**, **Providers**, **Models**, **Routing**,
+**Playground**, **Connect**, and **Settings**. Provider accounts and
+credentials are managed under Providers; model overrides, aliases, and policy
+are editable in the console, with file-owned and restart-only settings marked
+where they are shown. Playground provides persistent Chat, side-by-side
+Compare, Token Count, and the six auxiliary request tools.
 
 **Credentials are never returned by the API** — not for editing, not for export.
 The dashboard shows a label and a masked suffix. Replacing a key means adding a
@@ -320,6 +318,12 @@ endorsement, and removable on request.
 go test ./...
 go vet ./...
 go build ./cmd/darkrouter
+
+cd web
+npm ci
+npm test
+npm run lint
+npm run build
 ```
 
 The race detector needs cgo and a C toolchain, which a stock Windows checkout
