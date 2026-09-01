@@ -118,6 +118,7 @@ export function ModelCombobox({
   loading = false,
   className,
   id,
+  disabled = false,
 }: {
   value: string
   onChange: (next: string) => void
@@ -135,6 +136,7 @@ export function ModelCombobox({
    *  load: a refetch that already has rows to show is not a wait. */
   loading?: boolean
   className?: string
+  disabled?: boolean
 }) {
   const items: ComboboxItemData[] = useMemo(
     () => filterCandidates(candidates, value).map((c) => ({ value: c, label: c })),
@@ -169,6 +171,7 @@ export function ModelCombobox({
           aria-label={label}
           className="pr-8 font-mono text-sm"
           placeholder={placeholder}
+          disabled={disabled}
         />
         {/* The affordance, not just the behaviour: a chevron is what tells a
             reader this opens before they click it. */}
@@ -178,6 +181,7 @@ export function ModelCombobox({
             pulled the chevron twelve pixels above the field and left it
             sitting on the top border. */}
         <ComboboxTrigger
+          disabled={disabled}
           className="text-[hsl(var(--legend))]"
           aria-label={`Show ${label.toLowerCase()} suggestions`}
         >

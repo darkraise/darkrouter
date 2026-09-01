@@ -27,6 +27,9 @@ export type TurnRoute = {
    *  not depend on what the provider's wire called the reasoning text. */
   reasoningTokens: number
   costMicros: number | null
+  /** Whether `costMicros` covers every provider attempt, only the priced
+   * attempts, or none of them. */
+  costCoverage: "complete" | "partial" | "unknown"
   /** Providers tried before the one that answered, in the order tried. */
   failedOver: string[]
   /** What an adapter accepted and then dropped, in the gateway's own wording.
@@ -37,6 +40,18 @@ export type TurnRoute = {
 
 export function routeFromTrace(trace: RequestTrace): TurnRoute {
   const attempts = trace.attempts ?? []
+  const pricedAttempts = attempts.filter((attempt) => typeof attempt.cost_micros === "number")
+  const attemptCost = pricedAttempts.reduce((sum, attempt) => sum + attempt.cost_micros!, 0)
+  const costMicros = attempts.length === 0
+    ? (trace.cost_micros ?? null)
+    : pricedAttempts.length === 0
+      ? null
+      : attemptCost
+  const costCoverage: TurnRoute["costCoverage"] = attempts.length === 0
+    ? trace.cost_micros === null ? "unknown" : "complete"
+    : pricedAttempts.length === 0
+      ? "unknown"
+      : pricedAttempts.length === attempts.length ? "complete" : "partial"
   // The last attempt is the one that answered; everything before it failed
   // over. Reading the served provider off the trace rather than the request
   // is the point: an alias or a bare model name does not say who answered.
@@ -49,7 +64,8 @@ export function routeFromTrace(trace: RequestTrace): TurnRoute {
     tokensIn: trace.tokens_in ?? null,
     tokensOut: trace.tokens_out ?? null,
     reasoningTokens: trace.reasoning_tokens ?? 0,
-    costMicros: trace.cost_micros ?? null,
+    costMicros,
+    costCoverage,
     failedOver: attempts.slice(0, -1).map((a) => a.provider),
     warnings: trace.warnings ?? [],
   }
@@ -273,7 +289,7 @@ function RouteLine({ route, quiet = false }: { route: TurnRoute; quiet?: boolean
   if (route.tokensIn !== null && route.tokensOut !== null) {
     parts.push(`${route.tokensIn} in · ${route.tokensOut} out`)
   }
-  if (route.costMicros !== null && route.costMicros > 0) {
+  if (route.costMicros !== null) {
     parts.push(formatCost(route.costMicros))
   }
 
@@ -343,6 +359,7 @@ function TurnWarnings({ warnings }: { warnings: string[] }) {
 /** Cost lands in micros. Below a cent the useful reading is the fraction, not
  *  a rounded zero that says the call was free when it was not. */
 export function formatCost(micros: number): string {
+  if (micros === 0) return "$0.0000"
   const dollars = micros / 1_000_000
   if (dollars >= 0.01) return `$${dollars.toFixed(2)}`
   if (dollars >= 0.0001) return `$${dollars.toFixed(4)}`
@@ -350,23 +367,45 @@ export function formatCost(micros: number): string {
 }
 
 function CopyTurn({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
+  const [state, setState] = useState<"idle" | "copied" | "error">("idle")
+  const [error, setError] = useState("")
+
+  async function copy() {
+    if (!navigator.clipboard) {
+      setError("Clipboard is unavailable in this browser context.")
+      setState("error")
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setError("")
+      setState("copied")
+      window.setTimeout(() => setState("idle"), 1200)
+    } catch {
+      setError("Could not copy this answer.")
+      setState("error")
+    }
+  }
+
   return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
     <button
       type="button"
-      aria-label="Copy this answer"
+      aria-label={state === "copied" ? "Copied" : "Copy this answer"}
       className="mt-0.5 h-fit shrink-0 rounded-sm p-1 text-[hsl(var(--legend))] transition-colors hover:text-[hsl(var(--foreground))]"
-      onClick={() => {
-        void navigator.clipboard?.writeText(text)
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1200)
-      }}
+      onClick={() => void copy()}
     >
-      {copied ? (
+      {state === "copied" ? (
         <Check className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
       ) : (
         <Copy className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
       )}
     </button>
+    {state === "error" ? (
+      <span role="alert" className="max-w-48 text-right text-sm text-[hsl(var(--destructive))]">
+        {error}
+      </span>
+    ) : null}
+    </div>
   )
 }

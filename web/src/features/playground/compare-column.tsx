@@ -4,7 +4,7 @@ import { X } from "lucide-react"
 import { ModelCombobox } from "../shell/model-combobox"
 
 /** Where one column is in its run. Idle is before the first Run, not an error. */
-export type ColumnStatus = "idle" | "streaming" | "done" | "error"
+export type ColumnStatus = "idle" | "streaming" | "done" | "stopped" | "error"
 
 export type Column = {
   id: string
@@ -24,6 +24,7 @@ const DOT: Record<ColumnStatus, string> = {
   idle: "bg-[hsl(var(--legend))]",
   streaming: "bg-[hsl(var(--primary))] motion-safe:animate-pulse",
   done: "bg-[hsl(var(--primary))]",
+  stopped: "bg-[hsl(var(--legend))]",
   error: "bg-[hsl(var(--destructive))]",
 }
 
@@ -46,6 +47,7 @@ export function CompareColumn({
   candidates,
   loading,
   removable,
+  disabled = false,
 }: {
   column: Column
   index: number
@@ -54,6 +56,7 @@ export function CompareColumn({
   candidates: string[]
   loading?: boolean
   removable: boolean
+  disabled?: boolean
 }) {
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-4">
@@ -66,13 +69,14 @@ export function CompareColumn({
             onChange={onModel}
             candidates={candidates}
             loading={loading}
+            disabled={disabled}
             className="w-full"
           />
         </div>
         <Button
           variant="ghost"
           aria-label={`Remove column ${index + 1}`}
-          disabled={!removable}
+          disabled={disabled || !removable}
           onClick={onRemove}
         >
           <X className="size-[var(--icon-size,1rem)]" aria-hidden="true" />

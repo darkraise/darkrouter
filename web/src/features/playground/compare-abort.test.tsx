@@ -10,11 +10,12 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 
 vi.mock("../shell/model-combobox", () => ({
-  ModelCombobox: ({ label, value, onChange }: {
+  ModelCombobox: ({ label, value, onChange, disabled }: {
     label: string
     value: string
     onChange: (next: string) => void
-  }) => <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />,
+    disabled?: boolean
+  }) => <input aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />,
   useModelCandidates: () => ({ candidates: [], loading: false }),
 }))
 
@@ -91,21 +92,16 @@ describe("a Compare column that stops being watched", () => {
     hangs()
   })
 
-  it("aborts its request when a third column is removed", async () => {
-    // Left running, the orphan keeps costing tokens for output nothing renders,
-    // and busy — which counts streaming columns — drops while it arrives, so
-    // Run re-enables mid-stream.
-    renderCompare({ ...emptyConfig(), model: "gpt" })
+  it("aborts every request when Compare unmounts", async () => {
+    const mounted = renderCompare({ ...emptyConfig(), model: "gpt" })
     await userEvent.click(screen.getByRole("button", { name: "Add model" }))
     await nameEveryColumn()
     await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
     await userEvent.click(screen.getByRole("button", { name: "Run" }))
     await waitFor(() => expect(signals).toHaveLength(3))
 
-    const removes = screen.getAllByRole("button", { name: /remove/i })
-    await userEvent.click(removes[removes.length - 1]!)
-    await waitFor(() => expect(signals[2]!.aborted).toBe(true))
-    expect(signals[1]!.aborted).toBe(false)
+    mounted.unmount()
+    await waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true))
   })
 
   it("will not start a second run while columns are still streaming", async () => {
@@ -115,17 +111,38 @@ describe("a Compare column that stops being watched", () => {
     await startARun()
     expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
 
-    await userEvent.click(screen.getByRole("button", { name: "Add model" }))
-    const third = screen.getAllByRole("textbox", { name: /model/i })[2]!
-    await userEvent.type(third, "gpt")
-    await userEvent.click(screen.getAllByRole("button", { name: /remove/i }).at(-1)!)
-
-    // Two of the original columns are still streaming, so Run stays shut.
+    expect(screen.getByRole("button", { name: "Add model" })).toBeDisabled()
+    expect(screen.getAllByRole("button", { name: /remove/i })
+      .every((button) => button.hasAttribute("disabled"))).toBe(true)
     expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
-    // And removing the never-run third column aborted neither of them. A
-    // length check alone could not fail here -- nothing had started a third
-    // stream -- so it said nothing about which controller the removal hit.
     expect(signals[0]!.aborted).toBe(false)
     expect(signals[1]!.aborted).toBe(false)
+  })
+
+  it("keeps the model labels fixed while their outputs are streaming", async () => {
+    await startARun()
+    const first = screen.getAllByRole("textbox", { name: /model/i })[0]!
+
+    expect(first).toBeDisabled()
+    await userEvent.type(first, "-changed")
+    expect(first).toHaveValue("gpt")
+  })
+
+  it("aborts every live column when Compare becomes inactive", async () => {
+    const { rerender } = renderCompare({ ...emptyConfig(), model: "gpt" })
+    await nameEveryColumn()
+    await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
+    await userEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(signals).toHaveLength(2))
+
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <Compare config={{ ...emptyConfig(), model: "gpt" }} onConfigChange={() => {}} active={false} />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true))
+    await waitFor(() => expect(screen.getAllByRole("img", { name: "stopped" })).toHaveLength(2))
+    expect(screen.getByRole("button", { name: "Add model" })).toBeEnabled()
   })
 })

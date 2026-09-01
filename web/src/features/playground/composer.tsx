@@ -38,6 +38,7 @@ export function Composer({
   busy,
   error,
   toolsError,
+  disabled = false,
   onSend,
   onStop,
 }: {
@@ -45,11 +46,12 @@ export function Composer({
   busy: boolean
   error: string
   toolsError?: string
+  disabled?: boolean
   onSend: (prompt: string) => void
   onStop: () => void
 }) {
   const [draft, setDraft] = useState("")
-  const blocked = model === "" || draft.trim() === "" || toolsError !== undefined
+  const blocked = disabled || model === "" || draft.trim() === "" || toolsError !== undefined
 
   return (
     <div className="flex shrink-0 flex-col gap-2">
@@ -62,6 +64,7 @@ export function Composer({
           aria-label="Message"
           placeholder={model === "" ? "Choose a model first" : "Ask the router something"}
           value={draft}
+          disabled={disabled}
           rows={MIN_ROWS}
           onChange={(e) => setDraft(e.target.value)}
           ref={(el) => {

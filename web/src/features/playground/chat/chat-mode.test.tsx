@@ -38,13 +38,14 @@ const detail: PlaygroundConversationDetail = {
   ],
 }
 
-const { getMock, postMock, patchMock, delMock, streamMock, traceMock } = vi.hoisted(() => ({
+const { getMock, postMock, patchMock, delMock, streamMock, traceMock, conversationQueryMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
   patchMock: vi.fn(),
   delMock: vi.fn(),
   streamMock: vi.fn(),
   traceMock: vi.fn(),
+  conversationQueryMock: vi.fn(),
 }))
 
 vi.mock("../../../lib/api", async (importOriginal) => ({
@@ -60,10 +61,7 @@ vi.mock("../../../lib/queries", async (importOriginal) => ({
   // returning for the trace under test.
   usePlaygroundPresets: () => ({ data: [] }),
   usePlaygroundConversations: () => ({ data: [stored], isLoading: false }),
-  usePlaygroundConversation: (id: string) => ({
-    data: id === "c1" ? detail : undefined,
-    isLoading: false,
-  }),
+  usePlaygroundConversation: (id: string) => conversationQueryMock(id),
 }))
 
 // traceWhenWritten waits 300ms and retries six times by design; left real,
@@ -89,6 +87,25 @@ function mounted() {
       <ChatMode />
     </QueryClientProvider>,
   )
+}
+
+function mountedWithActive(active: boolean) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ChatMode active={active} />
+    </QueryClientProvider>,
+  )
+  return {
+    ...view,
+    setActive(next: boolean) {
+      view.rerender(
+        <QueryClientProvider client={client}>
+          <ChatMode active={next} />
+        </QueryClientProvider>,
+      )
+    },
+  }
 }
 
 async function send(text: string) {
@@ -117,6 +134,11 @@ describe("Chat mode", () => {
     delMock.mockReset()
     streamMock.mockReset()
     traceMock.mockReset()
+    conversationQueryMock.mockReset()
+    conversationQueryMock.mockImplementation((id: string) => ({
+      data: id === "c1" ? detail : undefined,
+      isLoading: false,
+    }))
     traceMock.mockResolvedValue(null)
     streamMock.mockImplementation(async function* (
       _path: string,
@@ -236,6 +258,139 @@ describe("Chat mode", () => {
     expect(screen.getByLabelText("System prompt")).toBeDisabled()
   })
 
+  it("does not let the previous transcript send while a selected conversation loads", async () => {
+    conversationQueryMock.mockImplementation((id: string) => ({
+      data: undefined,
+      isLoading: id === "c1",
+    }))
+    mounted()
+    await chooseModel("gpt")
+    await userEvent.type(screen.getByLabelText("Message"), "belongs to the old draft")
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    expect(screen.getByLabelText("Conversation title")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Conversation actions" })).toBeDisabled()
+  })
+
+  it("explains when a selected conversation cannot be loaded", async () => {
+    conversationQueryMock.mockImplementation((id: string) => ({
+      data: undefined,
+      isLoading: false,
+      isError: id === "c1",
+    }))
+    mounted()
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not load/i)
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+  })
+
+  it("does not let a delayed create response steal focus from a selected conversation", async () => {
+    let finishCreate: (conversation: PlaygroundConversation) => void = () => {}
+    postMock.mockImplementation((path: string) => {
+      if (path === "/api/playground/conversations") {
+        return new Promise<PlaygroundConversation>((resolve) => { finishCreate = resolve })
+      }
+      return Promise.resolve({ seq: 0 })
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("starts a new thread")
+    await waitFor(() => expect(postMock).toHaveBeenCalledWith(
+      "/api/playground/conversations",
+      expect.anything(),
+    ))
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByLabelText("Conversation title")).toHaveValue(stored.title))
+
+    finishCreate({ ...stored, id: "new1", title: "starts a new thread" })
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledWith(
+      "/api/playground/conversations/new1/messages",
+      expect.anything(),
+    ))
+    expect(screen.getByLabelText("Conversation title")).toHaveValue(stored.title)
+  })
+
+  it("persists a live turn to the conversation that sent it after selection changes", async () => {
+    let finishStream: (() => void) | undefined
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+    ) {
+      onStart?.({ requestId: "01NEW" })
+      await new Promise<void>((resolve) => { finishStream = resolve })
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: "old answer" } }] })}\n\n`
+    })
+    conversationQueryMock.mockImplementation((id: string) => ({
+      data: undefined,
+      isLoading: id === "c1",
+    }))
+    postMock.mockImplementation((path: string) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: "old prompt" })
+        : Promise.resolve({ seq: 0 }),
+    )
+
+    mounted()
+    await chooseModel("gpt")
+    await send("old prompt")
+    await waitFor(() => expect(finishStream).toBeDefined())
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    finishStream!()
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledWith(
+      "/api/playground/conversations/new1/messages",
+      expect.objectContaining({ content: "old prompt" }),
+    ))
+    expect(postMock).not.toHaveBeenCalledWith(
+      "/api/playground/conversations/c1/messages",
+      expect.anything(),
+    )
+  })
+
+  it("aborts the live request when Chat becomes inactive", async () => {
+    let signal: AbortSignal | undefined
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      _onStart?: (s: { requestId: string }) => void,
+      requestSignal?: AbortSignal,
+    ) {
+      signal = requestSignal
+      await new Promise<void>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+        })
+      })
+      yield ""
+    })
+    const view = mountedWithActive(true)
+    await chooseModel("gpt")
+    await send("keep streaming")
+    await waitFor(() => expect(signal).toBeDefined())
+
+    view.setActive(false)
+
+    await waitFor(() => expect(signal?.aborted).toBe(true))
+  })
+
+  it("opens conversation history in a sheet on narrow screens", async () => {
+    mounted()
+
+    await userEvent.click(screen.getByRole("button", { name: /show conversations/i }))
+
+    const dialog = await screen.findByRole("dialog", { name: /conversations/i })
+    expect(within(dialog).getByRole("button", { name: /speculative decoding/i })).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: /new conversation/i })).toBeInTheDocument()
+  })
+
   it("recovers a reopened turn's route from its stored request id", async () => {
     // The store keeps only the request id, so before this a restored answer
     // said "routed" and nothing else -- no provider, no duration, no cost --
@@ -249,7 +404,7 @@ describe("Chat mode", () => {
       tokens_in: 88,
       tokens_out: 921,
       cost_micros: 566,
-      attempts: [{ provider: "groq", model: "claude" }],
+      attempts: [{ provider: "groq", model: "claude", cost_micros: 3100 }],
       warnings: [],
     })
     mounted()
@@ -312,7 +467,7 @@ describe("Chat mode", () => {
       tokens_in: 1204,
       tokens_out: 887,
       cost_micros: 3100,
-      attempts: [{ provider: "groq", model: "claude" }],
+      attempts: [{ provider: "groq", model: "claude", cost_micros: 3100 }],
       warnings: [],
     })
     mounted()

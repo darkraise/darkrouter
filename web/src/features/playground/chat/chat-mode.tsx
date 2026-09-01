@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Card } from "darkraise-ui"
+import { Button, Card, Sheet, SheetContent, SheetHeader, SheetTitle } from "darkraise-ui"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "darkraise-ui/components/resizable"
 import { useSearch } from "@tanstack/react-router"
 import { usePlaygroundConversation, usePlaygroundConversations, useTrace } from "../../../lib/queries"
@@ -25,6 +25,7 @@ import { HistoryRail } from "./history-rail"
 import { ConversationHeader } from "./conversation-header"
 import { NewConversationDialog } from "./new-conversation-dialog"
 import type { PlaygroundConversation, RequestTrace } from "../../../lib/api-types"
+import { PanelLeft } from "lucide-react"
 
 /**
  * A conversation that is still there tomorrow.
@@ -59,7 +60,7 @@ import type { PlaygroundConversation, RequestTrace } from "../../../lib/api-type
  *  field is the operator's own, and outranks a title derived from the prompt. */
 const UNTITLED = "New chat"
 
-export function ChatMode() {
+export function ChatMode({ active = true }: { active?: boolean }) {
   const [config, setConfig] = useState<PlaygroundConfig>(emptyConfig)
   const [activeId, setActiveId] = useState("")
   const [loadedId, setLoadedId] = useState("")
@@ -75,18 +76,21 @@ export function ChatMode() {
   // stored until its first turn is, so "has an id" is false for exactly the
   // case the actions menu exists to serve — a thread set up and not yet sent.
   const [settingsAmending, setSettingsAmending] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const { data: conversations } = usePlaygroundConversations()
   const detail = usePlaygroundConversation(activeId, { enabled: activeId !== "" })
+  const selectionPending = activeId !== "" && loadedId !== activeId
+  const selectionFailed = selectionPending && detail.isError
   const create = useCreateConversation()
   const append = useAppendTurn()
   const update = useUpdateConversation()
   const remove = useDeleteConversation()
 
-  // The turn callback runs inside an async send, so it reads the conversation
-  // and the settings through refs rather than through the closure the send
-  // captured. Two messages sent in quick succession would otherwise both see
-  // an empty id and create two conversations for one exchange.
+  // Mutations that happen after a send use refs so they see the latest title
+  // and settings. Conversation ownership is the exception: the callback below
+  // captures activeId when the send begins, so selecting another thread while
+  // it streams cannot redirect its stored turn.
   const conversationRef = useRef("")
   const configRef = useRef(config)
   configRef.current = config
@@ -100,10 +104,18 @@ export function ChatMode() {
   // flight would both read an empty conversationRef and make two
   // conversations for one thread.
   const creating = useRef<Promise<PlaygroundConversation> | null>(null)
+  // Changes whenever the operator chooses which conversation owns the
+  // screen. A create may still finish after that choice; it should persist
+  // the completed turn, but it must not move the screen back to the thread it
+  // created.
+  const selectionGeneration = useRef(0)
 
-  async function persistTurn(turn: CompletedTurn) {
+  async function persistTurn(turn: CompletedTurn, ownerId: string) {
     try {
-      let id = conversationRef.current
+      // Ownership is captured by the render that starts the request. Reading
+      // conversationRef here would file a slow answer under whichever thread
+      // the operator selected while it was still streaming.
+      let id = ownerId
       if (id === "") {
         if (creating.current === null) {
           creating.current = create.mutateAsync({
@@ -111,14 +123,17 @@ export function ChatMode() {
             config: configRef.current,
           })
         }
+        const createGeneration = selectionGeneration.current
         const made = await creating.current
         id = made.id
-        conversationRef.current = id
-        setActiveId(id)
-        // Marked loaded at creation, so the read below does not fetch the row
-        // that was just written and replace the live transcript with it.
-        setLoadedId(id)
-        setTitle(made.title)
+        if (selectionGeneration.current === createGeneration) {
+          conversationRef.current = id
+          setActiveId(id)
+          // Marked loaded at creation, so the read below does not fetch the row
+          // that was just written and replace the live transcript with it.
+          setLoadedId(id)
+          setTitle(made.title)
+        }
       }
       await append.mutateAsync({ id, role: "user", content: turn.prompt, requestId: "" })
       await append.mutateAsync({
@@ -133,7 +148,15 @@ export function ChatMode() {
     }
   }
 
-  const run = useChatRun(config, setMetrics, (turn) => void persistTurn(turn))
+  const run = useChatRun(config, setMetrics, (turn) => void persistTurn(turn, activeId))
+
+  useEffect(() => {
+    if (!active) run.stop()
+    // `run` is recreated on every render; visibility is the event that ends
+    // an in-flight request, and stop reads the current controller through its
+    // ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
 
   // What fixes the settings is a turn existing, not the send that made it:
   // a conversation reopened from the rail has turns and no send behind it,
@@ -187,6 +210,7 @@ export function ChatMode() {
   }, [detail.data, loadedId])
 
   function startNew() {
+    selectionGeneration.current += 1
     // Seeded from the conversation being left rather than from the defaults:
     // the model an operator has been working with is almost always the one
     // they want next, and every value it carries is on screen in the dialog
@@ -220,6 +244,7 @@ export function ChatMode() {
 
   function select(id: string) {
     if (id === activeId) return
+    selectionGeneration.current += 1
     conversationRef.current = id
     setActiveId(id)
   }
@@ -250,6 +275,7 @@ export function ChatMode() {
   }
 
   return (
+    <>
     <ResizablePanelGroup className="flex min-h-0 flex-1 gap-0 px-6 pb-6">
       {/* Resizable rather than fixed at 260px: how much of the screen the
           retrieval deserves depends on how long the titles are and how many
@@ -260,7 +286,7 @@ export function ChatMode() {
         defaultSize={20}
         minSize={12}
         maxSize={40}
-        className="flex min-h-0 flex-col"
+        className="!hidden min-h-0 flex-col lg:!flex"
       >
         <HistoryRail
           conversations={conversations ?? []}
@@ -271,9 +297,20 @@ export function ChatMode() {
         />
       </ResizablePanel>
 
-      <ResizableHandle withHandle className="mx-2" />
+      <ResizableHandle withHandle className="mx-2 hidden lg:flex" />
 
       <ResizablePanel className="flex min-h-0 min-w-0 flex-col gap-4">
+        <div className="lg:hidden">
+          <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
+            <PanelLeft className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
+            Show conversations
+          </Button>
+        </div>
+        {selectionFailed ? (
+          <p role="alert" className="text-sm text-[hsl(var(--destructive))]">
+            Could not load the selected conversation. Select another conversation and try again.
+          </p>
+        ) : null}
         <ConversationHeader
           config={config}
           title={title}
@@ -282,8 +319,9 @@ export function ChatMode() {
             const current = (conversations ?? []).find((c) => c.id === activeId)
             if (current) removeConversation(current)
           }}
-          canDelete={activeId !== ""}
+          canDelete={activeId !== "" && !selectionPending}
           locked={locked}
+          disabled={selectionPending}
           onOpenSettings={amendSettings}
         />
 
@@ -320,6 +358,7 @@ export function ChatMode() {
                     busy={run.busy}
                     error={run.error}
                     toolsError={parseTools(config.toolsRaw).error}
+                    disabled={selectionPending}
                     onSend={(p) => void run.send(p)}
                     onStop={run.stop}
                   />
@@ -374,5 +413,29 @@ export function ChatMode() {
         amending={settingsAmending}
       />
     </ResizablePanelGroup>
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent side="left" className="flex w-full max-w-sm flex-col gap-0 p-4">
+          <SheetHeader>
+            <SheetTitle>Conversations</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 flex min-h-0 flex-1">
+            <HistoryRail
+              conversations={conversations ?? []}
+              activeId={activeId}
+              idPrefix="mobile-conversation"
+              onSelect={(id) => {
+                select(id)
+                setHistoryOpen(false)
+              }}
+              onNew={() => {
+                startNew()
+                setHistoryOpen(false)
+              }}
+              onDelete={removeConversation}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   )
 }

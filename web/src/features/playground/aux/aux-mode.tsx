@@ -16,8 +16,10 @@ import {
   catalogSurfaceFor,
   documentLines,
   postAux,
+  postCount,
   readFileAsBase64,
   readOutcome,
+  readCount,
   runSummary,
   surfaceInfo,
   type AuxRun,
@@ -45,7 +47,7 @@ import type { AuxSurface } from "../../../lib/api-types"
  * is written to the database, and the request log already keeps the permanent
  * record of every call these make.
  */
-export function AuxMode() {
+export function AuxMode({ active: isActive = true }: { active?: boolean }) {
   const [active, setActive] = useState<AuxSurface>("embeddings")
   const [forms, setForms] = useState<Partial<Record<AuxSurface, Record<string, string>>>>({})
   const [runs, setRuns] = useState<Partial<Record<AuxSurface, AuxRun[]>>>({})
@@ -56,13 +58,23 @@ export function AuxMode() {
   // A run replaces the audio on screen but not the blob behind the previous
   // one, and the history keeps both playable.
   const objectUrls = useRef<string[]>([])
+  const controllers = useRef(new Map<AuxSurface, AbortController>())
   const runId = useRef(0)
   useEffect(() => {
     const urls = objectUrls.current
+    const liveControllers = controllers.current
     return () => {
       for (const url of urls) URL.revokeObjectURL(url)
+      for (const controller of liveControllers.values()) controller.abort()
+      liveControllers.clear()
     }
   }, [])
+
+  useEffect(() => {
+    if (isActive) return
+    for (const controller of controllers.current.values()) controller.abort()
+    controllers.current.clear()
+  }, [isActive])
 
   const info = surfaceInfo(active)
   const form = forms[active] ?? {}
@@ -93,19 +105,28 @@ export function AuxMode() {
     const current = forms[surface] ?? {}
     setBusy((b) => ({ ...b, [surface]: true }))
     setErrors((e) => ({ ...e, [surface]: "" }))
+    const controller = new AbortController()
+    controllers.current.set(surface, controller)
     try {
-      let body = auxBodyFor(surface, current)
-      if (surface === "rerank") {
+      let res: Response
+      let outcome
+      if (surface === "count") {
+        res = await postCount(current, controller.signal)
+        outcome = await readCount(res)
+      } else {
+        let body = auxBodyFor(surface, current)
+        if (surface === "rerank") {
         // documents has no legal single-string wire shape. auxBodyFor's
         // NUMERIC set is the only per-field special case it knows; the one
         // array-shaped field here is assembled by hand instead.
-        body = { ...body, body: { ...body.body, documents: documentLines(current.documents ?? "") } }
+          body = { ...body, body: { ...body.body, documents: documentLines(current.documents ?? "") } }
+        }
+        res = await postAux(body, controller.signal)
+        outcome = await readOutcome(surface, res, current, (url) => {
+          objectUrls.current.push(url)
+        })
       }
-      const res = await postAux(body)
       const requestId = res.headers.get("X-Darkrouter-Request") ?? ""
-      const outcome = await readOutcome(surface, res, current, (url) => {
-        objectUrls.current.push(url)
-      })
       runId.current += 1
       const entry: AuxRun = {
         id: runId.current,
@@ -118,8 +139,13 @@ export function AuxMode() {
       // that grows downward puts it off the bottom of the panel.
       setRuns((r) => ({ ...r, [surface]: [entry, ...(r[surface] ?? [])] }))
     } catch (err) {
-      setErrors((e) => ({ ...e, [surface]: (err as Error).message }))
+      if ((err as Error).name !== "AbortError") {
+        setErrors((e) => ({ ...e, [surface]: (err as Error).message }))
+      }
     } finally {
+      if (controllers.current.get(surface) === controller) {
+        controllers.current.delete(surface)
+      }
       setBusy((b) => ({ ...b, [surface]: false }))
     }
   }

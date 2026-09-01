@@ -1,9 +1,18 @@
 import { render, screen } from "@testing-library/react"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import {
-  ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection, metaValue,
+  ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection, metaValue, TraceDrawer,
 } from "./trace-drawer"
 import type { TraceAttempt } from "../../lib/api-types"
+
+const traceMock = vi.hoisted(() => vi.fn())
+
+vi.mock("../../lib/queries", () => ({ useTrace: traceMock }))
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, search }: { children: React.ReactNode; search: unknown }) => (
+    <a href="/playground" data-search={JSON.stringify(search)}>{children}</a>
+  ),
+}))
 
 const attempt = (over: Partial<TraceAttempt> & { seq: number }): TraceAttempt => ({
   provider: "groq",
@@ -18,6 +27,61 @@ const attempt = (over: Partial<TraceAttempt> & { seq: number }): TraceAttempt =>
   tokens_out: 0,
   cost_micros: null,
   ...over,
+})
+
+describe("trace navigation", () => {
+  it("opens the seeded request in Chat regardless of the remembered surface", () => {
+    traceMock.mockReturnValue({
+      data: {
+        id: "01TRACE",
+        ts_ms: 0,
+        dialect: "openai",
+        surface: "chat",
+        source: "console",
+        alias: "",
+        model: "m",
+        final_model: "m",
+        provider: "groq",
+        status: "success",
+        cost_micros: 0,
+        tokens_in: 1,
+        tokens_out: 2,
+        cache_read_tokens: 0,
+        reasoning_tokens: 0,
+        ttft_ms: 10,
+        total_ms: 20,
+        attempts: [],
+        candidates: [],
+        skips: [],
+        warnings: [],
+      },
+      isError: false,
+    })
+
+    render(<TraceDrawer id="01TRACE" onClose={() => {}} />)
+
+    expect(screen.getByRole("link", { name: /open in playground/i })).toHaveAttribute(
+      "data-search",
+      JSON.stringify({ mode: "chat", seed: "01TRACE" }),
+    )
+  })
+
+  it("shows reasoning tokens as part of output tokens", () => {
+    traceMock.mockReturnValue({
+      data: {
+        id: "01TRACE", ts_ms: 0, dialect: "openai", surface: "chat", source: "console",
+        model: "m", final_model: "m", provider: "groq", status: "success",
+        cost_micros: 0, tokens_in: 10, tokens_out: 30, cache_read_tokens: 0,
+        reasoning_tokens: 20, ttft_ms: 10, total_ms: 20,
+        attempts: [], candidates: [], skips: [], warnings: [],
+      },
+      isError: false,
+    })
+
+    render(<TraceDrawer id="01TRACE" onClose={() => {}} />)
+
+    expect(screen.getByText(/of which reasoning/i)).toHaveTextContent("20")
+  })
 })
 
 describe("trace ladder rows", () => {

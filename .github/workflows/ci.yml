@@ -40,10 +40,12 @@ jobs:
       # the SPA handler would serve an empty bundle and its tests would assert
       # against something the release image never ships. Building here makes the
       # Go tests run against the same asset the Dockerfile embeds.
-      - name: Build the SPA
+      - name: Test and build the SPA
         working-directory: web
         run: |
           npm ci
+          npm test
+          npm run lint
           npm run build
 
       - name: go vet

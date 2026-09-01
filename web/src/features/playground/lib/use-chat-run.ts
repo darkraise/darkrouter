@@ -169,6 +169,14 @@ export function useChatRun(
       // rather than appearing whole once the model has finished with it.
       setThinking((prev) => ({ ...prev, [answerAt]: { text: thought, ms: null } }))
     }
+    const settleThought = () => {
+      if (!thinkingSeen || thoughtEndedAt !== null || superseded()) return
+      thoughtEndedAt = performance.now()
+      setThinking((prev) => ({
+        ...prev,
+        [answerAt]: { text: thought, ms: thoughtEndedAt! - startedAt },
+      }))
+    }
     try {
       for await (const chunk of stream(
         "/api/playground",
@@ -196,25 +204,17 @@ export function useChatRun(
         }
       }
       if (!doStream) {
-        // No timing to take from a body that arrived whole -- there were no
-        // deltas to time between -- so the thinking is shown without one.
+        // A unary body has no delta boundary between reasoning and answer, so
+        // its duration is the whole request rather than a precise split.
         const reasoning = extractUnaryReasoning(dialect, buffer.current)
-        if (reasoning && !superseded()) {
-          thought = reasoning
-          setThinking((prev) => ({ ...prev, [answerAt]: { text: reasoning, ms: null } }))
-        }
+        emitThought(reasoning)
         emit(extractUnaryText(dialect, buffer.current))
       }
       const totalMs = performance.now() - startedAt
       // A model that reasoned and then said nothing still stopped reasoning
       // when the stream did, so the clock is closed here rather than left to
       // run forever as "thinking…" under a finished turn.
-      if (thinkingSeen && thoughtEndedAt === null && !superseded()) {
-        setThinking((prev) => ({
-          ...prev,
-          [answerAt]: { text: thought, ms: performance.now() - startedAt },
-        }))
-      }
+      settleThought()
       const measured: StreamMetrics = { ...NO_METRICS, ttftMs, totalMs }
       onMetrics(measured)
       // The token counts are the gateway's, fetched after the fact rather
@@ -222,7 +222,7 @@ export function useChatRun(
       // looks authoritative and is not. A trace that has not landed yet
       // simply leaves the counts unknown.
       if (liveRequestId) {
-        const trace = await traceWhenWritten(liveRequestId)
+        const trace = await traceWhenWritten(liveRequestId, controller.signal)
         if (trace && !superseded()) {
           onMetrics(metricsFromTrace(measured, trace))
           // The route lands under the turn it served, so a transcript of six
@@ -240,8 +240,17 @@ export function useChatRun(
         failed = true
       }
     } finally {
-      abort.current = null
-      setBusy(false)
+      // A request can terminate before the first answer token through an
+      // upstream error or an operator stop. Reasoning still ended when the
+      // request did, so close the same clock on every terminal path.
+      settleThought()
+      // load() can supersede this run and immediately start another. Only the
+      // run that still owns the shared controller may unlock the composer or
+      // clear the controller the newer run needs for Stop.
+      if (abort.current === controller) {
+        abort.current = null
+        setBusy(false)
+      }
     }
     // After the finally, so a stopped run still reports: the turns already
     // written stay, and a half answer is what the tokens were spent on.

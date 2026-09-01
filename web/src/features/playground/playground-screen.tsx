@@ -13,9 +13,9 @@ import { initialMode, readMode, rememberMode, type PlaygroundMode } from "./mode
  * Lab is gone, and its two halves went to the two places that needed them.
  * Single's request pane is Chat's, because tuning a request and keeping the
  * conversation it produced were never two activities. Compare is a surface in
- * its own right and now says so rather than hiding one level down. Count went
- * with Lab: a token count is a reading the request log already carries for
- * every request that was actually sent.
+ * its own right and now says so rather than hiding one level down. Token Count
+ * lives with the other single-request Auxiliary tools, where operators can
+ * measure a prompt before sending it.
  *
  * The chosen surface is remembered per operator and carried in the URL, so a
  * shared link opens where its sender meant rather than where its reader last
@@ -69,23 +69,26 @@ export function PlaygroundScreen() {
 
         <TabsContent
           value="chat"
+          forceMount
           className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
         >
-          <ChatMode />
+          <ChatMode active={mode === "chat"} />
         </TabsContent>
 
         <TabsContent
           value="compare"
+          forceMount
           className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
         >
-          <Compare config={compareConfig} onConfigChange={setCompareConfig} />
+          <Compare config={compareConfig} onConfigChange={setCompareConfig} active={mode === "compare"} />
         </TabsContent>
 
         <TabsContent
           value="auxiliary"
+          forceMount
           className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
         >
-          <AuxMode />
+          <AuxMode active={mode === "auxiliary"} />
         </TabsContent>
       </Tabs>
     </div>

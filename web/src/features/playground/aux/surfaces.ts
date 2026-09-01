@@ -1,5 +1,5 @@
 import { getCsrfToken, throwOnExecutorError } from "../../../lib/api"
-import type { AuxBody, AuxSurface } from "../../../lib/api-types"
+import type { AuxBody, AuxSurface, CountResult } from "../../../lib/api-types"
 
 /**
  * The aux tools.
@@ -15,6 +15,13 @@ import type { AuxBody, AuxSurface } from "../../../lib/api-types"
  * "Rerank" and "Moderation" are jobs, not nouns most people carry around.
  */
 export const AUX_SURFACES = [
+  {
+    surface: "count",
+    catalogSurface: "llm",
+    label: "Token Count",
+    blurb: "Measure a prompt before sending",
+    needsFile: false,
+  },
   {
     surface: "embeddings",
     catalogSurface: "embedding",
@@ -106,11 +113,17 @@ export type FieldSpec = {
   primary?: boolean
   placeholder?: string
   hint?: string
+  options?: string[]
 }
 
 export type FormSurface = Exclude<AuxSurface, "transcriptions">
 
 export const SURFACE_FIELDS: Record<FormSurface, FieldSpec[]> = {
+  count: [
+    { key: "dialect", label: "Dialect", options: ["anthropic", "gemini"] },
+    { key: "prompt", label: "Prompt", multiline: true, primary: true,
+      placeholder: "Text to count" },
+  ],
   embeddings: [
     { key: "input", label: "Input", multiline: true, primary: true,
       placeholder: "Text to embed" },
@@ -141,6 +154,7 @@ export const SURFACE_FIELDS: Record<FormSurface, FieldSpec[]> = {
 
 /** What a run produced, in the shape its tool draws rather than as raw JSON. */
 export type AuxOutcome =
+  | { kind: "count"; tokens: number; estimated: boolean }
   | { kind: "embedding"; vector: number[] }
   | { kind: "rerank"; ranked: { index: number; score: number; text: string }[] }
   | {
@@ -171,7 +185,7 @@ export type AuxRun = {
  * uses, since this hits the same executor and the same dialect-writer error
  * shape.
  */
-export async function postAux(body: unknown): Promise<Response> {
+export async function postAux(body: unknown, signal?: AbortSignal): Promise<Response> {
   const res = await fetch("/api/playground/aux", {
     method: "POST",
     headers: {
@@ -181,9 +195,58 @@ export async function postAux(body: unknown): Promise<Response> {
     },
     body: JSON.stringify(body),
     credentials: "same-origin",
+    signal,
   })
   if (!res.ok) return await throwOnExecutorError(res)
   return res
+}
+
+export function countBodyFor(form: Record<string, string>) {
+  return { model: form.model, dialect: form.dialect, prompt: form.prompt }
+}
+
+export async function postCount(
+  form: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const res = await fetch("/api/playground/count", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": getCsrfToken(),
+      "Sec-Fetch-Site": "same-origin",
+    },
+    body: JSON.stringify(countBodyFor(form)),
+    credentials: "same-origin",
+    signal,
+  })
+  if (!res.ok) return await throwOnExecutorError(res)
+  return res
+}
+
+export async function readCount(res: Response): Promise<{ kind: "count" } & CountResult> {
+  const body = await res.json() as { input_tokens?: number; totalTokens?: number }
+  const tokens = body.input_tokens ?? body.totalTokens
+  if (typeof tokens !== "number" || !Number.isFinite(tokens)) {
+    throw new Error("token count response did not contain a count")
+  }
+  return {
+    kind: "count",
+    tokens,
+    estimated: res.headers.get("X-Darkrouter-Estimated") === "true",
+  }
+}
+
+export function isAuxReady(
+  surface: AuxSurface,
+  form: Record<string, string>,
+): boolean {
+  if ((form.model ?? "").trim() === "") return false
+  if (surface === "transcriptions") return (form.file_b64 ?? "") !== ""
+  if (surface === "rerank" && (form.query ?? "").trim() === "") return false
+  if (surface === "count" && (form.dialect ?? "") === "") return false
+  const primary = SURFACE_FIELDS[surface as FormSurface].find((field) => field.primary)
+  return primary !== undefined && (form[primary.key] ?? "").trim() !== ""
 }
 
 export function readFileAsBase64(file: File): Promise<string> {

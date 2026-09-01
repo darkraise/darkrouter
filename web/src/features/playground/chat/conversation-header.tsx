@@ -35,6 +35,7 @@ export function ConversationHeader({
   onOpenSettings,
   canDelete,
   locked = false,
+  disabled = false,
 }: {
   config: PlaygroundConfig
   title: string
@@ -45,6 +46,9 @@ export function ConversationHeader({
   canDelete: boolean
   /** Set once a turn has been sent under these settings. */
   locked?: boolean
+  /** The selected conversation has not loaded, so the readings still belong
+   *  to the conversation being left and must not be written to the new one. */
+  disabled?: boolean
 }) {
   const [draftTitle, setDraftTitle] = useState(title)
   // Escape blurs the field, and blur commits; without this the abandoned draft
@@ -96,6 +100,7 @@ export function ConversationHeader({
       <Input
         aria-label="Conversation title"
         value={draftTitle}
+        disabled={disabled}
         onChange={(e) => setDraftTitle(e.target.value)}
         onBlur={commitTitle}
         onKeyDown={(e) => {
@@ -116,7 +121,12 @@ export function ConversationHeader({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Conversation actions">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Conversation actions"
+            disabled={disabled}
+          >
             <MoreHorizontal className="size-[var(--icon-size)]" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
