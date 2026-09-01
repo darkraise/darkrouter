@@ -20,7 +20,9 @@ describe("the override editor", () => {
     ))
     mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
     await waitFor(() =>
-      expect(screen.getByLabelText(/context window/i)).toHaveValue(64000),
+      // A string, not a number: NumberBox renders a text field that parses
+      // rather than an <input type="number">, so the DOM value is the text.
+      expect(screen.getByLabelText(/context window/i)).toHaveValue("64000"),
     )
   })
 
@@ -30,7 +32,7 @@ describe("the override editor", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
     mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
     await waitFor(() =>
-      expect(screen.getByLabelText(/context window/i)).toHaveValue(null),
+      expect(screen.getByLabelText(/context window/i)).toHaveValue(""),
     )
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })

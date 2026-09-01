@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { auxBodyFor, vectorPreview, readCount } from "./aux-panels"
+import { auxBodyFor, vectorPreview } from "./surfaces"
 
 describe("auxBodyFor", () => {
   it("puts surface-specific fields under body and the model beside it", () => {
@@ -41,28 +41,5 @@ describe("vectorPreview", () => {
 
   it("does not claim a truncation that did not happen", () => {
     expect(vectorPreview([0.5], 4)).not.toContain("…")
-  })
-})
-
-describe("readCount", () => {
-  it("marks a locally estimated count from the response header", () => {
-    // The body cannot carry a marker — clients parse these responses
-    // strictly — so the header is the only signal there is.
-    const res = new Response("{}", { headers: { "X-Darkrouter-Estimated": "true" } })
-    expect(readCount(res, { input_tokens: 12 })).toEqual({ tokens: 12, estimated: true })
-  })
-
-  it("reads a native count as native", () => {
-    expect(readCount(new Response("{}"), { input_tokens: 12 })).toEqual({
-      tokens: 12, estimated: false,
-    })
-  })
-
-  it("reads Gemini's field name too", () => {
-    expect(readCount(new Response("{}"), { totalTokens: 40 }).tokens).toBe(40)
-  })
-
-  it("reports zero rather than NaN for a shape it does not recognise", () => {
-    expect(readCount(new Response("{}"), { surprise: 1 }).tokens).toBe(0)
   })
 })

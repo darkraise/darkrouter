@@ -1,31 +1,18 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ConversationHeader } from "./conversation-header"
 import { emptyConfig } from "../config"
-
-vi.mock("../../shell/model-combobox", () => ({
-  useModelCandidates: () => ({ candidates: ["gpt", "claude"], loading: false }),
-  ModelCombobox: ({ value, onChange, label }: {
-    value: string
-    onChange: (next: string) => void
-    label: string
-  }) => (
-    <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
-  ),
-}))
 
 const noop = () => {}
 
 function header(over: Record<string, unknown> = {}) {
   const props = {
     config: { ...emptyConfig(), model: "gpt" },
-    onConfigChange: noop,
-    onConfigCommit: noop,
     title: "speculative decoding",
     onTitleChange: noop,
-    onOpenInLab: noop,
     onDelete: noop,
+    onOpenSettings: noop,
     canDelete: true,
     ...over,
   }
@@ -35,7 +22,13 @@ function header(over: Record<string, unknown> = {}) {
 describe("the conversation header", () => {
   it("shows the model on the pill rather than hiding it in a pane", () => {
     header()
-    expect(screen.getByRole("button", { name: /gpt/ })).toBeInTheDocument()
+    expect(screen.getByText("gpt")).toBeInTheDocument()
+  })
+
+  it("names no model as an absence rather than as an empty pill", () => {
+    // A blank strip beside the title reads as a header that failed to load.
+    header({ config: emptyConfig() })
+    expect(screen.getByText("No model")).toBeInTheDocument()
   })
 
   it("commits a retitle on Enter and abandons it on Escape", async () => {
@@ -65,88 +58,59 @@ describe("the conversation header", () => {
     expect(onTitleChange).not.toHaveBeenCalled()
   })
 
-  it("carries the configuration into Lab", async () => {
-    const onOpenInLab = vi.fn()
-    header({ onOpenInLab })
+  it("offers deleting the conversation from its actions menu", async () => {
+    // The menu used to hold "Edit system prompt" and "Open in Lab" too. The
+    // system prompt is in the request pane now, under the same lock as the
+    // rest of what a request carries, and there is no Lab to open.
+    const onDelete = vi.fn()
+    header({ onDelete })
     await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /open in lab/i }))
-    expect(onOpenInLab).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole("menuitem", { name: /delete conversation/i }))
+    expect(onDelete).toHaveBeenCalled()
   })
 
-  it("flushes a pending model commit on unmount rather than dropping it", async () => {
-    // The model field commits after a quiet period. Switching to Lab inside
-    // that window unmounts the header, and a cancelled timer loses a change
-    // the operator made -- silently, which is the part that matters.
-    const onConfigCommit = vi.fn()
-    const view = header({ onConfigCommit })
-    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "x")
-    expect(onConfigCommit).not.toHaveBeenCalled()
-
-    view.unmount()
-    expect(onConfigCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "gptx" }),
-    )
+  it("opens the request settings from the actions menu while nothing has been sent", async () => {
+    // The pane beside the transcript does not edit, so this is the only way
+    // back to a mistyped temperature before the first message shuts it.
+    const onOpenSettings = vi.fn()
+    header({ onOpenSettings })
+    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
+    await userEvent.click(screen.getByRole("menuitem", { name: /request settings/i }))
+    expect(onOpenSettings).toHaveBeenCalled()
   })
 
-  it("commits a pending model the moment the popover closes", async () => {
-    // The popover is uncontrolled, so the flush depends on Radix running the
-    // close handler rather than leaving the pending write to the quiet-period
-    // timer. Closing is the operator saying they are done sooner than the
-    // pause would.
-    const onConfigCommit = vi.fn()
-    header({ onConfigCommit })
-    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "x")
-    expect(onConfigCommit).not.toHaveBeenCalled()
-
-    await userEvent.keyboard("{Escape}")
-    await waitFor(() =>
-      expect(onConfigCommit).toHaveBeenCalledWith(expect.objectContaining({ model: "gptx" })),
-    )
-    // Once, not once per keystroke and again on the timer.
-    expect(onConfigCommit).toHaveBeenCalledTimes(1)
+  it("refuses the request settings once a turn has been sent", async () => {
+    // Disabled rather than absent: an item that vanishes reads as a menu
+    // that lost something, while one that stays and refuses says the
+    // settings are shut -- which is the fact being looked for.
+    const onOpenSettings = vi.fn()
+    header({ locked: true, onOpenSettings })
+    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
+    const item = await screen.findByRole("menuitem", { name: /request settings/i })
+    await userEvent.click(item)
+    expect(onOpenSettings).not.toHaveBeenCalled()
   })
 
-  it("commits a picked dialect straight away", async () => {
-    // A dialect arrives whole rather than a character at a time, so there is
-    // no settling to wait for -- and it supersedes whatever the model field
-    // left pending, which is those same keystrokes with this change on top.
-    const onConfigCommit = vi.fn()
-    header({ onConfigCommit })
-    await userEvent.click(screen.getByRole("button", { name: /gpt/ }))
-    await userEvent.click(screen.getByLabelText("Dialect"))
-    await userEvent.click(await screen.findByRole("option", { name: "anthropic" }))
-
-    expect(onConfigCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ dialect: "anthropic" }),
-    )
-  })
-
-  it("returns focus to the menu trigger when the dialog closes", async () => {
-    // The menu item preventDefaults its own focus return so the dialog can
-    // take focus, which leaves the dialog nothing to hand it back to: focus
-    // lands on document.body and the next Tab starts from the top of the
-    // page, a long way from where the operator was working.
+  it("offers no way to change the model from the header itself", async () => {
+    // It was a popover that edited the model and the dialect. With the
+    // dialog owning setup that made three surfaces for one value, each with
+    // its own idea of when the settings close.
     header()
-    const trigger = screen.getByRole("button", { name: "Conversation actions" })
-    await userEvent.click(trigger)
-    await userEvent.click(screen.getByRole("menuitem", { name: /system prompt/i }))
-    expect(screen.getByLabelText("System prompt")).toBeInTheDocument()
-
-    await userEvent.keyboard("{Escape}")
-    await waitFor(() => expect(document.activeElement).toBe(trigger))
+    expect(screen.queryByRole("button", { name: /gpt/ })).toBeNull()
+    expect(screen.queryByLabelText("Model or alias")).toBeNull()
   })
 
-  it("edits the system prompt, which is the one Lab setting a conversation needs", async () => {
-    const onConfigChange = vi.fn()
-    header({ onConfigChange })
-    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /system prompt/i }))
-    await userEvent.type(screen.getByLabelText("System prompt"), "be brief")
-    await userEvent.click(screen.getByRole("button", { name: "Save" }))
-    expect(onConfigChange).toHaveBeenCalledWith(
-      expect.objectContaining({ system: "be brief" }),
-    )
+  it("shows the model as a fixed reading once a turn has been sent", async () => {
+    // Section 4: every answer in the transcript was produced by this model,
+    // so a picker that still opened would offer a change the conversation
+    // cannot honestly record. A plain reading rather than a disabled button,
+    // because an operator clicks a control before reading why it did nothing.
+    header({ locked: true })
+    expect(screen.getByText("gpt")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /gpt/ })).toBeNull()
+
+    // And the name is still the operator's to change: what a thread is
+    // called was never part of what was sent.
+    expect(screen.getByLabelText("Conversation title")).toBeEnabled()
   })
 })

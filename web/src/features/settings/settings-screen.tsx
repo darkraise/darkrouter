@@ -1,6 +1,5 @@
 import { useState, type ChangeEvent } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { PageHeader } from "darkraise-ui/layout"
 import { Badge, Banner, Button, Card, Input, Label, toast } from "darkraise-ui"
 import { AlertTriangle, Boxes, Clock, FileText, Server, ShieldAlert } from "lucide-react"
 import { api } from "../../lib/api"
@@ -372,48 +371,42 @@ export function SettingsScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Settings"
-        description="What the gateway is set to, and where each setting comes from"
-        actions={
-          <div className="flex gap-2">
-            <ConfirmButton
-              size="sm"
-              variant="outline"
-              destructive
-              disabled={purgeConversations.isPending}
-              title="Delete every saved conversation?"
-              description="Every conversation the playground has kept, and every message in them, is removed. This cannot be undone. Turning the setting off stops new ones being saved; this is what removes the ones already there."
-              confirmLabel="Delete"
-              onConfirm={() => purgeConversations.mutate()}
-            >
-              Delete saved conversations
-            </ConfirmButton>
-            <ConfirmButton
-              size="sm"
-              variant="outline"
-              disabled={sync.isPending}
-              title="Sync the catalogue now?"
-              description="Model definitions are refetched and merged over what is stored. A model the upstream source has dropped stops being offered, which can take routing targets with it."
-              confirmLabel="Sync"
-              onConfirm={() => sync.mutate()}
-            >
-              Sync catalog now
-            </ConfirmButton>
-            <ConfirmButton
-              size="sm"
-              variant="outline"
-              disabled={reload.isPending}
-              title="Reload the config file?"
-              description="The file on disk becomes what the gateway serves. Anything changed in the console that the file still contradicts goes back to the file's version."
-              confirmLabel="Reload"
-              onConfirm={() => reload.mutate()}
-            >
-              Reload config
-            </ConfirmButton>
-          </div>
-        }
-      />
+      <div className="mb-4 flex flex-wrap justify-end gap-2">
+        <ConfirmButton
+          size="sm"
+          variant="outline"
+          destructive
+          disabled={purgeConversations.isPending}
+          title="Delete every saved conversation?"
+          description="Every conversation the playground has kept, and every message in them, is removed. This cannot be undone. Turning the setting off stops new ones being saved; this is what removes the ones already there."
+          confirmLabel="Delete"
+          onConfirm={() => purgeConversations.mutate()}
+        >
+          Delete saved conversations
+        </ConfirmButton>
+        <ConfirmButton
+          size="sm"
+          variant="outline"
+          disabled={sync.isPending}
+          title="Sync the catalogue now?"
+          description="Model definitions are refetched and merged over what is stored. A model the upstream source has dropped stops being offered, which can take routing targets with it."
+          confirmLabel="Sync"
+          onConfirm={() => sync.mutate()}
+        >
+          Sync catalog now
+        </ConfirmButton>
+        <ConfirmButton
+          size="sm"
+          variant="outline"
+          disabled={reload.isPending}
+          title="Reload the config file?"
+          description="The file on disk becomes what the gateway serves. Anything changed in the console that the file still contradicts goes back to the file's version."
+          confirmLabel="Reload"
+          onConfirm={() => reload.mutate()}
+        >
+          Reload config
+        </ConfirmButton>
+      </div>
 
       {reload.data && !reload.data.valid && (
         <Banner variant="destructive" className="mb-4">

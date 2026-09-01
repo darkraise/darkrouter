@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { Button, Sheet, SheetContent, SheetTitle, SheetTrigger } from "darkraise-ui"
-import { PanelLeftOpen } from "lucide-react"
-import { usePlaygroundConversation, usePlaygroundConversations } from "../../../lib/queries"
+import { Card } from "darkraise-ui"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "darkraise-ui/components/resizable"
+import { useSearch } from "@tanstack/react-router"
+import { usePlaygroundConversation, usePlaygroundConversations, useTrace } from "../../../lib/queries"
 import {
   configOfConversation,
   messagesOfTurns,
@@ -14,20 +15,38 @@ import {
 } from "../lib/conversations"
 import { useChatRun, type CompletedTurn } from "../lib/use-chat-run"
 import { emptyConfig, type PlaygroundConfig } from "../config"
-import { parseTools } from "../lib/request"
+import { parseTools, seedFromTrace } from "../lib/request"
+import { ConfigPane } from "../config-pane/config-pane"
+import { NO_METRICS, type StreamMetrics } from "../metrics"
+import { TokenPanel, consumptionOf } from "../token-panel"
 import { Transcript } from "../transcript"
 import { Composer } from "../composer"
 import { HistoryRail } from "./history-rail"
 import { ConversationHeader } from "./conversation-header"
-import type { PlaygroundConversation } from "../../../lib/api-types"
+import { NewConversationDialog } from "./new-conversation-dialog"
+import type { PlaygroundConversation, RequestTrace } from "../../../lib/api-types"
 
 /**
  * A conversation that is still there tomorrow.
  *
- * Three regions: the history rail, the transcript, and the composer pinned to
- * the foot. No config pane and no metrics strip — the two settings a
- * conversation genuinely needs are on the header, and everything else belongs
- * to Lab.
+ * Three regions, and islands inside the middle one: the conversations panel
+ * on the left, the conversation itself, and the request pane on the right.
+ * Separating them says which controls belong to the thread and which to the
+ * message being typed — a distinction one continuous column left the reader
+ * to work out.
+ *
+ * This is where Lab's Single surface went. A playground that made you choose
+ * between "a conversation that is kept" and "a request you can actually tune"
+ * was two half-screens: an operator who wanted a temperature had to abandon
+ * their transcript to get one, and one who wanted a transcript sent every turn
+ * at the provider's defaults. The two are one screen now, and the seam is
+ * time rather than place — every setting is open until the first message, and
+ * fixed after it.
+ *
+ * Fixed rather than merely discouraged, because a conversation is a record.
+ * Every answer above was produced under these settings, and a model or a
+ * temperature that could still be changed would make the thread a transcript
+ * of a request that was never sent.
  *
  * The saving is deliberately invisible. A history rail behind an explicit Save
  * button does not get used, and a conversation the operator has to remember to
@@ -40,17 +59,22 @@ import type { PlaygroundConversation } from "../../../lib/api-types"
  *  field is the operator's own, and outranks a title derived from the prompt. */
 const UNTITLED = "New chat"
 
-export function ChatMode({
-  onOpenInLab,
-}: {
-  onOpenInLab: (config: PlaygroundConfig) => void
-}) {
+export function ChatMode() {
   const [config, setConfig] = useState<PlaygroundConfig>(emptyConfig)
   const [activeId, setActiveId] = useState("")
   const [loadedId, setLoadedId] = useState("")
   const [title, setTitle] = useState(UNTITLED)
-  const [collapsed, setCollapsed] = useState(false)
-  const [railOpen, setRailOpen] = useState(false)
+  const [metrics, setMetrics] = useState<StreamMetrics>(NO_METRICS)
+  const [seededFrom, setSeededFrom] = useState<string | undefined>(undefined)
+  // What the dialog is showing, and what it opens on. Held apart from `config`
+  // so a draft being edited in the dialog is not the thing the screen behind it
+  // would send if the operator closed it and typed.
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSeed, setSettingsSeed] = useState<PlaygroundConfig>(emptyConfig)
+  // How the dialog was opened, not whether a row exists. A conversation is not
+  // stored until its first turn is, so "has an id" is false for exactly the
+  // case the actions menu exists to serve — a thread set up and not yet sent.
+  const [settingsAmending, setSettingsAmending] = useState(false)
 
   const { data: conversations } = usePlaygroundConversations()
   const detail = usePlaygroundConversation(activeId, { enabled: activeId !== "" })
@@ -109,7 +133,45 @@ export function ChatMode({
     }
   }
 
-  const run = useChatRun(config, () => {}, (turn) => void persistTurn(turn))
+  const run = useChatRun(config, setMetrics, (turn) => void persistTurn(turn))
+
+  // What fixes the settings is a turn existing, not the send that made it:
+  // a conversation reopened from the rail has turns and no send behind it,
+  // and its settings are every bit as committed to.
+  const locked = run.messages.length > 0
+
+  // The trace drawer's "Open in playground" arrives as ?seed=. It carried
+  // its model and dialect into Lab's request pane, which is this screen now.
+  const search = useSearch({ strict: false })
+  const seed = search.seed
+  const trace = useTrace(seed ?? "", { enabled: seed !== undefined })
+
+  // Applied once per seed, and never over a conversation: a seed sets up a
+  // fresh request, and stomping the model of a thread the operator opened
+  // from the rail would rewrite what its answers were produced under.
+  useEffect(() => {
+    if (!trace.data || seed === undefined || seededFrom === seed) return
+    if (run.messages.length > 0) return
+    setConfig((prev) => ({ ...prev, ...seedFromTrace(trace.data as RequestTrace) }))
+    setSeededFrom(seed)
+    // run is a fresh object each render; the transcript's length is what
+    // matters, and it is read rather than depended on for the same reason
+    // config is set functionally above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trace.data, seed, seededFrom])
+
+  const seedNote =
+    seed !== undefined && run.messages.length === 0
+      ? // capture.bodies has a retention sweep and no writer, so a trace
+        // carries no prompt text — the model and dialect are all a seeded
+        // run can restore. Stated here rather than left for the operator to
+        // discover from a transcript that is silently empty.
+        seededFrom === seed
+        ? `Seeded from trace ${seed}: model and dialect carried over. The original prompt was not retained and is not recoverable.`
+        : trace.isError
+          ? `Trace ${seed} could not be loaded, so nothing was seeded.`
+          : `Loading trace ${seed}…`
+      : undefined
 
   // Applied once per conversation: re-firing would stomp on turns the operator
   // has typed since it was opened.
@@ -125,20 +187,41 @@ export function ChatMode({
   }, [detail.data, loadedId])
 
   function startNew() {
+    // Seeded from the conversation being left rather than from the defaults:
+    // the model an operator has been working with is almost always the one
+    // they want next, and every value it carries is on screen in the dialog
+    // rather than inherited invisibly. Cancel takes none of it.
+    setSettingsSeed(config)
     conversationRef.current = ""
     creating.current = null
     setActiveId("")
     setLoadedId("")
     setTitle(UNTITLED)
+    setMetrics(NO_METRICS)
+    setConfig(emptyConfig())
     run.load([], {})
-    setRailOpen(false)
+    setSettingsAmending(false)
+    setSettingsOpen(true)
+  }
+
+  /** The same dialog, reopened on a conversation that has not sent anything
+   *  yet. Without it a mistyped temperature could only be fixed by starting
+   *  the thread over, since the pane beside the transcript no longer edits. */
+  function amendSettings() {
+    setSettingsSeed(config)
+    setSettingsAmending(true)
+    setSettingsOpen(true)
+  }
+
+  function applySettings(next: PlaygroundConfig) {
+    setConfig(next)
+    commitConfig(next)
   }
 
   function select(id: string) {
     if (id === activeId) return
     conversationRef.current = id
     setActiveId(id)
-    setRailOpen(false)
   }
 
   /** Model, dialect and the system prompt are stored with the conversation, so
@@ -166,83 +249,130 @@ export function ChatMode({
     if (c.id === conversationRef.current) startNew()
   }
 
-  const rail = (
-    <HistoryRail
-      conversations={conversations ?? []}
-      activeId={activeId}
-      onSelect={select}
-      onNew={startNew}
-      onDelete={removeConversation}
-      collapsed={collapsed}
-      onToggleCollapsed={() => setCollapsed((c) => !c)}
-    />
-  )
-
   return (
-    <div className="flex min-h-0 flex-1">
-      {/* A 260px rail beside a transcript is two columns on a laptop and a
-          squeeze on anything narrower, so below lg it becomes a sheet. */}
-      <div className="hidden lg:flex">{rail}</div>
+    <ResizablePanelGroup className="flex min-h-0 flex-1 gap-0 px-6 pb-6">
+      {/* Resizable rather than fixed at 260px: how much of the screen the
+          retrieval deserves depends on how long the titles are and how many
+          there are, and only the operator looking at them knows. The floor
+          keeps a title readable; the ceiling keeps this a rail rather than a
+          second transcript. */}
+      <ResizablePanel
+        defaultSize={20}
+        minSize={12}
+        maxSize={40}
+        className="flex min-h-0 flex-col"
+      >
+        <HistoryRail
+          conversations={conversations ?? []}
+          activeId={activeId}
+          onSelect={select}
+          onNew={startNew}
+          onDelete={removeConversation}
+        />
+      </ResizablePanel>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 lg:hidden">
-          <Sheet open={railOpen} onOpenChange={setRailOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Show conversations" className="ml-4 mt-2">
-                <PanelLeftOpen className="size-[var(--icon-size)]" aria-hidden="true" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[280px] p-0">
-              <SheetTitle className="sr-only">Conversations</SheetTitle>
-              <HistoryRail
-                conversations={conversations ?? []}
-                activeId={activeId}
-                onSelect={select}
-                onNew={startNew}
-                onDelete={removeConversation}
-                collapsed={false}
-                onToggleCollapsed={() => setRailOpen(false)}
-              />
-            </SheetContent>
-          </Sheet>
-        </div>
+      <ResizableHandle withHandle className="mx-2" />
 
+      <ResizablePanel className="flex min-h-0 min-w-0 flex-col gap-4">
         <ConversationHeader
           config={config}
-          onConfigChange={setConfig}
-          onConfigCommit={commitConfig}
           title={title}
           onTitleChange={retitle}
-          onOpenInLab={() => onOpenInLab(config)}
           onDelete={() => {
             const current = (conversations ?? []).find((c) => c.id === activeId)
             if (current) removeConversation(current)
           }}
           canDelete={activeId !== ""}
+          locked={locked}
+          onOpenSettings={amendSettings}
         />
 
-        {/* Centred and capped: a transcript run to the full width of a wide
-            monitor is a line length nobody reads twice. */}
-        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
-          <Transcript
-            messages={run.messages}
-            routes={run.routes}
-            busy={run.busy}
-            model={config.model}
-            quiet
-          />
-          <Composer
-            model={config.model}
-            busy={run.busy}
-            error={run.error}
-            toolsError={parseTools(config.toolsRaw).error}
-            canClear={run.messages.length > 0}
-            onSend={(p) => void run.send(p)}
-            onStop={run.stop}
-            onClear={startNew}
-          />
+        <div className="flex min-h-0 flex-1 gap-4">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+            {/* Centred and capped: a transcript run to the full width of a
+                wide monitor is a line length nobody reads twice. */}
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+              <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
+                <Transcript
+                  messages={run.messages}
+                  routes={run.routes}
+                  thinking={run.thinking}
+                  busy={run.busy}
+                  model={config.model}
+                  seedNote={seedNote}
+                  quiet
+                />
+              </div>
+
+              {/* Inside the transcript's island rather than a card of its own
+                  below it. Typing and reading the answer are one activity, and
+                  the composer as a separate card put a gap and a second panel
+                  edge between the two halves of it.
+
+                  No rule above it. The field draws its own border, and a
+                  divider a few pixels over that one is a second line saying
+                  what the first already said. Capped to the transcript's
+                  measure so the box lines up with the text it produces. */}
+              <div className="shrink-0">
+                <div className="mx-auto w-full max-w-3xl px-6 py-4">
+                  <Composer
+                    model={config.model}
+                    busy={run.busy}
+                    error={run.error}
+                    toolsError={parseTools(config.toolsRaw).error}
+                    onSend={(p) => void run.send(p)}
+                    onStop={run.stop}
+                  />
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* The readings and the settings share the right-hand column: what
+              this request is, and what it has cost. */}
+          <div className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto lg:flex">
+            <TokenPanel
+              consumption={consumptionOf(
+                run.routes,
+                run.messages.filter((m) => m.role === "assistant").length,
+              )}
+              metrics={metrics}
+            />
+            {/* A card, like the readings above it. The pane used to draw
+                itself as a bare column with a hairline down its left edge,
+                which put two different kinds of object in one stack and made
+                the lower one read as scenery the layout had left behind. */}
+            <Card className="flex shrink-0 flex-col gap-4 p-4">
+              <ConfigPane
+                config={config}
+                // Never edited here. Settings are set in the dialog that opens
+                // with the conversation and read here for the rest of its
+                // life; two live surfaces for one value is a disagreement
+                // waiting for whichever is a keystroke behind.
+                onChange={() => {}}
+                locked
+                lockNote={
+                  locked
+                    ? undefined
+                    : "Chosen when this conversation started. Change them from its actions menu until the first message goes."
+                }
+                // The model island above owns both, so the pane showing them
+                // again would be two readings of one value.
+                showModel={false}
+                showDialect={false}
+              />
+            </Card>
+          </div>
         </div>
-      </div>
-    </div>
+      </ResizablePanel>
+
+      <NewConversationDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        seed={settingsSeed}
+        onStart={applySettings}
+        amending={settingsAmending}
+      />
+    </ResizablePanelGroup>
   )
 }

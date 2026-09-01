@@ -216,6 +216,35 @@ func TestRequestSurfacesReportCacheReadTokens(t *testing.T) {
 	}
 }
 
+func TestTraceReportsReasoningTokens(t *testing.T) {
+	// Reasoning tokens are billed inside tokens_out and are frequently most of
+	// it, so a consumer reading only tokens_out cannot say where the spend
+	// went. They are also the one signal that a turn reasoned that survives
+	// the passthrough path: a forwarded reply carries the upstream's own field
+	// names for the reasoning text, and those disagree between providers, so a
+	// client matching on them alone sees nothing for half the fleet.
+	s, db := testServerFull(t)
+	db.SeedFailoverTraceForTest(t, "01FAIL")
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/requests/01FAIL", "")
+	var tr struct {
+		TokensOut       int64 `json:"tokens_out"`
+		ReasoningTokens int64 `json:"reasoning_tokens"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.ReasoningTokens != 12 {
+		t.Errorf("trace reasoning_tokens = %d, want 12", tr.ReasoningTokens)
+	}
+	// Stated separately, not subtracted: tokens_out stays the total the
+	// provider billed, which is what reconciles against an invoice.
+	if tr.TokensOut != 20 {
+		t.Errorf("trace tokens_out = %d, want 20 (reasoning is inside it)", tr.TokensOut)
+	}
+}
+
 func TestAnUnknownTraceIs404(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)

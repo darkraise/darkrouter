@@ -57,6 +57,7 @@ func (d *DB) SeedFailoverTraceForTest(t *testing.T, id string) {
 		Dialect: "openai", Surface: "llm", RequestedModel: "fast",
 		ResolvedAlias: "fast", FinalProviderID: "b", FinalModel: "m2",
 		Status: "success", TokensIn: 10, TokensOut: 20, CacheReadTokens: 4,
+		ReasoningTokens: 12,
 		CostMicros: &cost, TTFTMs: &ttft,
 		Candidates:  []string{"a/m1", "b/m2", "c/m3"},
 		Skips:       []string{"c/m3:cooling", "d/m4:no_credential"},

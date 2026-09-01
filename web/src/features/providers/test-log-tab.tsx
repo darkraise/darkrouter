@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { ChevronRight, RefreshCw } from "lucide-react"
-import { Button } from "darkraise-ui"
+import { RefreshCw } from "lucide-react"
+import {
+  Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button,
+} from "darkraise-ui"
 import { useRequests } from "../../lib/queries"
 import { formatLatency } from "../requests/requests-columns"
 import { relativeTime } from "../../lib/time"
@@ -73,71 +75,69 @@ export function TestLogTab({ providerId }: { providerId: string }) {
         </Button>
       </div>
 
-      <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
+      {/* An Accordion, not a <ul> of aria-expanded buttons. The hand-rolled
+          version told a screen reader that something had expanded without
+          ever saying what: the trigger carried aria-expanded and no
+          aria-controls, and the panel had no role of its own. The component
+          wires both, and brings arrow-key movement between rows.
+
+          Single-open with `collapsible`, which is the behaviour the row state
+          already implemented by hand. */}
+      <Accordion
+        type="single"
+        collapsible
+        value={expanded ?? ""}
+        onValueChange={(next) => setExpanded(next === "" ? null : next)}
+        className="min-h-0 flex-1 divide-y overflow-y-auto"
+      >
         {rows.map((r) => {
-          const open = expanded === r.id
           const failed = r.status !== "success"
           return (
-            <li key={r.id}>
-              <button
-                type="button"
-                onClick={() => setExpanded(open ? null : r.id)}
-                aria-expanded={open}
-                className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-[hsl(var(--muted))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))] focus-visible:-outline-offset-2"
-              >
+            <AccordionItem key={r.id} value={r.id}>
+              <AccordionTrigger className="gap-3 px-4 py-2 hover:bg-[hsl(var(--muted))]">
                 <span
                   className={
                     failed
-                      ? "w-16 shrink-0 font-mono text-sm text-[hsl(var(--destructive))]"
-                      : "w-16 shrink-0 font-mono text-sm text-[hsl(var(--success))]"
+                      ? "w-16 shrink-0 text-left font-mono text-[hsl(var(--destructive))]"
+                      : "w-16 shrink-0 text-left font-mono text-[hsl(var(--success))]"
                   }
                 >
                   {failed ? r.error_code ?? "error" : "ok"}
                 </span>
-                <span className="w-20 shrink-0 font-mono text-sm text-[hsl(var(--legend))]">
+                <span className="w-20 shrink-0 text-left font-mono text-[hsl(var(--legend))]">
                   {relativeTime(r.ts_ms)}
                 </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-sm" title={r.model}>
+                <span className="min-w-0 flex-1 truncate text-left font-mono" title={r.model}>
                   {r.model}
                 </span>
-                <span className="w-16 shrink-0 text-right font-mono text-sm tabular-nums text-[hsl(var(--legend))]">
+                <span className="w-16 shrink-0 text-right font-mono tabular-nums text-[hsl(var(--legend))]">
                   {r.total_ms === null ? "—" : formatLatency(r.total_ms)}
                 </span>
-                <ChevronRight
-                  className={
-                    open
-                      ? "size-[var(--icon-size,1rem)] shrink-0 rotate-90 transition-transform"
-                      : "size-[var(--icon-size,1rem)] shrink-0 transition-transform"
-                  }
-                  aria-hidden="true"
-                />
-              </button>
+              </AccordionTrigger>
 
-              {open && (
-                <div className="bg-[hsl(var(--muted))]/40 px-4 pb-3">
-                  <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1 text-sm">
-                    {detailRows(r).map((d) => (
-                      <div key={d.label} className="contents">
-                        <dt className="text-[hsl(var(--legend))]">{d.label}</dt>
-                        <dd className={d.mono ? "truncate font-mono" : "truncate"}>{d.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  {/* The attempt trail, the candidates and the skips live on
-                      the trace. This row is the summary of it. */}
-                  <Link
-                    to="/requests/$id"
-                    params={{ id: r.id }}
-                    className="mt-2 inline-block text-sm underline underline-offset-2"
-                  >
-                    Open the full trace
-                  </Link>
-                </div>
-              )}
-            </li>
+              <AccordionContent className="bg-[hsl(var(--muted))]/40 px-4 pb-3">
+                <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1 text-sm">
+                  {detailRows(r).map((d) => (
+                    <div key={d.label} className="contents">
+                      <dt className="text-[hsl(var(--legend))]">{d.label}</dt>
+                      <dd className={d.mono ? "truncate font-mono" : "truncate"}>{d.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {/* The attempt trail, the candidates and the skips live on
+                    the trace. This row is the summary of it. */}
+                <Link
+                  to="/requests/$id"
+                  params={{ id: r.id }}
+                  className="mt-2 inline-block text-sm underline underline-offset-2"
+                >
+                  Open the full trace
+                </Link>
+              </AccordionContent>
+            </AccordionItem>
           )
         })}
-      </ul>
+      </Accordion>
 
       <div className="border-t px-4 py-2 text-center">
         <Link

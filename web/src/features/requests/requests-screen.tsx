@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { Link, useRouter, useRouterState } from "@tanstack/react-router"
-import { PageHeader } from "darkraise-ui/layout"
 import { Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { DataTable, exportToCsv } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
@@ -181,16 +180,6 @@ export function RequestsScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Requests"
-        description="What it just did, and which provider actually served"
-        actions={
-          <Button variant="outline" size="sm" onClick={() => exportToCsv(rows, "requests.csv", CSV_COLUMNS)}>
-            Export CSV
-          </Button>
-        }
-      />
-
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {/* Suggested from the whole catalogue, not just the page in hand: a
             menu built from the loaded rows can only offer what is already on
@@ -291,6 +280,14 @@ export function RequestsScreen() {
             {newer} newer
           </Button>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => exportToCsv(rows, "requests.csv", CSV_COLUMNS)}
+        >
+          Export CSV
+        </Button>
       </div>
 
       <SavedViewsBar fields={FIELDS} filters={filters} onApply={writeFilters} />

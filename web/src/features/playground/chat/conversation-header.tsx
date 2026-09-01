@@ -1,103 +1,55 @@
 import { useEffect, useRef, useState } from "react"
 import {
-  Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+  Button, Card,
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-  Input, Label, Popover, PopoverContent, PopoverTrigger,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea,
+  Input,
 } from "darkraise-ui"
-import { MoreHorizontal } from "lucide-react"
-import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
-import { DIALECTS, type PlaygroundConfig } from "../config"
-import type { PlaygroundDialect } from "../../../lib/api-types"
-
-/** Long enough that a typed model name is one write rather than eleven, short
- *  enough that an operator who types and immediately looks away still has it
- *  stored. Closing the popover does not wait for it. */
-const COMMIT_QUIET_MS = 400
+import { Lock, MoreHorizontal } from "lucide-react"
+import type { PlaygroundConfig } from "../config"
 
 /**
  * What a conversation is, above the conversation.
  *
- * Chat mode shows no config pane, so the two settings a conversation genuinely
- * needs are reachable from here instead: the model and the dialect from the
- * pill's popover, the system prompt from the overflow menu. Everything else a
- * request can carry belongs to Lab, and the menu's *open in Lab* is how a
- * conversation gets there without being retyped.
+ * The model it answers under, and the conversation's name. Everything else a
+ * request can carry is in the request pane beside the transcript; the model is
+ * here because it is what an operator checks before every send, and a pane is
+ * somewhere you look rather than something you see.
  *
- * Showing a value and storing it are separate here, as they already are for the
- * title. The model field reports every character it is given, and a stored row
- * written once per character is decided by whichever of those writes lands
- * last.
+ * Its own island at the top of the chat column, because what model is
+ * answering is a property of the conversation rather than of the message being
+ * typed — and a strip fused to the transcript read as part of it.
+ *
+ * The model is a reading and not a control. It used to be a popover that
+ * edited the model and the dialect, which made three places to change one
+ * value once the new-conversation dialog existed — and three places that each
+ * had to agree about when the settings close. They close at the first message;
+ * until then the dialog is where they are set, reachable from the actions menu
+ * beside this. The name stays editable throughout: what a thread is called is
+ * not part of what was sent.
  */
 export function ConversationHeader({
   config,
-  onConfigChange,
-  onConfigCommit,
   title,
   onTitleChange,
-  onOpenInLab,
   onDelete,
+  onOpenSettings,
   canDelete,
+  locked = false,
 }: {
   config: PlaygroundConfig
-  /** Every change, including a half-typed model name. What the screen shows. */
-  onConfigChange: (next: PlaygroundConfig) => void
-  /** Only a value the operator has settled on. What gets stored. */
-  onConfigCommit: (next: PlaygroundConfig) => void
   title: string
   onTitleChange: (next: string) => void
-  onOpenInLab: () => void
   onDelete: () => void
+  /** Reopens the request settings. Offered only while nothing has been sent. */
+  onOpenSettings: () => void
   canDelete: boolean
+  /** Set once a turn has been sent under these settings. */
+  locked?: boolean
 }) {
-  const { candidates, loading } = useModelCandidates()
   const [draftTitle, setDraftTitle] = useState(title)
-  const [systemOpen, setSystemOpen] = useState(false)
-  const [draftSystem, setDraftSystem] = useState(config.system)
   // Escape blurs the field, and blur commits; without this the abandoned draft
   // would be saved by the very keystroke that discards it.
   const abandoning = useRef(false)
-  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingCommit = useRef<PlaygroundConfig | null>(null)
-
-  function cancelPending() {
-    if (commitTimer.current !== null) clearTimeout(commitTimer.current)
-    commitTimer.current = null
-    pendingCommit.current = null
-  }
-
-  function commitPending() {
-    const settled = pendingCommit.current
-    cancelPending()
-    if (settled !== null) onConfigCommit(settled)
-  }
-
-  /** For the model field, which reports every character typed into it. A pause
-   *  is what says the operator has finished naming a model; closing the popover
-   *  says it sooner. */
-  function commitWhenSettled(next: PlaygroundConfig) {
-    onConfigChange(next)
-    if (commitTimer.current !== null) clearTimeout(commitTimer.current)
-    pendingCommit.current = next
-    commitTimer.current = setTimeout(commitPending, COMMIT_QUIET_MS)
-  }
-
-  /** For a value that arrives whole: a picked dialect, a saved system prompt.
-   *  It supersedes anything the model field left pending, which is these same
-   *  keystrokes with this change on top. */
-  function commitNow(next: PlaygroundConfig) {
-    cancelPending()
-    onConfigChange(next)
-    onConfigCommit(next)
-  }
-
-  // Flushed on unmount, not cancelled: a model name typed and then abandoned
-  // by switching to Lab inside the quiet period is still a change the operator
-  // made, and dropping it says nothing. Held in a ref because the cleanup runs
-  // once and would otherwise close over the first render's commit callback.
-  const flushOnUnmount = useRef(commitPending)
-  flushOnUnmount.current = commitPending
-  useEffect(() => () => flushOnUnmount.current(), [])
 
   // The field follows the conversation, not the keystroke: selecting another
   // conversation in the rail must not leave the previous one's name in it.
@@ -119,46 +71,27 @@ export function ConversationHeader({
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b px-6 py-2">
-      <Popover onOpenChange={(open) => { if (!open) commitPending() }}>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="max-w-[18rem] truncate font-mono">
-            {config.model === "" ? "Choose a model" : config.model}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="flex w-80 flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label>Model</Label>
-            <ModelCombobox
-              label="Model or alias"
-              value={config.model}
-              candidates={candidates}
-              loading={loading}
-              onChange={(model) => commitWhenSettled({ ...config, model })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="pgc-dialect">Dialect</Label>
-            <Select
-              value={config.dialect}
-              onValueChange={(dialect) =>
-                commitNow({ ...config, dialect: dialect as PlaygroundDialect })
-              }
-            >
-              <SelectTrigger id="pgc-dialect">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DIALECTS.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </PopoverContent>
-      </Popover>
+    <Card className="flex shrink-0 items-center gap-2 p-3">
+      {/* A plain reading rather than a disabled button: a control that cannot
+          be operated is still a control, and an operator will click it before
+          reading why it did nothing. The padlock is drawn only once the
+          settings are actually shut, so it marks the moment rather than
+          decorating the pill. */}
+      <span
+        className="flex max-w-[18rem] items-center gap-1.5 rounded-[var(--radius)] border border-dashed px-2.5 py-1.5 text-sm text-[hsl(var(--muted-foreground))]"
+        title={
+          locked
+            ? `Fixed by the first message: ${config.model} on the ${config.dialect} dialect`
+            : `${config.model === "" ? "No model chosen" : config.model} on the ${config.dialect} dialect`
+        }
+      >
+        {locked ? (
+          <Lock className="size-[var(--icon-size,1rem)] shrink-0" aria-hidden="true" />
+        ) : null}
+        <span className="truncate font-mono">
+          {config.model === "" ? "No model" : config.model}
+        </span>
+      </span>
 
       <Input
         aria-label="Conversation title"
@@ -188,57 +121,22 @@ export function ConversationHeader({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onSelect={(e) => {
-              // The menu returns focus to its trigger as it closes, which would
-              // pull focus straight back out of the dialog it just opened.
-              e.preventDefault()
-              setDraftSystem(config.system)
-              setSystemOpen(true)
-            }}
-          >
-            Edit system prompt
+          {/* Disabled rather than hidden once a turn has been sent. An item
+              that disappears reads as a menu that has lost something; one
+              that stays and refuses says the settings are shut, which is the
+              fact the operator is looking for. */}
+          <DropdownMenuItem disabled={locked} onSelect={onOpenSettings}>
+            Request settings…
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onOpenInLab}>Open in Lab</DropdownMenuItem>
+          {/* The system prompt used to be edited from here. It is in the
+              request settings now, beside the rest of what a request carries
+              and under the same lock, rather than in a dialog that could
+              change it after the turns it shaped had already been answered. */}
           <DropdownMenuItem disabled={!canDelete} onSelect={onDelete}>
             Delete conversation
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <Dialog open={systemOpen} onOpenChange={setSystemOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit system prompt</DialogTitle>
-            <DialogDescription>
-              Sent ahead of every turn in this conversation, and stored with it.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="pgc-system">System prompt</Label>
-            <Textarea
-              id="pgc-system"
-              aria-label="System prompt"
-              rows={6}
-              value={draftSystem}
-              onChange={(e) => setDraftSystem(e.target.value)}
-            />
-          </div>
-          <div className="mt-2 flex items-center justify-end gap-2 border-t pt-3">
-            <Button variant="ghost" onClick={() => setSystemOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                commitNow({ ...config, system: draftSystem })
-                setSystemOpen(false)
-              }}
-            >
-              Save
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+    </Card>
   )
 }

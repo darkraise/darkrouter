@@ -17,3 +17,61 @@
 .dr-data-table-frame .dr-table-wrapper {
   border-width: 0;
 }
+
+/* The app header carries the page's name, mark and description, and does it
+   at the library's own `h-14`: the bar is chrome shared with every other
+   darkraise app, and a taller one here is a seam. The name and description
+   are set in tight leading so both lines fit inside 3.5rem.
+
+   Stated as a minimum with an automatic height rather than left at the
+   library's fixed one, because the font-size axis rebinds the text scale —
+   at extra-large the two lines exceed 3.5rem, and a fixed height would clip
+   the description rather than grow. At every normal setting the rendered
+   height is the original 3.5rem.
+
+   `.dr-layout-header-end` is the only slot SidebarLayout exposes, and it is
+   `ml-auto`, which would pin the page name to the right-hand end beside the
+   theme switcher. Letting it span the bar instead lets the identity take the
+   left with its own `mr-auto` while the controls stay where they were.
+
+   Unlayered on purpose: the library's rules live in `@layer components`, and
+   an unlayered declaration wins over a layered one whatever the specificity. */
+.dr-layout-header {
+  height: auto;
+  min-height: 3.5rem;
+}
+
+.dr-layout-header-end {
+  margin-left: 0;
+  flex: 1 1 auto;
+}
+
+/* The 14px floor, applied to the three library components that sit under it.
+   CLAUDE.md's first typography rule is that `text-sm` is the floor and that
+   hierarchy below body text comes from colour and weight rather than from a
+   smaller size. Three of darkraise-ui's own components disagree: a default
+   `Badge` is `text-xs`, and so are the sidebar's group labels and the search
+   command's shortcut hint. Measured in this console that is 159 badges, 27
+   group labels and 9 shortcut hints rendering at 12px.
+
+   Fixed here rather than at 195 call sites, because the size is the
+   component's default and every future `<Badge>` would arrive at 12px again.
+   A `size="lg"` badge would also clear the floor, but it carries wider
+   padding too, so 159 pills would grow to fix a font size.
+
+   `--text-sm` rather than a pixel value: these track the font-size axis the
+   same way every other label does. They already scaled with it — 12 → 14 →
+   15px across the four steps — they simply sat one step under the floor at
+   every one of them.
+
+   The badge's own `leading-4` is left alone at `data-size="sm"`: it is a
+   line box, not a size, and the pill's height is set by its padding.
+
+   Unlayered on purpose: the library's rules live in `@layer components`, and
+   an unlayered declaration wins over a layered one whatever the specificity. */
+.dr-badge[data-size="sm"],
+.dr-badge[data-size="md"],
+.dr-sidebar-nav-group-label,
+.dr-search-command-shortcut {
+  font-size: var(--text-sm);
+}

@@ -314,6 +314,10 @@ type RequestSummary struct {
 	TokensIn        int64
 	TokensOut       int64
 	CacheReadTokens int64
+	// Output tokens the model spent reasoning rather than answering. Billed
+	// as output tokens and frequently most of them, so a consumer that reads
+	// only TokensOut cannot say where the spend went.
+	ReasoningTokens int64
 	CostMicros      *int64
 	TTFTMs          *int64
 	TotalMs         *int64
@@ -375,7 +379,8 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT r.id, r.ts, r.dialect, r.surface, r.requested_model, r.resolved_alias,
 		        r.final_provider_id, r.final_model, r.status, r.source,
-		        r.tokens_in, r.tokens_out, r.cache_read_tokens, r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
+		        r.tokens_in, r.tokens_out, r.cache_read_tokens, r.reasoning_tokens,
+		        r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
 		        (SELECT count(*) FROM request_attempts a WHERE a.request_id = r.id),
 		        coalesce((SELECT a.path FROM request_attempts a
 		                   WHERE a.request_id = r.id
@@ -394,7 +399,8 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		var s RequestSummary
 		if err := rows.Scan(&s.ID, &s.TSMs, &s.Dialect, &s.Surface, &s.RequestedModel,
 			&s.ResolvedAlias, &s.FinalProviderID, &s.FinalModel, &s.Status, &s.Source,
-			&s.TokensIn, &s.TokensOut, &s.CacheReadTokens, &s.CostMicros, &s.TTFTMs, &s.TotalMs,
+			&s.TokensIn, &s.TokensOut, &s.CacheReadTokens, &s.ReasoningTokens,
+			&s.CostMicros, &s.TTFTMs, &s.TotalMs,
 			&s.ErrorCode, &s.Attempts, &s.Path); err != nil {
 			return nil, fmt.Errorf("list requests: %w", err)
 		}
@@ -447,13 +453,15 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT id, ts, dialect, surface, requested_model, resolved_alias,
 		        final_provider_id, final_model, status,
-		        tokens_in, tokens_out, cache_read_tokens, cost_micros, ttft_ms, total_ms, error_code,
+		        tokens_in, tokens_out, cache_read_tokens, reasoning_tokens,
+		        cost_micros, ttft_ms, total_ms, error_code,
 		        candidates_json, warnings_json, surface_meta_json,
 		        response_bytes, response_content_type
 		   FROM requests WHERE id = ?`, id).Scan(
 		&tr.ID, &tr.TSMs, &tr.Dialect, &tr.Surface, &tr.RequestedModel, &tr.ResolvedAlias,
 		&tr.FinalProviderID, &tr.FinalModel, &tr.Status,
-		&tr.TokensIn, &tr.TokensOut, &tr.CacheReadTokens, &tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
+		&tr.TokensIn, &tr.TokensOut, &tr.CacheReadTokens, &tr.ReasoningTokens,
+		&tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
 		&traceJSON, &warningsJSON, &metaJSON,
 		&tr.ResponseBytes, &tr.ResponseContentType)
 	if errors.Is(err, sql.ErrNoRows) {

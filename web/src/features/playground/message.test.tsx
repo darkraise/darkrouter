@@ -24,7 +24,8 @@ const trace = (over: Partial<RequestTrace> = {}): RequestTrace =>
 
 const route = (over: Partial<TurnRoute> = {}): TurnRoute => ({
   requestId: "01ABC", provider: "groq", model: "llama-3.3", totalMs: 900,
-  tokensIn: 12, tokensOut: 30, costMicros: null, failedOver: [], warnings: [], ...over,
+  tokensIn: 12, tokensOut: 30, reasoningTokens: 0, costMicros: null,
+  failedOver: [], warnings: [], ...over,
 })
 
 describe("reading the route off a trace", () => {
@@ -198,6 +199,7 @@ describe("the route line in Chat mode", () => {
     totalMs: 1240,
     tokensIn: 12,
     tokensOut: 40,
+    reasoningTokens: 0,
     costMicros: 1500,
     failedOver: [],
     warnings: [],
@@ -221,5 +223,62 @@ describe("the route line in Chat mode", () => {
     render(<AssistantTurn text="an answer" route={route} />)
     expect(screen.getByText(/12 in · 40 out/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /routing detail/i })).not.toBeInTheDocument()
+  })
+})
+
+describe("a turn the model reasoned before answering", () => {
+  it("folds the working away behind its duration", async () => {
+    // Reasoning is not the answer. A transcript that printed it inline is a
+    // model talking to itself in front of the thing that was asked for -- and
+    // the duration is the reading that explains a slow turn without opening
+    // a trace.
+    render(
+      <AssistantTurn
+        text="42"
+        thinking={{ text: "first I weighed it", ms: 4200 }}
+      />,
+    )
+    const trigger = screen.getByRole("button", { name: /thinking in 4\.2s/i })
+    expect(screen.queryByText("first I weighed it")).toBeNull()
+
+    await userEvent.click(trigger)
+    expect(screen.getByText("first I weighed it")).toBeInTheDocument()
+  })
+
+  it("says it is still thinking while the working is arriving", () => {
+    // ms is null until the model starts answering, so a live turn must not
+    // print a duration it does not have yet.
+    render(<AssistantTurn text="" streaming thinking={{ text: "weighing", ms: null }} />)
+    expect(screen.getByRole("button", { name: /thinking…/i })).toBeInTheDocument()
+    // And the waiting dots stand down: two things saying "working" at once.
+    expect(screen.queryByLabelText("Waiting for the first token")).toBeNull()
+  })
+
+  it("shows nothing at all for a model that did not reason", () => {
+    render(<AssistantTurn text="42" route={route()} />)
+    expect(screen.queryByRole("button", { name: /thinking/i })).toBeNull()
+    expect(screen.queryByText(/reasoned for/i)).toBeNull()
+  })
+
+  it("says a turn reasoned even when the working never arrived", () => {
+    // The token count is off the trace, so it survives a reply whose wire
+    // shape the extractor does not recognise -- and a provider that bills
+    // reasoning while deliberately withholding the text. Before this, such a
+    // turn spent most of its output budget thinking and showed nothing to
+    // say so.
+    render(<AssistantTurn text="42" route={route({ reasoningTokens: 512 })} />)
+    expect(screen.getByText(/reasoned for 512 tokens/i)).toBeInTheDocument()
+  })
+
+  it("prefers the working itself when both are available", () => {
+    render(
+      <AssistantTurn
+        text="42"
+        route={route({ reasoningTokens: 512 })}
+        thinking={{ text: "weighing it", ms: 900 }}
+      />,
+    )
+    expect(screen.getByRole("button", { name: /thinking in 900ms/i })).toBeInTheDocument()
+    expect(screen.queryByText(/working not returned/i)).toBeNull()
   })
 })

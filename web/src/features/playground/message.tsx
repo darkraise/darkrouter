@@ -1,9 +1,10 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { Check, Copy, CornerDownRight, TriangleAlert } from "lucide-react"
-import { Badge } from "darkraise-ui"
+import { Brain, Check, ChevronRight, Copy, CornerDownRight, TriangleAlert } from "lucide-react"
+import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger } from "darkraise-ui"
 import { ProviderIcon } from "../providers/provider-icon"
 import { Markdown } from "./markdown"
+import type { TurnThinking } from "./lib/use-chat-run"
 import type { RequestTrace } from "../../lib/api-types"
 
 /**
@@ -21,6 +22,10 @@ export type TurnRoute = {
   totalMs: number | null
   tokensIn: number | null
   tokensOut: number | null
+  /** Of `tokensOut`, how many the model spent reasoning. Zero for a model
+   *  that does not reason, and the one signal that a turn reasoned which does
+   *  not depend on what the provider's wire called the reasoning text. */
+  reasoningTokens: number
   costMicros: number | null
   /** Providers tried before the one that answered, in the order tried. */
   failedOver: string[]
@@ -43,6 +48,7 @@ export function routeFromTrace(trace: RequestTrace): TurnRoute {
     totalMs: trace.total_ms ?? null,
     tokensIn: trace.tokens_in ?? null,
     tokensOut: trace.tokens_out ?? null,
+    reasoningTokens: trace.reasoning_tokens ?? 0,
     costMicros: trace.cost_micros ?? null,
     failedOver: attempts.slice(0, -1).map((a) => a.provider),
     warnings: trace.warnings ?? [],
@@ -72,11 +78,15 @@ export function UserTurn({ text }: { text: string }) {
 export function AssistantTurn({
   text,
   route,
+  thinking,
   streaming = false,
   quiet = false,
 }: {
   text: string
   route?: TurnRoute
+  /** The model's own working, when it sent any. Absent for a model that does
+   *  not reason, and for every turn read back from the store. */
+  thinking?: TurnThinking
   streaming?: boolean
   /** Chat mode's reading: the duration only, until the operator asks. */
   quiet?: boolean
@@ -107,9 +117,14 @@ export function AssistantTurn({
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {text === "" && streaming ? (
+        {thinking ? (
+          <Thinking thinking={thinking} />
+        ) : route && route.reasoningTokens > 0 ? (
+          <UnreadableThinking tokens={route.reasoningTokens} />
+        ) : null}
+        {text === "" && streaming && !thinking ? (
           <StreamingHint />
-        ) : (
+        ) : text === "" && streaming ? null : (
           <div className="min-w-0">
             <Markdown text={text} />
             {streaming ? <Caret /> : null}
@@ -121,6 +136,72 @@ export function AssistantTurn({
 
       {!streaming && text !== "" ? <CopyTurn text={text} /> : null}
     </div>
+  )
+}
+
+/**
+ * The model's own working, folded away.
+ *
+ * Collapsed by default and on every turn, because reasoning is not the answer:
+ * a transcript that opens six of these is six screens of a model talking to
+ * itself in front of the thing that was asked for. The header carries what an
+ * operator actually wants at a glance -- that it thought, and for how long --
+ * and one click gets the rest.
+ *
+ * The duration is the reading that makes it worth showing at all. Reasoning is
+ * billed and it is slow, so "thought for 8.4s" explains a turn whose answer
+ * arrived late without the operator opening a trace to find out why.
+ */
+function Thinking({ thinking }: { thinking: TurnThinking }) {
+  const settled = thinking.ms !== null
+  return (
+    <Collapsible className="w-fit max-w-full">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 rounded-[var(--radius)] border px-2 py-1 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">
+        <ChevronRight
+          className="size-[var(--icon-size,1rem)] transition-transform group-data-[state=open]:rotate-90"
+          aria-hidden="true"
+        />
+        <Brain
+          className={`size-[var(--icon-size,1rem)] ${settled ? "" : "motion-safe:animate-pulse"}`}
+          aria-hidden="true"
+        />
+        {settled ? `Thinking in ${shortDuration(Math.round(thinking.ms!))}` : "Thinking…"}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {/* Its own quiet ground and a capped height: the working is often
+            longer than the answer, and a turn whose reasoning pushes the reply
+            off the screen has buried the thing it was asked for. */}
+        <div className="mt-2 max-h-64 overflow-y-auto rounded-[var(--radius)] border-l-2 bg-[hsl(var(--muted)/0.4)] px-3 py-2 text-sm whitespace-pre-wrap text-[hsl(var(--muted-foreground))]">
+          {thinking.text}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/**
+ * A turn that reasoned and whose working never arrived.
+ *
+ * The token count comes off the trace, so it is true whatever the reply's wire
+ * shape was — which is the point. Two different situations land here and the
+ * client cannot tell them apart, so the wording claims neither: some providers
+ * bill reasoning and deliberately withhold the text, and a passthrough reply
+ * carries the upstream's own field name for it, which the extractor may not
+ * know yet. Either way the honest statement is that it reasoned and this is
+ * what it cost.
+ *
+ * Drawn at all because the alternative is what shipped before: a turn that
+ * spent most of its output budget thinking, showing nothing to say so.
+ */
+function UnreadableThinking({ tokens }: { tokens: number }) {
+  return (
+    <p
+      className="flex w-fit items-center gap-1.5 text-sm text-[hsl(var(--legend))]"
+      title="The gateway counted these tokens from the provider's usage. The reasoning text itself was not in the reply."
+    >
+      <Brain className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
+      Reasoned for {tokens.toLocaleString("en-US")} tokens · working not returned
+    </p>
   )
 }
 

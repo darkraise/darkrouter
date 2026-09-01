@@ -8,6 +8,8 @@ import {
   DialogTitle,
   Input,
   Label,
+  Listbox,
+  ListboxItem,
   Progress,
   Switch,
 } from "darkraise-ui"
@@ -121,6 +123,14 @@ type Chosen = {
   preset?: string
 }
 
+/* Hand-rolled on purpose. darkraise-ui ships `Steps`, and it was tried here:
+   it is a wizard indicator, so the shape is right. But `StepsIndicator`
+   renders no content of its own, so the step numbers and the completed tick
+   disappear unless you pass them back in, and the component sets no
+   `aria-current` — which is the one thing this display-only strip has to say,
+   and the one thing the markup below already gets right. Swapping would have
+   traded an <ol> with aria-current for a div stack that needs the numbers
+   re-supplied. Verified in the running console before reverting. */
 function Stepper({ steps, step }: { steps: Phase[]; step: number }) {
   return (
     <ol className="mb-4 flex items-center gap-2" aria-label="Progress">
@@ -160,22 +170,23 @@ function PresetRow({
   preset,
   provider,
   selected,
-  onSelect,
 }: {
   preset: Preset
   provider?: Provider
   selected: boolean
-  onSelect: () => void
 }) {
+  // An option in a single-choice list, which is what it always was.
+  // `aria-pressed` announced it as a toggle button, and a list of two hundred
+  // toggle buttons costs a Tab per row to walk; a listbox is one Tab in and
+  // then arrows, with typeahead over the provider name.
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
+    <ListboxItem
+      value={preset.id}
+      textValue={preset.name}
       className={
         selected
           ? "flex w-full items-center gap-3 rounded-[var(--radius)] border border-[hsl(var(--primary))] p-3 text-left"
-          : "flex w-full items-center gap-3 rounded-[var(--radius)] border p-3 text-left hover:bg-[hsl(var(--muted))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
+          : "flex w-full items-center gap-3 rounded-[var(--radius)] border p-3 text-left"
       }
     >
       <ProviderIcon preset={preset.id} id={preset.id} name={preset.name} size={28} />
@@ -192,7 +203,7 @@ function PresetRow({
           {provider.credentials.length === 1 ? "account" : "accounts"}
         </Badge>
       )}
-    </button>
+    </ListboxItem>
   )
 }
 
@@ -362,27 +373,35 @@ export function AddAccountsDialog({
               </span>
             </div>
 
-            <div className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+            <Listbox
+              mode="single"
+              variant="outline"
+              value={selected?.id ?? ""}
+              onValueChange={(next) => {
+                const id = Array.isArray(next) ? next[0] : next
+                const p = filtered.find((f) => f.id === id)
+                // Re-reporting the row already chosen must not advance the
+                // wizard a second time, which a click on a selected row does.
+                if (!p || p.id === selected?.id) return
+                // A provider that already exists brings its own free-models
+                // setting; the box has to show that rather than whatever the
+                // last-looked-at provider left behind.
+                const target = existing.find((e) => e.id === p.id)
+                setAccounts((a) => ({
+                  ...a,
+                  freeModelsOnly: target?.free_models_only ?? false,
+                }))
+                setSelected(p)
+                setStep(step + 1)
+              }}
+              className="flex max-h-96 flex-col gap-2 overflow-y-auto"
+            >
               {filtered.map((p) => (
                 <PresetRow
                   key={p.id}
                   preset={p}
                   provider={existing.find((e) => e.id === p.id)}
                   selected={selected?.id === p.id}
-                  onSelect={() => {
-                    // A provider that already exists brings its own
-                    // free-models setting; the box has to show that rather
-                    // than whatever the last-looked-at provider left behind.
-                    if (p.id !== selected?.id) {
-                      const target = existing.find((e) => e.id === p.id)
-                      setAccounts((a) => ({
-                        ...a,
-                        freeModelsOnly: target?.free_models_only ?? false,
-                      }))
-                    }
-                    setSelected(p)
-                    setStep(step + 1)
-                  }}
                 />
               ))}
               {filtered.length === 0 && (
@@ -392,7 +411,7 @@ export function AddAccountsDialog({
                   this screen.
                 </p>
               )}
-            </div>
+            </Listbox>
           </div>
         )}
 

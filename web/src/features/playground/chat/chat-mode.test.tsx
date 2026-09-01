@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -12,8 +12,11 @@ import type { PlaygroundConversation, PlaygroundConversationDetail } from "../..
 // calls one every time it grows while a run is in flight.
 Element.prototype.scrollIntoView = vi.fn()
 
+// The screen reads ?seed= to carry a trace's model and dialect into the
+// request pane -- the job Lab's Single tab used to do.
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...rest }: { children: React.ReactNode }) => <a {...rest}>{children}</a>,
+  useSearch: () => ({}),
 }))
 
 const stored: PlaygroundConversation = {
@@ -52,6 +55,10 @@ vi.mock("../../../lib/api", async (importOriginal) => ({
 
 vi.mock("../../../lib/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/queries")>()),
+  // The request pane's preset picker is on this screen now, and it reads a
+  // list. Left real it would take whatever the shared api.get mock is
+  // returning for the trace under test.
+  usePlaygroundPresets: () => ({ data: [] }),
   usePlaygroundConversations: () => ({ data: [stored], isLoading: false }),
   usePlaygroundConversation: (id: string) => ({
     data: id === "c1" ? detail : undefined,
@@ -75,11 +82,11 @@ vi.mock("../../shell/model-combobox", () => ({
   }) => <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />,
 }))
 
-function mounted(onOpenInLab = () => {}) {
+function mounted() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <ChatMode onOpenInLab={onOpenInLab} />
+      <ChatMode />
     </QueryClientProvider>,
   )
 }
@@ -87,6 +94,18 @@ function mounted(onOpenInLab = () => {}) {
 async function send(text: string) {
   await userEvent.type(screen.getByLabelText("Message"), text)
   await userEvent.click(screen.getByRole("button", { name: "Send" }))
+}
+
+
+/** Name the model the way an operator does: through the dialog that opens with
+ *  a new conversation. It used to be a popover on the header, which is why so
+ *  many tests reached for one. */
+async function chooseModel(model: string) {
+  await userEvent.click(screen.getByRole("button", { name: "New conversation" }))
+  const dialog = await screen.findByRole("dialog")
+  await userEvent.type(within(dialog).getByLabelText("Model or alias"), model)
+  await userEvent.click(within(dialog).getByRole("button", { name: /start conversation/i }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
 }
 
 describe("Chat mode", () => {
@@ -117,9 +136,7 @@ describe("Chat mode", () => {
       new ApiError(403, "playground.save_conversations is off, so conversations are not saved"),
     )
     mounted()
-    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
-    await userEvent.keyboard("{Escape}")
+    await chooseModel("gpt")
     await send("hello there")
 
     await waitFor(() => expect(postMock).toHaveBeenCalled())
@@ -139,9 +156,7 @@ describe("Chat mode", () => {
         : Promise.resolve({ seq: 0 }),
     )
     mounted()
-    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
-    await userEvent.keyboard("{Escape}")
+    await chooseModel("gpt")
 
     const field = screen.getByLabelText("Conversation title")
     await userEvent.clear(field)
@@ -164,9 +179,7 @@ describe("Chat mode", () => {
         : Promise.resolve({ seq: 0 }),
     )
     mounted()
-    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
-    await userEvent.keyboard("{Escape}")
+    await chooseModel("gpt")
     await send("hello there")
 
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
@@ -195,9 +208,7 @@ describe("Chat mode", () => {
         : Promise.resolve({ seq: 0 }),
     )
     mounted()
-    await userEvent.click(screen.getByRole("button", { name: /choose a model|gpt/i }))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
-    await userEvent.keyboard("{Escape}")
+    await chooseModel("gpt")
     await send("first")
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
     await send("second")
@@ -216,9 +227,13 @@ describe("Chat mode", () => {
     expect(screen.getByLabelText("Conversation title")).toHaveValue("speculative decoding")
 
     // The setting that shaped every answer above, restored rather than lost.
-    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /system prompt/i }))
+    // It reads from the request pane now rather than from a dialog behind the
+    // actions menu -- and it reads there under the lock, which is the point:
+    // a system prompt that could still be edited would change what the turns
+    // above were supposedly answered under.
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
     expect(screen.getByLabelText("System prompt")).toHaveValue("answer in one line")
+    expect(screen.getByLabelText("System prompt")).toBeDisabled()
   })
 
   it("recovers a reopened turn's route from its stored request id", async () => {
@@ -249,61 +264,121 @@ describe("Chat mode", () => {
     expect(await screen.findByText("2.4s")).toBeInTheDocument()
   })
 
-  it("hands the whole configuration to Lab", async () => {
-    const onOpenInLab = vi.fn()
-    mounted(onOpenInLab)
+  it("fixes the model once a turn has been sent", async () => {
+    // Section 4. Every answer above was produced by this model, so a way to
+    // change it now would offer the conversation a record it cannot honestly
+    // keep. Before the first turn the same settings are still reachable --
+    // that is the whole seam, and it is time rather than place.
+    mounted()
+    await chooseModel("gpt")
+    expect(screen.getByText("gpt")).toBeInTheDocument()
+
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
     await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
 
+    // The stored model reads on the header, and no control offers to move it.
+    expect(screen.queryByRole("button", { name: /^claude$/ })).toBeNull()
+    expect(screen.getByText("claude")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /open in lab/i }))
-    expect(onOpenInLab).toHaveBeenCalledWith(
-      expect.objectContaining({ system: "answer in one line", model: "claude", dialect: "anthropic" }),
-    )
+    expect(await screen.findByRole("menuitem", { name: /request settings/i }))
+      .toHaveAttribute("aria-disabled", "true")
   })
 
-  it("saves the model once the typing settles, not once per keystroke", async () => {
-    // The combobox reports every character, so a PATCH per report leaves the
-    // stored model decided by whichever of eleven concurrent writes lands
-    // last -- invisible until the conversation is reopened tomorrow.
+  it("keeps the request settings open until the first message", async () => {
+    // The other half of the same seam: Lab's request pane is on this screen
+    // now, and it is only useful if it can be set before the request it
+    // describes goes out.
     mounted()
+    expect(screen.getByRole("heading", { name: "Request" })).toBeInTheDocument()
+    // The pane states them either way. What changes is why it will not edit
+    // them: a conversation not yet started can still reopen its settings.
+    expect(screen.getByText(/chosen when this conversation started/i)).toBeInTheDocument()
+    expect(screen.queryByText(/set by the first message/i)).toBeNull()
+
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
     await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+    expect(screen.getByText(/set by the first message/i)).toBeInTheDocument()
+  })
 
-    await userEvent.click(screen.getByRole("button", { name: /claude/ }))
-    await userEvent.clear(screen.getByLabelText("Model or alias"))
-    // delay: null so the eleven keystrokes land in one tick. With the default
-    // per-key delay the gap between two of them is real wall-clock time, and
-    // on a loaded runner -- or if COMMIT_QUIET_MS ever drops -- it can exceed
-    // the quiet period and commit early, failing the count below for a reason
-    // that has nothing to do with the behaviour under test.
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt-4o-mini", {
-      delay: null,
+  it("totals what the conversation has spent, not just the last turn", async () => {
+    // A thread that has quietly grown to a large context is billing for all
+    // of it on every turn, and nothing else on the screen says so.
+    getMock.mockResolvedValue({
+      id: "01OLD",
+      provider: "groq",
+      model: "claude",
+      final_model: "claude",
+      total_ms: 2400,
+      tokens_in: 1204,
+      tokens_out: 887,
+      cost_micros: 3100,
+      attempts: [{ provider: "groq", model: "claude" }],
+      warnings: [],
     })
-    // The field still keeps up with the typing; only the write waits.
-    expect(screen.getByLabelText("Model or alias")).toHaveValue("gpt-4o-mini")
-    expect(patchMock).not.toHaveBeenCalled()
-
-    await waitFor(() => expect(patchMock).toHaveBeenCalled(), { timeout: 2000 })
-    expect(patchMock).toHaveBeenCalledTimes(1)
-    const [, body] = patchMock.mock.calls[0] as [string, { model: string }]
-    expect(body.model).toBe("gpt-4o-mini")
-  })
-
-  it("patches the row when the model changes part-way through", async () => {
-    // Section 8.5: the transcript keeps the turns that came before, and each
-    // answer's route line already records what actually served it.
     mounted()
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
     await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
 
-    await userEvent.click(screen.getByRole("button", { name: /claude/ }))
-    await userEvent.clear(screen.getByLabelText("Model or alias"))
-    await userEvent.type(screen.getByLabelText("Model or alias"), "gpt")
+    expect(await screen.findByText("1,204")).toBeInTheDocument()
+    expect(screen.getByText("887")).toBeInTheDocument()
+    expect(screen.getByText("$0.0031")).toBeInTheDocument()
+  })
 
-    await waitFor(() => expect(patchMock).toHaveBeenCalled())
-    const [path, body] = patchMock.mock.calls.at(-1) as [string, { model: string }]
-    expect(path).toBe("/api/playground/conversations/c1")
-    expect(body.model).toBe("gpt")
+  it("asks what a new conversation will be sent under before anything is typed", async () => {
+    // The one moment every setting is still open, and nothing used to mark
+    // it: an operator who did not know to visit a side panel first simply
+    // sent at the provider's defaults.
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByText(/what every message in this thread/i)).toBeInTheDocument()
+
+    const dialog = screen.getByRole("dialog")
+    await userEvent.type(within(dialog).getByLabelText("Model or alias"), "gpt-4")
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /start conversation/i }),
+    )
+
+    // The chosen model reaches the screen behind it, which is what the next
+    // send will actually carry.
+    await waitFor(() => expect(screen.getByText("gpt-4")).toBeInTheDocument())
+  })
+
+  it("leaves the blank conversation on defaults when the dialog is cancelled", async () => {
+    // Cancel refuses these settings, not the conversation -- the rail's own
+    // button already started one, and closing must not strand the operator.
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    const dialog = await screen.findByRole("dialog")
+    await userEvent.type(within(dialog).getByLabelText("Model or alias"), "gpt-4")
+    await userEvent.click(within(dialog).getByRole("button", { name: /cancel/i }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(screen.queryByText("gpt-4")).toBeNull()
+    expect(screen.getByText("No model")).toBeInTheDocument()
+  })
+
+  it("reopens the settings as an amendment, not as another new conversation", async () => {
+    // A conversation is not stored until its first turn is, so "has an id"
+    // is false for exactly the case this menu item exists to serve: a thread
+    // set up and not yet sent. Keying the wording off the row made the
+    // dialog offer to start something that had already been started.
+    mounted()
+    await chooseModel("gpt")
+    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: /request settings/i }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("button", { name: /apply/i })).toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: /start conversation/i })).toBeNull()
+  })
+
+  it("reads the settings beside the transcript rather than editing them there", async () => {
+    // Two live surfaces for one value disagree the moment one of them is a
+    // keystroke behind, so the pane states what was chosen and says where.
+    mounted()
+    expect(screen.getByText(/chosen when this conversation started/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    expect(screen.getByLabelText(/system prompt/i)).toBeDisabled()
   })
 })

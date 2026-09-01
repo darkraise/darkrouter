@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Badge, Button, Input, Label, Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle, Switch } from "darkraise-ui"
+import { NumberBox } from "../shell/number-box"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
@@ -128,11 +129,11 @@ export function OverrideEditor({
         <div className="mt-4 flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="override-context-window">Context window</Label>
-            <Input
+            <NumberBox
               id="override-context-window"
-              type="number"
+              precision={0}
               value={contextWindowValue}
-              onChange={(e) => setDraftContextWindow(e.target.value)}
+              onChange={setDraftContextWindow}
             />
           </div>
 

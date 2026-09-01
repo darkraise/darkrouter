@@ -25,6 +25,7 @@ import { RoutingScreen } from "../features/routing/routing-screen"
 import { ConnectScreen } from "../features/connect/connect-screen"
 import { PlaygroundScreen } from "../features/playground/playground-screen"
 import { CommandPalette } from "../features/shell/command-palette"
+import { PageIdentityBar } from "../features/shell/page-identity"
 import { ScreenBoundary } from "../features/shell/screen-boundary"
 import { RequestsScreen } from "../features/requests/requests-screen"
 import { SettingsScreen } from "../features/settings/settings-screen"
@@ -105,6 +106,9 @@ function RootShell() {
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
       <SidebarLayout
         nav={nav}
+        // Where you are, in the chrome: the name, mark and purpose of the
+        // section render here rather than at the top of each screen.
+        headerSlot={<PageIdentityBar />}
         showThemeSwitcher
         // The password belongs to whoever is signed in rather than to the
         // gateway's configuration, so it is reached from the same menu as

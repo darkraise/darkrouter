@@ -5,8 +5,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  Input,
   Label,
+  PasswordInput,
+  PasswordInputControl,
+  PasswordInputField,
+  PasswordInputVisibilityTrigger,
 } from "darkraise-ui"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
@@ -128,33 +131,45 @@ export function ChangePasswordDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="account-current-password">Current password</Label>
-            <Input
-              id="account-current-password"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-            />
+            <PasswordInput>
+              <PasswordInputControl>
+                <PasswordInputField
+                  id="account-current-password"
+                  autoComplete="current-password"
+                  value={current}
+                  onChange={(e) => setCurrent(e.target.value)}
+                />
+                <PasswordInputVisibilityTrigger />
+              </PasswordInputControl>
+            </PasswordInput>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="account-new-password">New password</Label>
-            <Input
-              id="account-new-password"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(e) => setNext(e.target.value)}
-            />
+            <PasswordInput>
+              <PasswordInputControl>
+                <PasswordInputField
+                  id="account-new-password"
+                  autoComplete="new-password"
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                />
+                <PasswordInputVisibilityTrigger />
+              </PasswordInputControl>
+            </PasswordInput>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="account-confirm-password">Confirm new password</Label>
-            <Input
-              id="account-confirm-password"
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-            />
+            <PasswordInput>
+              <PasswordInputControl>
+                <PasswordInputField
+                  id="account-confirm-password"
+                  autoComplete="new-password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                />
+                <PasswordInputVisibilityTrigger />
+              </PasswordInputControl>
+            </PasswordInput>
           </div>
 
           {problem && <p className="text-sm text-[hsl(var(--destructive))]">{problem}</p>}

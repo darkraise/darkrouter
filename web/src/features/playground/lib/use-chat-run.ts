@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { api, stream, type StreamStart } from "../../../lib/api"
 import { chatBody, parseTools, type ChatState } from "./request"
-import { drainSSE, extractUnaryText } from "./stream"
+import { drainSSE, extractUnaryReasoning, extractUnaryText } from "./stream"
 import {
   NO_METRICS,
   metricsFromTrace,
@@ -27,9 +27,33 @@ export type CompletedTurn = {
   requestId: string
 }
 
+/**
+ * The model's own working on one turn, and how long it spent on it.
+ *
+ * Held beside the transcript rather than inside it, for the same reason the
+ * routes are: `messages` is the wire body sent to the gateway, and a field of
+ * ours in it would be a field the provider sees.
+ *
+ * `ms` is null while the thinking is still arriving, and otherwise runs from
+ * the request going out to the moment the model starts answering.
+ *
+ * Anchored at the request rather than at the first reasoning delta, which is
+ * the reading it looks like it should be and cannot be. drainSSE empties every
+ * complete frame in the buffer on each pass, so a fast stream hands over the
+ * reasoning and the first answer token in the same pass -- and a clock started
+ * and stopped inside one pass reads 0ms, which is what it did. Nothing but
+ * reasoning comes back before the answer starts, so the whole window is the
+ * time spent on it.
+ */
+export type TurnThinking = {
+  text: string
+  ms: number | null
+}
+
 export type ChatRun = {
   messages: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
+  thinking: Record<number, TurnThinking>
   busy: boolean
   error: string
   send: (prompt: string) => Promise<void>
@@ -58,6 +82,10 @@ export function useChatRun(
   // messages rather than inside them: `messages` is the wire body sent to the
   // gateway, and a field of ours in it would be a field the provider sees.
   const [routes, setRoutes] = useState<Record<number, TurnRoute>>({})
+  // Keyed the same way, and for the same reason. Reasoning is not persisted
+  // with a conversation, so a reopened turn has none -- what the model was
+  // thinking is a reading about this run, not part of the exchange.
+  const [thinking, setThinking] = useState<Record<number, TurnThinking>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const abort = useRef<AbortController | null>(null)
@@ -112,11 +140,34 @@ export function useChatRun(
     let answer = ""
     let failed = false
     let aborted = false
+    // Whether the model has reasoned, and whether it has stopped. Thinking
+    // ends at the first token of the answer: a model that thought for two
+    // seconds and then wrote for twenty did not think for twenty-two. It is
+    // timed from `startedAt` for the reason given on TurnThinking.
+    let thinkingSeen = false
+    let thoughtEndedAt: number | null = null
+    let thought = ""
     const emit = (text: string) => {
       if (superseded()) return
       if (!text) return
+      if (thinkingSeen && thoughtEndedAt === null) {
+        thoughtEndedAt = performance.now()
+        setThinking((prev) => ({
+          ...prev,
+          [answerAt]: { text: thought, ms: thoughtEndedAt! - startedAt },
+        }))
+      }
       answer += text
       appendToLastMessage(text)
+    }
+    const emitThought = (text: string) => {
+      if (superseded()) return
+      if (!text) return
+      thinkingSeen = true
+      thought += text
+      // Written on every delta so the working is readable as it arrives,
+      // rather than appearing whole once the model has finished with it.
+      setThinking((prev) => ({ ...prev, [answerAt]: { text: thought, ms: null } }))
     }
     try {
       for await (const chunk of stream(
@@ -133,8 +184,11 @@ export function useChatRun(
         // no SSE framing at all, so there is nothing to drain until the body
         // is complete — handled after the loop instead.
         if (doStream) {
-          const { text, rest } = drainSSE(buffer.current, dialect)
+          const { text, reasoning, rest } = drainSSE(buffer.current, dialect)
           buffer.current = rest
+          // Reasoning first: a frame can carry both, and the answer's arrival
+          // is what closes the thinking clock.
+          emitThought(reasoning)
           // Measured on the first text, not the first chunk: a keep-alive or
           // a role-only frame is not the model answering.
           if (text && ttftMs === null) ttftMs = performance.now() - startedAt
@@ -142,9 +196,25 @@ export function useChatRun(
         }
       }
       if (!doStream) {
+        // No timing to take from a body that arrived whole -- there were no
+        // deltas to time between -- so the thinking is shown without one.
+        const reasoning = extractUnaryReasoning(dialect, buffer.current)
+        if (reasoning && !superseded()) {
+          thought = reasoning
+          setThinking((prev) => ({ ...prev, [answerAt]: { text: reasoning, ms: null } }))
+        }
         emit(extractUnaryText(dialect, buffer.current))
       }
       const totalMs = performance.now() - startedAt
+      // A model that reasoned and then said nothing still stopped reasoning
+      // when the stream did, so the clock is closed here rather than left to
+      // run forever as "thinking…" under a finished turn.
+      if (thinkingSeen && thoughtEndedAt === null && !superseded()) {
+        setThinking((prev) => ({
+          ...prev,
+          [answerAt]: { text: thought, ms: performance.now() - startedAt },
+        }))
+      }
       const measured: StreamMetrics = { ...NO_METRICS, ttftMs, totalMs }
       onMetrics(measured)
       // The token counts are the gateway's, fetched after the fact rather
@@ -212,6 +282,7 @@ export function useChatRun(
     generation.current++
     setMessages([])
     setRoutes({})
+    setThinking({})
     setError("")
     onMetrics(NO_METRICS)
   }
@@ -255,6 +326,9 @@ export function useChatRun(
     const mine = generation.current
     setMessages(next)
     setRoutes(nextRoutes)
+    // A stored turn keeps no reasoning, so a reopened conversation shows
+    // none rather than the previous conversation's.
+    setThinking({})
     setError("")
     // Cleared here rather than left to the aborted run's finally, which is a
     // microtask away: for that beat the composer stays disabled on a
@@ -264,5 +338,5 @@ export function useChatRun(
     void hydrate(nextRoutes, mine)
   }
 
-  return { messages, routes, busy, error, send, stop, clear, load }
+  return { messages, routes, thinking, busy, error, send, stop, clear, load }
 }

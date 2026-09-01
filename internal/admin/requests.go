@@ -133,6 +133,13 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 		"provider": tr.FinalProviderID, "final_model": tr.FinalModel,
 		"status": tr.Status, "error_code": tr.ErrorCode,
 		"tokens_in": tr.TokensIn, "tokens_out": tr.TokensOut, "cache_read_tokens": tr.CacheReadTokens,
+		// Output tokens spent reasoning rather than answering. Reported
+		// separately because they are billed inside tokens_out and are often
+		// most of it, and because they are the one signal that a turn reasoned
+		// that does not depend on what the provider's wire called the text --
+		// a passthrough reply carries the upstream's own field names, and
+		// those disagree across providers.
+		"reasoning_tokens": tr.ReasoningTokens,
 		"cost_micros": tr.CostMicros, "ttft_ms": tr.TTFTMs, "total_ms": tr.TotalMs,
 		// Three separate lists, deliberately. Attempts alone explains a
 		// failover; candidates and skips explain the routing decision.

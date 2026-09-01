@@ -29,6 +29,15 @@ afterEach(() => {
 const noop = () => {}
 
 describe("the sampling controls", () => {
+  it("names the stream switch, which a wrapping label could not", () => {
+    // Switch renders a role="switch" button, and a button takes its name
+    // from aria-label or its own subtree -- never from an enclosing <label>.
+    // Wrapped, it announced as "switch, off" with nothing saying what it
+    // switched.
+    render(<Sampling config={emptyConfig()} onChange={noop} />)
+    expect(screen.getByRole("switch", { name: /stream the reply/i })).toBeInTheDocument()
+  })
+
   it("enables top K on anthropic", () => {
     render(<Sampling config={{ ...emptyConfig(), dialect: "anthropic" }} onChange={noop} />)
     expect(screen.getByLabelText(/top k/i)).toBeEnabled()
@@ -50,7 +59,7 @@ describe("the sampling controls", () => {
     render(
       <Sampling config={{ ...emptyConfig(), dialect: "openai", topK: "40" }} onChange={noop} />,
     )
-    expect(screen.getByLabelText(/top k/i)).toHaveValue(40)
+    expect(screen.getByLabelText(/top k/i)).toHaveValue("40")
   })
 
   it("enables top P on every dialect", () => {

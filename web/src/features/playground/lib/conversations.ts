@@ -72,6 +72,7 @@ export function routesOfTurns(turns: PlaygroundStoredTurn[]): Record<number, Tur
       totalMs: null,
       tokensIn: null,
       tokensOut: null,
+      reasoningTokens: 0,
       costMicros: null,
       failedOver: [],
       warnings: [],

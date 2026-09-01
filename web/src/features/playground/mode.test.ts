@@ -1,44 +1,57 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { initialMode, isMode, rememberMode, storedMode } from "./mode"
+import { initialMode, isMode, readMode, rememberMode, storedMode } from "./mode"
 
 describe("the playground mode", () => {
   beforeEach(() => localStorage.clear())
 
-  it("recognises only the two modes", () => {
+  it("recognises the three surfaces", () => {
     expect(isMode("chat")).toBe(true)
-    expect(isMode("lab")).toBe(true)
-    expect(isMode("compare")).toBe(false)
+    expect(isMode("compare")).toBe(true)
+    expect(isMode("auxiliary")).toBe(true)
+    expect(isMode("lab")).toBe(false)
     expect(isMode(undefined)).toBe(false)
   })
 
+  it("lands a retired name where it used to go", () => {
+    // Lab's Single surface and its request pane are Chat now. A bookmark or a
+    // stored preference still saying "lab" is a reader who meant that screen,
+    // not a value to throw away.
+    expect(readMode("lab")).toBe("chat")
+    expect(readMode("count")).toBe("auxiliary")
+    expect(readMode("nonsense")).toBeUndefined()
+    rememberMode("compare")
+    expect(initialMode({ mode: "lab" })).toBe("chat")
+  })
+
   it("survives a reload", () => {
-    rememberMode("chat")
-    expect(storedMode()).toBe("chat")
-    expect(initialMode({})).toBe("chat")
+    rememberMode("compare")
+    expect(storedMode()).toBe("compare")
+    expect(initialMode({})).toBe("compare")
   })
 
   it("lets the URL win over the stored preference", () => {
     // A link says where its sender meant. Silently redirecting it to the
     // reader's own last choice would make a shared link mean two things.
     rememberMode("chat")
-    expect(initialMode({ mode: "lab" })).toBe("lab")
+    expect(initialMode({ mode: "auxiliary" })).toBe("auxiliary")
   })
 
   it("ignores a mode the URL made up", () => {
-    rememberMode("chat")
-    expect(initialMode({ mode: "compare" })).toBe("chat")
+    rememberMode("compare")
+    expect(initialMode({ mode: "nonsense" })).toBe("compare")
   })
 
-  it("opens a seeded link in Lab", () => {
-    // A seed is a routing investigation, not a conversation.
-    rememberMode("chat")
-    expect(initialMode({ seed: "01ABC" })).toBe("lab")
-    // Unless the sender said otherwise, which they can only do on purpose.
-    expect(initialMode({ seed: "01ABC", mode: "chat" })).toBe("chat")
+  it("opens a seeded link in Chat, which is where the request pane is now", () => {
+    // A seed carries a model and a dialect into the settings that send them,
+    // and those live on Chat since Lab was folded into it.
+    expect(initialMode({ seed: "01ABC" })).toBe("chat")
+    // A stored preference still wins: the seed no longer picks a surface.
+    rememberMode("compare")
+    expect(initialMode({ seed: "01ABC" })).toBe("compare")
   })
 
-  it("opens in Lab when nothing has been chosen", () => {
-    expect(initialMode({})).toBe("lab")
+  it("opens in Chat when nothing has been chosen", () => {
+    expect(initialMode({})).toBe("chat")
   })
 
   it("treats blocked storage as no preference rather than as an error", () => {
@@ -55,7 +68,7 @@ describe("the playground mode", () => {
     })
     try {
       expect(storedMode()).toBeUndefined()
-      expect(initialMode({})).toBe("lab")
+      expect(initialMode({})).toBe("chat")
       expect(() => rememberMode("chat")).not.toThrow()
     } finally {
       Object.defineProperty(globalThis, "localStorage", {

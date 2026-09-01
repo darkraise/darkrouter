@@ -2,7 +2,6 @@ import { useState } from "react"
 import { MessageSquare, Plus, Radio, RefreshCw, RotateCcw } from "lucide-react"
 import { useSearchFilters } from "../../lib/search-filters"
 import { useNavigate } from "@tanstack/react-router"
-import { PageHeader } from "darkraise-ui/layout"
 import {
   Badge,
   Button,
@@ -63,10 +62,9 @@ const VIEW_KEY = "providers-view"
  *  chip does not move when a provider is added. */
 const CONNECTION_ORDER: ConnectionType[] = ["key", "local", "none", "oauth", "signed"]
 
-const CHIP_BASE =
-  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
-const CHIP_ON = `${CHIP_BASE} border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]`
-const CHIP_OFF = `${CHIP_BASE} hover:bg-[hsl(var(--muted))]`
+/** The pill shape only. Selected, hover and disabled are the group's, which
+ *  is the point of moving to one. */
+const CHIP_SHAPE = "gap-1.5 rounded-full px-3"
 const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
 
 /** Which layout an operator last chose.
@@ -162,44 +160,40 @@ export function ProvidersScreen() {
 
   return (
     <>
-      <PageHeader
-        title="Providers"
-        description="What it can route to, and whether it is answering"
-        actions={
-          <div className="flex items-center gap-2">
-            <ToggleGroup
-              type="single"
-              value={view}
-              onValueChange={(next) => {
-                if (next !== "list" && next !== "grid") return
-                setView(next)
-                localStorage.setItem(VIEW_KEY, next)
-              }}
-              aria-label="Provider layout"
-              className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
-            >
-              <ToggleGroupItem value="list" aria-label="List view">
-                <ListGlyph />
-                List
-              </ToggleGroupItem>
-              <ToggleGroupItem value="grid" aria-label="Grid view">
-                <GridGlyph />
-                Grid
-              </ToggleGroupItem>
-            </ToggleGroup>
-            <Button
-              size="sm"
-              onClick={() => {
-                setAddPreset(null)
-                setAddOpen(true)
-              }}
-            >
-              <Plus className="size-[var(--icon-size)]" />
-              Add accounts
-            </Button>
-          </div>
-        }
-      />
+      {/* The page's own name is in the app header; this row is what the
+          screen can do. */}
+      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+        <ToggleGroup
+          type="single"
+          value={view}
+          onValueChange={(next) => {
+            if (next !== "list" && next !== "grid") return
+            setView(next)
+            localStorage.setItem(VIEW_KEY, next)
+          }}
+          aria-label="Provider layout"
+          className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
+        >
+          <ToggleGroupItem value="list" aria-label="List view">
+            <ListGlyph />
+            List
+          </ToggleGroupItem>
+          <ToggleGroupItem value="grid" aria-label="Grid view">
+            <GridGlyph />
+            Grid
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <Button
+          size="sm"
+          onClick={() => {
+            setAddPreset(null)
+            setAddOpen(true)
+          }}
+        >
+          <Plus className="size-[var(--icon-size)]" />
+          Add accounts
+        </Button>
+      </div>
 
       <TestDrawer
         row={testing}
@@ -255,33 +249,38 @@ export function ProvidersScreen() {
           another dropdown here: "the ones I run myself" is a question an
           operator asks by pointing, and a count that reads zero answers it
           before the click. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setFilter("connection", "")}
-          aria-pressed={connection === ""}
-          className={connection === "" ? CHIP_ON : CHIP_OFF}
-        >
+      {/* A ToggleGroup, like the view switcher above and the time windows on
+          Requests. Hand-rolled, this was one screen holding two idioms for
+          "a row of buttons, exactly one active" — and a zero-count chip was
+          disabled but still a tab stop, where the group's roving focus steps
+          over it.
+
+          "all" is a sentinel rather than the empty string the filter stores:
+          an empty value cannot be held by a controlled group, which is the
+          same trick requests-screen plays with its range. */}
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        value={connection === "" ? "all" : connection}
+        onValueChange={(v) => setFilter("connection", !v || v === "all" ? "" : v)}
+        className="mb-3 flex-wrap justify-start gap-2"
+      >
+        <ToggleGroupItem value="all" className={CHIP_SHAPE}>
           All
           <span className="tabular-nums text-[hsl(var(--legend))]">{all.length}</span>
-        </button>
-        {CONNECTION_ORDER.map((type) => {
-          const n = counts[type]
-          return (
-            <button
-              key={type}
-              type="button"
-              disabled={n === 0}
-              onClick={() => setFilter("connection", connection === type ? "" : type)}
-              aria-pressed={connection === type}
-              className={connection === type ? CHIP_ON : CHIP_OFF}
-            >
-              {CONNECTION_LABEL[type]}
-              <span className="tabular-nums text-[hsl(var(--legend))]">{n}</span>
-            </button>
-          )
-        })}
-      </div>
+        </ToggleGroupItem>
+        {CONNECTION_ORDER.map((type) => (
+          <ToggleGroupItem
+            key={type}
+            value={type}
+            disabled={counts[type] === 0}
+            className={CHIP_SHAPE}
+          >
+            {CONNECTION_LABEL[type]}
+            <span className="tabular-nums text-[hsl(var(--legend))]">{counts[type]}</span>
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
 
       {rows.length === 0 ? (
         // Only ever a filter miss: the list is every provider the release

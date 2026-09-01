@@ -1,4 +1,9 @@
-import { Checkbox, Input, Label, Textarea, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+import {
+  Checkbox, Input, Label,
+  PasswordInput, PasswordInputControl, PasswordInputField,
+  PasswordInputVisibilityTrigger,
+  Textarea, ToggleGroup, ToggleGroupItem,
+} from "darkraise-ui"
 
 export type AccountDraft = {
   mode: "single" | "bulk"
@@ -175,15 +180,22 @@ export function AccountFields({
                 className="font-mono text-sm"
               />
             ) : (
-              <Input
-                id="account-secret"
-                type="password"
-                autoFocus={autoFocus}
-                value={value.secret}
-                onChange={(e) => onChange({ ...value, secret: e.target.value })}
-                placeholder={field.placeholder}
-                className="w-72"
-              />
+              // Revealable, for the reason the multiline branch above is
+              // not masked at all: a truncated paste is invisible in a field
+              // that hides what arrived, and it surfaces as a failed request
+              // rather than as a typo.
+              <PasswordInput className="w-72">
+                <PasswordInputControl>
+                  <PasswordInputField
+                    id="account-secret"
+                    autoFocus={autoFocus}
+                    value={value.secret}
+                    onChange={(e) => onChange({ ...value, secret: e.target.value })}
+                    placeholder={field.placeholder}
+                  />
+                  <PasswordInputVisibilityTrigger />
+                </PasswordInputControl>
+              </PasswordInput>
             )}
             {field.help && (
               <p className="max-w-prose text-sm text-[hsl(var(--legend))]">{field.help}</p>
