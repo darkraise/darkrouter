@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-08-26
+Last updated: 2026-09-01
 
 ## Phase status
 
@@ -18,7 +18,7 @@ Last updated: 2026-08-26
 | 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
 | 11a — Cost, attempts and the usage dimension | ✅ | ✅ | **Complete.** 10 tasks; race-clean. Cost computed at commit time from catalog pricing, failed attempts counted, `usage_daily` keyed on alias. |
 | 11c — Cache tokens and coherence | ✅ | ✅ | **Complete.** 15 tasks; race-clean. `InputTokens` means one thing repo-wide, cache writes are priced, and the two cost surfaces agree. |
-| 14 — Console gap closure | ✅ | ✅ | **Static gate clean, live gate not performed.** 22 tasks close every phase 10–13 gap; full suite race-clean (26 packages), frontend 203/203, one cross-package regression found and fixed. UAT against a live gateway needs a provider credential this environment does not have — see `docs/ux/GAP-CLOSURE-DOD.md`. |
+| 14 — Console gap closure | ✅ | ✅ | **Static gate clean, live gate not performed.** 22 tasks close every phase 10–13 gap; full suite race-clean, frontend 749/749 in 77 files, one cross-package regression found and fixed. UAT against a live gateway needs a provider credential this environment does not have — see `docs/ux/GAP-CLOSURE-DOD.md`. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -1349,6 +1349,23 @@ Requests alias filter and column, Usage's alias dimension, the routing flow
 graph, and Overview's failover labels are all working off an always-empty
 field against a real gateway. Pre-existing, outside this plan's scope,
 recorded for follow-up.
+
+## Playground redesign review fixes — 2026-09-01
+
+The redesign was reviewed against the Playground's purpose and the phase 14
+Definition of Done, then corrected on `fix/playground-review-findings` without
+new runtime dependencies, storage, or API contracts. The fixes close run
+lifecycle edge cases, conversation-selection races, stale Compare labels,
+incorrect attempt-cost accounting, missing reasoning-token detail, lossy tab
+switching, and narrow-screen history layout. Token Count is restored as an
+Auxiliary tool, run readiness and clipboard feedback are honest, and trace
+links return to Chat explicitly.
+
+Static verification is clean: `go vet ./...`, `go test -race -count=1 ./...`,
+and the console's lint, typecheck, production build, and 749 tests in 77 files.
+CI now runs the frontend tests and lint before building. Live provider/browser
+UAT remains unperformed because this environment has no provider credential;
+the limitation and required pass are unchanged in `docs/ux/GAP-CLOSURE-DOD.md`.
 
 ## Review history
 
