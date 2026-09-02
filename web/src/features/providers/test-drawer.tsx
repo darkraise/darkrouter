@@ -202,6 +202,19 @@ export function TestDrawer({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-xl">
+        {/* Keyed on the provider: the sheet is mounted once for the whole
+            list, and a run against groq must not sit under ollama's name when
+            the operator aims the drawer somewhere else. */}
+        <TestSession key={row?.id ?? ""} row={row} />
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function TestSession({ row }: { row: ProviderRow | null }) {
   const catalog = useModels()
   const queryClient = useQueryClient()
   const [model, setModel] = useState("")
@@ -357,144 +370,142 @@ export function TestDrawer({
   const failed = log.some((l) => l.level === "error")
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-xl">
-        <SheetHeader className="border-b p-4">
-          <SheetTitle className="flex items-center gap-2">
-            {row && (
-              <ProviderIcon preset={row.preset} id={row.id} name={row.name} size={24} />
-            )}
-            Test {row?.name}
-            {row?.keyless && <Badge variant="outline">no auth</Badge>}
-          </SheetTitle>
-        </SheetHeader>
+    <>
+      <SheetHeader className="border-b p-4">
+        <SheetTitle className="flex items-center gap-2">
+          {row && (
+            <ProviderIcon preset={row.preset} id={row.id} name={row.name} size={24} />
+          )}
+          Test {row?.name}
+          {row?.keyless && <Badge variant="outline">no auth</Badge>}
+        </SheetTitle>
+      </SheetHeader>
 
-        {/* Ask, then answer. The controls are a block at the top rather than a
-            column down the panel, so the result has the room — an operator
-            reads this far more often than they retype the question. */}
-        <div className="flex flex-col gap-3 border-b p-4">
-          <ModelCombobox
-            label="Model"
-            value={model}
-            onChange={setModel}
-            candidates={models.map((m) => m.model)}
-            placeholder={models.length ? "pick or type a model" : "type a model id"}
-          />
-          <div className="flex items-center gap-3">
-            <VerdictLine verdict={verdict} />
-            {messages.length > 0 && !running && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="ml-auto"
-                onClick={() => {
-                  setMessages([])
-                  setVerdict({ kind: "idle" })
-                  setMetrics(NO_METRICS)
-                  setDraft(FIRST_PROBE)
-                }}
-              >
-                <Eraser className="size-[var(--icon-size)]" />
-                Clear
+      {/* Ask, then answer. The controls are a block at the top rather than a
+          column down the panel, so the result has the room — an operator
+          reads this far more often than they retype the question. */}
+      <div className="flex flex-col gap-3 border-b p-4">
+        <ModelCombobox
+          label="Model"
+          value={model}
+          onChange={setModel}
+          candidates={models.map((m) => m.model)}
+          placeholder={models.length ? "pick or type a model" : "type a model id"}
+        />
+        <div className="flex items-center gap-3">
+          <VerdictLine verdict={verdict} />
+          {messages.length > 0 && !running && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto"
+              onClick={() => {
+                setMessages([])
+                setVerdict({ kind: "idle" })
+                setMetrics(NO_METRICS)
+                setDraft(FIRST_PROBE)
+              }}
+            >
+              <Eraser className="size-[var(--icon-size)]" />
+              Clear
+            </Button>
+          )}
+        </div>
+        {row?.keyless && !row.provider && (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            {row.name} asks for no credential. Sending adds it to your providers and
+            routes through it — nothing else to set up.
+          </p>
+        )}
+      </div>
+
+      {/* The same readings the playground shows, from the same component: a
+          latency that means one thing on one screen and another elsewhere is
+          two vocabularies for one fact. */}
+      <MetricsStrip metrics={metrics} />
+
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="mx-4 mt-3 w-fit">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="log">
+            Log
+            {failed && (
+              <Badge variant="destructive" className="ml-1.5">
+                !
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="chat"
+          className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+        >
+          <div ref={transcript} className="min-h-0 flex-1 overflow-y-auto">
+            {messages.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+                <MessagesSquare
+                  className="size-8 text-[hsl(var(--legend))]"
+                  aria-hidden="true"
+                />
+                <p className="text-sm font-medium">No messages yet</p>
+                <p className="max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
+                  Send one and it goes through the router to {row?.name}, exactly as a
+                  client's would. Ask again to keep the conversation going.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 p-4">
+                {messages.map((turn, i) => (
+                  <Bubble
+                    key={i}
+                    turn={turn}
+                    row={row}
+                    streaming={running && i === messages.length - 1 && turn.role === "assistant"}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* The composer sits at the bottom, where a chat's does. Enter
+              sends and Shift+Enter breaks the line — the convention every
+              other chat surface an operator uses already follows. */}
+          <div className="flex items-end gap-2 border-t p-3">
+            <Textarea
+              rows={2}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.shiftKey) return
+                e.preventDefault()
+                void run()
+              }}
+              placeholder={target ? "Send a message" : "Pick a model first"}
+              aria-label="Test message"
+              className="max-h-32 min-h-0 flex-1 resize-none"
+            />
+            {running ? (
+              <Button variant="secondary" onClick={() => (abort.current = true)}>
+                <Square className="size-[var(--icon-size)]" />
+                Stop
+              </Button>
+            ) : (
+              <Button disabled={!target || draft.trim() === ""} onClick={() => void run()}>
+                <Play className="size-[var(--icon-size)]" />
+                Send
               </Button>
             )}
           </div>
-          {row?.keyless && !row.provider && (
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">
-              {row.name} asks for no credential. Sending adds it to your providers and
-              routes through it — nothing else to set up.
-            </p>
-          )}
-        </div>
+        </TabsContent>
 
-        {/* The same readings the playground shows, from the same component: a
-            latency that means one thing on one screen and another elsewhere is
-            two vocabularies for one fact. */}
-        <MetricsStrip metrics={metrics} />
-
-        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-          <TabsList className="mx-4 mt-3 w-fit">
-            <TabsTrigger value="chat">Chat</TabsTrigger>
-            <TabsTrigger value="log">
-              Log
-              {failed && (
-                <Badge variant="destructive" className="ml-1.5">
-                  !
-                </Badge>
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent
-            value="chat"
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-          >
-            <div ref={transcript} className="min-h-0 flex-1 overflow-y-auto">
-              {messages.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-                  <MessagesSquare
-                    className="size-8 text-[hsl(var(--legend))]"
-                    aria-hidden="true"
-                  />
-                  <p className="text-sm font-medium">No messages yet</p>
-                  <p className="max-w-prose text-sm text-[hsl(var(--muted-foreground))]">
-                    Send one and it goes through the router to {row?.name}, exactly as a
-                    client's would. Ask again to keep the conversation going.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3 p-4">
-                  {messages.map((turn, i) => (
-                    <Bubble
-                      key={i}
-                      turn={turn}
-                      row={row}
-                      streaming={running && i === messages.length - 1 && turn.role === "assistant"}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* The composer sits at the bottom, where a chat's does. Enter
-                sends and Shift+Enter breaks the line — the convention every
-                other chat surface an operator uses already follows. */}
-            <div className="flex items-end gap-2 border-t p-3">
-              <Textarea
-                rows={2}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" || e.shiftKey) return
-                  e.preventDefault()
-                  void run()
-                }}
-                placeholder={target ? "Send a message" : "Pick a model first"}
-                aria-label="Test message"
-                className="max-h-32 min-h-0 flex-1 resize-none"
-              />
-              {running ? (
-                <Button variant="secondary" onClick={() => (abort.current = true)}>
-                  <Square className="size-[var(--icon-size)]" />
-                  Stop
-                </Button>
-              ) : (
-                <Button disabled={!target || draft.trim() === ""} onClick={() => void run()}>
-                  <Play className="size-[var(--icon-size)]" />
-                  Send
-                </Button>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent
-            value="log"
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-          >
-            {row && <TestLogTab providerId={row.id} />}
-          </TabsContent>
-        </Tabs>
-      </SheetContent>
-    </Sheet>
+        <TabsContent
+          value="log"
+          className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+        >
+          {row && <TestLogTab providerId={row.id} />}
+        </TabsContent>
+      </Tabs>
+    </>
   )
 }
