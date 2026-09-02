@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import {
   createMemoryHistory,
@@ -225,6 +225,30 @@ describe("adding a keyless provider", () => {
       )
       expect(JSON.parse((create?.[1] as RequestInit).body as string).free_models_only).toBe(false)
     })
+  })
+})
+
+const localPreset: Preset = {
+  ...preset, id: "ollama", name: "Ollama", auth_kind: "none",
+  base_url: "http://localhost:11434/v1", free_tier: false,
+}
+
+describe("adding a local runtime from its own page", () => {
+  it("asks where it is listening rather than which models are free", async () => {
+    stub([], [localPreset])
+    await renderProvider("ollama")
+    await userEvent.click(await screen.findByRole("button", { name: /add ollama/i }))
+
+    const dialog = within(await screen.findByRole("dialog"))
+    expect(dialog.getByLabelText("Base URL")).toHaveValue("http://localhost:11434/v1")
+    expect(dialog.queryByLabelText(/import free models only/i)).toBeNull()
+  })
+
+  it("never offers the import filter, which its models cannot fail", async () => {
+    stub([], [localPreset])
+    await renderProvider("ollama")
+    expect(await screen.findByRole("button", { name: /add ollama/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/import free models only/i)).toBeNull()
   })
 })
 
