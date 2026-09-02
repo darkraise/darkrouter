@@ -142,7 +142,7 @@ export function ProvidersScreen() {
   const discover = useApiMutation({
     mutationFn: (id: string) => api.post(`/api/providers/${id}/discover`, {}),
     success: "Discovery sweep queued",
-    invalidates: [keys.models],
+    invalidates: [keys.models, keys.discovery],
   })
   const probe = useApiMutation({
     mutationFn: (id: string) => api.post<ProbeResult>(`/api/providers/${id}/test`, {}),
