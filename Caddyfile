@@ -7,7 +7,26 @@
 # on another, or mounting it under a subpath such as /darkrouter/ — the bundle
 # references its assets from the site root, so it must own the root of its name.
 
+# Login rate limiting is enforced by darkrouter itself (per-IP token bucket
+# on POST /api/login, answered with 429 and Retry-After). Caddy ships no rate
+# limiter in its standard build; if one is wanted at the edge as well, it needs
+# a custom build with the caddy-ratelimit module, which is deliberately not
+# assumed here.
+
+(security) {
+	header {
+		# One year, subdomains included: the dashboard is a whole origin of its
+		# own, so nothing under it is meant to be reached over plain HTTP.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		-Server
+	}
+}
+
 {$ADMIN_DOMAIN} {
+	import security
+	header X-Frame-Options DENY
 	encode zstd gzip
 	reverse_proxy darkrouter:8081
 }
@@ -16,6 +35,7 @@
 # never enters into it; it is a separate name only so TLS and access rules can
 # differ from the dashboard's.
 {$PROXY_DOMAIN} {
+	import security
 	encode zstd gzip
 	reverse_proxy darkrouter:8080 {
 		# Streamed responses must not be buffered or a client sees the whole
