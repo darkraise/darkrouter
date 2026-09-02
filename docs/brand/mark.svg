@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" shape-rendering="crispEdges">
+  <title>darkrouter</title>
+  <!--
+    The identity mark at its native 24-unit grid, transcribed from
+    web/src/features/shell/identity-mark.tsx so the file and the console draw
+    the same geometry. Colours are frozen here because a file on disk cannot
+    read the legend token, which the theme computes at runtime.
+
+    For a browser tab use web/public/favicon.svg instead: it is the same mark
+    redrawn on a 16-unit grid, which this one cannot survive being scaled to.
+  -->
+  <style>
+    .hair { fill: #7B6C60; stroke: #7B6C60 }
+    @media (prefers-color-scheme: dark) { .hair { fill: #89786C; stroke: #89786C } }
+  </style>
+  <g class="hair">
+    <rect x="2.5" y="2.5" width="19" height="19" fill="none" stroke-width="1"/>
+    <rect x="11.5" y="2" width="1" height="3.5" stroke="none"/>
+    <rect x="11.5" y="8.5" width="1" height="7" stroke="none"/>
+    <rect x="11.5" y="18.5" width="1" height="3.5" stroke="none"/>
+    <rect x="2" y="6.5" width="10" height="1" stroke="none"/>
+    <rect x="2" y="11.5" width="17" height="1" stroke="none"/>
+    <rect x="2" y="16.5" width="10" height="1" stroke="none"/>
+    <rect x="11" y="6" width="2" height="2" fill="none" stroke-width="1"/>
+    <rect x="11" y="16" width="2" height="2" fill="none" stroke-width="1"/>
+  </g>
+  <rect x="18" y="10" width="4" height="4" fill="#E56748"/>
+</svg>
