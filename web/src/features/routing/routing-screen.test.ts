@@ -44,6 +44,19 @@ describe("validateChain", () => {
   })
 })
 
+describe("validateChain against a narrow context", () => {
+  it("judges from what the check reads, not from a whole Provider", () => {
+    // The fallback used to fabricate a full Provider row per id. The context
+    // type now names only the fields the check reads, so a caller with the
+    // ids alone and one with the live rows go through the same door.
+    const ctx = {
+      providers: [{ id: "groq", enabled: true, credentials: [{ enabled: true, cooling: false }] }],
+      models: [],
+    }
+    expect(validateChain(["groq/m", "ghost/m"], ["groq"], ctx)).toHaveLength(1)
+  })
+})
+
 describe("previewRows", () => {
   const candidate = (provider_id: string, key_id: string, model = "m") => ({
     provider_id, key_id, model, kind: "openaicompat", inferred: false,

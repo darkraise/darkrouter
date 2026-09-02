@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
 import {
   Button,
   Dialog,
@@ -67,8 +67,11 @@ export function AddAliasDialog({
   context: ChainContext
   onCreate: (name: string, targets: string[]) => void
 }) {
+  // Unique to this dialog instance, so a row id can never collide with one
+  // the editor behind it minted.
+  const idPrefix = useId()
   const counter = useRef(0)
-  const makeRow = (): Row => ({ id: `new-${counter.current++}`, value: "" })
+  const makeRow = (): Row => ({ id: `${idPrefix}${counter.current++}`, value: "" })
   const [name, setName] = useState("")
   const [rows, setRows] = useState<Row[]>(() => [makeRow()])
 
