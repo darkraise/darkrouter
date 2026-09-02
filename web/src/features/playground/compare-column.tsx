@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { Button, Card } from "darkraise-ui"
 import { X } from "lucide-react"
+import { count, duration, money } from "../../lib/format"
 import { ModelCombobox } from "../shell/model-combobox"
 
 /** Where one column is in its run. Idle is before the first Run, not an error. */
@@ -14,10 +15,18 @@ export type Column = {
   error: string
   status: ColumnStatus
   latencyMs: number | undefined
+  /** From the trace, once it is written. Null until then, and for a run
+   *  whose trace never landed. */
+  tokensIn: number | null
+  tokensOut: number | null
+  costMicros: number | null
 }
 
 export function emptyColumn(id: string): Column {
-  return { id, model: "", text: "", requestId: "", error: "", status: "idle", latencyMs: undefined }
+  return {
+    id, model: "", text: "", requestId: "", error: "", status: "idle", latencyMs: undefined,
+    tokensIn: null, tokensOut: null, costMicros: null,
+  }
 }
 
 const DOT: Record<ColumnStatus, string> = {
@@ -87,8 +96,12 @@ export function CompareColumn({
         {column.text}
       </div>
       {column.error ? <p className="text-destructive text-sm">{column.error}</p> : null}
-      <div className="flex items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
-        {column.latencyMs !== undefined ? <span>{Math.round(column.latencyMs)} ms</span> : null}
+      <div className="flex flex-wrap items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
+        {column.latencyMs !== undefined ? <span>{duration(column.latencyMs)}</span> : null}
+        {column.tokensIn !== null && column.tokensOut !== null ? (
+          <span>{count(column.tokensIn)} in · {count(column.tokensOut)} out</span>
+        ) : null}
+        {column.costMicros !== null ? <span>{money(column.costMicros)}</span> : null}
         {column.requestId ? (
           <Link to="/requests/$id" params={{ id: column.requestId }} className="underline">
             View the trace for this request

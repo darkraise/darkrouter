@@ -5,6 +5,8 @@ import { ConfigPane } from "./config-pane/config-pane"
 import { stream, type StreamStart } from "../../lib/api"
 import { chatBody } from "./lib/request"
 import { drainSSE } from "./lib/stream"
+import { traceWhenWritten } from "./metrics"
+import { routeFromTrace } from "./message"
 import type { PlaygroundConfig } from "./config"
 import { CompareColumn, emptyColumn, type Column } from "./compare-column"
 import { useModelCandidates } from "../shell/model-combobox"
@@ -27,6 +29,7 @@ async function runColumn(
   const started = performance.now()
   update((c) => ({ ...emptyColumn(c.id), model, status: "streaming" }))
   let buffer = ""
+  let requestId = ""
   try {
     const turns: PlaygroundMessage[] = [{ role: "user", content: prompt }]
     for await (const chunk of stream(
@@ -35,7 +38,10 @@ async function runColumn(
       // comparing models under two system prompts would answer a question
       // nobody asked.
       chatBody({ ...config, model, stream: true, messages: turns }),
-      (s: StreamStart) => update((c) => ({ ...c, requestId: s.requestId })),
+      (s: StreamStart) => {
+        requestId = s.requestId
+        update((c) => ({ ...c, requestId: s.requestId }))
+      },
       signal,
     )) {
       buffer += chunk
@@ -45,6 +51,21 @@ async function runColumn(
       if (error !== undefined) throw new Error(error)
     }
     update((c) => ({ ...c, status: "done", latencyMs: performance.now() - started }))
+    // The counts are the gateway's, read off the trace once the log writer
+    // has it, the same way a chat turn's are. Priced across every attempt,
+    // so a column that failed over reports what the whole run cost.
+    if (requestId !== "") {
+      const trace = await traceWhenWritten(requestId, signal)
+      if (trace && !signal.aborted) {
+        const route = routeFromTrace(trace)
+        update((c) => ({
+          ...c,
+          tokensIn: route.tokensIn,
+          tokensOut: route.tokensOut,
+          costMicros: route.costMicros,
+        }))
+      }
+    }
   } catch (err) {
     // An abort is the column being removed or the run being replaced, not a
     // provider failing. It leaves nothing behind: the column is either gone
