@@ -1,4 +1,4 @@
-import { MessageSquare } from "lucide-react"
+import { MessageSquare, Plus } from "lucide-react"
 import { Badge, Button, Card } from "darkraise-ui"
 import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
 import { ProviderIcon } from "./provider-icon"
@@ -19,6 +19,7 @@ export function ProviderCard({
   share,
   onOpen,
   onTest,
+  onAdd,
 }: {
   row: ProviderRow
   /** The accounts by what the router can do with them, taken once per row
@@ -31,6 +32,10 @@ export function ProviderCard({
   /** Absent for a provider with nothing to test — the router cannot reach one
    *  that has no account and needs one. */
   onTest?: () => void
+  /** Adds a key, or the provider itself when it is reached without one. The
+   *  card carries it for the same reason the row does: opening the detail
+   *  page to add a provider is a step with nothing in it. */
+  onAdd?: () => void
 }) {
   return (
     <Card className={row.configured ? "p-0" : "p-0 opacity-70"}>
@@ -76,12 +81,20 @@ export function ProviderCard({
 
       {/* Outside the button: a button inside a button is invalid markup and
           the browser resolves it by dropping one of them. */}
-      {onTest && row.configured && (
-        <div className="border-t px-4 py-2">
-          <Button size="sm" variant="ghost" onClick={onTest}>
-            <MessageSquare className="size-[var(--icon-size)]" />
-            Test
-          </Button>
+      {(onAdd || (onTest && row.configured)) && (
+        <div className="flex flex-wrap gap-2 border-t px-4 py-2">
+          {onAdd && (
+            <Button size="sm" variant="ghost" onClick={onAdd}>
+              <Plus className="size-[var(--icon-size)]" />
+              {row.keyless && !row.configured ? "Add provider" : "Add credentials"}
+            </Button>
+          )}
+          {onTest && row.configured && (
+            <Button size="sm" variant="ghost" onClick={onTest}>
+              <MessageSquare className="size-[var(--icon-size)]" />
+              Test
+            </Button>
+          )}
         </div>
       )}
     </Card>

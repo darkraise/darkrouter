@@ -66,6 +66,11 @@ const presets: Preset[] = [
     id: "cerebras", name: "Cerebras", kind: "openaicompat", base_url: "https://api.cerebras.ai/v1",
     surfaces: ["llm"], auth_kind: "bearer", website: "", free_tier: false,
   },
+  {
+    id: "aihorde", name: "AI Horde", kind: "openaicompat",
+    base_url: "https://stablehorde.net/api/v2", surfaces: ["llm"],
+    auth_kind: "anonymous", website: "", free_tier: true,
+  },
 ]
 
 const groq: Provider = {
@@ -161,5 +166,113 @@ describe("the providers list", () => {
     await userEvent.hover(trigger)
     const tip = await screen.findByRole("tooltip")
     expect(tip).toHaveTextContent(/missing for 6 sweeps/)
+  })
+})
+
+describe("adding a local runtime", () => {
+  it("offers its own action, because a local runtime has no key to paste", async () => {
+    stub([groq])
+    await renderScreen()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /add local runtime/i }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add a local runtime/i }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe("adding a key to a provider that already has one", () => {
+  it("offers the action on the row, not only on the provider's own page", async () => {
+    // A second key on a working provider is ordinary. Sending the operator to
+    // the detail page for it makes the row's actions a partial set.
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Groq" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    expect(within(row).getByRole("button", { name: "Add credentials" })).toBeInTheDocument()
+  })
+
+  it("opens straight on the accounts step, with the provider already settled", async () => {
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Groq" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    await userEvent.click(within(row).getByRole("button", { name: "Add credentials" }))
+
+    expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument()
+    // Scoped to the dialog: the screen behind it has a "Search providers"
+    // filter of its own, which is not the picker this asserts is absent.
+    const dialog = within(screen.getByRole("dialog"))
+    expect(dialog.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("a keyless provider nobody has added", () => {
+  it("is addable from the row rather than only from its own page", async () => {
+    // Its endpoint answers without a credential, so the accounts dialog has
+    // nothing to ask for -- which used to mean the detail page was the only
+    // place it could be added at all.
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "AI Horde" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    expect(within(row).getByRole("button", { name: /add provider/i })).toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: /add credentials/i })).toBeNull()
+  })
+
+  it("asks the import filter before creating it", async () => {
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "AI Horde" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    await userEvent.click(within(row).getByRole("button", { name: /add provider/i }))
+
+    expect(await screen.findByRole("button", { name: /Add AI Horde/ })).toBeInTheDocument()
+    expect(screen.getByLabelText(/import free models only/i)).toBeInTheDocument()
+  })
+})
+
+describe("the grid view", () => {
+  /** A card is a Card element wrapping the open-button and, below it, the
+   *  action strip — so the button's parent is the card. */
+  const cardFor = (name: RegExp) =>
+    within(screen.getByRole("button", { name }).parentElement as HTMLElement)
+
+  async function grid() {
+    stub([groq])
+    await renderScreen()
+    await userEvent.click(await screen.findByLabelText(/grid view/i))
+    await screen.findByRole("button", { name: /Groq/ })
+  }
+
+  it("offers a configured provider another key, as the list row does", async () => {
+    await grid()
+    expect(cardFor(/Groq/).getByRole("button", { name: /add credentials/i })).toBeInTheDocument()
+  })
+
+  it("offers the first key on a provider nobody has configured", async () => {
+    await grid()
+    expect(
+      cardFor(/Cerebras/).getByRole("button", { name: /add credentials/i }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers a keyless provider the action that fits it", async () => {
+    await grid()
+    const card = cardFor(/AI Horde/)
+    expect(card.getByRole("button", { name: /add provider/i })).toBeInTheDocument()
+    expect(card.queryByRole("button", { name: /add credentials/i })).toBeNull()
+  })
+
+  it("keeps the card's own Test action", async () => {
+    await grid()
+    expect(cardFor(/Groq/).getByRole("button", { name: /^Test/ })).toBeInTheDocument()
   })
 })

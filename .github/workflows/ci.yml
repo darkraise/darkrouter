@@ -82,14 +82,135 @@ jobs:
           CGO_ENABLED: 1
         run: go test -race -cover -count=1 ./...
 
+  # The next release number, derived from the conventional-commit subjects since
+  # the last v-tag. It runs before the image so the version it derives can be
+  # compiled into the binary and published as the image's semver tags in the
+  # same build, rather than needing a second build once the tag exists.
+  #
+  # Only a push to master releases. A tag pushed by hand still builds an image
+  # through the trigger above, and a workflow_dispatch run never releases, so a
+  # manual re-run cannot mint a version by accident.
+  version:
+    name: next version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      major_minor: ${{ steps.next.outputs.major_minor }}
+      tag: ${{ steps.next.outputs.tag }}
+      previous: ${{ steps.next.outputs.previous }}
+      notes: ${{ steps.next.outputs.notes }}
+    steps:
+      # The whole history and every tag: the bump is read from the commits since
+      # the last release, so a shallow clone would see neither.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        with:
+          fetch-depth: 0
+
+      - id: next
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            range="$prev..HEAD"
+            base=${prev#v}
+            base=${base%%-*}
+          else
+            range=""
+            base="0.0.0"
+          fi
+          IFS=. read -r major minor patch <<<"$base"
+
+          subjects=$(git log --no-merges --format='%s' $range)
+          bodies=$(git log --no-merges --format='%B' $range)
+
+          bump=none
+          if printf '%s\n' "$subjects" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:' \
+            || printf '%s\n' "$bodies" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            bump=major
+          elif printf '%s\n' "$subjects" | grep -qE '^feat(\([^)]*\))?:'; then
+            bump=minor
+          elif printf '%s\n' "$subjects" | grep -qE '^(fix|perf|refactor|revert|build)(\([^)]*\))?:'; then
+            bump=patch
+          fi
+
+          # docs, style, test, chore and ci commits change nothing a user of the
+          # image can observe, so a push carrying only those publishes no version.
+          if [ "$bump" = none ]; then
+            echo "No release-worthy commits since ${prev:-the start of history}; skipping the release."
+            exit 0
+          fi
+
+          # Below 1.0.0 a breaking change bumps the minor rather than declaring
+          # the API stable, which is what SemVer's 0.y.z clause allows and what
+          # every release tool defaults to. Reaching 1.0.0 is a deliberate act:
+          # tag it by hand once the interface is meant to be stable.
+          case "$bump" in
+            major)
+              if [ "$major" -eq 0 ]; then minor=$((minor + 1)); patch=0
+              else major=$((major + 1)); minor=0; patch=0; fi ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          version="$major.$minor.$patch"
+
+          # $3 inverts the match, which is how the last bucket catches every
+          # subject the conventional-commit types above did not claim.
+          section() {
+            body=$(git log --no-merges --format='%s (%h)' $range | grep -E ${3:-} "$2" || true)
+            [ -n "$body" ] || return 0
+            printf '### %s\n\n' "$1"
+            printf '%s\n' "$body" | sed 's/^/- /'
+            printf '\n'
+          }
+
+          known='^(feat|fix|revert|perf|refactor|build|docs|style|test|chore|ci)(\([^)]*\))?!?:'
+          {
+            section 'Features' '^feat(\([^)]*\))?!?:'
+            section 'Fixes' '^(fix|revert)(\([^)]*\))?!?:'
+            section 'Other changes' '^(perf|refactor|build|docs|style|test|chore|ci)(\([^)]*\))?!?:'
+            section 'Uncategorised' "$known" -v
+            if [ -n "$prev" ]; then
+              printf '**Full changelog**: %s/compare/%s...v%s\n' \
+                "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$prev" "$version"
+            fi
+          } > notes.md
+
+          # notes.md is commit text, so its heredoc delimiter has to be one no
+          # commit can contain. A fixed marker would let anyone who can land a
+          # commit on master write a line matching it, close the heredoc early
+          # and append output lines of their own -- a version, for one.
+          delim="NOTES_EOF_$(openssl rand -hex 16)"
+          if grep -qxF "$delim" notes.md; then
+            echo "delimiter collision; refusing to write the release notes." >&2
+            exit 1
+          fi
+
+          {
+            echo "version=$version"
+            echo "major_minor=$major.$minor"
+            echo "tag=v$version"
+            echo "previous=$prev"
+            echo "notes<<$delim"
+            cat notes.md
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "$bump bump: ${prev:-none} -> v$version"
+
   image:
     name: build and push image
     # A pull request builds nothing: it has no access to the registry secrets,
     # and pushing from an unmerged branch is what a tag is for.
     if: github.event_name != 'pull_request'
-    needs: test
+    needs: [test, version]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -109,6 +230,8 @@ jobs:
           # to when "latest" has already moved.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.version != '' }}
+            type=raw,value=${{ needs.version.outputs.major_minor }},enable=${{ needs.version.outputs.version != '' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
@@ -128,14 +251,16 @@ jobs:
           # commit, without trusting the tag alone.
           sbom: true
           provenance: mode=max
-          # metadata-action's version output is the tag it derived: the semver
-          # for a v-tag, the branch name otherwise. That is what the admin port's
-          # /healthz reports, so a running container can be matched to a build.
+          # The version the binary reports on /healthz, so a running container
+          # can be matched to a build: the release this run is about to cut when
+          # there is one, and otherwise metadata-action's derived version, which
+          # is the semver for a hand-pushed v-tag and the branch name for a build
+          # that publishes no release.
           # The Augment CLI's licence forbids redistribution, so the public
           # image is built without it. An operator who wants it builds
           # locally with WITH_AUGGIE=1, which is the Dockerfile's default.
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ needs.version.outputs.version || steps.meta.outputs.version }}
             WITH_AUGGIE=0
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -152,3 +277,60 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+  # The tag is created only after the image is in the registry, so a release
+  # never points at a version nobody can pull. GITHUB_TOKEN pushes deliberately
+  # do not re-trigger workflows, which is why the image job above had to publish
+  # the semver tags itself rather than waiting for this push to come back round.
+  release:
+    name: tag and release
+    needs: [version, image]
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Both steps are idempotent, and separately so. A re-run of an already
+      # released commit derives the same version and finds both already in
+      # place; a run cancelled between the two finds the tag and still publishes
+      # the release the first attempt did not reach.
+      - name: Create the tag
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "refs/tags/$TAG"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          # Commit subjects reach the shell through the environment rather than
+          # through ${{ }} interpolation, which would splice them into the script.
+          NOTES: ${{ needs.version.outputs.notes }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "A release for $TAG already exists."
+            exit 0
+          fi
+          {
+            printf '%s\n' "$NOTES"
+            printf '### Image\n\n```\ndocker pull %s:%s\n```\n\nDigest: `%s`\n' \
+              "$IMAGE" "$VERSION" "$DIGEST"
+          } > release-notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
