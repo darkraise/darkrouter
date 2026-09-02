@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -149,5 +150,156 @@ describe("what a filter offers", () => {
     const { mergedOptions } = await import("./requests-screen")
     expect(mergedOptions(["groq", "groq"], ["", "groq"])).toEqual(["groq", "groq"])
     expect(mergedOptions([], ["", "a"])).toEqual(["a"])
+  })
+})
+
+function trace(id: string) {
+  return {
+    id, ts_ms: 0, dialect: "openai", surface: "llm", model: "m", provider: "groq",
+    status: "success", tokens_in: 1, tokens_out: 2, cache_read_tokens: 0,
+    cost_micros: 0, ttft_ms: 10, total_ms: 20, attempts: [], candidates: [], skips: [],
+  }
+}
+
+/** Serves the list and the trace by path, so a screen test can open a trace
+ *  the list does not hold and settle deferred pages in an order it controls. */
+function mockByPath(handler: (url: string) => Promise<Response> | Response) {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => handler(String(input))))
+}
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+
+async function renderAt(path: string) {
+  const rootRoute = createRootRoute({
+    component: () => (
+      <RouterAdapterProvider value={stubRouterAdapter}>
+        <Outlet />
+      </RouterAdapterProvider>
+    ),
+  })
+  const list = createRoute({ getParentRoute: () => rootRoute, path: "/requests", component: RequestsScreen })
+  const one = createRoute({ getParentRoute: () => rootRoute, path: "/requests/$id", component: RequestsScreen })
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([list, one]),
+    history: createMemoryHistory({ initialEntries: [path] }),
+  })
+  await router.load()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+  return { router, client }
+}
+
+describe("a trace deep link", () => {
+  it("opens the drawer for a request the loaded page does not hold", async () => {
+    // A reloaded or shared /requests/<id> has to land on the trace itself,
+    // not on a list that happens not to contain it any more.
+    mockByPath((url) =>
+      url.includes("/api/requests/01DEEP") ? json(trace("01DEEP")) : json({ requests: [] }),
+    )
+    await renderAt("/requests/01DEEP")
+
+    const dialog = await screen.findByRole("dialog", { name: "01DEEP" })
+    expect(await within(dialog).findByText("groq")).toBeInTheDocument()
+  })
+
+  it("says when there is no request with that id", async () => {
+    mockByPath((url) =>
+      url.includes("/api/requests/01GONE") ? json({ error: "not found" }, 404) : json({ requests: [] }),
+    )
+    await renderAt("/requests/01GONE")
+
+    expect(await screen.findByText(/no request with that id/i)).toBeInTheDocument()
+  })
+
+  it("moves the URL to the trace when one is opened, and back when it closes", async () => {
+    mockByPath((url) =>
+      url.includes("/api/requests/r1")
+        ? json(trace("r1"))
+        : json({ requests: [row({ id: "r1", model: "distinctive-model" })] }),
+    )
+    const { router } = await renderAt("/requests?provider=groq")
+
+    await userEvent.click(await screen.findByRole("button", { name: "Open" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/requests/r1"))
+    // The filters survive the trip: the drawer is a detail of the list, not
+    // a different screen.
+    expect(router.state.location.search).toEqual({ provider: "groq" })
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(router.state.location.pathname).toBe("/requests"))
+    expect(router.state.location.search).toEqual({ provider: "groq" })
+  })
+})
+
+describe("loading older requests", () => {
+  it("sends one request for the next page however often the button is pressed", async () => {
+    let release: (() => void) | undefined
+    const calls: string[] = []
+    mockByPath((url) => {
+      calls.push(url)
+      if (!url.includes("cursor=")) return json({ requests: [row({ id: "r1" })], next_cursor: "c1" })
+      return new Promise<Response>((resolve) => {
+        release = () => resolve(json({ requests: [row({ id: "r0" })] }))
+      })
+    })
+    await renderAt("/requests")
+
+    const more = await screen.findByRole("button", { name: /load more/i })
+    await userEvent.click(more)
+    await userEvent.click(more)
+    await userEvent.click(more)
+
+    await waitFor(() => expect(release).toBeDefined())
+    expect(calls.filter((u) => u.includes("cursor=c1"))).toHaveLength(1)
+    release!()
+    await waitFor(() => expect(screen.queryByRole("button", { name: /load more/i })).toBeNull())
+  })
+
+  it("reports a page that failed to load, and offers to try again", async () => {
+    let fail = true
+    mockByPath((url) => {
+      if (!url.includes("cursor=")) return json({ requests: [row({ id: "r1" })], next_cursor: "c1" })
+      if (fail) return json({ error: "log locked" }, 500)
+      return json({ requests: [row({ id: "r0" })] })
+    })
+    await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    expect(await screen.findByText(/could not load older requests/i)).toBeInTheDocument()
+
+    fail = false
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }))
+    await waitFor(() => expect(screen.queryByText(/could not load older requests/i)).toBeNull())
+  })
+
+  it("discards a page that was requested under filters since changed", async () => {
+    // A slow second page arriving after the operator switched filters would
+    // append rows from the old query under the new one.
+    let release: (() => void) | undefined
+    mockByPath((url) => {
+      if (url.includes("cursor=")) {
+        return new Promise<Response>((resolve) => {
+          release = () => resolve(json({ requests: [row({ id: "stale", model: "stale-model" })] }))
+        })
+      }
+      if (url.includes("provider=nebius")) return json({ requests: [row({ id: "n1", model: "nebius-model" })] })
+      return json({ requests: [row({ id: "r1" })], next_cursor: "c1" })
+    })
+    const { router } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(release).toBeDefined())
+    await router.navigate({ to: "/requests", search: { provider: "nebius" } })
+    await screen.findByText("nebius-model")
+
+    release!()
+    // Given a beat to arrive; nothing should happen.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText("stale-model")).toBeNull()
   })
 })

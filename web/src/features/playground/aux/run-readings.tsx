@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
 import { Card } from "darkraise-ui"
 import { Link } from "@tanstack/react-router"
-import { formatCost } from "../message"
-import { duration, traceWhenWritten } from "../metrics"
+import { count, duration, money } from "../../../lib/format"
+import { traceWhenWritten } from "../metrics"
 import type { AuxRun } from "./surfaces"
 import type { RequestTrace } from "../../../lib/api-types"
 
@@ -38,19 +38,18 @@ export function RunReadings({ run }: { run: AuxRun | undefined }) {
       setTrace(null)
       return
     }
-    let live = true
+    // Aborted on the way out, so the retry stops with the panel rather than
+    // running on and writing into a run that has been superseded or a
+    // surface that has been left.
+    const controller = new AbortController()
     setWaiting(true)
     setTrace(null)
-    void traceWhenWritten(run.requestId).then((t) => {
-      // The run may have been superseded while the retry was in flight, and
-      // the newer one's figures must not be replaced by the older one's.
-      if (!live) return
+    void traceWhenWritten(run.requestId, controller.signal).then((t) => {
+      if (controller.signal.aborted) return
       setTrace(t)
       setWaiting(false)
     })
-    return () => {
-      live = false
-    }
+    return () => controller.abort()
   }, [run?.requestId, run])
 
   return (
@@ -73,22 +72,9 @@ export function RunReadings({ run }: { run: AuxRun | undefined }) {
           </div>
 
           <div className="flex flex-col gap-1 border-t pt-3">
-            <Reading
-              label="tokens in"
-              value={trace?.tokens_in != null ? trace.tokens_in.toLocaleString("en-US") : "—"}
-            />
-            <Reading
-              label="tokens out"
-              value={trace?.tokens_out != null ? trace.tokens_out.toLocaleString("en-US") : "—"}
-            />
-            <Reading
-              label="cost"
-              value={
-                trace?.cost_micros != null && trace.cost_micros > 0
-                  ? formatCost(trace.cost_micros)
-                  : "—"
-              }
-            />
+            <Reading label="tokens in" value={count(trace?.tokens_in)} />
+            <Reading label="tokens out" value={count(trace?.tokens_out)} />
+            <Reading label="cost" value={money(trace?.cost_micros)} />
           </div>
 
           {/* Said rather than left as a row of dashes an operator reads as a

@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "darkraise-ui"
 import { ConfigPane } from "../config-pane/config-pane"
+import { NestedDialogContext } from "../config-pane/nested-dialog"
 import type { PlaygroundConfig } from "../config"
 
 /**
@@ -49,6 +50,9 @@ export function NewConversationDialog({
   amending?: boolean
 }) {
   const [draft, setDraft] = useState<PlaygroundConfig>(seed)
+  // While the pane has a dialog of its own open, Escape belongs to that one.
+  // See NestedDialogContext for why this has to be said.
+  const [nested, setNested] = useState(false)
 
   // Reseeded on opening rather than on every seed change: a draft that
   // tracked the seed would be rewritten under the operator's hands the
@@ -62,7 +66,11 @@ export function NewConversationDialog({
   }, [open])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      closeOnEscape={!nested}
+    >
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{amending ? "Request settings" : "New conversation"}</DialogTitle>
@@ -73,7 +81,9 @@ export function NewConversationDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ConfigPane config={draft} onChange={setDraft} showHeading={false} />
+        <NestedDialogContext.Provider value={setNested}>
+          <ConfigPane config={draft} onChange={setDraft} showHeading={false} />
+        </NestedDialogContext.Provider>
 
         <div className="mt-2 flex items-center justify-end gap-2 border-t pt-3">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>

@@ -31,6 +31,24 @@ describe("the conversation header", () => {
     expect(screen.getByText("No model")).toBeInTheDocument()
   })
 
+  it("ignores Enter while an input method is composing", async () => {
+    const { fireEvent } = await import("@testing-library/react")
+    const onTitleChange = vi.fn()
+    header({ onTitleChange })
+    const field = screen.getByLabelText("Conversation title")
+    field.focus()
+    fireEvent.change(field, { target: { value: "新しい" } })
+
+    fireEvent.keyDown(field, { key: "Enter", isComposing: true })
+    // Enter commits by blurring, so keeping focus is keeping the draft open.
+    expect(field).toHaveFocus()
+    expect(onTitleChange).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(field).not.toHaveFocus()
+    expect(onTitleChange).toHaveBeenCalledWith("新しい")
+  })
+
   it("commits a retitle on Enter and abandons it on Escape", async () => {
     const onTitleChange = vi.fn()
     header({ onTitleChange })

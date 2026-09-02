@@ -9,7 +9,7 @@ import {
 } from "darkraise-ui/components/file-upload"
 import { Play, Square } from "lucide-react"
 import { NumberBox } from "../../shell/number-box"
-import { isAuxReady, SURFACE_FIELDS, type FieldSpec, type FormSurface } from "./surfaces"
+import { auxBlocker, SURFACE_FIELDS, type FieldSpec, type FormSurface } from "./surfaces"
 import type { AuxSurface } from "../../../lib/api-types"
 
 /**
@@ -42,7 +42,8 @@ export function ToolInputs({
 }) {
   const fields: FieldSpec[] = needsFile ? [] : SURFACE_FIELDS[surface as FormSurface]
   const primaryKey = fields.find((f) => f.primary)?.key
-  const ready = isAuxReady(surface, form)
+  const blocker = auxBlocker(surface, form)
+  const ready = blocker === null
 
   // Drawn in the order each tool declares, not with the primary hoisted to
   // the top. Rerank asks for a query and then the documents it ranks; a rule
@@ -77,6 +78,7 @@ export function ToolInputs({
             // composer uses. Not on a field whose own separator is the
             // newline, where Enter would fire the run mid-list.
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return
               if (f.key !== primaryKey || f.key === "documents") return
               if (e.key !== "Enter" || e.shiftKey) return
               if (busy || !ready) return
@@ -155,7 +157,12 @@ export function ToolInputs({
       {/* Right-aligned and sized to its own label. A full-width primary bar
           across the panel read as the page's main action when it is one
           tool's. */}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {/* Said beside the button rather than left to be worked out from a
+            control that does not answer. */}
+        {blocker !== null ? (
+          <p className="text-sm text-[hsl(var(--legend))]">{blocker}</p>
+        ) : null}
         <Button onClick={onRun} disabled={busy || !ready}>
           {busy ? (
             <Square className="size-[var(--icon-size,1rem)]" aria-hidden="true" />

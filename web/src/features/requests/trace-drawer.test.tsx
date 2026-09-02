@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import {
-  ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection, metaValue, TraceDrawer,
+  attemptSegments, ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection, metaValue,
+  TraceDrawer, traceErrorMessage,
 } from "./trace-drawer"
+import { ApiError } from "../../lib/api"
 import type { TraceAttempt } from "../../lib/api-types"
 
 const traceMock = vi.hoisted(() => vi.fn())
@@ -115,13 +117,40 @@ describe("trace ladder rows", () => {
     expect(rows[1]?.terminated).toBe(true)
   })
 
-  it("scales latency bars against the slowest attempt in the trace", () => {
-    const rows = ladderRows([
-      attempt({ seq: 0, latency_ms: 50 }),
-      attempt({ seq: 1, latency_ms: 100, outcome: "success" }),
-    ])
-    expect(rows[1]?.latencyPx).toBe(96)
-    expect(rows[0]?.latencyPx).toBe(48)
+  it("scales latency bars against the request total", () => {
+    // Against the total rather than the slowest attempt, so a bar says what
+    // share of the wait this attempt was; the waterfall below uses the same
+    // scale, and two scales for one trace would disagree about the same row.
+    const rows = ladderRows(
+      [attempt({ seq: 0, latency_ms: 50 }), attempt({ seq: 1, latency_ms: 100, outcome: "success" })],
+      200,
+    )
+    expect(rows[1]?.latencyPx).toBe(48)
+    expect(rows[0]?.latencyPx).toBe(24)
+  })
+
+  it("falls back to the slowest attempt when the request has no total", () => {
+    const rows = ladderRows([attempt({ seq: 0, latency_ms: 100, outcome: "success" })], null)
+    expect(rows[0]?.latencyPx).toBe(96)
+  })
+
+  it("reads provider/model, the code, the duration, the path and the cost", () => {
+    const [row] = ladderRows(
+      [attempt({ seq: 0, outcome: "success", status_code: 200, latency_ms: 570, path: "passthrough", cost_micros: 100 })],
+      1000,
+    )
+    expect(row?.target).toBe("groq/m")
+    expect(row?.reasonCode).toBe("200")
+    expect(row?.reasonProse).toBe("570 ms · passthrough · $0.0001 · key k")
+  })
+
+  it("shows the attempt's error where there is one, and no invented cost", () => {
+    const [row] = ladderRows(
+      [attempt({ seq: 0, status_code: 0, outcome: "timeout", latency_ms: 30000, error: "deadline exceeded", key_label: "" })],
+      30000,
+    )
+    expect(row?.reasonCode).toBe("timeout")
+    expect(row?.reasonProse).toBe("30.0 s · deadline exceeded")
   })
 
   it("ranks from one, not from the stored sequence", () => {
@@ -162,17 +191,14 @@ describe("the waterfall", () => {
 })
 
 describe("the bodies panel", () => {
-  it("explains an empty panel instead of drawing an empty box", () => {
-    // capture.bodies has a retention sweep and no writer, so this is the
-    // permanent state today. §2 makes saying so the requirement.
+  it("says bodies are not stored, without editorialising about the gateway", () => {
     render(<BodiesPanel bodies={undefined} />)
-    expect(screen.getByText(/capture\.bodies/i)).toBeInTheDocument()
-    expect(screen.getByText(/not captured/i)).toBeInTheDocument()
+    expect(screen.getByText("Bodies are not stored for this request.")).toBeInTheDocument()
   })
 
   it("says the same thing for an empty list as for an absent one", () => {
     render(<BodiesPanel bodies={[]} />)
-    expect(screen.getByText(/not captured/i)).toBeInTheDocument()
+    expect(screen.getByText("Bodies are not stored for this request.")).toBeInTheDocument()
   })
 
   it("renders each captured body under its kind", () => {
@@ -219,5 +245,67 @@ describe("a surface metadata value", () => {
 
   it("does not print null as the word object", () => {
     expect(metaValue(null)).toBe("null")
+  })
+})
+
+describe("the attempt waterfall", () => {
+  it("lays attempts end to end as shares of the request total", () => {
+    expect(
+      attemptSegments(
+        [attempt({ seq: 0, latency_ms: 250 }), attempt({ seq: 1, latency_ms: 500, outcome: "success" })],
+        1000,
+      ),
+    ).toEqual([
+      { seq: 0, label: "groq/m", start: 0, fraction: 0.25, served: false },
+      { seq: 1, label: "groq/m", start: 0.25, fraction: 0.5, served: true },
+    ])
+  })
+
+  it("clamps attempts that overrun the total rather than drawing past the track", () => {
+    const [first, second] = attemptSegments(
+      [attempt({ seq: 0, latency_ms: 800 }), attempt({ seq: 1, latency_ms: 800, outcome: "success" })],
+      1000,
+    )
+    expect(first?.fraction).toBe(0.8)
+    expect(second?.start).toBe(0.8)
+    expect(second?.fraction).toBeCloseTo(0.2)
+  })
+
+  it("draws nothing without a total to scale against", () => {
+    expect(attemptSegments([attempt({ seq: 0 })], null)).toEqual([])
+  })
+})
+
+describe("what the drawer says when the trace does not load", () => {
+  it("tells a missing request apart from a failed fetch", () => {
+    expect(traceErrorMessage(new ApiError(404, "not found"))).toMatch(/no request with that id/i)
+    expect(traceErrorMessage(new ApiError(500, "log locked"))).toMatch(/could not load this trace/i)
+    expect(traceErrorMessage(new ApiError(500, "log locked"))).toMatch(/log locked/)
+    expect(traceErrorMessage(new TypeError("Failed to fetch"))).toMatch(/failed to fetch/i)
+  })
+
+  it("renders the missing state in the drawer", () => {
+    traceMock.mockReturnValue({ data: undefined, isError: true, error: new ApiError(404, "not found") })
+    render(<TraceDrawer id="01GONE" onClose={() => {}} />)
+    expect(screen.getByText(/no request with that id/i)).toBeInTheDocument()
+  })
+
+  it("prints costs and durations the way the rest of the console does", () => {
+    traceMock.mockReturnValue({
+      data: {
+        id: "01TRACE", ts_ms: 0, dialect: "openai", surface: "chat", source: "console",
+        model: "m", final_model: "m", provider: "groq", status: "success",
+        cost_micros: 3400, tokens_in: 1200, tokens_out: 30, cache_read_tokens: 0,
+        ttft_ms: 250, total_ms: 8100,
+        attempts: [], candidates: [], skips: [], warnings: [],
+      },
+      isError: false,
+    })
+    render(<TraceDrawer id="01TRACE" onClose={() => {}} />)
+    expect(screen.getByText("$0.0034")).toBeInTheDocument()
+    expect(screen.getAllByText(/8\.1 s/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/1,200/)).toBeInTheDocument()
+    // The id names the dialog on its own; the playground link is content.
+    expect(screen.getByRole("dialog", { name: "01TRACE" })).toBeInTheDocument()
   })
 })

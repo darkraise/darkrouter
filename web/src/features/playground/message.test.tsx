@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { AssistantTurn, UserTurn, formatCost, routeFromTrace, type TurnRoute } from "./message"
+import { AssistantTurn, UserTurn, routeFromTrace, type TurnRoute } from "./message"
 import type { RequestTrace, TraceAttempt } from "../../lib/api-types"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -62,7 +62,7 @@ describe("an answered turn", () => {
     render(<AssistantTurn text="hello" route={route()} />)
     expect(screen.getByText(/groq/)).toBeInTheDocument()
     expect(screen.getByText(/llama-3.3/)).toBeInTheDocument()
-    expect(screen.getByText(/900ms/)).toBeInTheDocument()
+    expect(screen.getByText(/900 ms/)).toBeInTheDocument()
     expect(screen.getByText(/12 in · 30 out/)).toBeInTheDocument()
   })
 
@@ -180,12 +180,6 @@ describe("a typed turn", () => {
 })
 
 describe("cost", () => {
-  it("keeps a fraction of a cent legible instead of rounding it to free", () => {
-    expect(formatCost(2_500_000)).toBe("$2.50")
-    expect(formatCost(3_400)).toBe("$0.0034")
-    expect(formatCost(12)).toBe("<$0.0001")
-  })
-
   it("includes failed-attempt burn in the turn cost", () => {
     const r = routeFromTrace(trace({ attempts: [
       attempt("first", { outcome: "retryable_provider", cost_micros: 125 }),
@@ -210,9 +204,6 @@ describe("cost", () => {
     expect(r.costCoverage).toBe("unknown")
   })
 
-  it("renders known zero as zero rather than as missing", () => {
-    expect(formatCost(0)).toBe("$0.0000")
-  })
 })
 
 describe("what the provider dropped", () => {
@@ -275,7 +266,7 @@ describe("the route line in Chat mode", () => {
     // every turn. It does want them under the one turn being questioned,
     // which is what makes this a disclosure rather than a removal.
     render(<AssistantTurn text="an answer" route={route} quiet />)
-    expect(screen.getByText("1.2s")).toBeInTheDocument()
+    expect(screen.getByText("1.2 s")).toBeInTheDocument()
     expect(screen.queryByText(/12 in/)).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "trace" })).not.toBeInTheDocument()
 
@@ -303,7 +294,7 @@ describe("a turn the model reasoned before answering", () => {
         thinking={{ text: "first I weighed it", ms: 4200 }}
       />,
     )
-    const trigger = screen.getByRole("button", { name: /thinking in 4\.2s/i })
+    const trigger = screen.getByRole("button", { name: /thinking in 4\.2 s/i })
     expect(screen.queryByText("first I weighed it")).toBeNull()
 
     await userEvent.click(trigger)
@@ -343,7 +334,7 @@ describe("a turn the model reasoned before answering", () => {
         thinking={{ text: "weighing it", ms: 900 }}
       />,
     )
-    expect(screen.getByRole("button", { name: /thinking in 900ms/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /thinking in 900 ms/i })).toBeInTheDocument()
     expect(screen.queryByText(/working not returned/i)).toBeNull()
   })
 })

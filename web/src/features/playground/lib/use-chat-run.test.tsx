@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatRun } from "./use-chat-run"
 import { emptyConfig } from "../config"
+import { api } from "../../../lib/api"
 
 const frame = (text: string) =>
   `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
@@ -45,6 +46,50 @@ describe("running one chat turn", () => {
   beforeEach(() => {
     streamMock.mockReset()
     traceMock.mockReset()
+  })
+
+  it("hydrates a reopened conversation at most four traces at a time", async () => {
+    // A forty-turn conversation reopened fired forty trace fetches at once,
+    // which the admin server answers serially from one SQLite handle.
+    const pending: (() => void)[] = []
+    vi.mocked(api.get).mockImplementation(
+      () => new Promise((resolve) => pending.push(() => resolve({ id: "t", attempts: [] }))),
+    )
+    const { result } = renderHook(() => useChatRun({ ...emptyConfig(), model: "m" }, () => {}))
+    const routes = Object.fromEntries(
+      Array.from({ length: 6 }, (_, i) => [
+        i * 2 + 1,
+        {
+          requestId: `r${i}`, provider: "", model: "", totalMs: null, tokensIn: null,
+          tokensOut: null, reasoningTokens: 0, costMicros: null, costCoverage: "unknown" as const,
+          failedOver: [], warnings: [],
+        },
+      ]),
+    )
+    act(() => result.current.load([], routes))
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(4))
+    await act(async () => {
+      pending.shift()!()
+    })
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(5))
+    for (const release of pending.splice(0)) release()
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(6))
+  })
+
+  it("reports an error frame as the run's error", async () => {
+    yields(frame("par"), 'data: {"error":{"message":"upstream exploded"}}\n\n')
+    traceMock.mockResolvedValue(null)
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.error).toBe("upstream exploded")
+    // The half answer stays: it is what the tokens were spent on.
+    expect(result.current.messages[1]!.content).toBe("par")
   })
 
   it("appends every streamed delta to the one assistant turn", async () => {

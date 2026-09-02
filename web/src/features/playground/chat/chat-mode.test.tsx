@@ -416,7 +416,7 @@ describe("Chat mode", () => {
     // The duration replaces the bare "routed" that the stored row alone
     // could offer. (The button's accessible name is its aria-label, so the
     // reading is the text.)
-    expect(await screen.findByText("2.4s")).toBeInTheDocument()
+    expect(await screen.findByText("2.4 s")).toBeInTheDocument()
   })
 
   it("fixes the model once a turn has been sent", async () => {
@@ -445,14 +445,34 @@ describe("Chat mode", () => {
     // describes goes out.
     mounted()
     expect(screen.getByRole("heading", { name: "Request" })).toBeInTheDocument()
-    // The pane states them either way. What changes is why it will not edit
-    // them: a conversation not yet started can still reopen its settings.
-    expect(screen.getByText(/chosen when this conversation started/i)).toBeInTheDocument()
     expect(screen.queryByText(/set by the first message/i)).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    expect(screen.getByLabelText("System prompt")).toBeEnabled()
 
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
     await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
     expect(screen.getByText(/set by the first message/i)).toBeInTheDocument()
+    expect(screen.getByLabelText("System prompt")).toBeDisabled()
+  })
+
+  it("sends what was typed into the pane beside the transcript", async () => {
+    // The pane edits until the first message, and what it holds is what the
+    // next send carries — the same value the dialog would have set.
+    mounted()
+    await chooseModel("gpt")
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    await userEvent.type(screen.getByLabelText("System prompt"), "answer tersely")
+    await send("hello")
+
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    const [, body] = streamMock.mock.calls[0] as [string, { system?: string }]
+    expect(body.system).toBe("answer tersely")
+  })
+
+  it("opens the settings from the empty transcript's own button", async () => {
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /choose a model/i }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 
   it("totals what the conversation has spent, not just the last turn", async () => {
@@ -528,12 +548,4 @@ describe("Chat mode", () => {
     expect(within(dialog).queryByRole("button", { name: /start conversation/i })).toBeNull()
   })
 
-  it("reads the settings beside the transcript rather than editing them there", async () => {
-    // Two live surfaces for one value disagree the moment one of them is a
-    // keystroke behind, so the pane states what was chosen and says where.
-    mounted()
-    expect(screen.getByText(/chosen when this conversation started/i)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
-    expect(screen.getByLabelText(/system prompt/i)).toBeDisabled()
-  })
 })
