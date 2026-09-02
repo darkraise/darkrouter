@@ -247,3 +247,23 @@ func TestAReasoningBlockIsOpenedAndClosed(t *testing.T) {
 		t.Errorf("reasoning block opened at %d was not closed (stop=%v at %d)", startIdx, stop, stopIdx)
 	}
 }
+
+func TestParseResponseUnwrapsToolArguments(t *testing.T) {
+	// OpenAI encodes arguments as a JSON string. Keeping the quotes hands
+	// every client a double-encoded object it has to unwrap twice.
+	body := `{"choices":[{"message":{"tool_calls":[
+	  {"id":"a","type":"function","function":{"name":"f","arguments":"{\"city\":\"Oslo\"}"}},
+	  {"id":"b","type":"function","function":{"name":"g","arguments":{"n":1}}},
+	  {"id":"c","type":"function","function":{"name":"h","arguments":""}}]},
+	  "finish_reason":"tool_calls"}]}`
+	resp, err := ParseResponse(&http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`{"city":"Oslo"}`, `{"n":1}`, `{}`}
+	for i, blk := range resp.Content {
+		if blk.ToolUse == nil || string(blk.ToolUse.Input) != want[i] {
+			t.Errorf("call %d input = %s, want %s", i, blk.ToolUse.Input, want[i])
+		}
+	}
+}
