@@ -37,25 +37,14 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.deps.DB.ProviderRows(r.Context())
+	row, err := s.deps.DB.ProviderByID(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	var row store.ProviderRow
-	var found bool
-	for _, p := range rows {
-		if p.ID == id {
-			row, found = p, true
-		}
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no provider %q", id))
+		writeStoreError(w, r, err)
 		return
 	}
 	creds, err := s.deps.DB.Credentials(r.Context(), s.deps.Key, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	style := row.AuthStyle

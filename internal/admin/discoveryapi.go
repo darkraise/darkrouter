@@ -17,7 +17,7 @@ type discoveryHealthView struct {
 func (s *Server) handleDiscoveryHealth(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.deps.DB.DiscoveryHealth(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	out := make([]discoveryHealthView, 0, len(rows))
