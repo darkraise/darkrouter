@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -203,5 +204,80 @@ func TestOverlayFailureKeepsThePreviousConfig(t *testing.T) {
 	}
 	if s.LastError() == nil {
 		t.Fatal("expected LastError to record the overlay failure")
+	}
+}
+
+// Kubernetes projects a ConfigMap as a symlink to a versioned directory and
+// swaps that symlink atomically on update. The file the store watches is
+// never written; the entry beside it changes.
+func TestWatchDetectsASymlinkSwap(t *testing.T) {
+	dir := t.TempDir()
+	v1, v2 := filepath.Join(dir, "v1"), filepath.Join(dir, "v2")
+	for _, d := range []string{v1, v2} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(v1, "darkrouter.yaml"), minimal)
+	writeFile(t, filepath.Join(v2, "darkrouter.yaml"), strings.Replace(minimal, "id: groq", "id: swapped", 1))
+	data := filepath.Join(dir, "..data")
+	if err := os.Symlink("v1", data); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "darkrouter.yaml")
+	if err := os.Symlink(filepath.Join("..data", "darkrouter.yaml"), path); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(path, env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan struct{})
+	go func() { _ = s.watch(ctx, ready) }()
+	select {
+	case <-ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher did not start")
+	}
+
+	tmp := filepath.Join(dir, "..data_tmp")
+	if err := os.Symlink("v2", tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, data); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		if s.Current().Providers[0].ID == "swapped" {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("watcher did not observe the symlink swap")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// The watcher and the admin API both call Reload; two at once must not
+// interleave a stale parse over a newer one.
+func TestConcurrentReloadsPublishTheLatestFile(t *testing.T) {
+	s, path := newTestStore(t, minimal)
+	writeFile(t, path, strings.Replace(minimal, "id: groq", "id: latest", 1))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = s.Reload()
+		}()
+	}
+	wg.Wait()
+	if s.Current().Providers[0].ID != "latest" {
+		t.Fatalf("published provider = %q", s.Current().Providers[0].ID)
 	}
 }
