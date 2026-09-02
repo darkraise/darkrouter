@@ -2,6 +2,7 @@ package ir
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -210,5 +211,35 @@ func TestExtraStringRoundTrips(t *testing.T) {
 	b.Extra["n"] = json.RawMessage(`7`)
 	if b.ExtraString("n") != "" {
 		t.Fatal("a non-string extra reads as empty")
+	}
+}
+
+func TestOpenBlocksCloseInAscendingOrderAndReset(t *testing.T) {
+	var o OpenBlocks
+	for _, i := range []int{2000, 0, 1001, 1000} {
+		o.Open(i)
+	}
+	o.Open(0)
+	if !o.IsOpen(1000) || o.IsOpen(7) {
+		t.Fatal("membership is wrong")
+	}
+	var got []int
+	ok := o.CloseAll(func(ev StreamEvent, err error) bool {
+		if ev.Type != EventBlockStop || err != nil {
+			t.Fatalf("event = %+v err = %v", ev, err)
+		}
+		got = append(got, ev.Index)
+		return true
+	})
+	if !ok || fmt.Sprint(got) != "[0 1000 1001 2000]" {
+		t.Fatalf("closed %v", got)
+	}
+	if o.IsOpen(0) || !o.CloseAll(func(StreamEvent, error) bool { t.Fatal("nothing left"); return false }) {
+		t.Fatal("CloseAll must forget what it closed")
+	}
+	o.Open(1)
+	o.Open(2)
+	if o.CloseAll(func(StreamEvent, error) bool { return false }) {
+		t.Fatal("a consumer that stops listening is reported")
 	}
 }

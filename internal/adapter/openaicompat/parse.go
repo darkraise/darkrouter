@@ -8,7 +8,6 @@ import (
 	"io"
 	"iter"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -257,7 +256,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			return
 		}
 		reader := sse.NewReader(br, maxLine)
-		open := make(map[int]bool)
+		var open ir.OpenBlocks
 		textIdx := -1
 		reasoningIdx := -1
 		started := false
@@ -267,25 +266,12 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		callByID := map[string]int{}
 		nextCall := 0
 
-		// closeAll emits stops in ascending index order so the event sequence is
-		// deterministic; map iteration order is not.
 		closeAll := func() bool {
-			idxs := make([]int, 0, len(open))
-			for idx := range open {
-				idxs = append(idxs, idx)
-			}
-			sort.Ints(idxs)
-			for _, idx := range idxs {
-				if !yield(ir.StreamEvent{Type: ir.EventBlockStop, Index: idx}, nil) {
-					return false
-				}
-			}
-			open = map[int]bool{}
 			textIdx = -1
 			reasoningIdx = -1
 			callByID = map[string]int{}
 			nextCall = 0
-			return true
+			return open.CloseAll(yield)
 		}
 
 		for {
@@ -329,7 +315,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				if d.Content != "" {
 					if textIdx < 0 {
 						textIdx = 0
-						open[textIdx] = true
+						open.Open(textIdx)
 						if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: textIdx,
 							Delta: &ir.Delta{Type: ir.BlockText}}, nil) {
 							return
@@ -346,7 +332,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				if d.Reasoning != "" {
 					if reasoningIdx < 0 {
 						reasoningIdx = reasoningBlockBase
-						open[reasoningIdx] = true
+						open.Open(reasoningIdx)
 						if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: reasoningIdx,
 							Delta: &ir.Delta{Type: ir.BlockThinking}}, nil) {
 							return
@@ -369,8 +355,8 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 						// arrival so parallel calls stay separate blocks.
 						idx = toolBlockBase + nextCall
 					}
-					if !open[idx] {
-						open[idx] = true
+					if !open.IsOpen(idx) {
+						open.Open(idx)
 						nextCall++
 						if tc.ID != "" {
 							callByID[tc.ID] = idx

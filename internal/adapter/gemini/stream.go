@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"iter"
-	"sort"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
@@ -25,7 +24,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			textIdx    = -1
 			thoughtIdx = -1
 			nextIdx    int
-			open       = map[int]ir.BlockType{}
+			open       ir.OpenBlocks
 			// hasCall spans the whole candidate: the call arrives in one
 			// chunk and the finish reason in a later one, and STOP on that
 			// later chunk means tool_use only if this remembers the call.
@@ -33,21 +32,8 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		)
 
 		closeAll := func() bool {
-			idxs := make([]int, 0, len(open))
-			for idx := range open {
-				idxs = append(idxs, idx)
-			}
-			// Ascending, because map iteration order is not deterministic and
-			// the event sequence has to be.
-			sort.Ints(idxs)
-			for _, idx := range idxs {
-				if !yield(ir.StreamEvent{Type: ir.EventBlockStop, Index: idx}, nil) {
-					return false
-				}
-			}
-			open = map[int]ir.BlockType{}
 			textIdx, thoughtIdx = -1, -1
-			return true
+			return open.CloseAll(yield)
 		}
 
 		// openBlock returns the index for a persistent kind, opening it once.
@@ -57,7 +43,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			}
 			*slot = nextIdx
 			nextIdx++
-			open[*slot] = kind
+			open.Open(*slot)
 			return *slot, yield(ir.StreamEvent{
 				Type: ir.EventBlockStart, Index: *slot, Delta: &ir.Delta{Type: kind},
 			}, nil)
