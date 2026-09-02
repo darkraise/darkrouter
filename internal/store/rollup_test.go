@@ -410,7 +410,7 @@ func TestTheRollupWindowIsNeverPrunable(t *testing.T) {
 		}
 	}
 
-	if _, err := db.Prune(ctx, now, 48*time.Hour, 72*time.Hour, 0); err != nil {
+	if _, err := db.Prune(ctx, now, 48*time.Hour, 72*time.Hour, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -497,7 +497,7 @@ func TestTodayIsNeverPrunedAtTheRetentionFloor(t *testing.T) {
 	}
 
 	// 14:00: pruning at the floor retention, then another rollup.
-	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 48*time.Hour, 48*time.Hour, 0); err != nil {
+	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 48*time.Hour, 48*time.Hour, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Rollup(ctx, startOfToday.Add(14*time.Hour)); err != nil {
