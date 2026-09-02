@@ -110,3 +110,25 @@ func TestModelOverrideForAnUnknownProviderIs404(t *testing.T) {
 		t.Fatalf("PUT = %d, want 404: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestModelOverrideAcceptsASlashInTheModelID(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	// Publisher-prefixed ids reach the handler as one encoded segment.
+	path := "/api/models/groq/publisher%2Fmodel-a/override"
+	if w := do(t, s, cookie, token, "PUT", path, `{"context_window":4096}`); w.Code != 200 {
+		t.Fatalf("PUT %s = %d: %s", path, w.Code, w.Body.String())
+	}
+	w := do(t, s, cookie, token, "GET", path, "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "4096") {
+		t.Fatalf("GET %s = %d: %s", path, w.Code, w.Body.String())
+	}
+	rows, err := s.deps.DB.ModelOverrides(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ModelID != "publisher/model-a" {
+		t.Fatalf("stored overrides = %+v, want one for publisher/model-a", rows)
+	}
+}

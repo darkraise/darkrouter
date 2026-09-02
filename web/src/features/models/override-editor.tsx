@@ -25,7 +25,10 @@ import type { ModelCapabilities, ModelOverride } from "../../lib/api-types"
 import { ConfirmButton } from "../shell/confirm-button"
 
 function overridePath(provider: string, model: string) {
-  return `/api/models/${provider}/${model}/override`
+  // Model ids can carry slashes (a publisher prefix), and the route's
+  // wildcard matches one segment; encoded, the id stays one segment and
+  // the handler reads it decoded.
+  return `/api/models/${encodeURIComponent(provider)}/${encodeURIComponent(model)}/override`
 }
 
 async function fetchOverride(provider: string, model: string): Promise<ModelOverride | null> {
