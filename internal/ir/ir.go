@@ -262,6 +262,14 @@ type Usage struct {
 	CacheWriteTokens int
 	ReasoningTokens  int
 	Estimated        bool
+
+	// CacheWrite5mTokens and CacheWrite1hTokens break CacheWriteTokens down
+	// by TTL where the provider reports it; Anthropic prices the two
+	// differently. Both are included in CacheWriteTokens, never in addition
+	// to it. Omitted from JSON when zero so fixtures of every dialect stay
+	// unchanged by them.
+	CacheWrite5mTokens int `json:",omitempty"`
+	CacheWrite1hTokens int `json:",omitempty"`
 }
 
 // PromptTokens is the inclusive prompt count that OpenAI-compatible and

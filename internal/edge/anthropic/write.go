@@ -79,12 +79,21 @@ func responseBlocks(blocks []ir.ContentBlock) []any {
 }
 
 func usageBody(u ir.Usage) map[string]any {
-	return map[string]any{
+	body := map[string]any{
 		"input_tokens":                u.InputTokens,
 		"output_tokens":               u.OutputTokens,
 		"cache_read_input_tokens":     u.CacheReadTokens,
 		"cache_creation_input_tokens": u.CacheWriteTokens,
 	}
+	// Only when the upstream broke the writes out by TTL: claiming a split
+	// that was not reported would price every write as a 5-minute one.
+	if u.CacheWrite5mTokens > 0 || u.CacheWrite1hTokens > 0 {
+		body["cache_creation"] = map[string]any{
+			"ephemeral_5m_input_tokens": u.CacheWrite5mTokens,
+			"ephemeral_1h_input_tokens": u.CacheWrite1hTokens,
+		}
+	}
+	return body
 }
 
 func messageID(id string) string {

@@ -168,8 +168,8 @@ func TestProjectAndLocationAreRequired(t *testing.T) {
 }
 
 func TestParseResponseDispatchesOnShape(t *testing.T) {
-	// Neither parser is handed a Target, so the publisher is unavailable. The
-	// two payloads are unambiguous, which is what makes this safe.
+	// A response with no request attached — a test double — falls back to
+	// the payload's own shape, which is unambiguous between the two.
 	anthropicBody := `{"id":"msg_1","type":"message","role":"assistant",
 	  "content":[{"type":"text","text":"from claude"}],"stop_reason":"end_turn",
 	  "usage":{"input_tokens":3,"output_tokens":2}}`
@@ -231,11 +231,9 @@ func TestParseStreamDispatchesOnThePrefix(t *testing.T) {
 	}
 }
 
-func TestSurfacesIsLLMOnly(t *testing.T) {
-	// The vertex preset declares embedding, but that route is a third URL
-	// shape; claiming the surface would route embeddings to a 404.
+func TestSurfacesAreLLMAndEmbedding(t *testing.T) {
 	s := New().Surfaces()
-	if !s.Has(ir.SurfaceLLM) || s.Has(ir.SurfaceEmbedding) {
+	if !s.Has(ir.SurfaceLLM) || !s.Has(ir.SurfaceEmbedding) {
 		t.Errorf("surfaces = %v", s)
 	}
 }
@@ -266,5 +264,94 @@ func TestAnExplicitBaseURLWins(t *testing.T) {
 	hr, _ = build(t, tgt, req())
 	if !strings.HasPrefix(hr.URL.String(), "https://vertex.internal/") {
 		t.Errorf("anthropic url = %s", hr.URL)
+	}
+}
+
+func TestTheGlobalLocationUsesTheGlobalHost(t *testing.T) {
+	// The global endpoint has no regional prefix on the host, and the path
+	// still names the location. A "global-aiplatform" host does not resolve.
+	tgt := googleTarget()
+	tgt.Location = "global"
+	hr, _ := build(t, tgt, req())
+	want := "https://aiplatform.googleapis.com/v1/projects/proj/locations/global/" +
+		"publishers/google/models/gemini-2.5-pro:generateContent"
+	if hr.URL.String() != want {
+		t.Errorf("url = %s\nwant %s", hr.URL, want)
+	}
+}
+
+func TestParseResponseDispatchesOnThePublisherWhenKnown(t *testing.T) {
+	// The upstream request is attached to a real response, and its URL names
+	// the publisher. That is the authority; sniffing the body is the fallback.
+	anthropicBody := `{"id":"msg_1","type":"message","role":"assistant",
+	  "content":[{"type":"text","text":"from claude"}],"stop_reason":"end_turn",
+	  "usage":{"input_tokens":3,"output_tokens":2}}`
+	hr, _ := build(t, anthropicTarget(), req())
+	got, err := parseResponse(&http.Response{
+		StatusCode: 200, Header: http.Header{}, Request: hr,
+		Body: io.NopCloser(strings.NewReader(anthropicBody)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Content) == 0 || got.Content[0].Text != "from claude" {
+		t.Errorf("anthropic response = %+v", got.Content)
+	}
+}
+
+func TestGoogleEmbeddingsUsePredict(t *testing.T) {
+	dims := 256
+	hr, warns, err := New().BuildEmbedding(context.Background(), googleTarget(), &ir.EmbeddingRequest{
+		Model: "text-embedding-005", Input: []string{"a", "b"}, Dimensions: dims,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://us-central1-aiplatform.googleapis.com/v1/projects/proj/locations/" +
+		"us-central1/publishers/google/models/gemini-2.5-pro:predict"
+	if hr.URL.String() != want {
+		t.Errorf("url = %s\nwant %s", hr.URL, want)
+	}
+	raw, _ := io.ReadAll(hr.Body)
+	var body struct {
+		Instances  []map[string]any `json:"instances"`
+		Parameters map[string]any   `json:"parameters"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("body is not JSON: %v\n%s", err, raw)
+	}
+	if len(body.Instances) != 2 || body.Instances[0]["content"] != "a" || body.Instances[1]["content"] != "b" {
+		t.Errorf("instances = %v", body.Instances)
+	}
+	if body.Parameters["outputDimensionality"] != float64(256) {
+		t.Errorf("parameters = %v", body.Parameters)
+	}
+	if len(warns) != 0 || hr.Header.Get("Authorization") != "" {
+		t.Errorf("warnings = %v, auth = %q", warns, hr.Header.Get("Authorization"))
+	}
+}
+
+func TestAnthropicPublisherHasNoEmbeddings(t *testing.T) {
+	if _, _, err := New().BuildEmbedding(context.Background(), anthropicTarget(),
+		&ir.EmbeddingRequest{Input: []string{"a"}}); err == nil {
+		t.Fatal("the Anthropic publisher serves no embedding model")
+	}
+}
+
+func TestParseEmbeddingReadsPredictions(t *testing.T) {
+	body := `{"predictions":[
+	  {"embeddings":{"values":[0.1,0.2],"statistics":{"token_count":3,"truncated":false}}},
+	  {"embeddings":{"values":[0.3,0.4],"statistics":{"token_count":4,"truncated":false}}}]}`
+	got, err := New().ParseEmbedding(&http.Response{
+		StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Embeddings) != 2 || got.Embeddings[1].Index != 1 || got.Embeddings[1].Float[1] != 0.4 {
+		t.Errorf("embeddings = %+v", got.Embeddings)
+	}
+	if got.Usage.InputTokens != 7 {
+		t.Errorf("usage = %+v; the per-instance token counts add up to the prompt", got.Usage)
 	}
 }
