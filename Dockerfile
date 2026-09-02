@@ -7,6 +7,8 @@
 # Dependabot's docker ecosystem tracks these tags instead and opens a pull
 # request when one moves, which is the review point a digest bump would need
 # anyway. Tags in this file: node:24-alpine, golang:1.26.6-alpine, alpine:3.22.
+ARG WITH_AUGGIE=1
+
 FROM node:24-alpine AS web
 # Mirrors the repo layout so the bundle lands where vite.config.ts points it,
 # at /src/internal/admin/dist.
@@ -46,8 +48,8 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # CLI, for a deployment that never routes to Augment and would rather not carry
 # a second language runtime for a provider it does not use. The stage name is
 # resolved from the argument, which is how a Dockerfile expresses a conditional
-# stage without duplicating the final one.
-ARG WITH_AUGGIE=1
+# stage without duplicating the final one. The argument itself is declared
+# at the top of the file: an ARG a FROM line reads has to precede every stage.
 
 FROM node:24-alpine AS auggie-1
 # Pinned for the reason web/ uses npm ci: an image is meant to be reproducible,
