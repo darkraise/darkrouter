@@ -360,3 +360,26 @@ func TestBuildRendersToolStrictAndDropsBuiltInTools(t *testing.T) {
 		t.Fatalf("warnings = %v", warns)
 	}
 }
+
+func TestBuildDropsTypedServerTools(t *testing.T) {
+	tgt := &adapter.Target{BaseURL: "https://up.example/v1", Model: "up-model"}
+	hr, warns, err := BuildRequest(context.Background(), tgt, &ir.Request{Tools: []ir.Tool{
+		{Name: "web_search", Extra: map[string]json.RawMessage{"type": json.RawMessage(`"web_search_20250305"`)}},
+		{Name: "lookup", Schema: json.RawMessage(`{"type":"object"}`)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(hr.Body)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	tools := got["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["function"].(map[string]any)["name"] != "lookup" {
+		t.Fatalf("tools = %v; a server tool must not become a function nobody answers", tools)
+	}
+	if !hasWarning(warns, "tools[].type") {
+		t.Fatalf("warnings = %v", warns)
+	}
+}
