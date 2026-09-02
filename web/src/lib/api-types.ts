@@ -325,6 +325,8 @@ export type DiscoveryHealthRow = {
 
 export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }
 
+export type ProviderHealthResponse = { providers: BreakerEntry[] }
+
 /** POST /api/providers/{id}/test. A rejected credential is a 200 with
  *  ok:false, not an error response — the button exists to discover exactly
  *  that outcome. */
@@ -391,6 +393,10 @@ export type PlaygroundConversation = {
   created_at: string
   updated_at: string
 }
+
+export type PlaygroundPresetsResponse = { presets: PlaygroundPreset[] }
+
+export type PlaygroundConversationsResponse = { conversations: PlaygroundConversation[] }
 
 export type PlaygroundStoredTurn = {
   seq: number
@@ -493,6 +499,8 @@ export type ProxyToken = {
   secret?: string
 }
 
+export type ProxyTokensResponse = { tokens: ProxyToken[] }
+
 export type Session = {
   id: string
   prefix: string
@@ -500,3 +508,5 @@ export type Session = {
   expires_at: string
   current: boolean
 }
+
+export type SessionsResponse = { sessions: Session[] }

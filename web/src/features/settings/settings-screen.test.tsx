@@ -198,7 +198,10 @@ function stubSettingsFetch(overrides: {
       })
     }
     if (url === "/api/sessions" && method === "GET") {
-      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(JSON.stringify({ sessions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
     }
     if (url === "/api/config/reload" && method === "POST") {
       return new Response(JSON.stringify(overrides.reload ?? { valid: true }), {
