@@ -1,6 +1,6 @@
 # Darkrouter Progress
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 ## Phase status
 
@@ -18,7 +18,10 @@ Last updated: 2026-09-01
 | 10 — Operator console (mockups) | ✅ | ✅ | **Mockups approved and published.** 20 tasks; eighteen screens, gate clean, published as a Claude artifact. No TSX written yet — implementation starts from the approved set. |
 | 11a — Cost, attempts and the usage dimension | ✅ | ✅ | **Complete.** 10 tasks; race-clean. Cost computed at commit time from catalog pricing, failed attempts counted, `usage_daily` keyed on alias. |
 | 11c — Cache tokens and coherence | ✅ | ✅ | **Complete.** 15 tasks; race-clean. `InputTokens` means one thing repo-wide, cache writes are priced, and the two cost surfaces agree. |
-| 14 — Console gap closure | ✅ | ✅ | **Static gate clean, live gate not performed.** 22 tasks close every phase 10–13 gap; full suite race-clean, frontend 749/749 in 77 files, one cross-package regression found and fixed. UAT against a live gateway needs a provider credential this environment does not have — see `docs/ux/GAP-CLOSURE-DOD.md`. |
+| 12 — Console prerequisites | ✅ | ✅ | **Complete.** `darkraise-ui` 6.5.0 published, aliases and policy moved into SQLite behind `GET`/`PUT /api/config`, and the twelve admin endpoints §8.4 lists; merged 2026-08-26. |
+| 13 — Operator console | ✅ | ✅ | **Complete.** Fifteen screens over nine destinations, the ladder and flow visuals, command palette; merged 2026-08-26. |
+| 14 — Console gap closure | ✅ | ✅ | **Complete, live gate performed 2026-09-02.** 22 tasks close every phase 10–13 gap; full suite race-clean, frontend 760/760 in 78 files. The console was run against this machine's UAT instance and a shadow of it, with Chat and Compare exercised end to end against Groq. `docs/ux/GAP-CLOSURE-DOD.md` records the static gate as it was run on 2026-08-27. |
+| 15 — Review fixes | — | ✅ | **In progress.** A whole-project review on 2026-09-02 produced `docs/superpowers/plans/2026-09-02-review-fixes.md`: eight tracks in parallel worktrees (core, two provider tracks, admin, three console tracks, engineering) merging in order, then structured logging serially. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -40,18 +43,25 @@ the letters and the slices are out of step. Read the table, not the letters.
 to npm on 2026-08-26; step 4 is the console, built in
 `2026-08-26-phase13-operator-console.md` and merged the same day.
 
-**The console has never been run against a live gateway.** Every claim about it
-rests on unit tests over pure functions and on reading the code. §12's first
-criterion — every screen renders against a real gateway in both modes — is
-unmet, and `docs/ux/DONE-CRITERIA.md` records criterion by criterion what is
-actually backed by what.
+**The console has been run against a live gateway.** On 2026-09-02 it was
+exercised against this machine's UAT instance (published on 8090/8091) and a
+shadow container of the same build: every destination rendered, and Chat and
+Compare ran end to end against Groq. Until then every claim about it rested
+on unit tests over pure functions and on reading the code;
+`docs/ux/DONE-CRITERIA.md` records criterion by criterion what backs what.
 
-Everything from phase 10 onward was merged to `master` on 2026-08-26 as
-`fc3f36d`. Nothing has been pushed to `origin`.
+`origin/master` exists at `f62db6d`. Local `master` is far ahead of it and
+has not been pushed; the review-fix branches are unpushed too.
+
+For how the system is put together — packages, the request path, breaker
+and failover semantics, config precedence, the data model, the background
+workers — read `docs/ARCHITECTURE.md`; it describes the current code rather
+than the history this file keeps. `docs/API.md` lists the admin routes and
+`docs/DEPLOY.md` the deployment procedure.
 
 ## Build environment
 
-The Linux machine needs Go 1.26.1 at `/usr/local/go` (add `/usr/local/go/bin` to
+The Linux machine needs Go 1.26.6 at `/usr/local/go` (add `/usr/local/go/bin` to
 `PATH`) and gcc, which `-race` requires via cgo. `CGO_ENABLED` defaults to 1
 there, unlike the original Windows machine.
 
@@ -1337,10 +1347,11 @@ gate as sufficient.
 it claimed to check. Corrected in the plan and recorded in the gate document,
 rather than repaired quietly.
 
-**The live gate could not be performed.** No provider credential exists in
-this environment, so every UAT half of the Definition of Done — D1 through
-D18a — is unexercised, and `docs/ux/DONE-CRITERIA.md`'s first criterion
-remains exactly as unverified as it was after phase 13.
+**The live gate could not be performed at the time.** No provider credential
+existed in that environment, so every UAT half of the Definition of Done —
+D1 through D18a — went unexercised until 2026-09-02, when the console was run
+against the UAT instance on this machine (see the phase status table and the
+2026-09-02 section below).
 
 **`store.RequestRecord.ResolvedAlias` has no production writer**, discovered
 while gating this phase. Every occurrence outside a test fixture only reads
@@ -1363,9 +1374,27 @@ links return to Chat explicitly.
 
 Static verification is clean: `go vet ./...`, `go test -race -count=1 ./...`,
 and the console's lint, typecheck, production build, and 749 tests in 77 files.
-CI now runs the frontend tests and lint before building. Live provider/browser
-UAT remains unperformed because this environment has no provider credential;
-the limitation and required pass are unchanged in `docs/ux/GAP-CLOSURE-DOD.md`.
+CI now runs the frontend tests and lint before building. Live provider and
+browser UAT followed on 2026-09-02, below.
+
+## Live gate and whole-project review — 2026-09-02
+
+The console was run against the UAT instance on this machine and against a
+shadow container of the same build. Chat and Compare completed end to end
+against Groq; the other destinations rendered against real data. That closes
+the live half of the phase 14 gate that the two sections above record as
+unperformed.
+
+The same day a whole-project review — gateway core, every provider adapter,
+the admin API and store, the console, and the engineering surface — produced
+`docs/superpowers/plans/2026-09-02-review-fixes.md`. The fixes run as eight
+tracks in parallel worktrees on `fix/<track>` branches, each owning a
+disjoint set of paths, and merge in order: eng, core, prov1, prov2, admin,
+web1, web2, web3. Structured logging with request ids follows serially as
+the one cross-cutting change, then a live console check, a fresh UAT
+password and a redeploy per `docs/DEPLOY.md`. The engineering track's own
+output is this document's companions: `docs/ARCHITECTURE.md`, `docs/API.md`
+and `docs/DEPLOY.md`, the CI gates, and the container hardening.
 
 ## Review history
 
@@ -1375,3 +1404,4 @@ the limitation and required pass are unchanged in `docs/ux/GAP-CLOSURE-DOD.md`.
 | Task 13 (`internal/exec`) | 1 × Fable, read-only | Concurrency core sound; 6 defects fixed in 8b0b81d |
 | Task 14 (`internal/server`) | 1 × Fable, read-only | 8 defects fixed in 8b0b81d, including a drain deadline that did nothing |
 | Phase 10 — all 18 mockup screens | 1 × Fable, read-only | 4 Important + 27 Minor, all verified against source and all fixed in 641c63d |
+| Whole project, 2026-09-02 | Fable, read-only, per area | Findings across core, providers, admin, console and engineering → `docs/superpowers/plans/2026-09-02-review-fixes.md`, in progress |

@@ -1,6 +1,7 @@
 # Phase 13 — §12's done criteria, walked
 
-Assessed 2026-08-26 against `master` plus `feat/operator-console`.
+Assessed 2026-08-26 against `master` plus `feat/operator-console`; criterion
+1 and the test counts updated 2026-09-02.
 
 Each criterion is marked by what actually verifies it. **"Tests" means unit
 tests over pure functions; it does not mean the screen was looked at.** Nothing
@@ -10,8 +11,8 @@ than met.
 
 | # | Criterion | State | What backs it |
 |---|---|---|---|
-| 1 | Every screen in §6 renders against a real gateway in both modes | **Still unverified** | Phase 14's gap-closure pass (`docs/ux/GAP-CLOSURE-DOD.md`) ran every static gate but could not perform its own UAT step either — no provider credential exists in that environment. So this remains exactly what it was after phase 13: nine-plus destinations exist and build, but none has been rendered against a live gateway, and light mode has not been looked at once |
-| 2 | `qa.py` and the frontend build pass | **Partly met** | Frontend build and 56 tests pass; `qa.py` gates the mockups, not the built console |
+| 1 | Every screen in §6 renders against a real gateway in both modes | **Met for rendering against a gateway; light mode not recorded** | On 2026-09-02 the console was run against this machine's UAT instance and a shadow container of the same build, with Chat and Compare completed end to end against Groq. Whether every screen was also walked in light mode is not recorded, so that half stays open |
+| 2 | `qa.py` and the frontend build pass | **Partly met** | Frontend build and 760 tests in 78 files pass; `qa.py` gates the mockups, not the built console |
 | 3 | A failover is findable in three clicks, and its ladder explains every attempt and skipped candidate, with no colour needed | **Partly met** | Requests → row → trace is three clicks, and the ladder renders attempts and skips. Colour-independence is a design property of the marks, not something tested |
 | 4 | Route preview produces the same ordered candidate list the router produces | **Met** | `TestPreviewAgreesWithTheRouterExactly` compares position by position against `router.Resolve` over the same snapshot; the screen renders the response unsorted |
 | 5 | A provider can be renamed, reprioritised, disabled, probed, breaker reset, discovery forced, without touching a file | **Met** | All six are wired; rename and reprioritise were added on this pass, which is what found them missing |
@@ -38,18 +39,19 @@ rather than after.
 
 ## Still open
 
-**Criterion 1 is the one that matters and is not met.** No screen has been
-rendered against a running gateway, in either mode. Everything above is
-reasoning about code plus unit tests over pure functions.
+**Criterion 1's light-mode half.** The console has now been rendered against
+a running gateway; a recorded pass through every screen in light mode is
+what remains.
 
 ## What the tests do and do not establish
 
-Fifty-six frontend tests cover pure functions: ladder row derivation, provider
-state, usage summarisation, filter parsing, config field reading, the
-information architecture. They caught real defects — a filled mark outside a
-trace, an unpriced total rendering as free, a screen that unmounted the whole
-console.
+The 760 frontend tests (78 files, as of 2026-09-02) cover pure functions and
+component behaviour: ladder row derivation, provider state, usage
+summarisation, filter parsing, config field reading, the information
+architecture, the playground's run lifecycle. They caught real defects — a
+filled mark outside a trace, an unpriced total rendering as free, a screen
+that unmounted the whole console.
 
 They establish nothing about whether the screens look like the approved
-mockups, whether light mode is legible, or whether any of it works against a
-gateway that is actually routing. Those are UAT's job.
+mockups or whether light mode is legible. Whether it works against a gateway
+that is actually routing was UAT's job, and that pass ran on 2026-09-02.
