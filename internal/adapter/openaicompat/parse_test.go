@@ -325,3 +325,81 @@ func TestParseResponseUnwrapsToolArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestParseResponseReadsPartsReasoningAndExtraChoices(t *testing.T) {
+	body := `{"id":"x","choices":[
+	  {"index":0,"message":{"reasoning_content":"hmm","content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]},"finish_reason":"stop"},
+	  {"index":1,"message":{"content":"other"},"finish_reason":"stop"}]}`
+	resp, err := ParseResponse(&http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].Type != ir.BlockThinking || resp.Content[0].Thinking.Text != "hmm" ||
+		resp.Content[1].Type != ir.BlockText || resp.Content[1].Text != "ab" {
+		t.Fatalf("content = %+v", resp.Content)
+	}
+	if len(resp.Warnings) != 1 || resp.Warnings[0].Field != "choices" {
+		t.Fatalf("warnings = %v; a second choice is silently lost otherwise", resp.Warnings)
+	}
+	alt := `{"choices":[{"message":{"reasoning":"r","content":null},"finish_reason":"stop"}]}`
+	resp, err = ParseResponse(&http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(alt))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Thinking == nil || resp.Content[0].Thinking.Text != "r" {
+		t.Fatalf("content = %+v; OpenRouter spells the field reasoning", resp.Content)
+	}
+}
+
+func TestParseStreamNumbersToolCallsWithoutAnIndex(t *testing.T) {
+	body := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":{\"name\":\"f\",\"arguments\":\"\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":{\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"b\",\"function\":{\"name\":\"g\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+	args := map[int]string{}
+	names := map[int]string{}
+	for ev, err := range ParseStream(strings.NewReader(body), 1<<16) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Delta == nil || ev.Delta.Type != ir.BlockToolUse {
+			continue
+		}
+		args[ev.Index] += ev.Delta.ToolInput
+		if ev.Delta.ToolName != "" {
+			names[ev.Index] = ev.Delta.ToolName
+		}
+	}
+	if args[toolBlockBase] != `{"x":1}` || names[toolBlockBase] != "f" {
+		t.Fatalf("first call: args=%v names=%v", args, names)
+	}
+	if args[toolBlockBase+1] != `{}` || names[toolBlockBase+1] != "g" {
+		t.Fatalf("second call: args=%v names=%v", args, names)
+	}
+}
+
+func TestParseStreamClassifiesInStreamErrors(t *testing.T) {
+	cases := []struct {
+		chunk string
+		want  ir.ErrorType
+		code  string
+	}{
+		{`{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`, ir.ErrRateLimit, "rate_limit_exceeded"},
+		{`{"error":{"message":"slow down","code":429}}`, ir.ErrRateLimit, "429"},
+		{`{"error":{"message":"busy","type":"server_error"}}`, ir.ErrOverloaded, ""},
+		{`{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`, ir.ErrAuthentication, "invalid_api_key"},
+		{`{"error":{"message":"nope","type":"invalid_request_error"}}`, ir.ErrInvalidRequest, ""},
+		{`{"error":{"message":"?","type":"weird","code":null}}`, ir.ErrAPI, ""},
+	}
+	for _, tc := range cases {
+		var got *ir.Error
+		for _, err := range ParseStream(strings.NewReader("data: "+tc.chunk+"\n\n"), 1<<16) {
+			if err != nil {
+				got, _ = err.(*ir.Error)
+			}
+		}
+		if got == nil || got.Type != tc.want || got.Code != tc.code {
+			t.Errorf("%s: got %+v, want %s/%q", tc.chunk, got, tc.want, tc.code)
+		}
+	}
+}

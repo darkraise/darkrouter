@@ -181,6 +181,7 @@ var bareQuirks = map[string]bool{
 	"strict-unknown-fields":       true,
 	"no-tool-streaming":           true,
 	"usage-final-chunk-only":      true,
+	"echo-reasoning-content":      true,
 }
 
 // valuedQuirks require a non-empty value after '='. Tag-plus-value was chosen

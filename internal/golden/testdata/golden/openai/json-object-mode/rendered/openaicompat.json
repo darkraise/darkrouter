@@ -1,0 +1,18 @@
+{
+  "messages": [
+    {
+      "content": "Reply with a JSON object holding a single key, answer.",
+      "role": "system"
+    },
+    {
+      "content": "Is 91 prime?",
+      "role": "user"
+    }
+  ],
+  "model": "target-model",
+  "response_format": {
+    "type": "json_object"
+  },
+  "seed": 42,
+  "user": "golden"
+}

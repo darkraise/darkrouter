@@ -283,3 +283,80 @@ func TestBuildRequestDoesNotLeakAnthropicTransportMetadata(t *testing.T) {
 		t.Errorf("metadata = %v", md)
 	}
 }
+
+func TestBuildEmitsStrictAndNameOnlyAsAsked(t *testing.T) {
+	yes, no := true, false
+	schema := json.RawMessage(`{"type":"object"}`)
+	strict := build(t, &ir.Request{ResponseFormat: &ir.ResponseFormat{
+		Type: "json_schema", Schema: schema, Name: "answer", Strict: &yes}})
+	js := strict["response_format"].(map[string]any)["json_schema"].(map[string]any)
+	if js["name"] != "answer" || js["strict"] != true {
+		t.Fatalf("json_schema = %v", js)
+	}
+	for _, rf := range []*ir.ResponseFormat{
+		{Type: "json_schema", Schema: schema},
+		{Type: "json_schema", Schema: schema, Strict: &no},
+	} {
+		js := build(t, &ir.Request{ResponseFormat: rf})["response_format"].(map[string]any)["json_schema"].(map[string]any)
+		if _, present := js["strict"]; present {
+			t.Errorf("strict = %v for %+v; strict mode changes which schemas are accepted", js["strict"], rf)
+		}
+		if js["name"] != "response" {
+			t.Errorf("name = %v, want the default", js["name"])
+		}
+	}
+}
+
+func TestBuildEmitsJSONObjectMode(t *testing.T) {
+	got := build(t, &ir.Request{ResponseFormat: &ir.ResponseFormat{Type: "json_object"}})
+	rf, _ := got["response_format"].(map[string]any)
+	if rf["type"] != "json_object" || len(rf) != 1 {
+		t.Fatalf("response_format = %v", rf)
+	}
+}
+
+func TestBuildReEmitsExtraWithoutOverridingTheIR(t *testing.T) {
+	temp := 0.2
+	got := build(t, &ir.Request{
+		Temperature: &temp,
+		Extra: map[string]json.RawMessage{
+			"seed":        json.RawMessage(`7`),
+			"logit_bias":  json.RawMessage(`{"50256":-100}`),
+			"temperature": json.RawMessage(`0.9`),
+		},
+	})
+	if got["seed"] != float64(7) || got["logit_bias"].(map[string]any)["50256"] != float64(-100) {
+		t.Fatalf("extras = %v", got)
+	}
+	if got["temperature"] != 0.2 {
+		t.Fatalf("temperature = %v; the IR wins over an extra with the same key", got["temperature"])
+	}
+}
+
+func TestBuildRendersToolStrictAndDropsBuiltInTools(t *testing.T) {
+	tgt := &adapter.Target{BaseURL: "https://up.example/v1", Model: "up-model"}
+	hr, warns, err := BuildRequest(context.Background(), tgt, &ir.Request{Tools: []ir.Tool{
+		{Name: "lookup", Schema: json.RawMessage(`{"type":"object"}`),
+			Extra: map[string]json.RawMessage{"strict": json.RawMessage(`true`)}},
+		{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(hr.Body)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	tools := got["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("tools = %v; a built-in tool cannot become a nameless function", tools)
+	}
+	fn := tools[0].(map[string]any)["function"].(map[string]any)
+	if fn["strict"] != true || fn["name"] != "lookup" {
+		t.Fatalf("function = %v", fn)
+	}
+	if !hasWarning(warns, "tools[].googleSearch") {
+		t.Fatalf("warnings = %v", warns)
+	}
+}

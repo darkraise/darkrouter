@@ -182,6 +182,8 @@ func TestQuirksResolveFromTheTargetBaseURL(t *testing.T) {
 		{"https://api.openai.com/v1", []string{"max-completion-tokens-name"}},
 		{"https://api.openai.com/v1/", []string{"max-completion-tokens-name"}},
 		{"https://api.mistral.ai/v1", []string{"strict-unknown-fields", "temperature-top-p-exclusive"}},
+		{"https://api.deepseek.com/v1", []string{"echo-reasoning-content"}},
+		{"https://openrouter.ai/api/v1", []string{"echo-reasoning-content"}},
 		{"https://upstream.example/v1", nil},
 	}
 	for _, tc := range cases {

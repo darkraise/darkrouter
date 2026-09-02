@@ -570,6 +570,8 @@ deepseek:
     - llm
   models_dev_id: deepseek
   website: https://platform.deepseek.com
+  quirks:
+    - echo-reasoning-content
 dgrid:
   name: DGrid
   kind: openaicompat
@@ -1571,6 +1573,8 @@ openrouter:
   models_dev_id: openrouter
   free_tier: true
   website: https://openrouter.ai
+  quirks:
+    - echo-reasoning-content
 openvecta:
   name: OpenVecta
   kind: openaicompat
