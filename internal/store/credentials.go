@@ -147,6 +147,19 @@ func scanCredentials(rows *sql.Rows, key *crypto.Key) ([]Credential, error) {
 // leaves either the old pair or the new one and never a mixture.
 func (d *DB) ReplaceCredentialSecret(ctx context.Context, key *crypto.Key,
 	id, secret string, expiresAt *int64) error {
+	return d.replaceSecret(ctx, key, "", id, secret, expiresAt)
+}
+
+// ReplaceProviderCredentialSecret is ReplaceCredentialSecret scoped to one
+// provider, for a caller whose credential id arrived in a URL beside the
+// provider's: an id that exists under another provider must not match.
+func (d *DB) ReplaceProviderCredentialSecret(ctx context.Context, key *crypto.Key,
+	providerID, id, secret string, expiresAt *int64) error {
+	return d.replaceSecret(ctx, key, providerID, id, secret, expiresAt)
+}
+
+func (d *DB) replaceSecret(ctx context.Context, key *crypto.Key,
+	providerID, id, secret string, expiresAt *int64) error {
 
 	if secret == "" {
 		return fmt.Errorf("refusing to store an empty credential for %s", id)
@@ -155,23 +168,69 @@ func (d *DB) ReplaceCredentialSecret(ctx context.Context, key *crypto.Key,
 	if err != nil {
 		return fmt.Errorf("seal credential %s: %w", id, err)
 	}
-	res, err := d.Sync.ExecContext(ctx,
-		`UPDATE provider_keys SET ciphertext = ?, nonce = ?, expires_at = ? WHERE id = ?`,
-		ciphertext, nonce, expiresAt, id)
+	q := `UPDATE provider_keys SET ciphertext = ?, nonce = ?, expires_at = ? WHERE id = ?`
+	args := []any{ciphertext, nonce, expiresAt, id}
+	if providerID != "" {
+		q += ` AND provider_id = ?`
+		args = append(args, providerID)
+	}
+	res, err := d.Sync.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("replace credential %s: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("replace credential %s: %w", id, err)
 	}
 	if n == 0 {
 		// The credential was deleted while a refresh was in flight. Silently
 		// succeeding would leave the worker believing it had persisted a token
 		// that does not exist.
-		return fmt.Errorf("credential %s no longer exists", id)
+		return fmt.Errorf("credential %s no longer exists: %w", id, ErrNotFound)
 	}
 	return nil
+}
+
+// CredentialSummary is a credential without its secret: everything a listing
+// or a count needs, readable without touching the keyring.
+type CredentialSummary struct {
+	ID         string
+	ProviderID string
+	Label      string
+	Kind       string
+	Enabled    bool
+	Scope      string
+	ExpiresAt  *int64
+}
+
+// CredentialSummaries returns every provider's credentials keyed by provider
+// id, in one query and without decrypting. An overview polled every few
+// seconds must not unseal every secret in the database each time it counts
+// them.
+func (d *DB) CredentialSummaries(ctx context.Context) (map[string][]CredentialSummary, error) {
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT id, provider_id, label, kind, enabled, scope, expires_at
+		   FROM provider_keys ORDER BY provider_id, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list credential summaries: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string][]CredentialSummary{}
+	for rows.Next() {
+		var c CredentialSummary
+		var enabled int
+		if err := rows.Scan(&c.ID, &c.ProviderID, &c.Label, &c.Kind,
+			&enabled, &c.Scope, &c.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("scan credential summary: %w", err)
+		}
+		c.Enabled = enabled == 1
+		out[c.ProviderID] = append(out[c.ProviderID], c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list credential summaries: %w", err)
+	}
+	return out, nil
 }
 
 // ExpiringCredentials returns every enabled credential of one kind whose expiry
@@ -232,7 +291,10 @@ func allCredentialRows(ctx context.Context, q interface {
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sealed credentials: %w", err)
+	}
+	return out, nil
 }
 
 // SetCredentialEnabled turns one credential on or off without deleting it, so
@@ -246,5 +308,8 @@ func (d *DB) SetCredentialEnabled(ctx context.Context, providerID, keyID string,
 		return false, fmt.Errorf("set credential %s enabled: %w", keyID, err)
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("set credential %s enabled: %w", keyID, err)
+	}
+	return n > 0, nil
 }
