@@ -473,7 +473,15 @@ export function AliasEditor({
           }}
         />
         <div className="ml-auto flex gap-2">
-          <Button size="sm" disabled={hasProblems} onClick={() => save.mutate(cleaned)}>
+          {/* Outline while it cannot act: a disabled filled button is still
+              the loudest thing on the card, and reads as "press me" rather
+              than "not yet". */}
+          <Button
+            size="sm"
+            variant={hasProblems ? "outline" : "default"}
+            disabled={hasProblems}
+            onClick={() => save.mutate(cleaned)}
+          >
             Save
           </Button>
           <Button
@@ -584,6 +592,7 @@ export function RoutingScreen() {
           />
           <Button
             size="sm"
+            variant={run.isPending ? "outline" : "default"}
             disabled={run.isPending}
             onClick={() => run.mutate(filters.alias)}
           >

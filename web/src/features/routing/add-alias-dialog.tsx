@@ -189,7 +189,10 @@ export function AddAliasDialog({
             >
               Cancel
             </Button>
+            {/* Outline while it cannot act: a disabled filled button is still
+                the loudest thing in the dialog. */}
             <Button
+              variant={canCreate ? "default" : "outline"}
               disabled={!canCreate}
               onClick={() => {
                 onCreate(name.trim(), targets)
