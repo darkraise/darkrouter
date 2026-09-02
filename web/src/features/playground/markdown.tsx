@@ -1,6 +1,38 @@
-import { useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Copy } from "lucide-react"
 import { parseBlocks, type Block, type Inline } from "./markdown-parse"
+
+/** How often a streaming answer is re-parsed. A stream delivers many chunks
+ *  a second, and parsing the whole answer on every one made a long reply
+ *  stutter as it grew; fifty milliseconds is under a frame of reading. */
+const STREAM_PARSE_MS = 50
+
+/**
+ * `text`, held back to one change per interval while `active`. Off, it is
+ * the text itself, immediately: the finished answer must not lag its stream.
+ */
+function useThrottled(text: string, active: boolean): string {
+  const [shown, setShown] = useState(text)
+  const flushedAt = useRef(0)
+  useEffect(() => {
+    if (!active) {
+      setShown(text)
+      return
+    }
+    const wait = STREAM_PARSE_MS - (Date.now() - flushedAt.current)
+    if (wait <= 0) {
+      flushedAt.current = Date.now()
+      setShown(text)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      flushedAt.current = Date.now()
+      setShown(text)
+    }, wait)
+    return () => window.clearTimeout(timer)
+  }, [text, active])
+  return active ? shown : text
+}
 
 /**
  * A model's answer, rendered.
@@ -9,9 +41,15 @@ import { parseBlocks, type Block, type Inline } from "./markdown-parse"
  * anywhere in this file and no dangerouslySetInnerHTML, which is what makes a
  * provider's answer inert by construction rather than by sanitising: markup a
  * model writes arrives as the characters it wrote.
+ *
+ * The parse is memoised on the text, so a finished answer is parsed once
+ * however often the turns around it re-render, and throttled while the answer
+ * is still arriving.
  */
-export function Markdown({ text }: { text: string }) {
-  return <div className="flex min-w-0 flex-col gap-3">{renderBlocks(parseBlocks(text))}</div>
+export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  const shown = useThrottled(text, streaming)
+  const blocks = useMemo(() => parseBlocks(shown), [shown])
+  return <div className="flex min-w-0 flex-col gap-3">{renderBlocks(blocks)}</div>
 }
 
 function renderBlocks(blocks: Block[]) {
