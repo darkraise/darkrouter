@@ -145,7 +145,7 @@ jobs:
       # Scan what was actually pushed, by digest, so the report describes the
       # bytes a deployment will pull rather than a local rebuild of them.
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           format: table
