@@ -1,3 +1,3 @@
 [
-  "thinking -\u003e bedrock: Converse does not accept reasoning blocks as input"
+  "reasoning -\u003e bedrock: reasoning_config is an Anthropic-only additional field; dropped for this publisher"
 ]

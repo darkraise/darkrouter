@@ -7,6 +7,11 @@
       "content": [
         {
           "text": "Review this."
+        },
+        {
+          "cachePoint": {
+            "type": "default"
+          }
         }
       ],
       "role": "user"
@@ -15,6 +20,11 @@
   "system": [
     {
       "text": "You are a careful reviewer."
+    },
+    {
+      "cachePoint": {
+        "type": "default"
+      }
     }
   ]
 }
