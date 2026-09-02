@@ -13,6 +13,16 @@ describe("the transcript before anything is said", () => {
     expect(screen.getByText(/name a model to send to/i)).toBeInTheDocument()
   })
 
+  it("offers a button that opens the settings when no model is named", async () => {
+    // The sentence used to point at a pane that no longer edits the model;
+    // the button is the way to the dialog that does.
+    const onChooseModel = vi.fn()
+    render(<Transcript messages={[]} routes={{}} busy={false} model="" onChooseModel={onChooseModel} />)
+    const { default: userEvent } = await import("@testing-library/user-event")
+    await userEvent.click(screen.getByRole("button", { name: /choose a model/i }))
+    expect(onChooseModel).toHaveBeenCalledTimes(1)
+  })
+
   it("says it is ready once one is named", () => {
     render(<Transcript messages={[]} routes={{}} busy={false} model="fast" />)
     expect(screen.getByText(/ready to send to fast/i)).toBeInTheDocument()

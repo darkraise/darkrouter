@@ -1,5 +1,7 @@
 import { getCsrfToken, throwOnExecutorError } from "../../../lib/api"
-import type { AuxBody, AuxSurface, CountResult } from "../../../lib/api-types"
+import type {
+  AuxBody, AuxSurface, CountResult, Model, PlaygroundDialect, Provider,
+} from "../../../lib/api-types"
 
 /**
  * The aux tools.
@@ -241,12 +243,51 @@ export function isAuxReady(
   surface: AuxSurface,
   form: Record<string, string>,
 ): boolean {
-  if ((form.model ?? "").trim() === "") return false
-  if (surface === "transcriptions") return (form.file_b64 ?? "") !== ""
-  if (surface === "rerank" && (form.query ?? "").trim() === "") return false
-  if (surface === "count" && (form.dialect ?? "") === "") return false
+  return auxBlocker(surface, form) === null
+}
+
+/** The first thing still missing before a run can go, said so the disabled
+ *  button does not have to be read against the whole form. Null once the
+ *  run is ready. */
+export function auxBlocker(surface: AuxSurface, form: Record<string, string>): string | null {
+  if ((form.model ?? "").trim() === "") return "Name a model to run against."
+  if (surface === "transcriptions") {
+    return (form.file_b64 ?? "") !== "" ? null : "Choose an audio file to transcribe."
+  }
+  if (surface === "rerank" && (form.query ?? "").trim() === "") return "Add a query to rank against."
+  if (surface === "count" && (form.dialect ?? "") === "") {
+    return "Choose a dialect: the count is made by the provider, and only the anthropic and gemini wires count."
+  }
   const primary = SURFACE_FIELDS[surface as FormSurface].find((field) => field.primary)
-  return primary !== undefined && (form[primary.key] ?? "").trim() !== ""
+  if (primary === undefined) return null
+  if ((form[primary.key] ?? "").trim() !== "") return null
+  return `Add ${primary.label === "Prompt" ? "a prompt" : `the ${primary.label.toLowerCase()}`} to send.`
+}
+
+/** Which counting wire a provider speaks. Vertex fronts Gemini models, so it
+ *  counts the way Gemini does; the OpenAI-compatible kinds have no count
+ *  endpoint at all. */
+const COUNT_DIALECT_BY_KIND: Record<string, PlaygroundDialect> = {
+  anthropic: "anthropic",
+  gemini: "gemini",
+  vertex: "gemini",
+}
+
+/** The counting dialect a model's own provider speaks, or null when none of
+ *  its providers counts natively and the choice has to stay the operator's. */
+export function countDialectFor(
+  model: string,
+  models: Pick<Model, "model" | "providers">[],
+  providers: Pick<Provider, "id" | "kind">[],
+): PlaygroundDialect | null {
+  const row = models.find((m) => m.model === model)
+  if (row === undefined) return null
+  for (const id of row.providers) {
+    const kind = providers.find((p) => p.id === id)?.kind
+    const dialect = kind === undefined ? undefined : COUNT_DIALECT_BY_KIND[kind]
+    if (dialect !== undefined) return dialect
+  }
+  return null
 }
 
 export function readFileAsBase64(file: File): Promise<string> {

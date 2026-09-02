@@ -7,13 +7,16 @@ import {
 } from "darkraise-ui/components/resizable"
 import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
 import { EmptyState } from "../../shell/empty-state"
+import { useModels, useProviders } from "../../../lib/queries"
 import { ToolRail } from "./tool-rail"
 import { ToolInputs } from "./tool-inputs"
 import { RunCard } from "./results"
 import { RunReadings } from "./run-readings"
 import {
+  AUX_SURFACES,
   auxBodyFor,
   catalogSurfaceFor,
+  countDialectFor,
   documentLines,
   postAux,
   postCount,
@@ -48,7 +51,7 @@ import type { AuxSurface } from "../../../lib/api-types"
  * record of every call these make.
  */
 export function AuxMode({ active: isActive = true }: { active?: boolean }) {
-  const [active, setActive] = useState<AuxSurface>("embeddings")
+  const [active, setActive] = useState<AuxSurface>(AUX_SURFACES[0].surface)
   const [forms, setForms] = useState<Partial<Record<AuxSurface, Record<string, string>>>>({})
   const [runs, setRuns] = useState<Partial<Record<AuxSurface, AuxRun[]>>>({})
   const [errors, setErrors] = useState<Partial<Record<AuxSurface, string>>>({})
@@ -87,9 +90,28 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
     aliases: false,
     surface: catalogSurfaceFor(active),
   })
+  // Both already cached by the screens that own them; nothing refetches for
+  // this. They answer which counting wire a model's provider speaks.
+  const catalog = useModels()
+  const providers = useProviders()
 
   function setField(surface: AuxSurface, key: string, value: string) {
     setForms((f) => ({ ...f, [surface]: { ...(f[surface] ?? {}), [key]: value } }))
+  }
+
+  /** Naming a model on Token Count also picks the dialect its provider counts
+   *  in. The count has no OpenAI wire, so the default the operator would
+   *  otherwise have to know is the one thing the catalogue can tell them. */
+  function setCountModel(model: string) {
+    const dialect = countDialectFor(
+      model,
+      catalog.data?.models ?? [],
+      providers.data?.providers ?? [],
+    )
+    setForms((f) => ({
+      ...f,
+      count: { ...(f.count ?? {}), model, ...(dialect === null ? {} : { dialect }) },
+    }))
   }
 
   async function pickFile(surface: AuxSurface, file: File) {
@@ -173,7 +195,9 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
             label={`${info.label} model`}
             placeholder="model"
             value={form.model ?? ""}
-            onChange={(model) => setField(active, "model", model)}
+            onChange={(model) =>
+              active === "count" ? setCountModel(model) : setField(active, "model", model)
+            }
             candidates={candidates}
             loading={loading}
             className="min-w-0 flex-1"
