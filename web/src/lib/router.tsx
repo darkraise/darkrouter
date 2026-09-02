@@ -5,29 +5,30 @@ import {
   Outlet,
   Link,
   useNavigate,
+  useRouter,
   useRouterState,
 } from "@tanstack/react-router"
-import { useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useCallback, useState } from "react"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
-import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
-import { OverviewScreen } from "../features/overview/overview-screen"
 import { nav, settingsItem } from "../features/shell/nav"
+import { AppShell } from "../features/shell/app-shell"
 import { ChangePasswordDialog } from "../features/settings/change-password-dialog"
 import { api } from "./api"
+import { CommandPalette } from "../features/shell/command-palette"
+import { PageIdentityBar } from "../features/shell/page-identity"
+import { usePageTitle } from "../features/shell/page-title"
+import { ScreenBoundary } from "../features/shell/screen-boundary"
+import { OverviewScreen } from "../features/overview/overview-screen"
+import { RequestsScreen } from "../features/requests/requests-screen"
 import { UsageScreen } from "../features/usage/usage-screen"
 import { ProvidersScreen } from "../features/providers/providers-screen"
 import { ProviderDetail } from "../features/providers/provider-detail"
 import { ModelsScreen } from "../features/models/models-screen"
 import { RoutingScreen } from "../features/routing/routing-screen"
-import { ConnectScreen } from "../features/connect/connect-screen"
 import { PlaygroundScreen } from "../features/playground/playground-screen"
-import { CommandPalette } from "../features/shell/command-palette"
-import { PageIdentityBar } from "../features/shell/page-identity"
-import { ScreenBoundary } from "../features/shell/screen-boundary"
-import { RequestsScreen } from "../features/requests/requests-screen"
+import { ConnectScreen } from "../features/connect/connect-screen"
 import { SettingsScreen } from "../features/settings/settings-screen"
 
 /**
@@ -80,56 +81,56 @@ export const routerAdapter: RouterAdapter = {
   usePathname: () => useRouterState({ select: (s) => s.location.pathname }),
   useBack: () => () => window.history.back(),
   useInvalidate: () => {
-    const qc = useQueryClient()
-    // Invalidate rather than refetch: a screen the operator is not looking at
-    // should not fetch just because another one mutated.
-    return () => void qc.invalidateQueries()
+    const router = useRouter()
+    // The router's own invalidation, not the query cache's: the adapter's
+    // contract is "reload what this route shows", and wiping every cached
+    // query refetched screens the operator was not looking at.
+    return () => void router.invalidate()
   },
 }
 
-
+const footerNav = [{ label: "Settings", items: [settingsItem] }]
 
 /**
  * RootShell is the chrome every screen renders inside.
  *
  * It lives here, as the root route's component, rather than wrapping
- * RouterProvider from outside: SidebarLayout renders SidebarItem and
- * SearchCommand, both of which call darkraise-ui's useRouterAdapter, and the
- * adapter below is built on TanStack hooks. Mounted above RouterProvider it
- * would be reaching for a router context that does not exist yet.
+ * RouterProvider from outside: the rail's links and the palette are built on
+ * TanStack hooks, and mounted above RouterProvider they would be reaching for
+ * a router context that does not exist yet.
  */
 function RootShell() {
   const [passwordOpen, setPasswordOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const navigate = useNavigate()
+  const openPalette = useCallback(() => setPaletteOpen(true), [])
+  usePageTitle()
   return (
     <RouterAdapterProvider value={routerAdapter}>
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
-      <SidebarLayout
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <AppShell
         nav={nav}
+        footerNav={footerNav}
         // Where you are, in the chrome: the name, mark and purpose of the
         // section render here rather than at the top of each screen.
         headerSlot={<PageIdentityBar />}
-        showThemeSwitcher
+        onSearch={openPalette}
         // The password belongs to whoever is signed in rather than to the
         // gateway's configuration, so it is reached from the same menu as
         // signing out.
-        user={{ name: "Administrator", email: "" }}
-        onProfile={() => setPasswordOpen(true)}
+        onChangePassword={() => setPasswordOpen(true)}
         onSettings={() => void navigate({ to: "/settings" })}
         onLogout={() => {
           // The 401 the next request gets is what the app's global listener
           // turns into the login screen, so this only has to end the session.
           void api.post("/api/auth/logout", {}).finally(() => window.location.reload())
         }}
-        sidebarFooter={
-          <SidebarNav nav={[{ items: [settingsItem] }]} />
-        }
       >
-        <CommandPalette />
         <ScreenBoundary>
           <Outlet />
         </ScreenBoundary>
-      </SidebarLayout>
+      </AppShell>
     </RouterAdapterProvider>
   )
 }
