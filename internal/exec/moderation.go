@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -40,17 +39,13 @@ func (o *moderationOp) Respond(cw *CommitWriter, resp *http.Response, ac *Attemp
 			Type: ir.ErrDarkrouter, Message: "adapter does not serve moderations",
 		}
 	}
+	ac.resetIdle()
 	out, err := m.ParseModeration(resp)
 	if err != nil {
 		return failedParse(ac, resp, err)
 	}
-
-	ttft := time.Since(ac.Rec.TS).Milliseconds()
-	ac.Rec.TTFTMs = &ttft
 	applyUsage(ac.Rec, &out.Usage)
-	ac.Rec.FinalProviderID = ac.Cand.ProviderID
-	ac.Rec.FinalModel = ac.Cand.Model
-	ac.Rec.Warnings = warningStrings(ac.Warns)
+	ac.served(ac.Warns)
 
 	flagged := 0
 	for _, r := range out.Results {

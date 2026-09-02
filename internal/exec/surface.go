@@ -64,6 +64,11 @@ type SurfaceOp interface {
 // excluded by master design §4.1 and by having nothing to return here.
 type passthroughOp interface {
 	Passthrough() *edge.Passthrough
+	// WriteStreamError renders a terminal in-stream error in the inbound
+	// dialect's own wire form, for a forwarded stream that fails after commit.
+	// The forwarder holds no dialect writer, and a stream that simply stops is
+	// indistinguishable to the client from one that finished.
+	WriteStreamError(w http.ResponseWriter, e *ir.Error)
 }
 
 // AttemptCtx is what Respond needs from the attempt around it. It is a struct
@@ -93,6 +98,59 @@ type AttemptCtx struct {
 	// op inferring "first" from its own calls would stay silent in exactly the
 	// case the warning exists for.
 	FirstModel string
+
+	// resp is the upstream response, kept so the breaker signal can read its
+	// status and Retry-After whichever path emits it.
+	resp *http.Response
+	// healthDone guards the one breaker signal an attempt may emit. The first
+	// caller wins: a surface reporting a pre-commit fault beats the loop's
+	// deferred record on the way out, and a success reported once the body
+	// was read beats nothing, because nothing else reports one.
+	healthDone bool
+}
+
+// recordHealth emits the attempt's breaker signal, once.
+func (ac *AttemptCtx) recordHealth(o adapter.Outcome, resp *http.Response) {
+	if ac.healthDone {
+		return
+	}
+	ac.healthDone = true
+	ac.Exec.recordHealthFor(ac.Cand, o, resp)
+}
+
+// resetIdle moves the attempt's bound from the pre-commit deadline to
+// policy.timeout.idle. Post-commit, total stops applying and idle bounds the
+// gap between events; a unary body is bounded the same way once its headers
+// have arrived, because connect+first_byte was never meant to cover a
+// multi-megabyte body on a slow link.
+func (ac *AttemptCtx) resetIdle() {
+	if ac.Timer == nil {
+		return
+	}
+	if d := ac.Cfg.Policy.Timeout.Idle; d > 0 {
+		ac.Timer.Reset(d)
+	}
+}
+
+// served marks this attempt as the one that answered: the record names its
+// target, carries its warnings and its time to first byte, and the breaker
+// hears a success. It is called once the body has been parsed or the stream
+// has committed — never from the status line alone, which a provider can
+// send ahead of a body it then fails to deliver.
+//
+// Warnings are assigned, not appended: the request is re-rendered per
+// attempt, and the record must describe the translation the client actually
+// received rather than every attempt that was abandoned on the way there.
+func (ac *AttemptCtx) served(warns []ir.Warning) {
+	rec, c := ac.Rec, ac.Cand
+	if rec.TTFTMs == nil {
+		ttft := time.Since(rec.TS).Milliseconds()
+		rec.TTFTMs = &ttft
+	}
+	rec.FinalProviderID = c.ProviderID
+	rec.FinalModel = c.Model
+	rec.Warnings = warningStrings(warns)
+	ac.recordHealth(adapter.OutcomeSuccess, ac.resp)
 }
 
 // chatOp is the llm surface. It is the first SurfaceOp and its behavior is
@@ -105,6 +163,12 @@ type chatOp struct {
 }
 
 func (o *chatOp) Passthrough() *edge.Passthrough { return o.pt }
+
+func (o *chatOp) WriteStreamError(w http.ResponseWriter, e *ir.Error) {
+	_ = o.d.WriteStream(w, func(yield func(ir.StreamEvent, error) bool) {
+		yield(ir.StreamEvent{}, e)
+	})
+}
 
 func (o *chatOp) Dialect() string { return o.d.Name() }
 
@@ -130,41 +194,17 @@ func (o *chatOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
 
 func (o *chatOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
 	if o.req.Stream {
-		return ac.Exec.attemptStream(o.d, ac.Cfg, ac.Cand, resp, ac.Rec, ac.Seq, ac.Timer,
-			ac.Warns, ac.Adapter, cw)
+		return ac.Exec.attemptStream(o.d, resp, ac, cw)
 	}
 
-	rec, c := ac.Rec, ac.Cand
+	ac.resetIdle()
 	out, perr := ac.Adapter.ParseResponse(resp)
 	if perr != nil {
-		outcome := outcomeForParseError(perr)
-		last := len(rec.Attempts) - 1
-		rec.Attempts[last].Outcome = string(outcome)
-		rec.Attempts[last].Error = perr.Error()
-		if outcome != adapter.OutcomeFatal {
-			// A 2xx that cannot be read is a provider fault, so it rejoins the
-			// outcome path. A refusal is not: recording it would trip the
-			// breaker on a healthy provider, and failing over would re-ask a
-			// question every model in the chain will refuse.
-			ac.Exec.recordHealthFor(c, outcome, resp)
-		}
-		var ie *ir.Error
-		if errors.As(perr, &ie) {
-			return outcome, ie
-		}
-		return outcome, errorFor(outcome, perr)
+		return failedParse(ac, resp, perr)
 	}
-
-	ttft := time.Since(rec.TS).Milliseconds()
-	rec.TTFTMs = &ttft
-	applyUsage(rec, &out.Usage)
-	rec.FinalProviderID = c.ProviderID
-	rec.FinalModel = c.Model
-	// Assigned, not appended: the request is re-rendered per attempt, and the
-	// record must describe the translation the client actually received rather
-	// than every attempt that was abandoned on the way there.
-	rec.Warnings = warningStrings(append(ac.Warns, out.Warnings...))
-	ac.Exec.writeDiagnostics(cw, rec.ID, c, ac.Seq)
+	applyUsage(ac.Rec, &out.Usage)
+	ac.served(append(ac.Warns, out.Warnings...))
+	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteResponse(cw, out)
 	return adapter.OutcomeSuccess, nil
 }
