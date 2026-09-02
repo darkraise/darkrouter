@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AliasEditor } from "./routing-screen"
 
 const cred = () => ({
@@ -223,5 +223,27 @@ describe("AliasEditor keyboard reorder", () => {
     await user.click(screen.getByRole("button", { name: "Edit" }))
     expect(screen.getByRole("button", { name: "Move chain target 1 up" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Move chain target 2 down" })).toBeDisabled()
+  })
+})
+
+describe("saving", () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  it("refreshes the catalogue, whose alias column reads the same map", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      expect(keys).toContain(JSON.stringify(["models"]))
+    })
   })
 })

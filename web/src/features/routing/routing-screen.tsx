@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState } from "react"
 import { ChevronDown, ChevronUp, Plus } from "lucide-react"
 import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { api } from "../../lib/api"
@@ -119,11 +119,9 @@ export function validateChain(
       ? ctx
       : {
           providers: knownProviders.map((id) => ({
-            id, name: id, preset: id, kind: "", base_url: "", priority: 0, enabled: true,
-            auth_style: "", credentials: [{
-              id: "assumed", label: "assumed", masked: "", enabled: true,
-              cooling: false, kind: "static",
-            }], free_models_only: false,
+            id,
+            enabled: true,
+            credentials: [{ enabled: true, cooling: false }],
           })),
           models: ctx?.models ?? [],
         }
@@ -181,8 +179,11 @@ export function AliasEditor({
   candidates?: string[]
   onPreview?: (name: string) => void
 }) {
+  // The prefix is this editor's alone, so two editors on one page cannot
+  // mint the same row id; the counter only has to be unique within it.
+  const idPrefix = useId()
   const idCounter = useRef(0)
-  const makeId = () => `row-${idCounter.current++}`
+  const makeId = () => `${idPrefix}${idCounter.current++}`
 
   const [draft, setDraft] = useState<Record<string, DraftRow[]>>(() =>
     toDraftRows(aliases, makeId),
@@ -210,7 +211,8 @@ export function AliasEditor({
   const save = useApiMutation({
     mutationFn: (next: Aliases) => api.put("/api/aliases", next),
     success: "Aliases saved",
-    invalidates: [keys.aliases, keys.config],
+    // The catalogue too: its alias column is read from the same map.
+    invalidates: [keys.aliases, keys.config, keys.models],
   })
 
   // Trimmed and stripped of in-progress blanks: what would actually be sent,
@@ -490,8 +492,12 @@ export function AliasEditor({
   )
 }
 
+/** The filter this screen keeps in the URL. A module constant so the hook
+ *  sees the same array each render rather than a fresh literal. */
+const ROUTING_FIELDS = ["alias"] as const
+
 export function RoutingScreen() {
-  const [filters, setFilter] = useSearchFilters(["alias"] as const)
+  const [filters, setFilter] = useSearchFilters(ROUTING_FIELDS)
   const aliases = useAliases()
   const providers = useProviders()
   const models = useModels()
@@ -534,7 +540,8 @@ export function RoutingScreen() {
     run.mutate(name)
   }
 
-  const rows = preview ? previewRows(preview.result) : []
+  // Memoised: the graph rebuilds its nodes when the rows change identity.
+  const rows = useMemo(() => (preview ? previewRows(preview.result) : []), [preview])
 
   return (
     <>
