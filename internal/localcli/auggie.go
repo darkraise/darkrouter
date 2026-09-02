@@ -207,6 +207,7 @@ func (a *Auggie) Run(ctx context.Context, model, prompt string, out io.Writer) e
 	// Kill the whole run rather than only the parent: a CLI that spawns a
 	// helper leaves it holding the pipe, and the read below would block on a
 	// process nobody is waiting for.
+	ownProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Stdin = strings.NewReader(prompt)
 	stdout, err := cmd.StdoutPipe()
