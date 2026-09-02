@@ -210,6 +210,16 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 			}
 			continue
 		}
+		if _, typed := t.Extra["type"]; typed {
+			// A typed tool is a provider-side capability the client did not
+			// implement (an Anthropic server tool such as web search), so
+			// declaring it as a function would invite calls nobody answers.
+			warns = append(warns, ir.Warning{
+				Field: "tools[].type", Target: targetName,
+				Reason: "typed server tool has no equivalent; the tool was dropped",
+			})
+			continue
+		}
 		fn := map[string]any{
 			"name":        t.Name,
 			"description": t.Description,

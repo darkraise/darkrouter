@@ -189,6 +189,15 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 			}
 			continue
 		}
+		if _, typed := tool.Extra["type"]; typed {
+			// A typed tool is another provider's server-side capability;
+			// declaring it as a function would invite calls nobody answers.
+			warns = append(warns, ir.Warning{
+				Field: "tools[].type", Target: targetName,
+				Reason: "typed server tool has no equivalent; the tool was dropped",
+			})
+			continue
+		}
 		for k := range tool.Extra {
 			warns = append(warns, ir.Warning{
 				Field: "tools[]." + k, Target: targetName,

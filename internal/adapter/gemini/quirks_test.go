@@ -363,3 +363,15 @@ func TestRenderContentsPositionalResultSkipsAClaimedCall(t *testing.T) {
 		t.Fatalf("unmatched result took %v; call_a was claimed by name", first["name"])
 	}
 }
+
+func TestBuildRequestDropsTypedServerTools(t *testing.T) {
+	body, warns := builtFor(t, "gemini-2.5-flash", &ir.Request{Tools: []ir.Tool{
+		{Name: "web_search", Extra: map[string]json.RawMessage{"type": json.RawMessage(`"web_search_20250305"`)}},
+	}})
+	if _, ok := body["tools"]; ok {
+		t.Fatalf("tools = %v; a server tool must not become a function declaration", body["tools"])
+	}
+	if len(warns) != 1 || warns[0].Field != "tools[].type" {
+		t.Fatalf("warnings = %v", warns)
+	}
+}
