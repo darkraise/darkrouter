@@ -163,3 +163,18 @@ describe("the providers list", () => {
     expect(tip).toHaveTextContent(/missing for 6 sweeps/)
   })
 })
+
+describe("adding a local runtime", () => {
+  it("offers its own action, because a local runtime has no key to paste", async () => {
+    stub([groq])
+    await renderScreen()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /add local runtime/i }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add a local runtime/i }),
+    ).toBeInTheDocument()
+  })
+})

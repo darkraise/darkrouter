@@ -35,6 +35,7 @@ import { TestDrawer } from "./test-drawer"
 import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
 import { ProviderStateMark } from "../shell/status-mark"
 import { AddAccountsDialog } from "./add-accounts-dialog"
+import { AddLocalDialog } from "./add-local-dialog"
 import { ProviderCard } from "./provider-card"
 import { ProviderIcon } from "./provider-icon"
 import {
@@ -345,6 +346,7 @@ export function ProvidersScreen() {
   const discovery = useDiscoveryHealth()
   const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
+  const [addLocalOpen, setAddLocalOpen] = useState(false)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
   const [addPreset, setAddPreset] = useState<Preset | null>(null)
@@ -466,6 +468,14 @@ export function ProvidersScreen() {
         </ToggleGroup>
         <Button
           size="sm"
+          variant="outline"
+          onClick={() => setAddLocalOpen(true)}
+        >
+          <Plus className="size-[var(--icon-size)]" />
+          Add local runtime
+        </Button>
+        <Button
+          size="sm"
           onClick={() => {
             setAddPreset(null)
             setAddOpen(true)
@@ -487,6 +497,15 @@ export function ProvidersScreen() {
         open={addOpen}
         onOpenChange={setAddOpen}
         onDone={(id) => void navigate({ to: "/providers/$id", params: { id } })}
+      />
+
+      <AddLocalDialog
+        open={addLocalOpen}
+        onOpenChange={setAddLocalOpen}
+        onDone={(id) => {
+          setAddLocalOpen(false)
+          void navigate({ to: "/providers/$id", params: { id } })
+        }}
       />
 
       {/* The list is every provider the release supports, so it needs a way
