@@ -104,6 +104,7 @@ export function ConversationHeader({
         onChange={(e) => setDraftTitle(e.target.value)}
         onBlur={commitTitle}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return
           if (e.key === "Enter") {
             e.preventDefault()
             // Blur is what commits. Committing here as well would fire the
