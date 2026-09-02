@@ -116,16 +116,11 @@ export function ChangePasswordDialog({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          {/* "Account", not "Change password": darkraise-ui's UserMenu
-              hardcodes its item labels, and the one that opens this reads
-              "Profile". A dialog titled for the button that did not open it
-              is a worse mismatch than a broader title. */}
-          <DialogTitle>Account</DialogTitle>
+          <DialogTitle>Change password</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium">Change password</h3>
-          <p className="-mt-2 text-sm text-[hsl(var(--muted-foreground))]">
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
             Every other signed-in browser is signed out when the password changes.
           </p>
 

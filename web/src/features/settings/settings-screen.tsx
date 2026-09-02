@@ -1,13 +1,17 @@
 import { useState, type ChangeEvent } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Badge, Banner, Button, Card, Input, Label, toast } from "darkraise-ui"
-import { AlertTriangle, Boxes, Clock, FileText, Server, ShieldAlert } from "lucide-react"
+import { AlertTriangle, Boxes, Clock, FileText, KeyRound, Server, ShieldAlert } from "lucide-react"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
+import { NumberBox } from "../shell/number-box"
+import { LoadError, LoadingRows } from "../shell/screen-state"
 import { usePurgeConversations } from "../playground/lib/conversations"
 import { keys, useConfig, usePolicy, useSessions } from "../../lib/queries"
-import type { ConfigResponse, PolicyBlock } from "../../lib/api-types"
+import { dateTime, zoneLabel } from "../../lib/format"
+import type { ConfigResponse, PolicyBlock, Session } from "../../lib/api-types"
+import { ChangePasswordDialog } from "./change-password-dialog"
 import {
   EDITABLE,
   SOURCE_LABEL,
@@ -102,22 +106,27 @@ export type PolicyWrite = {
  * /api/policy` refuses a write that touches either — they are omitted rather
  * than sent and rejected.
  */
+/** A count field's value, or undefined when it holds nothing a count can be.
+ *  Left out rather than sent as 0: `Number("")` is 0, and the store reads 0
+ *  as "no override", so an emptied box would delete the setting and silently
+ *  fall back to the file default under a toast reporting success. NaN is
+ *  worse: it serialises to null and the field is ignored with no complaint
+ *  either. */
+function wholeNumber(raw: string | undefined): number | undefined {
+  const text = (raw ?? "").trim()
+  if (text === "" || !Number.isInteger(Number(text))) return undefined
+  return Number(text)
+}
+
 export function toWrite(draft: Draft): PolicyWrite {
-  const tripAfter = (draft["policy.cooldown.trip_after"] ?? "").trim()
-  const attempts = (draft["policy.retry.max_attempts"] ?? "").trim()
+  const tripAfter = wholeNumber(draft["policy.cooldown.trip_after"])
+  const attempts = wholeNumber(draft["policy.retry.max_attempts"])
   return {
     cooldown: {
       max: draft["policy.cooldown.max"] ?? "",
-      ...(tripAfter !== "" ? { trip_after: Number(tripAfter) } : {}),
+      ...(tripAfter !== undefined ? { trip_after: tripAfter } : {}),
     },
-    // Left out rather than sent as 0. `Number("")` is 0, and the store reads
-    // 0 as "no override" (`ok = p.Retry.MaxAttempts != 0`), so an emptied box
-    // would delete the setting and silently fall back to the file default
-    // under a toast reporting success. NaN is worse: it serialises to null and
-    // the field is ignored with no complaint either.
-    ...(Number.isInteger(Number(attempts)) && attempts !== ""
-      ? { retry: { max_attempts: Number(attempts) } }
-      : {}),
+    ...(attempts !== undefined ? { retry: { max_attempts: attempts } } : {}),
     timeout: {
       total: draft["policy.timeout.total"] ?? "",
       idle: draft["policy.timeout.idle"] ?? "",
@@ -151,14 +160,25 @@ function SettingField({
         <p className="text-sm text-[hsl(var(--muted-foreground))]">{setting.description}</p>
         <p className="font-mono text-sm text-[hsl(var(--legend))]">{setting.field}</p>
       </div>
-      <Input
-        id={setting.field}
-        value={value}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-        inputMode={setting.kind === "count" ? "numeric" : undefined}
-        placeholder={setting.placeholder}
-        className="w-40 shrink-0 font-mono"
-      />
+      {setting.kind === "count" ? (
+        <NumberBox
+          id={setting.field}
+          value={value}
+          onChange={onChange}
+          placeholder={setting.placeholder}
+          step={1}
+          precision={0}
+          className="w-40 shrink-0"
+        />
+      ) : (
+        <Input
+          id={setting.field}
+          value={value}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+          placeholder={setting.placeholder}
+          className="w-40 shrink-0 font-mono"
+        />
+      )}
     </div>
   )
 }
@@ -181,12 +201,15 @@ function ReadOnlySetting({ row }: { row: SettingRow }) {
         <p className="font-mono text-sm text-[hsl(var(--legend))]">{row.field}</p>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
-        <span className="font-mono text-base font-medium tabular-nums">{row.display}</span>
-        {/* The file's own spelling, when the humanised form differs from it:
-            720h0m0s reads as 30 days here and still says the first in YAML. */}
-        {row.literal && (
-          <span className="font-mono text-sm text-[hsl(var(--legend))]">{row.literal}</span>
-        )}
+        {/* One reading. The file's own spelling, when it differs, is on the
+            title: 720h0m0s reads as 30 days here, and printing both made
+            every duration look like two settings. */}
+        <span
+          className="font-mono text-base font-medium tabular-nums"
+          title={row.literal || undefined}
+        >
+          {row.display}
+        </span>
         <span className="flex items-center gap-1">
           <Badge variant="outline" title={SOURCE_NOTE[row.source]}>
             {SOURCE_LABEL[row.source]}
@@ -325,11 +348,18 @@ function PolicySettings({ policy }: { policy: PolicyBlock }) {
   )
 }
 
+/** The caller's own session first, so the row that must not be revoked is
+ *  the first one read; the rest in the order the gateway lists them. */
+export function orderSessions(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => Number(b.current) - Number(a.current))
+}
+
 export function SettingsScreen() {
   const config = useConfig()
   const policy = usePolicy()
   const sessions = useSessions()
   const queryClient = useQueryClient()
+  const [passwordOpen, setPasswordOpen] = useState(false)
 
   const revoke = useApiMutation({
     mutationFn: (id: string) => api.del(`/api/sessions/${id}`),
@@ -446,23 +476,68 @@ export function SettingsScreen() {
         </Card>
       )}
 
+      {policy.isError && (
+        <LoadError
+          what="The policy"
+          error={policy.error}
+          onRetry={() => void policy.refetch()}
+          className="mb-4"
+        />
+      )}
+      {config.isError && (
+        <LoadError
+          what="The configuration"
+          error={config.error}
+          onRetry={() => void config.refetch()}
+          className="mb-4"
+        />
+      )}
+      {(policy.isPending || config.isPending) && !policy.isError && !config.isError && (
+        <LoadingRows rows={6} />
+      )}
+
       {policy.data && <PolicySettings policy={policy.data} />}
 
       {config.data && <ReadOnlySettings cfg={config.data} />}
 
       <Card className="mt-4 p-4">
+        <div className="flex flex-wrap items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius)] bg-[hsl(var(--muted))]">
+            <KeyRound className="size-5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-medium">Password</h2>
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              The one password that opens this console. Changing it signs every other browser
+              out.
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setPasswordOpen(true)}>
+            Change password
+          </Button>
+        </div>
+        <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
+      </Card>
+
+      <Card className="mt-4 p-4">
         <h2 className="mb-1 text-sm font-medium">Signed-in browsers</h2>
         <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
           Every session that can reach this console. Revoking one signs it out at its next
-          request.
+          request. Times in {zoneLabel()}.
         </p>
+        {sessions.isError && (
+          <LoadError
+            what="The session list"
+            error={sessions.error}
+            onRetry={() => void sessions.refetch()}
+          />
+        )}
+        {sessions.isPending && <LoadingRows rows={2} />}
         <ul className="flex flex-col gap-2">
-          {(sessions.data ?? []).map((s) => (
+          {orderSessions(sessions.data ?? []).map((s) => (
             <li key={s.id} className="flex items-center gap-3 text-sm">
               <span className="font-mono">{s.prefix}…</span>
-              <span className="text-[hsl(var(--legend))]">
-                since {new Date(s.created_at).toLocaleString()}
-              </span>
+              <span className="text-[hsl(var(--legend))]">since {dateTime(s.created_at)}</span>
               {s.current ? (
                 // Naming the caller's row is what stops an operator revoking
                 // the session they are using and wondering what broke.
