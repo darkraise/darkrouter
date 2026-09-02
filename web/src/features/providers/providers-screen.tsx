@@ -48,6 +48,7 @@ import {
   type ProviderRow,
 } from "./provider-rows"
 import { breakersFor, discoveryLine, probeOutcome } from "./provider-state"
+import { dateTime, zoneLabel } from "../../lib/format"
 import "./providers-table.css"
 
 export { breakersFor, discoveryLine, probeOutcome, providerState } from "./provider-state"
@@ -596,7 +597,10 @@ export function ProvidersScreen() {
 
       {healthRows.some((e) => e.cooling_until) && (
         <Card className="mt-6 p-4">
-          <h2 className="mb-2 text-sm font-medium">Cooling credentials</h2>
+          <h2 className="mb-2 text-sm font-medium">
+            Cooling credentials
+            <span className="ml-2 font-normal text-[hsl(var(--legend))]">{zoneLabel()}</span>
+          </h2>
           <ul className="flex flex-col gap-1 font-mono text-sm">
             {healthRows
               .filter((e) => e.cooling_until)
@@ -604,7 +608,7 @@ export function ProvidersScreen() {
                 <li key={`${e.provider_id}/${e.key_id}/${e.model}`}>
                   {e.provider_id}/{e.key_id || "—"} · backoff {e.backoff_level} ·{" "}
                   {e.consecutive_failures} consecutive failures · until{" "}
-                  {new Date(e.cooling_until as string).toLocaleTimeString()}
+                  {dateTime(e.cooling_until as string)}
                 </li>
               ))}
           </ul>
