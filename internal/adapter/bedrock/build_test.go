@@ -74,7 +74,7 @@ func TestStreamingUsesTheStreamRoute(t *testing.T) {
 
 func TestModelIdIsPathEscaped(t *testing.T) {
 	// The colon in a model id is part of the canonical URI the signature
-	// covers. Task 3's known-answer vector was generated against %3A.
+	// covers, and the SigV4 known-answer vector was generated against %3A.
 	_, url, _ := build(t, &adapter.Target{Region: "us-east-1", Model: "us.anthropic.claude-x-v1:0"}, simple())
 	if !strings.Contains(url, "us.anthropic.claude-x-v1%3A0") {
 		t.Errorf("url = %s; the model id is not escaped", url)
@@ -237,7 +237,7 @@ func TestToolResultsBecomeUserContent(t *testing.T) {
 }
 
 func TestNoCredentialHeaderIsWritten(t *testing.T) {
-	// Signing is the authorizer's job, Task 1. An adapter that also wrote a
+	// Signing is the authorizer's job. An adapter that also wrote a
 	// header would put a key in a request the signature does not cover.
 	hr, _, err := New().BuildRequest(context.Background(),
 		&adapter.Target{Region: "us-east-1", Model: "m", APIKey: "should-be-ignored"}, simple())

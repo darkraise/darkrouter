@@ -28,9 +28,9 @@ func builtFor(t *testing.T, model string, req *ir.Request) (*http.Request, map[s
 
 // builtWith is builtFor with the catalog's view of the model supplied.
 //
-// From phase 6 the request shape is decided by these traits rather than by the
-// model name, so a test that exercises per-generation behavior has to say which
-// generation it means. catalog_traits_test.go in internal/catalog is what
+// The request shape is decided by these traits rather than by the model name,
+// so a test that exercises per-generation behavior has to say which generation
+// it means. catalog_traits_test.go in internal/catalog is what
 // asserts the shipped preset produces these same values for these same names.
 func builtWith(t *testing.T, model string, info adapter.ModelInfo, req *ir.Request) (*http.Request, map[string]any, []ir.Warning) {
 	t.Helper()
@@ -406,7 +406,7 @@ func TestTraitsComeFromTheTargetNotTheName(t *testing.T) {
 }
 
 func TestUnknownTraitsStayPermissiveAndWarn(t *testing.T) {
-	// The behavior for an unknown model is unchanged from phase 4: the request
+	// The behavior for an unknown model is the permissive fallback: the request
 	// is shaped by what the client asked for, and the guess is warned about.
 	_, _, warns := builtFor(t, "who-knows", &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},

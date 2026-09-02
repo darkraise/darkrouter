@@ -21,8 +21,8 @@ import (
 // base URL rather than importing provider.
 //
 // The zero value means the catalog knows nothing, and every adapter reading it
-// must behave as it did before phase 6 in that case: honor what the client
-// asked for rather than acting on a half-filled guess.
+// must then honor what the client asked for rather than act on a half-filled
+// guess.
 type ModelInfo struct {
 	ContextWindow   int
 	MaxOutputTokens int
@@ -55,9 +55,9 @@ type Target struct {
 	RerankPath string
 
 	// Region, Project and Location are endpoint properties rather than parts
-	// of the model identifier. Phase 8 spec §3.3 is explicit for Bedrock — what
-	// carries a geo prefix is the inference profile, not the region — and §4.2
-	// puts Vertex's project and location on the provider row.
+	// of the model identifier: what carries a geo prefix on Bedrock is the
+	// inference profile, not the region, and Vertex's project and location
+	// live on the provider row.
 	Region   string
 	Project  string
 	Location string
@@ -66,9 +66,9 @@ type Target struct {
 	Publisher string
 }
 
-// Outcome is the classification that drives failover. Phase 1 has nowhere to
-// fail over to, but defining the full taxonomy now keeps Phase 3 from having to
-// revisit every adapter.
+// Outcome is the classification that drives failover. The full taxonomy is
+// defined here so that adding a failover destination never means revisiting
+// every adapter.
 type Outcome string
 
 const (
@@ -213,10 +213,9 @@ type Forward struct {
 // Deliberately not an ir.StreamEvent: the fast path never reconstructs IR, and
 // a type that could be mistaken for one would invite a future change to start.
 type RawEvent struct {
-	// Content marks a content-bearing event under phase 3's definition — text,
-	// thinking, or tool-input content. Pings, comments, message_start and
-	// role-only deltas are not, because committing on a keepalive forfeits
-	// failover for nothing.
+	// Content marks a content-bearing event — text, thinking, or tool-input
+	// content. Pings, comments, message_start and role-only deltas are not,
+	// because committing on a keepalive forfeits failover for nothing.
 	Content bool
 	// ErrPayload is a non-empty in-stream error, whatever the status line said.
 	// Anthropic delivers overloaded_error this way under a 200.

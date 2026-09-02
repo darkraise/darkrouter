@@ -1,14 +1,14 @@
 // Package vertex renders the IR to Google Vertex AI.
 //
 // One adapter kind, two request builders, selected by the publisher recorded on
-// the catalog entry — master design §6.2. An earlier draft claimed the Gemini
-// payload covers both and that only transport and auth differ; that is false
-// for exactly the models that justify supporting two URL forms, and following
-// it 400s on every Claude call.
+// the catalog entry — master design §6.2. The Gemini payload does not cover the
+// Anthropic publisher: only transport and auth are shared, and sending the
+// Gemini shape to a Claude model 400s on every call.
 //
-// Neither payload is reimplemented here. The Google half hands phase 4's Gemini
-// builder a base URL that already ends in the publisher segment; the Anthropic
-// half calls phase 4's Anthropic builder and rewrites what Vertex moves.
+// Neither payload is reimplemented here. The Google half hands the Gemini
+// adapter's builder a base URL that already ends in the publisher segment; the
+// Anthropic half calls the Anthropic adapter's builder and rewrites what Vertex
+// moves.
 package vertex
 
 import (

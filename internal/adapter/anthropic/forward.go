@@ -78,8 +78,8 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 		if w.Delta == nil {
 			return adapter.RawEvent{}
 		}
-		// Phase 3's definition, matching stream.go: a signature_delta carries
-		// no text, and an empty text_delta is not content. content_block_start
+		// The same rule as stream.go: a signature_delta carries no text, and
+		// an empty text_delta is not content. content_block_start
 		// is not here either — it maps to EventBlockStart on the IR path, and
 		// committing on it would commit one event earlier than the IR path
 		// does on every Anthropic stream.
