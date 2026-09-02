@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { App } from "./app"
 
@@ -45,10 +46,31 @@ describe("the authenticated shell", () => {
     // the whole dashboard went blank the moment a login succeeded.
     render(<App />)
 
-    expect(await screen.findByRole("link", { name: /Requests/i })).toBeInTheDocument()
+    // The first render also fetches the overview's lazy chunk, which drags
+    // the flow canvas in with it; the default wait is too short for that.
+    expect(
+      await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 }),
+    ).toBeInTheDocument()
     // One item from each of §5's three groups, so a rail that lost a group
     // fails here rather than at a reader wondering where Routing went.
     expect(await screen.findByRole("link", { name: /Models/i })).toBeInTheDocument()
     expect(await screen.findByRole("link", { name: /Connect/i })).toBeInTheDocument()
+  })
+
+  it("titles the tab after the section", async () => {
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+    await waitFor(() => expect(document.title).toBe("Overview · Darkrouter"))
+  })
+
+  it("opens exactly one palette on Ctrl+K", async () => {
+    // darkraise's SidebarLayout ships its own search palette on the same
+    // shortcut. Two dialogs answering one keystroke was the bug.
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+    await userEvent.setup().keyboard("{Control>}k{/Control}")
+    const inputs = await screen.findAllByPlaceholderText(/jump to a provider/i)
+    expect(inputs).toHaveLength(1)
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
   })
 })
