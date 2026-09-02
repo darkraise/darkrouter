@@ -41,7 +41,7 @@ func TestPruneRemovesExpiredRequestsAndAttempts(t *testing.T) {
 	seedOldRequests(t, db, 40, now.Add(-800*time.Hour))
 	insertRequest(t, db, "fresh", now.Add(-time.Hour), "groq", "m", 1, 1, nil)
 
-	deleted, err := db.Prune(ctx, now, 720*time.Hour, 72*time.Hour, 7)
+	deleted, err := db.Prune(ctx, now, 720*time.Hour, 72*time.Hour, 0, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestPruneRemovesExpiredBodies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Prune(ctx, now, 720*time.Hour, 72*time.Hour, 10); err != nil {
+	if _, err := db.Prune(ctx, now, 720*time.Hour, 72*time.Hour, 0, 10); err != nil {
 		t.Fatal(err)
 	}
 	if got := countRows(t, db, "request_bodies"); got != 1 {
@@ -82,7 +82,7 @@ func TestPruneIsANoOpWhenNothingHasExpired(t *testing.T) {
 	now := time.Now()
 	insertRequest(t, db, "fresh", now.Add(-time.Hour), "groq", "m", 1, 1, nil)
 
-	deleted, err := db.Prune(ctx, now, 720*time.Hour, 72*time.Hour, 10)
+	deleted, err := db.Prune(ctx, now, 720*time.Hour, 72*time.Hour, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestPruneDoesNotStarveTheLogWriter(t *testing.T) {
 
 	pruneDone := make(chan error, 1)
 	go func() {
-		_, err := db.Prune(context.Background(), time.Now(), 720*time.Hour, 72*time.Hour, 20)
+		_, err := db.Prune(context.Background(), time.Now(), 720*time.Hour, 72*time.Hour, 0, 20)
 		pruneDone <- err
 	}()
 
