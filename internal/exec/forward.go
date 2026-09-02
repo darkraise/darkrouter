@@ -177,31 +177,29 @@ type streamErrorWriter interface {
 	WriteStreamError(w http.ResponseWriter, e *ir.Error)
 }
 
-// hopByHop is RFC 9110 §7.6.1's connection-specific header set.
-var hopByHop = map[string]bool{
-	"connection": true, "keep-alive": true, "proxy-authenticate": true,
-	"proxy-authorization": true, "te": true, "trailer": true,
-	"transfer-encoding": true, "upgrade": true,
+// forwardedResponseHeaders is the upstream header set a forwarded response may
+// carry to the client. Everything else is dropped: a provider's Set-Cookie,
+// CORS grant or server banner describes the provider's relationship with the
+// gateway, not the gateway's with the client, and forwarding it would let an
+// upstream set policy on Darkrouter's origin.
+//
+// Content-Length is deliberately absent even though it looks harmless. Spec
+// §8: stripping a usage chunk changes the length even when nothing else does,
+// and a wrong length is worse than none.
+var forwardedResponseHeaders = map[string]bool{
+	"content-type":  true,
+	"cache-control": true,
+	"x-request-id":  true,
 }
 
-// copyResponseHeaders forwards the upstream's headers minus the ones that
-// describe the connection or the encoding.
-//
-// Content-Encoding and Content-Length are dropped rather than copied. Spec §8:
-// copying them through would label bytes with an encoding or a length that the
-// forward no longer matches — and stripping a usage chunk changes the length
-// even when nothing else does. Darkrouter's own diagnostics are added after
-// this call, so an upstream echoing one cannot spoof it.
+// copyResponseHeaders forwards the allowlisted upstream headers plus every
+// x-ratelimit-* header, which clients use to pace themselves against the
+// provider's quota. Darkrouter's own diagnostics are added after this call,
+// so an upstream echoing one cannot spoof it.
 func copyResponseHeaders(dst, src http.Header) {
-	skip := map[string]bool{"content-length": true, "content-encoding": true}
-	for _, v := range src.Values("Connection") {
-		for _, name := range strings.Split(v, ",") {
-			skip[strings.ToLower(strings.TrimSpace(name))] = true
-		}
-	}
 	for k, vs := range src {
 		lk := strings.ToLower(k)
-		if hopByHop[lk] || skip[lk] || strings.HasPrefix(lk, "x-darkrouter-") {
+		if !forwardedResponseHeaders[lk] && !strings.HasPrefix(lk, "x-ratelimit-") {
 			continue
 		}
 		for _, v := range vs {
