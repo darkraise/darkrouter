@@ -101,3 +101,26 @@ need a restart are marked as such in the console's Settings screen and in the
 startup log; providers, aliases and policy are imported from the file once on
 first run and owned by the database (edit them in the console) from then on.
 `docs/ARCHITECTURE.md` describes the precedence in full.
+
+## Reaching a model runtime on the host
+
+The console's **Add local runtime** action configures Ollama, LM Studio,
+llama.cpp and the rest. They run on the host, not in the container, so
+`localhost` — which every local preset ships as its base URL — is the wrong
+address: inside the container it is the container. Both compose files
+therefore map `host.docker.internal` to the host gateway, and that is the host
+the form offers by default.
+
+An existing deployment does not pick up a new `extra_hosts` entry on a
+restart. Recreate the container:
+
+```sh
+docker compose up -d --force-recreate darkrouter
+```
+
+The runtime also has to listen on more than loopback, or it will refuse a
+connection coming from the container's network namespace. For Ollama that is
+`OLLAMA_HOST=0.0.0.0`; the others have an equivalent bind setting.
+
+Running darkrouter outside a container instead? Replace the host with
+`localhost` in the form — nothing else changes.

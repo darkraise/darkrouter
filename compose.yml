@@ -5,6 +5,13 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
+
+    # Lets a model runtime on the host — Ollama, LM Studio, llama.cpp — be
+    # reached from inside the container. Every local preset ships a localhost
+    # base URL, and localhost here is this container, so without this name
+    # there is no address the console's local-runtime form could offer.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       GROQ_KEY: ${GROQ_KEY}
       DARKROUTER_PROXY_TOKEN: ${DARKROUTER_PROXY_TOKEN:-}
