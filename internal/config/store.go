@@ -159,11 +159,14 @@ func (s *Store) watch(ctx context.Context, ready chan<- struct{}) error {
 	if err := w.Add(dir); err != nil {
 		return fmt.Errorf("watch %s: %w", dir, err)
 	}
+	// Where the path resolves is recorded before anyone is told the watcher
+	// is up: a swap that lands between the two would otherwise be the
+	// baseline rather than a change, and never reload.
+	self := filepath.Clean(s.path)
+	resolved := realPath(s.path)
 	if ready != nil {
 		close(ready)
 	}
-	self := filepath.Clean(s.path)
-	resolved := realPath(s.path)
 	// changed reports whether an event concerns this file: its own name, or
 	// an entry whose creation or rename moved where the path resolves.
 	changed := func(ev fsnotify.Event) bool {
