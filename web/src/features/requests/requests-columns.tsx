@@ -54,7 +54,11 @@ export function buildColumns(onOpen: (id: string) => void): Columns {
       accessorKey: "ts_ms",
       // The zone is named once, here, rather than on every row.
       header: ({ column }) => <ColumnHeader column={column} title={`Time (${zoneLabel()})`} />,
-      cell: ({ row }) => <span className="whitespace-nowrap">{dateTime(row.original.ts_ms)}</span>,
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap" data-request-id={row.original.id}>
+          {dateTime(row.original.ts_ms)}
+        </span>
+      ),
     },
     { accessorKey: "surface", header: "Surface" },
     {

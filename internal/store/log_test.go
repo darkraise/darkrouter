@@ -422,3 +422,40 @@ func TestAttemptUsageIsPersisted(t *testing.T) {
 		t.Fatalf("cost: want 4321, got %v", got)
 	}
 }
+
+func TestLogWriterStoresCapturedBodiesWithTheirExpiry(t *testing.T) {
+	db := migrated(t)
+	w := NewLogWriter(db, LogOptions{Buffer: 16, BatchSize: 2, FlushEvery: 10 * time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	withBodies := rec("r1")
+	withBodies.RequestBody = `{"messages":[{"role":"user","content":"hi"}]}`
+	withBodies.ResponseBody = `{"choices":[{"message":{"content":"pong"}}]}`
+	withBodies.BodiesExpireAt = time.Unix(1700003600, 0)
+	w.Log(withBodies)
+	w.Log(rec("r2"))
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := countRows(t, db, "request_bodies"); got != 1 {
+		t.Fatalf("request_bodies = %d, want 1: a record without bodies writes no row", got)
+	}
+	tr, ok, err := db.RequestTrace(context.Background(), "r1")
+	if err != nil || !ok {
+		t.Fatalf("RequestTrace = %v, %v", ok, err)
+	}
+	if len(tr.Bodies) != 2 || tr.Bodies[0].Kind != "request" || tr.Bodies[1].Content != withBodies.ResponseBody {
+		t.Errorf("bodies = %+v", tr.Bodies)
+	}
+	var expires int64
+	if err := db.Read.QueryRow(`SELECT expires_at FROM request_bodies WHERE request_id = 'r1'`).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if expires != withBodies.BodiesExpireAt.UnixMilli() {
+		t.Errorf("expires_at = %d, want %d (milliseconds, the unit the sweep compares)", expires, withBodies.BodiesExpireAt.UnixMilli())
+	}
+}

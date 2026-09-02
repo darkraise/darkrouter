@@ -79,6 +79,13 @@ type RequestRecord struct {
 	// that way unless something says otherwise.
 	Source string
 
+	// Captured bodies, present only while capture.bodies is on and the body
+	// was text. They live in their own table with their own expiry because
+	// they are the one part of a row that carries what a user actually said.
+	RequestBody    string
+	ResponseBody   string
+	BodiesExpireAt time.Time
+
 	// SurfaceMeta is the surface-specific detail spec §9 asks for: input count
 	// and dimensions for embeddings, image count and size, audio duration and
 	// voice, document count for rerank. One JSON column rather than nine,
@@ -247,9 +254,17 @@ func (w *LogWriter) WriteBatch(ctx context.Context, batch []*RequestRecord) (int
 	}
 	defer attStmt.Close()
 
+	bodyStmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO request_bodies (request_id, request_json, response_json, expires_at)
+		 VALUES (?,?,?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer bodyStmt.Close()
+
 	written := 0
 	for _, r := range batch {
-		if err := insertOne(ctx, reqStmt, attStmt, r); err != nil {
+		if err := insertOne(ctx, reqStmt, attStmt, bodyStmt, r); err != nil {
 			// One malformed record must not cost the batch. Duplicate ids are
 			// the realistic case, and they mean a bug elsewhere, not here.
 			slog.Warn("request log: record skipped", "request", r.ID, "err", err)
@@ -263,7 +278,7 @@ func (w *LogWriter) WriteBatch(ctx context.Context, batch []*RequestRecord) (int
 	return written, nil
 }
 
-func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord) error {
+func insertOne(ctx context.Context, reqStmt, attStmt, bodyStmt *sql.Stmt, r *RequestRecord) error {
 	// Candidates and skips travel together in one column: they are only ever
 	// read together, and keeping them there leaves the phase 2 schema alone.
 	trace, err := json.Marshal(struct {
@@ -304,6 +319,13 @@ func insertOne(ctx context.Context, reqStmt, attStmt *sql.Stmt, r *RequestRecord
 		if _, err := attStmt.ExecContext(ctx,
 			r.ID, a.Seq, a.ProviderID, a.KeyID, a.Model, a.Outcome,
 			a.StatusCode, a.LatencyMs, a.Error, path, a.TokensIn, a.TokensOut, a.CostMicros,
+		); err != nil {
+			return err
+		}
+	}
+	if r.RequestBody != "" || r.ResponseBody != "" {
+		if _, err := bodyStmt.ExecContext(ctx,
+			r.ID, r.RequestBody, r.ResponseBody, r.BodiesExpireAt.UnixMilli(),
 		); err != nil {
 			return err
 		}

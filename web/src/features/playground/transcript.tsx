@@ -6,6 +6,7 @@ import type { PlaygroundMessage } from "../../lib/api-types"
 
 export function Transcript({
   messages,
+  epoch,
   routes,
   thinking = {},
   busy,
@@ -19,6 +20,8 @@ export function Transcript({
   /** The model's own working per answer, where it sent any. */
   thinking?: Record<number, TurnThinking>
   busy: boolean
+  /** From the chat run; part of every turn's key. */
+  epoch?: number
   model: string
   seedNote?: string
   quiet?: boolean
@@ -48,10 +51,10 @@ export function Transcript({
         <div className="flex flex-col gap-6">
           {messages.map((m, i) =>
             m.role === "user" ? (
-              <UserTurn key={i} text={m.content} />
+              <UserTurn key={`${epoch ?? 0}:${i}`} text={m.content} />
             ) : (
               <AssistantTurn
-                key={i}
+                key={`${epoch ?? 0}:${i}`}
                 text={m.content}
                 route={routes[i]}
                 thinking={thinking[i]}

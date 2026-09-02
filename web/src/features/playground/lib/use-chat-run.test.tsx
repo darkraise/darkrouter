@@ -297,6 +297,22 @@ describe("running one chat turn", () => {
     expect(turns).toEqual([])
   })
 
+  it("bumps the epoch when the transcript is replaced, not when it grows", async () => {
+    yields(frame("x"))
+    traceMock.mockResolvedValue(null)
+    const { result } = renderHook(() => useChatRun({ ...emptyConfig(), model: "m" }, () => {}))
+    const before = result.current.epoch
+    await act(() => result.current.send("hi"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.epoch).toBe(before)
+
+    act(() => result.current.load([{ role: "user", content: "other" }], {}))
+    expect(result.current.epoch).toBeGreaterThan(before)
+    const loaded = result.current.epoch
+    act(() => result.current.clear())
+    expect(result.current.epoch).toBeGreaterThan(loaded)
+  })
+
   it("loads a stored transcript over whatever is on screen", async () => {
     yields(frame("x"))
     traceMock.mockResolvedValue(null)

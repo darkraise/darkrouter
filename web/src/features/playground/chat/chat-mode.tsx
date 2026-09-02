@@ -367,6 +367,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
               <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
                 <Transcript
                   messages={run.messages}
+                  epoch={run.epoch}
                   routes={run.routes}
                   thinking={run.thinking}
                   busy={run.busy}

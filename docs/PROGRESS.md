@@ -291,8 +291,9 @@ Four smaller items are listed at the end of
   drawer's cost field both render an em-dash and say pricing is not wired. The
   blocker is unchanged from phase 5: `ir.Usage.InputTokens` means different
   things across adapters.
-- **`capture.bodies` still has no writer**, so the trace drawer's bodies panel
-  always reads "not captured".
+- **`capture.bodies` gained its writer on 2026-09-02**: text-shaped request
+  and response bodies are captured up to `max_bytes` and expire on
+  `retention`; the trace drawer shows them.
 - **The probe's completion fallback is not implemented.** Spec §4.3 allows a
   one-token completion where a kind has no listing endpoint; every kind that
   ships today has one, so the fallback returns an explanatory error rather than
@@ -422,11 +423,12 @@ still required and now substitutes the catalog's value. The findings ledger's
   double-charges cached input or under-charges it — so the IR has to normalize
   before pricing can be turned on. This is the blocker for the item above, and a
   real defect in the existing usage plumbing rather than a phase 5 omission.
-- **`capture.bodies` has no writer.** The `request_bodies` table exists from
-  phase 2 and the retention sweep prunes it, but nothing has ever inserted a
-  row. The setting, its `max_bytes` and its `retention` are all inert. Spec §5's
-  "a speech response is never captured even when `capture.bodies` is on" is
-  therefore satisfied by construction rather than by enforcement — what phase 5
+- **`capture.bodies` has a writer since 2026-09-02.** The executor tees
+  text-shaped bodies (JSON, form, text, event streams) up to `max_bytes` and
+  the log writer stores them with an expiry of `retention`; audio, images and
+  multipart uploads are never captured, which is how spec §5's "a speech
+  response is never captured even when `capture.bodies` is on" is enforced
+  rather than assumed — what phase 5
   does enforce is that the body is never held whole, which is the property that
   matters.
 - **Per-call image pricing has no catalog source.** Spec §9 says cost should
