@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"time"
 )
@@ -108,7 +108,7 @@ func RunRollup(ctx context.Context, d *DB, interval time.Duration) error {
 			if err := d.Rollup(ctx, time.Now()); err != nil {
 				// Logged, not fatal: a missed rollup is recomputed on the next
 				// run, because finalization is idempotent.
-				log.Printf("rollup: %v", err)
+				slog.Error("usage rollup failed", "err", err)
 			}
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -39,23 +39,52 @@ func seedable(ps catalog.Presets) []store.SeedProvider {
 	return out
 }
 
+// configureLogging installs the process logger from the environment: JSON
+// for a log pipeline, text for a terminal, at the level the operator asked
+// for. It runs before anything can log, subcommands included.
+func configureLogging() {
+	var level slog.Level
+	switch strings.ToLower(os.Getenv("DARKROUTER_LOG_LEVEL")) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	var h slog.Handler
+	if strings.EqualFold(os.Getenv("DARKROUTER_LOG_FORMAT"), "json") {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(h))
+}
+
 func main() {
+	configureLogging()
 	// Subcommands are dispatched before flag.Parse, which would otherwise
 	// reject the bare verb as an unknown flag.
 	if len(os.Args) > 1 && os.Args[1] == "rotate-key" {
 		if err := runRotateKey(os.Args[2:]); err != nil {
-			log.Fatalf("rotate-key: %v", err)
+			slog.Error("rotate-key failed", "err", err)
+			os.Exit(1)
 		}
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
 		if err := runHashPassword(os.Args[2:]); err != nil {
-			log.Fatalf("hash-password: %v", err)
+			slog.Error("hash-password failed", "err", err)
+			os.Exit(1)
 		}
 		return
 	}
 	if err := runServer(os.Args[1:]); err != nil {
-		log.Fatal(err)
+		slog.Error("darkrouter exited", "err", err)
+		os.Exit(1)
 	}
 }
 
@@ -102,7 +131,7 @@ func runServer(args []string) error {
 		return err
 	}
 	if res.Imported {
-		log.Printf("imported %d providers from %s into the database", res.Providers, *path)
+		slog.Info("imported providers into the database", "count", res.Providers, "file", *path)
 	}
 
 	// Seeded before the config overlay and the server: the providers it adds
@@ -115,9 +144,7 @@ func runServer(args []string) error {
 			return err
 		}
 		if len(seedRes.Added) > 0 {
-			log.Printf("added %d providers that need no credential: %s. "+
-				"Delete any you do not want — they are not offered twice",
-				len(seedRes.Added), strings.Join(seedRes.Added, ", "))
+			slog.Info("added providers that need no credential; delete any you do not want, they are not offered twice", "count", len(seedRes.Added), "providers", strings.Join(seedRes.Added, ", "))
 		}
 	}
 
@@ -126,9 +153,7 @@ func runServer(args []string) error {
 		return err
 	}
 	if cfgRes.Imported {
-		log.Printf("imported %d aliases and %d policy settings from %s into the database; "+
-			"edit them through the admin API from now on",
-			cfgRes.Aliases, cfgRes.Policy, *path)
+		slog.Info("imported aliases and policy into the database; edit them through the admin API from now on", "aliases", cfgRes.Aliases, "policy_settings", cfgRes.Policy, "file", *path)
 	}
 
 	// Installed before the reload below, so the first snapshot any request can
@@ -154,16 +179,15 @@ func runServer(args []string) error {
 		return err
 	}
 
-	log.Printf("darkrouter %s listening: proxy %s admin %s",
-		server.Version, cfg.Server.ProxyListen, cfg.Server.AdminListen)
+	slog.Info("darkrouter listening", "version", server.Version, "proxy", cfg.Server.ProxyListen, "admin", cfg.Server.AdminListen)
 	for _, w := range append(warnings, cfg.Warnings...) {
-		log.Printf("config warning: %s", w)
+		slog.Warn("config warning", "warning", w)
 	}
 
 	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server: %w", err)
 	}
-	log.Print("darkrouter stopped")
+	slog.Info("darkrouter stopped")
 	return nil
 }
 

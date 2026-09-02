@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -93,7 +93,7 @@ func (s *Syncer) Run(ctx context.Context) error {
 	// half a day. A failure here is expected on an offline install and must
 	// not stop the worker.
 	if err := s.SyncOnce(ctx); err != nil {
-		log.Printf("models.dev sync: %v (serving embedded metadata)", err)
+		slog.Warn("models.dev sync failed; serving embedded metadata", "err", err)
 	}
 	for {
 		select {
@@ -101,7 +101,7 @@ func (s *Syncer) Run(ctx context.Context) error {
 			return nil
 		case <-time.After(jitter(s.opts.Interval)):
 			if err := s.SyncOnce(ctx); err != nil {
-				log.Printf("models.dev sync: %v (previous metadata retained)", err)
+				slog.Warn("models.dev sync failed; previous metadata retained", "err", err)
 			}
 		}
 	}

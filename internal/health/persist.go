@@ -2,7 +2,7 @@ package health
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -59,7 +59,7 @@ func (p *Persister) Run(ctx context.Context) error {
 			if err := p.s.SaveHealth(ctx, p.b.Snapshot()); err != nil {
 				// Logged rather than fatal: losing a health write costs a
 				// restart's worth of accuracy, not correctness.
-				log.Printf("health persister: %v", err)
+				slog.Error("health persister failed", "err", err)
 			}
 		}
 	}

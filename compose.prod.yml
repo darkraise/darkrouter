@@ -37,6 +37,8 @@ services:
       # Optional. Unset means proxy authentication is off, which is the wrong
       # posture for anything reachable from the internet.
       DARKROUTER_PROXY_TOKEN: ${DARKROUTER_PROXY_TOKEN:-}
+      DARKROUTER_LOG_FORMAT: ${DARKROUTER_LOG_FORMAT:-}
+      DARKROUTER_LOG_LEVEL: ${DARKROUTER_LOG_LEVEL:-}
       # Optional, and unsetting it closes the dashboard rather than opening it:
       # every login is refused.
       #

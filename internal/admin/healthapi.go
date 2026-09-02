@@ -3,7 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -96,7 +96,7 @@ func (s *Server) handleForceCatalogSync(w http.ResponseWriter, r *http.Request) 
 	}
 	go func() {
 		if err := s.deps.Sync.SyncOnce(context.Background()); err != nil {
-			log.Printf("admin: catalog sync: %v (serving the previous metadata)", err)
+			slog.Warn("catalog sync failed; serving the previous metadata", "err", err)
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"triggered": true})
@@ -111,7 +111,7 @@ func (s *Server) providerExists(ctx context.Context, w http.ResponseWriter, id s
 			writeError(w, http.StatusNotFound, "no provider named "+id)
 			return false
 		}
-		log.Printf("admin: read provider %q: %v", id, err)
+		slog.Error("read provider failed", "provider", id, "err", err)
 		writeError(w, http.StatusInternalServerError, internalMessage)
 		return false
 	}

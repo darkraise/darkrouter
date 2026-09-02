@@ -2,7 +2,7 @@ package auth
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"time"
@@ -98,7 +98,7 @@ func (w *RefreshWorker) Once(ctx context.Context) {
 	before := time.Now().Add(w.opts.Ahead).Unix()
 	rows, err := w.src.Expiring(ctx, "oauth", before)
 	if err != nil {
-		log.Printf("token refresh: list expiring: %v", err)
+		slog.Error("token refresh: list expiring failed", "err", err)
 		return
 	}
 	for _, row := range rows {
@@ -128,7 +128,7 @@ func (w *RefreshWorker) renew(ctx context.Context, row StoredCredential) {
 	}, Credential{ID: row.ID, Kind: row.Kind, Secret: row.Secret})
 	if err != nil || az == nil {
 		if err != nil {
-			log.Printf("token refresh: %s: %v", row.ID, err)
+			slog.Warn("token refresh failed", "credential", row.ID, "err", err)
 		}
 		return
 	}
@@ -141,6 +141,6 @@ func (w *RefreshWorker) renew(ctx context.Context, row StoredCredential) {
 	if err := az(ctx, req); err != nil {
 		// Already classified: a terminal refusal disabled the credential
 		// inside the authorizer, and a transient one is retried next tick.
-		log.Printf("token refresh: %s: %v", row.ID, err)
+		slog.Warn("token refresh failed", "credential", row.ID, "err", err)
 	}
 }

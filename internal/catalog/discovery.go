@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -190,7 +190,7 @@ func (d *Discoverer) Run(ctx context.Context) error {
 func (d *Discoverer) SweepOnce(ctx context.Context) {
 	ps, err := d.src.Providers(ctx)
 	if err != nil {
-		log.Printf("discovery: providers: %v", err)
+		slog.Error("discovery: listing providers failed", "err", err)
 		return
 	}
 	var wg sync.WaitGroup
@@ -215,7 +215,7 @@ func (d *Discoverer) SweepOnce(ctx context.Context) {
 func (d *Discoverer) probeProvider(ctx context.Context, providerID string) {
 	ps, err := d.src.Providers(ctx)
 	if err != nil {
-		log.Printf("discovery: providers: %v", err)
+		slog.Error("discovery: listing providers failed", "err", err)
 		return
 	}
 	for _, p := range ps {
@@ -236,7 +236,7 @@ func (d *Discoverer) probeProvider(ctx context.Context, providerID string) {
 
 func (d *Discoverer) rebuild(ctx context.Context) {
 	if err := d.cat.Rebuild(ctx); err != nil {
-		log.Printf("discovery: rebuild: %v", err)
+		slog.Error("discovery: catalog rebuild failed", "err", err)
 	}
 }
 
@@ -269,7 +269,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	if seeded := SeedFromPreset(preset, d.doc()); len(seeded) > 0 {
 		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset))
 		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
-			log.Printf("discovery: %s: seed: %v", p.ID, err)
+			slog.Warn("discovery: seeding failed", "provider", p.ID, "err", err)
 		}
 		return
 	}
@@ -280,7 +280,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// skipped in silence.
 	if az, aerr := d.authorizerFor(ctx, p, cred); aerr != nil {
 		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, aerr.Error()); rerr != nil {
-			log.Printf("discovery: %s: record failure: %v", p.ID, rerr)
+			slog.Error("discovery: recording failure failed", "provider", p.ID, "err", rerr)
 		}
 		return
 	} else {
@@ -295,7 +295,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 			return
 		}
 		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, err.Error()); rerr != nil {
-			log.Printf("discovery: %s: record failure: %v", p.ID, rerr)
+			slog.Error("discovery: recording failure failed", "provider", p.ID, "err", rerr)
 		}
 		return
 	}
@@ -321,7 +321,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, d.freeRules(p, preset))
 
 	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, dropped, now); err != nil {
-		log.Printf("discovery: %s: record success: %v", p.ID, err)
+		slog.Error("discovery: recording success failed", "provider", p.ID, "err", err)
 	}
 }
 

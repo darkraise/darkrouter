@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -478,7 +478,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	// an attempt row, because the trace has to explain why the candidate the
 	// router chose was not the one that answered.
 	failBefore := func(o adapter.Outcome, err error, msg string, typ ir.ErrorType) attemptResult {
-		log.Printf("request %s: %s/%s: %s: %v", rec.ID, c.ProviderID, c.Model, msg, err)
+		slog.Warn(msg, "request", rec.ID, "provider", c.ProviderID, "model", c.Model, "err", err)
 		e.recordAttempt(rec, c, o, 0, fmt.Errorf("%s: %w", msg, err), 0, path)
 		return attemptResult{Outcome: o, Path: path, Err: &ir.Error{Type: typ, Message: msg}}
 	}

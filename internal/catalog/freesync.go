@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -83,7 +83,7 @@ func (s *FreeSyncer) Run(ctx context.Context) error {
 	// An immediate first fetch, so a gateway that has been off for a month is
 	// current within seconds of starting rather than a day later.
 	if err := s.SyncOnce(ctx); err != nil {
-		log.Printf("free catalogue sync: %v (serving the embedded catalogue)", err)
+		slog.Warn("free catalogue sync failed; serving the embedded catalogue", "err", err)
 	}
 	for {
 		select {
@@ -91,7 +91,7 @@ func (s *FreeSyncer) Run(ctx context.Context) error {
 			return nil
 		case <-time.After(jitter(s.opts.Interval)):
 			if err := s.SyncOnce(ctx); err != nil {
-				log.Printf("free catalogue sync: %v (previous catalogue retained)", err)
+				slog.Warn("free catalogue sync failed; previous catalogue retained", "err", err)
 			}
 		}
 	}
@@ -113,9 +113,7 @@ func (s *FreeSyncer) SyncOnce(ctx context.Context) error {
 	// Logged rather than silent: this is a background job changing what the
 	// gateway imports, and an operator looking at a catalogue that grew by
 	// forty models needs somewhere to see why.
-	log.Printf("free catalogue sync: curated %s, %d models across %d providers (was %s, %d models)",
-		fetched.CuratedAt, fetched.count(), len(fetched.Providers),
-		previous.CuratedAt, previous.count())
+	slog.Info("free catalogue synced", "curated_at", fetched.CuratedAt, "models", fetched.count(), "providers", len(fetched.Providers), "was_curated_at", previous.CuratedAt, "was_models", previous.count())
 	return nil
 }
 

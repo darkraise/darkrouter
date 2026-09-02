@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"sync/atomic"
 	"time"
 )
@@ -205,7 +205,7 @@ func (w *LogWriter) flush(batch *[]*RequestRecord) {
 	written, err := w.WriteBatch(context.Background(), *batch)
 	if err != nil {
 		w.dropped.Add(int64(len(*batch)))
-		log.Printf("request log: dropped %d records: %v", len(*batch), err)
+		slog.Error("request log: batch dropped", "records", len(*batch), "err", err)
 	} else {
 		w.written.Add(int64(written))
 		if skipped := len(*batch) - written; skipped > 0 {
@@ -252,7 +252,7 @@ func (w *LogWriter) WriteBatch(ctx context.Context, batch []*RequestRecord) (int
 		if err := insertOne(ctx, reqStmt, attStmt, r); err != nil {
 			// One malformed record must not cost the batch. Duplicate ids are
 			// the realistic case, and they mean a bug elsewhere, not here.
-			log.Printf("request log: skipped record %s: %v", r.ID, err)
+			slog.Warn("request log: record skipped", "request", r.ID, "err", err)
 			continue
 		}
 		written++
