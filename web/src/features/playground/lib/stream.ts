@@ -102,42 +102,82 @@ const STREAM_REASONING: Record<PlaygroundDialect, (obj: unknown) => string> = {
 }
 
 /**
+ * The message carried by an `{"error": ...}` frame, in either of the shapes
+ * the wires use: an object with a message, or a bare string.
+ */
+function errorOf(obj: unknown): string | undefined {
+  const o = obj as { error?: unknown }
+  if (o === null || typeof o !== "object" || !("error" in o)) return undefined
+  const err = o.error
+  if (typeof err === "string") return err
+  if (err && typeof err === "object" && "message" in err) {
+    const message = (err as { message?: unknown }).message
+    if (typeof message === "string") return message
+  }
+  return "the provider returned an error"
+}
+
+/** Where the first complete frame ends: at a blank line, whichever line
+ *  ending the writer used. Returns the boundary and its width. */
+function frameEnd(buffer: string): { at: number; width: number } | null {
+  const lf = buffer.indexOf("\n\n")
+  const crlf = buffer.indexOf("\r\n\r\n")
+  if (lf < 0 && crlf < 0) return null
+  if (crlf >= 0 && (lf < 0 || crlf < lf)) return { at: crlf, width: 4 }
+  return { at: lf, width: 2 }
+}
+
+/** The payload of one frame: its `data` lines joined with newlines, as the
+ *  SSE spec says. `data:` with no space is the same field. */
+function framePayload(frame: string): string | null {
+  const data: string[] = []
+  for (const raw of frame.split(/\r?\n/)) {
+    if (!raw.startsWith("data:")) continue
+    const value = raw.slice(5)
+    data.push(value.startsWith(" ") ? value.slice(1) : value)
+  }
+  return data.length === 0 ? null : data.join("\n")
+}
+
+/**
  * Reads the assistant's reply out of whatever complete SSE frames have
  * arrived, in the wire shape the request's own dialect streams in.
  *
  * `text` is the answer and `reasoning` is the model's own working, kept apart
  * because they are different things to read: splicing the two into one blob
  * makes a transcript where the answer begins several paragraphs in.
+ *
+ * `error` is set when a frame carried `{"error": ...}` — a provider failing
+ * mid-stream — so the run can end as a failure rather than as a short answer.
  */
 export function drainSSE(
   buffer: string,
   dialect: PlaygroundDialect = "openai",
-): { text: string; reasoning: string; rest: string } {
+): { text: string; reasoning: string; rest: string; error?: string } {
   let text = ""
   let reasoning = ""
+  let error: string | undefined
   let rest = buffer
   const extract = STREAM_DELTA[dialect]
   const extractReasoning = STREAM_REASONING[dialect]
   for (;;) {
-    const i = rest.indexOf("\n\n")
-    if (i < 0) break
-    const frame = rest.slice(0, i)
-    rest = rest.slice(i + 2)
-    for (const line of frame.split("\n")) {
-      if (!line.startsWith("data: ")) continue
-      const payload = line.slice(6)
-      if (payload === "[DONE]") continue
-      try {
-        const frameBody: unknown = JSON.parse(payload)
-        text += extract(frameBody)
-        reasoning += extractReasoning(frameBody)
-      } catch {
-        // A frame that is not JSON is a provider quirk, not a client error.
-        // Skipping it beats aborting a stream that is otherwise fine.
-      }
+    const end = frameEnd(rest)
+    if (end === null) break
+    const frame = rest.slice(0, end.at)
+    rest = rest.slice(end.at + end.width)
+    const payload = framePayload(frame)
+    if (payload === null || payload === "[DONE]") continue
+    try {
+      const frameBody: unknown = JSON.parse(payload)
+      error ??= errorOf(frameBody)
+      text += extract(frameBody)
+      reasoning += extractReasoning(frameBody)
+    } catch {
+      // A frame that is not JSON is a provider quirk, not a client error.
+      // Skipping it beats aborting a stream that is otherwise fine.
     }
   }
-  return { text, reasoning, rest }
+  return error === undefined ? { text, reasoning, rest } : { text, reasoning, rest, error }
 }
 
 // The unary (stream: false) counterpart: one complete JSON document rather

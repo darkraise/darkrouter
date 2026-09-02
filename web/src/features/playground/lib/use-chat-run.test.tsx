@@ -47,6 +47,21 @@ describe("running one chat turn", () => {
     traceMock.mockReset()
   })
 
+  it("reports an error frame as the run's error", async () => {
+    yields(frame("par"), 'data: {"error":{"message":"upstream exploded"}}\n\n')
+    traceMock.mockResolvedValue(null)
+
+    const { result } = renderHook(() =>
+      useChatRun({ ...emptyConfig(), model: "m" }, () => {}),
+    )
+    await act(() => result.current.send("hi"))
+
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.error).toBe("upstream exploded")
+    // The half answer stays: it is what the tokens were spent on.
+    expect(result.current.messages[1]!.content).toBe("par")
+  })
+
   it("appends every streamed delta to the one assistant turn", async () => {
     // A version that read the turns its render closed over would append each
     // chunk to the same stale array, which renders as an empty transcript
