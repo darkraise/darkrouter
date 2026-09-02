@@ -246,4 +246,13 @@ describe("saving", () => {
       expect(keys).toContain(JSON.stringify(["models"]))
     })
   })
+
+  it("does not shout when it cannot save", () => {
+    // A disabled filled button is still the loudest thing on the card. The
+    // outline reads as "not now" rather than "press me".
+    mount({ chain: [] })
+    const save = screen.getByRole("button", { name: "Save" })
+    expect(save).toBeDisabled()
+    expect(save).toHaveAttribute("data-variant", "outline")
+  })
 })
