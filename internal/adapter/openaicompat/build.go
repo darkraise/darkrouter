@@ -17,21 +17,41 @@ import (
 const targetName = "openaicompat"
 
 func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
+	return buildRequest(ctx, t, req, quirksForTarget(t))
+}
+
+func buildRequest(ctx context.Context, t *adapter.Target, req *ir.Request, q quirkSet) (*http.Request, []ir.Warning, error) {
 	var warns []ir.Warning
-	msgs, mwarns := renderMessages(req, targetName)
+	msgs, mwarns := renderMessages(req, targetName, q.has("no-system-role"))
 	warns = append(warns, mwarns...)
 	body := map[string]any{
 		"model":    t.Model,
 		"messages": msgs,
 	}
-	if req.MaxTokens != nil {
-		body["max_tokens"] = *req.MaxTokens
+	maxTokensKey := "max_tokens"
+	if q.has("max-completion-tokens-name") {
+		maxTokensKey = "max_completion_tokens"
+	}
+	switch {
+	case q.has("requires-max-tokens"):
+		cap, w := xlate.RequiredMaxTokens(req, targetName, t.Info.MaxOutputTokens)
+		warns = append(warns, w...)
+		body[maxTokensKey] = cap
+	case req.MaxTokens != nil:
+		body[maxTokensKey] = *req.MaxTokens
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
 	}
 	if req.TopP != nil {
-		body["top_p"] = *req.TopP
+		if q.has("temperature-top-p-exclusive") && req.Temperature != nil {
+			warns = append(warns, ir.Warning{
+				Field: "top_p", Target: targetName,
+				Reason: "the target accepts temperature or top_p, not both; top_p was dropped",
+			})
+		} else {
+			body["top_p"] = *req.TopP
+		}
 	}
 	if len(req.StopSequences) > 0 {
 		body["stop"] = req.StopSequences
@@ -46,8 +66,19 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 			Field: "safety", Target: targetName, Reason: "safety settings are Gemini-only",
 		})
 	}
+	strict := q.has("strict-unknown-fields")
 	if req.Reasoning != nil {
 		switch {
+		case req.Reasoning.Disabled:
+			warns = append(warns, ir.Warning{
+				Field: "reasoning.disabled", Target: targetName,
+				Reason: "no switch to turn thinking off; the request was sent without a reasoning_effort",
+			})
+		case strict && (req.Reasoning.Effort != "" || req.Reasoning.Budget > 0):
+			warns = append(warns, ir.Warning{
+				Field: "reasoning.effort", Target: targetName,
+				Reason: "the target rejects unknown fields and reasoning_effort is not one it knows",
+			})
 		case req.Reasoning.Effort != "":
 			body["reasoning_effort"] = req.Reasoning.Effort
 		case req.Reasoning.Budget > 0:
@@ -71,10 +102,30 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		}
 	}
 	if req.ParallelToolCalls != nil {
-		body["parallel_tool_calls"] = *req.ParallelToolCalls
+		switch {
+		case q.has("no-parallel-tool-calls"):
+			warns = append(warns, ir.Warning{
+				Field: "parallel_tool_calls", Target: targetName,
+				Reason: "the target does not accept parallel_tool_calls; the field was dropped",
+			})
+		case strict:
+			warns = append(warns, ir.Warning{
+				Field: "parallel_tool_calls", Target: targetName,
+				Reason: "the target rejects unknown fields; parallel_tool_calls was dropped",
+			})
+		default:
+			body["parallel_tool_calls"] = *req.ParallelToolCalls
+		}
 	}
 	if md := forwardableMetadata(req.Metadata); len(md) > 0 {
-		body["metadata"] = md
+		if strict {
+			warns = append(warns, ir.Warning{
+				Field: "metadata", Target: targetName,
+				Reason: "the target rejects unknown fields; metadata was dropped",
+			})
+		} else {
+			body["metadata"] = md
+		}
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = renderTools(req.Tools)
@@ -82,10 +133,22 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if req.ToolChoice != nil {
 		body["tool_choice"] = renderToolChoice(req.ToolChoice)
 	}
-	if req.Stream {
+	stream := req.Stream
+	if stream && len(req.Tools) > 0 && q.has("no-tool-streaming") {
+		// The stream parser recognizes a unary body and replays it as
+		// events, so the client still receives its stream.
+		stream = false
+		warns = append(warns, ir.Warning{
+			Field: "stream", Target: targetName,
+			Reason: "the target cannot stream tool calls; the request was sent unary",
+		})
+	}
+	if stream {
 		body["stream"] = true
 		// Compatible providers report no stream usage unless asked.
-		body["stream_options"] = map[string]any{"include_usage": true}
+		if !strict {
+			body["stream_options"] = map[string]any{"include_usage": true}
+		}
 	}
 
 	buf, err := json.Marshal(body)
