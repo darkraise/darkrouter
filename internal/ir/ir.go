@@ -184,7 +184,19 @@ type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+
+	// Extra carries tool fields the IR has no slot for, keyed by their wire
+	// name: OpenAI's strict flag on a function, or the body of a provider
+	// built-in tool such as Gemini's googleSearch. A built-in tool has no
+	// Name, and only the dialect that produced it can render it; every other
+	// target drops it with a warning rather than declaring a nameless
+	// function.
+	Extra map[string]json.RawMessage `json:",omitempty"`
 }
+
+// BuiltIn reports whether the tool is a provider-side capability rather than
+// a function the client implements.
+func (t Tool) BuiltIn() bool { return t.Name == "" && len(t.Extra) > 0 }
 
 type ToolChoice struct {
 	Mode string // "auto" | "none" | "any" | "tool"
