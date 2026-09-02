@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { apiFilters, newerCount, optionsFrom } from "./requests-screen"
-import { buildColumns } from "./requests-columns"
+import { buildColumns, modelLabel } from "./requests-columns"
 import type { RequestRow } from "../../lib/api-types"
 
 const row = (over: Partial<RequestRow> & { id: string }): RequestRow => ({
@@ -75,5 +75,24 @@ describe("the column-visibility menu", () => {
       (c) => c.header === "" && c.enableHiding !== false,
     )
     expect(nameless).toEqual([])
+  })
+})
+
+describe("the model column", () => {
+  it("reads alias → final model when the request resolved through an alias", () => {
+    // What the client asked for and what actually answered are two different
+    // facts, and a row showing only one of them hides the routing decision.
+    expect(modelLabel(row({ id: "1", model: "fast", alias: "fast", final_model: "llama-70b" })))
+      .toBe("fast → llama-70b")
+  })
+
+  it("reads the bare model when nothing resolved through an alias", () => {
+    expect(modelLabel(row({ id: "1", model: "gpt-4o" }))).toBe("gpt-4o")
+  })
+
+  it("does not draw an arrow to nothing when the final model is unknown", () => {
+    // A request that failed before any provider answered has an alias and no
+    // final model; "fast → " would read as a rendering fault.
+    expect(modelLabel(row({ id: "1", model: "fast", alias: "fast" }))).toBe("fast")
   })
 })

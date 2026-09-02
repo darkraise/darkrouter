@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { Button, Card, Sheet, SheetContent, SheetHeader, SheetTitle } from "darkraise-ui"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "darkraise-ui/components/resizable"
 import { useSearch } from "@tanstack/react-router"
-import { usePlaygroundConversation, usePlaygroundConversations, useTrace } from "../../../lib/queries"
+import { useQueryClient } from "@tanstack/react-query"
+import { keys, usePlaygroundConversation, usePlaygroundConversations, useTrace } from "../../../lib/queries"
 import {
   configOfConversation,
   messagesOfTurns,
@@ -24,7 +25,11 @@ import { Composer } from "../composer"
 import { HistoryRail } from "./history-rail"
 import { ConversationHeader } from "./conversation-header"
 import { NewConversationDialog } from "./new-conversation-dialog"
-import type { PlaygroundConversation, RequestTrace } from "../../../lib/api-types"
+import type {
+  PlaygroundConversation,
+  PlaygroundConversationDetail,
+  RequestTrace,
+} from "../../../lib/api-types"
 import { PanelLeft } from "lucide-react"
 
 /**
@@ -78,6 +83,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   const [settingsAmending, setSettingsAmending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
 
+  const queryClient = useQueryClient()
   const { data: conversations } = usePlaygroundConversations()
   const detail = usePlaygroundConversation(activeId, { enabled: activeId !== "" })
   const selectionPending = activeId !== "" && loadedId !== activeId
@@ -135,10 +141,38 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           setTitle(made.title)
         }
       }
-      await append.mutateAsync({ id, role: "user", content: turn.prompt, requestId: "" })
-      await append.mutateAsync({
+      const user = await append.mutateAsync({
+        id, role: "user", content: turn.prompt, requestId: "",
+      })
+      const assistant = await append.mutateAsync({
         id, role: "assistant", content: turn.answer, requestId: turn.requestId,
       })
+      // The cached detail learns the turns it was just sent. Left stale, a
+      // conversation left and reopened loads its old transcript from the
+      // cache, and the refetch that follows is ignored because the id has
+      // not changed — the answer just given vanishes until a reload.
+      const at = new Date().toISOString()
+      queryClient.setQueryData<PlaygroundConversationDetail>(
+        keys.playgroundConversation(id),
+        (old) =>
+          old && {
+            ...old,
+            updated_at: at,
+            preview: turn.prompt,
+            messages: [
+              ...old.messages,
+              { seq: user.seq, role: "user", content: turn.prompt, request_id: "", created_at: at },
+              {
+                seq: assistant.seq,
+                role: "assistant",
+                content: turn.answer,
+                request_id: turn.requestId,
+                created_at: at,
+              },
+            ],
+          },
+      )
+      void queryClient.invalidateQueries({ queryKey: keys.playgroundConversation(id) })
     } catch {
       // useApiMutation has already reported it through the toaster. Losing a
       // saved turn must not take the transcript on screen down with it.
@@ -339,6 +373,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
                   model={config.model}
                   seedNote={seedNote}
                   quiet
+                  onChooseModel={amendSettings}
                 />
               </div>
 
@@ -384,17 +419,11 @@ export function ChatMode({ active = true }: { active?: boolean }) {
             <Card className="flex shrink-0 flex-col gap-4 p-4">
               <ConfigPane
                 config={config}
-                // Never edited here. Settings are set in the dialog that opens
-                // with the conversation and read here for the rest of its
-                // life; two live surfaces for one value is a disagreement
-                // waiting for whichever is a keystroke behind.
-                onChange={() => {}}
-                locked
-                lockNote={
-                  locked
-                    ? undefined
-                    : "Chosen when this conversation started. Change them from its actions menu until the first message goes."
-                }
+                // Edits until the first message and reads after it, the same
+                // seam the dialog observes. Both write the one config, so
+                // neither can be a keystroke behind the other.
+                onChange={applySettings}
+                locked={locked}
                 // The model island above owns both, so the pane showing them
                 // again would be two readings of one value.
                 showModel={false}

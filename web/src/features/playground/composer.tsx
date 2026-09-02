@@ -73,6 +73,9 @@ export function Composer({
           // Enter sends, Shift+Enter makes a newline — which is why this is
           // a Textarea now and not a single-line Input.
           onKeyDown={(e) => {
+            // Confirming a candidate in an input method is an Enter keystroke
+            // that is not a send.
+            if (e.nativeEvent.isComposing) return
             if (e.key !== "Enter" || e.shiftKey) return
             if (busy || blocked) return
             e.preventDefault()

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
-import { Link, useRouter, useRouterState } from "@tanstack/react-router"
-import { Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+import { Link, useNavigate, useParams, useRouter, useRouterState } from "@tanstack/react-router"
+import { Banner, Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { DataTable, exportToCsv } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
 import { useAliases, useModels, useProviders, useRequests } from "../../lib/queries"
@@ -87,14 +87,23 @@ export function apiFilters(filters: Record<string, string>): Record<string, stri
 export function RequestsScreen() {
   const [filters, , clear] = useSearchFilters(FIELDS)
   const router = useRouter()
+  const navigate = useNavigate()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const search = useRouterState({ select: (s) => s.location.searchStr })
+  // The open trace is the URL, not local state, so a reload or a shared link
+  // lands on the same drawer. The drawer fetches by id, so the request need
+  // not be on the loaded page — or in the log at all.
+  const { id: selected = null } = useParams({ strict: false })
 
   // Pages accumulate: the operator is scrolling a log, and a "next page" that
   // swapped the table would lose their place and make the cursor pointless.
   const [older, setOlder] = useState<RequestRow[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
+  // Bumped whenever paging resets, so a page that was requested under the
+  // previous filters is thrown away when it lands rather than appended.
+  const pagingGeneration = useRef(0)
   // The first page the reader is currently looking at, frozen. `null` means
   // "not yet loaded" — distinct from an empty result set, which would
   // otherwise look identical and re-freeze forever on every poll.
@@ -114,13 +123,20 @@ export function RequestsScreen() {
     if (first.data && (held === null || held.length === 0)) setHeld(first.data.requests)
   }, [first.data, held])
 
-  function resetPaging() {
-    // The cursor is rejected under different filters by design; resetting it
-    // here is what keeps that rejection invisible in normal use.
+  // Paging follows the URL rather than the control that changed it: Back and
+  // a pasted link change the filters without passing through any handler
+  // here, and pages accumulated under the old filters would otherwise sit
+  // under the new ones. The cursor is rejected under different filters by
+  // design; resetting it here is what keeps that rejection invisible.
+  const filterKey = JSON.stringify(apiFilters(filters))
+  useEffect(() => {
+    pagingGeneration.current += 1
     setOlder([])
     setCursor(null)
     setHeld(null)
-  }
+    setLoadingMore(false)
+    setLoadMoreError(null)
+  }, [filterKey])
 
   /**
    * The one place a filter change reaches the URL, for every control on this
@@ -132,7 +148,6 @@ export function RequestsScreen() {
    * once would only ever see its last call stick.
    */
   function writeFilters(next: Record<string, string>) {
-    resetPaging()
     const params = new URLSearchParams(search)
     for (const [k, v] of Object.entries(next)) {
       if (v === "") params.delete(k)
@@ -148,17 +163,38 @@ export function RequestsScreen() {
 
   async function loadMore() {
     const from = cursor ?? first.data?.next_cursor
-    if (!from) return
-    const page = await api.get<RequestPage>(
-      `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
-    )
-    setOlder((p) => [...p, ...page.requests])
-    setCursor(page.next_cursor ?? null)
+    if (!from || loadingMore) return
+    const generation = pagingGeneration.current
+    setLoadingMore(true)
+    setLoadMoreError(null)
+    try {
+      const page = await api.get<RequestPage>(
+        `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
+      )
+      if (pagingGeneration.current !== generation) return
+      setOlder((p) => [...p, ...page.requests])
+      setCursor(page.next_cursor ?? null)
+    } catch (err) {
+      if (pagingGeneration.current !== generation) return
+      setLoadMoreError((err as Error).message)
+    } finally {
+      if (pagingGeneration.current === generation) setLoadingMore(false)
+    }
+  }
+
+  function openTrace(id: string) {
+    void navigate({ to: "/requests/$id", params: { id }, search: true })
+  }
+
+  function closeTrace() {
+    void navigate({ to: "/requests", search: true })
   }
 
   const pageRows = [...(held ?? []), ...older]
   const rows = pageRows.map(facetRow)
-  const columns = useMemo(() => buildColumns(setSelected), [])
+  // navigate is stable for the router's life, so the columns build once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const columns = useMemo(() => buildColumns(openTrace), [])
   const more = cursor ?? first.data?.next_cursor
   const filtered = Object.values(filters).some((v) => v !== "")
 
@@ -294,12 +330,17 @@ export function RequestsScreen() {
 
       <TrafficStrip rows={rows} />
 
-      <DataTable
-        columns={columns}
-        data={rows}
-        facets={["surface", "status", "failover"]}
-        virtualize={{ rowHeight: 36, height: 640 }}
-      />
+      {/* Scrolls sideways inside its own box rather than pushing the page
+          wider: ten columns do not fit a laptop, and the Path column at the
+          far end is the one that used to fall off. */}
+      <div className="overflow-x-auto">
+        <DataTable
+          columns={columns}
+          data={rows}
+          facets={["surface", "status", "failover"]}
+          virtualize={{ rowHeight: 36, height: 640 }}
+        />
+      </div>
 
       {rows.length === 0 && (
         <div className="mt-4">
@@ -320,14 +361,33 @@ export function RequestsScreen() {
         </div>
       )}
 
+      {loadMoreError !== null && (
+        <Banner
+          variant="destructive"
+          className="mt-4"
+          action={
+            <Button variant="outline" size="sm" onClick={() => void loadMore()}>
+              Try again
+            </Button>
+          }
+        >
+          Could not load older requests: {loadMoreError}
+        </Banner>
+      )}
+
       {more && (
-        <Button variant="secondary" className="mt-4" onClick={() => void loadMore()}>
+        <Button
+          variant="secondary"
+          className="mt-4"
+          disabled={loadingMore}
+          onClick={() => void loadMore()}
+        >
           <ChevronDown className="size-[var(--icon-size)]" />
-          Load more
+          {loadingMore ? "Loading…" : "Load more"}
         </Button>
       )}
 
-      <TraceDrawer id={selected} onClose={() => setSelected(null)} />
+      <TraceDrawer id={selected} onClose={closeTrace} />
     </>
   )
 }

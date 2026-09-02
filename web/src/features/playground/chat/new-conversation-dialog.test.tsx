@@ -143,4 +143,24 @@ describe("the new-conversation dialog", () => {
     expect(screen.queryByRole("button", { name: /start conversation/i })).toBeNull()
     expect(screen.getByRole("button", { name: /apply/i })).toBeInTheDocument()
   })
+
+  it("closes only the Manage presets dialog on Escape, not itself", async () => {
+    // Both dialogs portal to the body as siblings, so neither is nested in
+    // the other's DOM and both took Escape as their own: one keystroke
+    // closed the preset list and threw away the settings behind it.
+    const onOpenChange = vi.fn()
+    dialog({ onOpenChange })
+
+    await userEvent.click(screen.getByRole("button", { name: /manage presets/i }))
+    expect(await screen.findByRole("dialog", { name: /manage presets/i })).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+
+    // Whether the closed dialog is already out of the tree depends on the
+    // exit transition, which jsdom does not play; either way it is closed.
+    const manage = screen.queryByRole("dialog", { name: /manage presets/i })
+    expect(manage === null || manage.getAttribute("data-state") === "closed").toBe(true)
+    expect(screen.getByRole("dialog", { name: /new conversation/i })).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
 })

@@ -16,9 +16,9 @@ const consumption = (over: Partial<Consumption> = {}): Consumption => ({
 })
 
 describe("conversation price coverage", () => {
-  it("renders a known zero cost as zero", () => {
+  it("renders a known zero cost as free rather than as missing", () => {
     render(<TokenPanel consumption={consumption()} metrics={NO_METRICS} />)
-    expect(screen.getByText("$0.0000")).toBeInTheDocument()
+    expect(screen.getByText("free")).toBeInTheDocument()
   })
 
   it("states when the displayed cost contains only known portions", () => {

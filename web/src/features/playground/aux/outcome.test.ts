@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { documentLines, readOutcome, runSummary } from "./surfaces"
+import { documentLines, outcomeOfResponse, runSummary } from "./surfaces"
 
 /** A JSON response the way the executor writes one. */
 function jsonRes(body: unknown): Response {
@@ -15,7 +15,7 @@ describe("reading a rerank response", () => {
   it("puts the documents in rank order with their scores", async () => {
     // The wire returns indices into what was sent, in relevance order --
     // not the documents themselves unless they were asked for.
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "rerank",
       jsonRes({
         results: [
@@ -38,7 +38,7 @@ describe("reading a rerank response", () => {
   it("prefers the text the provider sent over the line that was submitted", async () => {
     // A provider asked for documents echoes them back, and its own copy is
     // what it actually ranked.
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "rerank",
       jsonRes({ results: [{ index: 0, relevance_score: 0.5, document: { text: "echoed" } }] }),
       { documents: "submitted" },
@@ -48,7 +48,7 @@ describe("reading a rerank response", () => {
   })
 
   it("names a document it cannot resolve rather than drawing a blank row", async () => {
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "rerank",
       jsonRes({ results: [{ index: 7, relevance_score: 0.5 }] }),
       { documents: "only one" },
@@ -62,7 +62,7 @@ describe("reading a moderation response", () => {
   it("orders the categories by score, so the reason is at the top", async () => {
     // A moderation response carries every category the model knows, mostly
     // at zero. Alphabetical order buries the one row that says something.
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "moderations",
       jsonRes({
         results: [
@@ -87,7 +87,7 @@ describe("reading a moderation response", () => {
   })
 
   it("reports a clean verdict as clean rather than as an absence", async () => {
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "moderations",
       jsonRes({ results: [{ flagged: false, categories: {}, category_scores: {} }] }),
       {},
@@ -99,7 +99,7 @@ describe("reading a moderation response", () => {
 
 describe("reading the other surfaces", () => {
   it("takes the transcript as prose rather than as a tree", async () => {
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "transcriptions",
       jsonRes({ text: "what was said" }),
       {},
@@ -109,7 +109,7 @@ describe("reading the other surfaces", () => {
   })
 
   it("takes the first embedding vector", async () => {
-    const out = await readOutcome(
+    const out = await outcomeOfResponse(
       "embeddings",
       jsonRes({ data: [{ embedding: [0.1, -0.2] }] }),
       {},
@@ -121,7 +121,7 @@ describe("reading the other surfaces", () => {
   it("falls back to a tree for a shape it does not know", async () => {
     // An unfamiliar response is still a result. Throwing here would report a
     // failed run for one that succeeded.
-    const out = await readOutcome("embeddings", jsonRes({ surprise: true }), {}, noRevoke)
+    const out = await outcomeOfResponse("embeddings", jsonRes({ surprise: true }), {}, noRevoke)
     expect(out).toEqual({ kind: "json", json: { surprise: true } })
   })
 })

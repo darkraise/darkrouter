@@ -1,4 +1,5 @@
 import { api } from "../../lib/api"
+import { duration } from "../../lib/format"
 import type { RequestTrace } from "../../lib/api-types"
 
 /**
@@ -67,13 +68,6 @@ export function MetricsStrip({ metrics }: { metrics: StreamMetrics }) {
       <Cell label="tokens/s" value={tps === null ? "—" : tps.toFixed(1)} />
     </div>
   )
-}
-
-/** Duration in the unit that keeps it readable: milliseconds until a second,
- *  then seconds. A four-figure millisecond count is a number nobody parses. */
-export function duration(ms: number | null): string {
-  if (ms === null) return "—"
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms.toFixed(0)} ms`
 }
 
 /**
