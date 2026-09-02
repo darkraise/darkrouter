@@ -1,13 +1,12 @@
 // Package provider exposes configured upstreams to the router.
 //
-// Source is an interface from Phase 1 so that Phase 2 can swap the YAML
-// implementation for a SQLite one without touching consumers.
+// Source is an interface so the SQLite-backed source the gateway runs on and
+// the config-backed one tests build are interchangeable to every consumer.
 package provider
 
 import (
 	"context"
 	"hash/fnv"
-	"sort"
 
 	"github.com/darkraise/darkrouter/internal/config"
 )
@@ -95,28 +94,6 @@ func (s *YAMLSource) Revision() uint64 {
 		}
 	}
 	return h.Sum64()
-}
-
-// Resolve returns the provider serving model, ordered by priority descending
-// then declaration order. Phase 3 replaces this with an ordered candidate list;
-// Phase 1 takes the first match.
-func Resolve(ps []Provider, model string) (Provider, bool) {
-	idx := make([]int, 0, len(ps))
-	for i, p := range ps {
-		for _, m := range p.Models {
-			if m == model {
-				idx = append(idx, i)
-				break
-			}
-		}
-	}
-	if len(idx) == 0 {
-		return Provider{}, false
-	}
-	sort.SliceStable(idx, func(a, b int) bool {
-		return ps[idx[a]].Priority > ps[idx[b]].Priority
-	})
-	return ps[idx[0]], true
 }
 
 var _ Source = (*YAMLSource)(nil)

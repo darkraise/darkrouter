@@ -26,7 +26,6 @@ type resolved struct {
 	Candidates []router.Candidate
 	ByID       map[string]provider.Provider
 	Catalog    catalog.Reader
-	Cfg        *config.Config
 }
 
 // resolve runs the prologue every route shares: fetch the provider set, freeze
@@ -77,7 +76,7 @@ func (e *Executor) resolve(ctx context.Context, w http.ResponseWriter, ew errorW
 	for _, p := range providers {
 		byID[p.ID] = p
 	}
-	return resolved{Candidates: cands, ByID: byID, Catalog: cat, Cfg: cfg}, true
+	return resolved{Candidates: cands, ByID: byID, Catalog: cat}, true
 }
 
 // RouteSnapshot freezes every input the router is allowed to read, at one

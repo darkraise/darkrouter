@@ -2,14 +2,12 @@ package exec
 
 import "net/http"
 
-// CommitWriter makes Phase 3's commit rule observable rather than reported.
+// CommitWriter makes the commit rule observable rather than reported.
 //
 // The rule is that once the first byte reaches the client there is no
-// re-route. Today the loop infers that from an outcome value, and the stream
-// path returns OutcomeSuccess for a post-commit failure — conflating
-// "committed" with "succeeded". That is survivable with one surface and not
-// with seven: a binary surface reporting success after writing half a
-// truncated body would be indistinguishable from one that finished.
+// re-route. A surface's returned outcome cannot carry that: a stream that
+// fails after commit is both "committed" and "failed", and a binary surface
+// that wrote half a body is indistinguishable from one that finished.
 //
 // So the loop wraps the response writer and, after a surface returns, asks the
 // wrapper rather than the surface. Detecting what counts as content-bearing
@@ -22,7 +20,6 @@ type CommitWriter struct {
 	w         http.ResponseWriter
 	committed bool
 	bytes     int64
-	onCommit  []func()
 }
 
 func NewCommitWriter(w http.ResponseWriter) *CommitWriter {
@@ -38,29 +35,7 @@ func (c *CommitWriter) Committed() bool { return c.committed }
 // only place the truncation can appear.
 func (c *CommitWriter) Bytes() int64 { return c.bytes }
 
-// OnCommit registers a hook to run when the first byte goes out — the loop
-// hangs the total-to-idle timeout switch and the diagnostics headers off it.
-//
-// A hook registered after the commit runs immediately, so registration order
-// cannot decide whether it runs at all.
-func (c *CommitWriter) OnCommit(fn func()) {
-	if c.committed {
-		fn()
-		return
-	}
-	c.onCommit = append(c.onCommit, fn)
-}
-
-func (c *CommitWriter) commit() {
-	if c.committed {
-		return
-	}
-	c.committed = true
-	for _, fn := range c.onCommit {
-		fn()
-	}
-	c.onCommit = nil
-}
+func (c *CommitWriter) commit() { c.committed = true }
 
 func (c *CommitWriter) Header() http.Header { return c.w.Header() }
 
