@@ -111,6 +111,13 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
+	// policy.cooldown is edited through the admin API and lands in the next
+	// config snapshot, so the breaker reads it from there rather than from the
+	// values it was built with.
+	breaker.Configure(func() (int, time.Duration) {
+		p := cfgStore.Current().Policy.Cooldown
+		return *p.TripAfter, p.Max
+	})
 
 	// Built above both the discoverer and the executor because each resolves
 	// credentials through it. Static styles need none of these collaborators:

@@ -89,6 +89,11 @@ type Breaker struct {
 	tripAfter int
 	max       time.Duration
 
+	// policy, when set, supplies trip_after and the maximum cooldown at the
+	// moment they are applied. policy.cooldown is hot-editable, so a value
+	// frozen at construction would hold until the next restart.
+	policy func() (tripAfter int, max time.Duration)
+
 	// now is swappable so tests can advance time without sleeping.
 	now func() time.Time
 
@@ -96,17 +101,40 @@ type Breaker struct {
 }
 
 func New(tripAfter int, max time.Duration) *Breaker {
+	tripAfter, max = clampPolicy(tripAfter, max)
+	return &Breaker{
+		m:         make(map[Key]*state),
+		lastUsed:  make(map[CredKey]time.Time),
+		tripAfter: tripAfter, max: max, now: time.Now,
+	}
+}
+
+// Configure makes the breaker read its thresholds from source on every
+// decision instead of the values New was given. The source is called under
+// the breaker's lock and must be cheap and non-blocking: an atomic read of
+// the current config snapshot, not a query.
+func (b *Breaker) Configure(source func() (tripAfter int, max time.Duration)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.policy = source
+}
+
+func clampPolicy(tripAfter int, max time.Duration) (int, time.Duration) {
 	if tripAfter < 1 {
 		tripAfter = 1
 	}
 	if max <= 0 {
 		max = 15 * time.Minute
 	}
-	return &Breaker{
-		m:         make(map[Key]*state),
-		lastUsed:  make(map[CredKey]time.Time),
-		tripAfter: tripAfter, max: max, now: time.Now,
+	return tripAfter, max
+}
+
+// policyLocked returns the thresholds in force right now.
+func (b *Breaker) policyLocked() (int, time.Duration) {
+	if b.policy == nil {
+		return b.tripAfter, b.max
 	}
+	return clampPolicy(b.policy())
 }
 
 // Available reports whether the triple may be attempted now, and performs the
@@ -208,12 +236,13 @@ func (b *Breaker) Record(k Key, s Signal) {
 	case adapter.OutcomeRetryableProvider:
 		b.releaseProbeLocked(ck)
 		st := b.getLocked(k)
+		tripAfter, max := b.policyLocked()
 		if s.HasRetryAfter {
 			// The provider said how long it needs, on a 429 or a 503 alike.
 			// That is more precise than the ladder and does not trip it.
 			d := s.RetryAfter
-			if d > b.max {
-				d = b.max
+			if d > max {
+				d = max
 			}
 			st.coolingUntil = now.Add(d)
 			st.retryAfterOnly = true
@@ -229,7 +258,7 @@ func (b *Breaker) Record(k Key, s Signal) {
 		st.consecutiveFailures++
 		st.probing = false
 		b.dirty = true
-		if st.consecutiveFailures >= b.tripAfter {
+		if st.consecutiveFailures >= tripAfter {
 			b.coolLocked(st, now, st.backoffLevel)
 		}
 		return
@@ -266,7 +295,8 @@ func (b *Breaker) getLocked(k Key) *state {
 // escalates. consecutiveFailures is deliberately not reset: it is what makes a
 // probe failure re-trip immediately at the next level.
 func (b *Breaker) coolLocked(st *state, now time.Time, level int) {
-	st.coolingUntil = now.Add(cooldownFor(level, b.max))
+	_, max := b.policyLocked()
+	st.coolingUntil = now.Add(cooldownFor(level, max))
 	st.backoffLevel = level + 1
 	st.retryAfterOnly = false
 	st.probing = false

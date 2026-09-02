@@ -432,3 +432,33 @@ func TestRetryAfterOnAServerErrorCoolsWithoutTheLadder(t *testing.T) {
 		}
 	}
 }
+
+// policy.cooldown is hot-editable, so the thresholds are read when they are
+// applied rather than frozen at construction.
+func TestPolicyIsReadLiveOnEveryRecord(t *testing.T) {
+	b, now := newTestBreaker(t)
+	tripAfter, max := 3, 15*time.Minute
+	b.Configure(func() (int, time.Duration) { return tripAfter, max })
+
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	if !b.Available(triple) {
+		t.Fatal("one 5xx cooled the triple under trip_after 3")
+	}
+	tripAfter = 1
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	if b.Available(triple) {
+		t.Fatal("trip_after 1 was not applied without a restart")
+	}
+
+	// max clamps the next cooldown at the moment it is applied.
+	max = 500 * time.Millisecond
+	*now = now.Add(2 * time.Second)
+	if !b.Available(triple) {
+		t.Fatal("expected the probe to be admitted after the level-0 cooldown")
+	}
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	*now = now.Add(600 * time.Millisecond)
+	if !b.Available(triple) {
+		t.Fatal("the escalated cooldown was not clamped to the edited max")
+	}
+}
