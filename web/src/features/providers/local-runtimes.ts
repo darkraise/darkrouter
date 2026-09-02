@@ -5,7 +5,9 @@ import type { Preset } from "../../lib/api-types"
  *  appears here with no change to the console. */
 const LOOPBACK = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/
 
-export function isLocalPreset(p: Preset): boolean {
+// Takes the address rather than a Preset: a configured provider is the same
+// question asked of the same field, and a detail page has a Provider in hand.
+export function isLocalPreset(p: { base_url: string }): boolean {
   return LOOPBACK.test(p.base_url)
 }
 
