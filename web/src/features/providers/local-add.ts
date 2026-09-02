@@ -7,7 +7,13 @@ export type ProviderApi = {
   del: <T>(path: string) => Promise<T>
 }
 
-export type LocalDraft = { presetId: string; baseUrl: string }
+export type LocalDraft = {
+  presetId: string
+  baseUrl: string
+  /** A token the runtime was started behind. Empty is the ordinary case: a
+   *  model server on the operator's own machine usually asks for nothing. */
+  apiKey?: string
+}
 
 export type LocalOutcome =
   | { ok: true; modelCount?: number }
@@ -23,6 +29,24 @@ async function create(api: ProviderApi, d: LocalDraft, enabled: boolean): Promis
     preset: d.presetId,
     base_url: d.baseUrl,
     enabled,
+    // Only when there is a key. Without one the preset's own `none` stands,
+    // and overriding it would make a keyless runtime send an empty header.
+    // Always bearer: every local server that reads a token at all -- vLLM and
+    // llama.cpp behind --api-key -- reads it from Authorization: Bearer. The
+    // x-api-key and api-key styles belong to hosted APIs, so offering them
+    // here would be offering a choice with one right answer.
+    ...(d.apiKey ? { auth_style: "bearer" } : {}),
+  })
+}
+
+/** Stores the key, if there is one, before anything probes the endpoint: a
+ *  probe that ran first would be refused by exactly the runtime the key is
+ *  for, and report the address as unreachable. */
+async function addKey(api: ProviderApi, d: LocalDraft): Promise<void> {
+  if (!d.apiKey) return
+  await api.post(`/api/providers/${d.presetId}/keys`, {
+    label: "default",
+    secret: d.apiKey,
   })
 }
 
@@ -61,6 +85,7 @@ export async function testLocalRuntime(api: ProviderApi, d: LocalDraft): Promise
   }
   let outcome: LocalOutcome
   try {
+    await addKey(api, d)
     outcome = await probe(api, d.presetId)
   } catch (err) {
     outcome = { ok: false, error: messageOf(err) }
@@ -84,10 +109,13 @@ export async function addLocalRuntime(api: ProviderApi, d: LocalDraft): Promise<
   }
   let outcome: LocalOutcome
   try {
+    await addKey(api, d)
     outcome = await probe(api, d.presetId)
   } catch (err) {
     outcome = { ok: false, error: messageOf(err) }
   }
+  // The delete cascades to the credential, so a rolled-back add leaves no
+  // orphaned key behind.
   if (!outcome.ok) await remove(api, d.presetId)
   return outcome
 }
