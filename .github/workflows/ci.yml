@@ -118,7 +118,7 @@ jobs:
       # the Go and npm stages and a much longer build, so it is left out until
       # something actually needs it.
       - id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
