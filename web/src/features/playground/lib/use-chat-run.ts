@@ -58,6 +58,10 @@ export type ChatRun = {
   thinking: Record<number, TurnThinking>
   busy: boolean
   error: string
+  /** Bumps whenever the transcript is replaced wholesale (clear, load), so
+   *  a same-length replacement remounts its turns instead of keeping their
+   *  expanded-and-copied state from the conversation before. */
+  epoch: number
   send: (prompt: string) => Promise<void>
   stop: () => void
   clear: () => void
@@ -361,5 +365,5 @@ export function useChatRun(
     void hydrate(nextRoutes, mine)
   }
 
-  return { messages, routes, thinking, busy, error, send, stop, clear, load }
+  return { messages, routes, thinking, busy, error, epoch: generation.current, send, stop, clear, load }
 }

@@ -240,12 +240,19 @@ func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
 	start := time.Now()
 	rec, done := e.newRecord(r, start, dialect, string(surface))
 	defer done()
+	cfg := e.store.Current() // one snapshot for this request's whole lifetime
+	if cfg.Capture.Bodies {
+		// Armed before any header or byte goes out, and filled before done()
+		// emits the row: a deferred call registered later runs first.
+		cap := newBodyCapture(cfg.Capture)
+		w = cap.arm(w, r)
+		defer cap.fill(rec, start)
+	}
 	e.beginResponse(w, rec)
 	if e.refuseCompressed(w, r, rec, ew) {
 		return
 	}
 
-	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 	op, err := build(cfg)
 	if err != nil {
 		// A parser reporting an oversized body says so in the error it

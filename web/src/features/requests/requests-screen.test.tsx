@@ -216,6 +216,18 @@ describe("a trace deep link", () => {
     expect(await screen.findByText(/no request with that id/i)).toBeInTheDocument()
   })
 
+  it("opens a trace from a click anywhere on its row", async () => {
+    mockByPath((url) =>
+      url.includes("/api/requests/r1")
+        ? json(trace("r1"))
+        : json({ requests: [row({ id: "r1", model: "distinctive-model" })] }),
+    )
+    const { router } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByText("distinctive-model"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/requests/r1"))
+  })
+
   it("moves the URL to the trace when one is opened, and back when it closes", async () => {
     mockByPath((url) =>
       url.includes("/api/requests/r1")

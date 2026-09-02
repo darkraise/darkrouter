@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 import { ChevronDown } from "lucide-react"
 import { Link, useNavigate, useParams, useRouter, useRouterState } from "@tanstack/react-router"
 import { Banner, Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
@@ -182,6 +182,13 @@ export function RequestsScreen() {
     }
   }
 
+  function openRowUnderPointer(e: MouseEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement
+    if (target.closest("button, a, input, [role='menu']")) return
+    const id = target.closest("tr")?.querySelector<HTMLElement>("[data-request-id]")?.dataset.requestId
+    if (id) openTrace(id)
+  }
+
   function openTrace(id: string) {
     void navigate({ to: "/requests/$id", params: { id }, search: true })
   }
@@ -333,7 +340,11 @@ export function RequestsScreen() {
       {/* Scrolls sideways inside its own box rather than pushing the page
           wider: ten columns do not fit a laptop, and the Path column at the
           far end is the one that used to fall off. */}
-      <div className="overflow-x-auto">
+      {/* A click anywhere on a row opens it; the Open button stays for
+          the keyboard and for screen readers, since the row itself is a
+          row and not a button. The table renders its own cells, so the id
+          rides on the first cell and the click is delegated from here. */}
+      <div className="overflow-x-auto [&_tbody_tr]:cursor-pointer" onClick={openRowUnderPointer}>
         <DataTable
           columns={columns}
           data={rows}
