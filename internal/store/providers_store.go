@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -71,6 +73,9 @@ func (d *DB) CreateProvider(ctx context.Context, p ProviderRow) error {
 		p.ID, p.Name, p.Preset, p.Kind, p.BaseURL, p.AuthStyle,
 		p.Priority, enabled, p.Region, p.Project, p.Location,
 		boolToInt(p.FreeModelsOnly), time.Now().UnixMilli()); err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("create provider %q: %w", p.ID, ErrConflict)
+		}
 		return fmt.Errorf("create provider %q: %w", p.ID, err)
 	}
 	return nil
@@ -128,7 +133,7 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 		return fmt.Errorf("update provider %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("update provider %q: no such provider", id)
+		return fmt.Errorf("update provider %q: %w", id, ErrNotFound)
 	}
 	return nil
 }
@@ -151,7 +156,7 @@ func (d *DB) DeleteProvider(ctx context.Context, id string) error {
 		return fmt.Errorf("delete provider %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("delete provider %q: no such provider", id)
+		return fmt.Errorf("delete provider %q: %w", id, ErrNotFound)
 	}
 	return nil
 }
@@ -170,7 +175,7 @@ func (d *DB) DeleteCredential(ctx context.Context, providerID, keyID string) err
 		return fmt.Errorf("delete credential %q: %w", keyID, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("delete credential %q: no such credential", keyID)
+		return fmt.Errorf("delete credential %q: %w", keyID, ErrNotFound)
 	}
 	return nil
 }
@@ -202,5 +207,30 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 		p.Enabled = enabled != 0
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list providers: %w", err)
+	}
+	return out, nil
+}
+
+// ProviderByID reads one provider row, or ErrNotFound.
+func (d *DB) ProviderByID(ctx context.Context, id string) (ProviderRow, error) {
+	var p ProviderRow
+	var enabled, freeOnly int
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT id, name, preset, kind, base_url, auth_style, priority, enabled,
+		        region, project, location, free_models_only
+		   FROM providers WHERE id = ?`, id).Scan(
+		&p.ID, &p.Name, &p.Preset, &p.Kind, &p.BaseURL,
+		&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project, &p.Location,
+		&freeOnly)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProviderRow{}, fmt.Errorf("provider %q: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return ProviderRow{}, fmt.Errorf("read provider %q: %w", id, err)
+	}
+	p.Enabled = enabled != 0
+	p.FreeModelsOnly = freeOnly == 1
+	return p, nil
 }
