@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -47,8 +46,7 @@ func (s *Server) handleRoutePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body previewRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 16<<10, &body) {
 		return
 	}
 	if body.Model == "" {
@@ -63,7 +61,7 @@ func (s *Server) handleRoutePreview(w http.ResponseWriter, r *http.Request) {
 	snap, err := s.deps.Exec.RouteSnapshot(r.Context(), time.Now(),
 		s.deps.Config.Current())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	cands, skips, rerr := router.Resolve(router.Query{

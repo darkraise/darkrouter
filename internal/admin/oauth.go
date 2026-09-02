@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -38,11 +37,15 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body oauthStartBody
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body)
+	// An empty body is the common case: the label is optional and the SPA
+	// sends nothing when it has none.
+	if r.ContentLength != 0 && !decodeJSON(w, r, 4<<10, &body) {
+		return
+	}
 
 	verifier, err := auth.NewVerifier()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	sessionID := sessionFrom(r.Context())
@@ -52,7 +55,7 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := s.deps.Flows.Begin(flow)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 
@@ -111,8 +114,7 @@ type oauthCompleteBody struct {
 
 func (s *Server) handleOAuthComplete(w http.ResponseWriter, r *http.Request) {
 	var body oauthCompleteBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 8<<10, &body) {
 		return
 	}
 	code, state, err := parseRedirected(body.RedirectedURL)
@@ -197,7 +199,7 @@ func (s *Server) completeOAuth(ctx context.Context, code, state, sessionID strin
 	if err != nil {
 		return "", "", "", err
 	}
-	s.reloadProviders(ctx)
+	s.reloadProviders(context.WithoutCancel(ctx))
 	return credID, label, tok.Account, nil
 }
 
@@ -215,21 +217,15 @@ func statusForOAuth(err error) int {
 
 // oauthConfig resolves the provider's preset OAuth block.
 func (s *Server) oauthConfig(ctx context.Context, providerID string) (string, catalog.OAuth, bool) {
-	rows, err := s.deps.DB.ProviderRows(ctx)
+	p, err := s.deps.DB.ProviderByID(ctx, providerID)
 	if err != nil {
 		return "", catalog.OAuth{}, false
 	}
-	for _, p := range rows {
-		if p.ID != providerID {
-			continue
-		}
-		preset, ok := s.deps.Presets[p.Preset]
-		if !ok || preset.OAuth == nil {
-			return "", catalog.OAuth{}, false
-		}
-		return p.Preset, *preset.OAuth, true
+	preset, ok := s.deps.Presets[p.Preset]
+	if !ok || preset.OAuth == nil {
+		return "", catalog.OAuth{}, false
 	}
-	return "", catalog.OAuth{}, false
+	return p.Preset, *preset.OAuth, true
 }
 
 // authConfig translates the preset's OAuth block into the shape internal/auth

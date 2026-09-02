@@ -183,6 +183,13 @@ func testServerWithCatalog(t *testing.T, aliases string) (*Server, *store.DB) {
 // than a mock.
 func testServerWithExecutor(t *testing.T, upstreamURL, model string) *Server {
 	t.Helper()
+	return testServerWithExecutorLog(t, upstreamURL, model, nil)
+}
+
+// testServerWithExecutorLog is testServerWithExecutor with a log sink, for a
+// test that reads what the executor recorded about a request.
+func testServerWithExecutorLog(t *testing.T, upstreamURL, model string, logger exec.Logger) *Server {
+	t.Helper()
 	db := storetest.Migrated(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
@@ -207,7 +214,7 @@ func testServerWithExecutor(t *testing.T, upstreamURL, model string) *Server {
 
 	ex := exec.New(cfg, provider.NewYAMLSource(cfg),
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()},
-		exec.Deps{Catalog: cat})
+		exec.Deps{Catalog: cat, Log: logger})
 
 	s, err := New(Deps{
 		DB: db, PasswordHash: testHash(), Config: cfg, Key: key,

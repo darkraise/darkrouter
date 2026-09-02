@@ -265,8 +265,7 @@ func (s *Server) handlePlayground(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body playgroundBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 256<<10, &body) {
 		return
 	}
 	pr, d, err := playgroundRequest(r.Context(), body)
