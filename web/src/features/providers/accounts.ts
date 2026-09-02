@@ -33,7 +33,7 @@ export function countAccounts(draft: AccountDraft): number {
 /** The label on the button that submits the draft, so it says what will
  *  happen rather than what the form is called. */
 export function addAccountsLabel(n: number): string {
-  return n <= 1 ? "Add account" : `Add ${n} accounts`
+  return n <= 1 ? "Add credential" : `Add ${n} credentials`
 }
 
 /**
@@ -108,14 +108,14 @@ export async function addCredentials(
 export function reportAdded(result: AddResult) {
   const { added, failed, rejected } = result
   if (failed.length === 0 && rejected.length === 0) {
-    toast.success(added === 1 ? "Account added" : `${added} accounts added`)
+    toast.success(added === 1 ? "Credential added" : `${added} credentials added`)
     return
   }
   // Naming the ones that did not make it, because "18 of 20" without saying
   // which two leaves the operator to diff the list by hand.
   const names = (list: AddFailure[]) => list.map((f) => f.label).join(", ")
   if (rejected.length > 0 && added === 0 && failed.length === 0) {
-    toast.error(`No account kept. ${names(rejected)} — ${rejected[0]?.error}`)
+    toast.error(`No credential kept. ${names(rejected)} — ${rejected[0]?.error}`)
     return
   }
   const parts = [`${added} added`]

@@ -120,7 +120,7 @@ describe("the wizard", () => {
       fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "POST"),
     ).toHaveLength(0)
 
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(
         ([, init]) => (init as RequestInit)?.method === "POST",
@@ -140,7 +140,7 @@ describe("the wizard", () => {
 
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-bbbb")
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(
@@ -159,7 +159,7 @@ describe("the wizard", () => {
     stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
-    expect(screen.getByRole("button", { name: /add account/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /add credential/i })).toBeDisabled()
   })
 
   it("removes a key the provider refuses", async () => {
@@ -168,7 +168,7 @@ describe("the wizard", () => {
 
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-bad")
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       // Only what works survives: the key is written, probed, and taken back.
@@ -188,7 +188,7 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-unchecked")
     await userEvent.click(screen.getByRole("checkbox", { name: /check every key/i }))
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(
@@ -205,7 +205,7 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-aaaa")
     await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const create = fetchMock.mock.calls.find(
@@ -235,7 +235,7 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
     await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nspare|sk-bbb")
-    await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add 2 credentials/i }))
 
     expect(await screen.findByText("Checking work · 1 of 2")).toBeInTheDocument()
     expect(screen.getByRole("progressbar")).toBeInTheDocument()
@@ -249,7 +249,7 @@ describe("the wizard", () => {
     await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
     await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
     await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nsk-bbb")
-    await userEvent.click(screen.getByRole("button", { name: /add 2 accounts/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add 2 credentials/i }))
 
     await waitFor(() => {
       const keyPosts = fetchMock.mock.calls.filter(
@@ -294,7 +294,7 @@ describe("the wizard opened from an unconfigured preset", () => {
     )
 
     await userEvent.type(await screen.findByLabelText(/api key/i), "sk-aaaa")
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(
@@ -323,7 +323,7 @@ describe("the wizard opened from an unconfigured preset", () => {
     )
 
     await userEvent.type(await screen.findByLabelText(/api key/i), "sk-bbbb")
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(
@@ -419,7 +419,7 @@ describe("the wizard opened from a provider", () => {
 
     await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
     await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const patch = fetchMock.mock.calls.find(
@@ -447,7 +447,7 @@ describe("the wizard opened from a provider", () => {
     )
 
     await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() =>
       expect(
@@ -475,7 +475,7 @@ describe("the wizard opened from a provider", () => {
     )
 
     await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
-    await userEvent.click(screen.getByRole("button", { name: /add account/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(

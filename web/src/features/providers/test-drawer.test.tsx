@@ -346,3 +346,35 @@ describe("the conversation", () => {
     expect(screen.getByRole("button", { name: /send/i })).toBeDisabled()
   })
 })
+
+describe("aiming the drawer at another provider", () => {
+  it("starts that provider from nothing rather than carrying the last one's run over", async () => {
+    // The drawer is mounted once for the whole list. Without a reset the
+    // model picked for groq, and groq's transcript, sat under ollama's name.
+    stubFetch(
+      () =>
+        new Response(sse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'), {
+          status: 200,
+          headers: { "X-Darkrouter-Request": "req-1" },
+        }),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <TestDrawer row={row} open onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    )
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findByText("ok")
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <TestDrawer row={keylessRow} open onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByLabelText("Model")).toHaveValue("")
+    expect(screen.queryByText("ok")).not.toBeInTheDocument()
+    expect(screen.getByText(/not tested yet/i)).toBeInTheDocument()
+  })
+})

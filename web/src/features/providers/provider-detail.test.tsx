@@ -25,7 +25,10 @@ const stubRouterAdapter: RouterAdapter = {
 
 /** The detail page reads its id from the route, so it needs a real router
  *  rather than a stubbed adapter — the same shape models-screen.test.tsx uses. */
-async function renderProvider(id: string) {
+async function renderProvider(
+  id: string,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   const rootRoute = createRootRoute({
     component: () => (
       <RouterAdapterProvider value={stubRouterAdapter}>
@@ -43,7 +46,6 @@ async function renderProvider(id: string) {
     history: createMemoryHistory({ initialEntries: [`/providers/${id}`] }),
   })
   await router.load()
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
@@ -123,12 +125,12 @@ describe("a provider nobody has configured", () => {
     expect(screen.getByText("Free tier")).toBeInTheDocument()
   })
 
-  it("offers the accounts dialog on the provider already chosen", async () => {
+  it("offers the credentials dialog on the provider already chosen", async () => {
     // No picker: the operator named the provider by navigating to it.
     stub([], [preset])
     await renderProvider("groq")
 
-    await userEvent.click(await screen.findByRole("button", { name: /add the first account/i }))
+    await userEvent.click(await screen.findByRole("button", { name: /add the first credential/i }))
     expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
   })
@@ -239,5 +241,37 @@ describe("waiting for a keyless provider's first sweep", () => {
     const { awaitingModels } = await import("./provider-detail")
     const off = { ...configured, id: "opencode", auth_style: "optional", enabled: false, credentials: [] }
     expect(awaitingModels([off], "opencode")).toBe(false)
+  })
+})
+
+describe("switching a provider back on", () => {
+  it("refreshes the breaker and discovery readings, not only the provider row", async () => {
+    // Enabling changes what the router may dispatch to, and the health and
+    // discovery panels read from their own endpoints. Left stale, the page
+    // said "enabled" beside readings taken while it was off.
+    stub([{ ...configured, enabled: false }], [preset])
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    await renderProvider("groq", client)
+
+    await userEvent.click(await screen.findByRole("button", { name: "Enable" }))
+
+    await waitFor(() => {
+      const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      expect(keys).toContain(JSON.stringify(["health", "providers"]))
+      expect(keys).toContain(JSON.stringify(["health", "discovery"]))
+    })
+  })
+})
+
+describe("the page outline", () => {
+  it("leaves the one h1 to the app header", async () => {
+    // The header bar already carries the page's h1 ("Providers"). A second
+    // one here gave the page two top-level headings, and the provider's
+    // name is a section of that page rather than a page of its own.
+    stub([configured], [preset])
+    const { container } = await renderProvider("groq")
+    expect(await screen.findByRole("heading", { level: 2, name: "Groq" })).toBeInTheDocument()
+    expect(container.querySelector("h1")).toBeNull()
   })
 })

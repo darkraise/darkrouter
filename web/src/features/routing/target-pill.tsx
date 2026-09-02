@@ -23,7 +23,7 @@ export const STATE_PROSE: Record<TargetState, string> = {
   "any-provider": "routable",
   cooling: "cooling",
   "provider-disabled": "provider disabled",
-  "provider-unconfigured": "no accounts",
+  "provider-unconfigured": "no credentials",
   "model-missing": "model not offered",
   "model-retired": "withdrawn upstream",
   "provider-missing": "provider not configured",

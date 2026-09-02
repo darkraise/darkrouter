@@ -1,4 +1,4 @@
-import type { Model, Provider } from "../../lib/api-types"
+import type { Credential, Model, Provider } from "../../lib/api-types"
 
 /**
  * What the router would make of one target, right now.
@@ -39,9 +39,16 @@ export type TargetFacts = {
  *  credential's own flag rather than from the breaker endpoint: the provider
  *  rows already carry it, and a second source would be a second thing to keep
  *  in step. */
+export type ChainCredential = Pick<Credential, "enabled" | "cooling">
+export type ChainProvider = Pick<Provider, "id" | "enabled"> & { credentials: ChainCredential[] }
+export type ChainModel = Pick<Model, "model" | "providers" | "state">
+
+/** Only the fields the judgement reads. Named narrowly so a caller holding
+ *  the provider ids alone can stand rows in without fabricating the rest of
+ *  a Provider, and the live rows still fit as they are. */
 export type ChainContext = {
-  providers: Provider[]
-  models: Model[]
+  providers: ChainProvider[]
+  models: ChainModel[]
 }
 
 /**
@@ -67,20 +74,20 @@ export function splitTarget(
 /** Credentials the router would actually dispatch to. A disabled one is not a
  *  quiet one: `provider.enabledOnly` drops it, and a provider left with none is
  *  dropped from the provider set entirely, so it can never serve. */
-function usableCredentials(p: Provider) {
+function usableCredentials(p: ChainProvider) {
   return p.credentials.filter((c) => c.enabled)
 }
 
 /** A provider the router could dispatch to at all: switched on, and holding at
  *  least one enabled credential that is not cooling. */
-function live(p: Provider): boolean {
+function live(p: ChainProvider): boolean {
   return p.enabled && usableCredentials(p).some((c) => !c.cooling)
 }
 
 /** The catalogue rows for one model on one provider that the router would
  *  still consider. `catalog.Model.Routable()` is `State != "removed_upstream"`,
  *  so `stale` still routes and only a model withdrawn upstream does not. */
-function routableRow(models: Model[], model: string, providerID: string) {
+function routableRow(models: ChainModel[], model: string, providerID: string) {
   return models.find(
     (m) => m.model === model && m.providers.includes(providerID) && m.state !== "removed_upstream",
   )
@@ -119,8 +126,8 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
         state: "provider-unconfigured",
         problem:
           provider.credentials.length === 0
-            ? `${providerId} has no accounts`
-            : `every ${providerId} account is disabled`,
+            ? `${providerId} has no credentials`
+            : `every ${providerId} credential is disabled`,
       }
     }
     // Only judged against a catalogue that has loaded: an empty one means
@@ -142,7 +149,7 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
           }
     }
     if (!live(provider)) {
-      return { ...base, state: "cooling", problem: `every ${providerId} account is cooling` }
+      return { ...base, state: "cooling", problem: `every ${providerId} credential is cooling` }
     }
     return { ...base, state: "routable", problem: "" }
   }

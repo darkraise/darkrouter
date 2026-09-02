@@ -163,6 +163,17 @@ export const CONNECTION_LABEL: Record<ConnectionType, string> = {
   local: "Local",
 }
 
+/** What each chip means, for the reader the one-word label does not reach.
+ *  "Signed" in particular names two schemes an operator knows by their own
+ *  names, not by what they have in common. */
+export const CONNECTION_DESCRIPTION: Record<ConnectionType, string> = {
+  key: "A key pasted once and sent with every request",
+  oauth: "A browser sign-in that mints short-lived tokens",
+  signed: "SigV4 and service-account credentials",
+  none: "Reached with nothing pasted",
+  local: "A program running on this machine",
+}
+
 const LOOPBACK = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i
 
 /** Anything darkrouter reaches over the network. A base URL that is not one of

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import type { Credential, Preset, Provider } from "../../lib/api-types"
 import {
+  CONNECTION_DESCRIPTION,
   connectionCounts,
   connectionType,
   filterProviderRows,
@@ -239,5 +240,16 @@ describe("the quick filters", () => {
     expect(counts.local).toBe(2)
     expect(counts.key).toBe(1)
     expect(counts.oauth).toBe(0)
+  })
+})
+
+describe("the connection chips", () => {
+  it("say what each way of connecting means, since the label alone cannot", () => {
+    // "Signed" is the one an operator cannot expand from the word: it covers
+    // the two schemes that sign every request rather than sending a key.
+    expect(CONNECTION_DESCRIPTION.signed).toBe("SigV4 and service-account credentials")
+    for (const type of ["key", "oauth", "signed", "none", "local"] as const) {
+      expect(CONNECTION_DESCRIPTION[type]).not.toBe("")
+    }
   })
 })
