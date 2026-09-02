@@ -192,7 +192,7 @@ export function useChatRun(
         // no SSE framing at all, so there is nothing to drain until the body
         // is complete — handled after the loop instead.
         if (doStream) {
-          const { text, reasoning, rest } = drainSSE(buffer.current, dialect)
+          const { text, reasoning, rest, error: frameError } = drainSSE(buffer.current, dialect)
           buffer.current = rest
           // Reasoning first: a frame can carry both, and the answer's arrival
           // is what closes the thinking clock.
@@ -201,6 +201,9 @@ export function useChatRun(
           // a role-only frame is not the model answering.
           if (text && ttftMs === null) ttftMs = performance.now() - startedAt
           emit(text)
+          // After the text: a provider that fails part-way has still sent the
+          // part before it, and that stays on screen with the error under it.
+          if (frameError !== undefined) throw new Error(frameError)
         }
       }
       if (!doStream) {

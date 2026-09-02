@@ -39,9 +39,10 @@ async function runColumn(
       signal,
     )) {
       buffer += chunk
-      const { text, rest } = drainSSE(buffer, config.dialect)
+      const { text, rest, error } = drainSSE(buffer, config.dialect)
       buffer = rest
       if (text) update((c) => ({ ...c, text: c.text + text }))
+      if (error !== undefined) throw new Error(error)
     }
     update((c) => ({ ...c, status: "done", latencyMs: performance.now() - started }))
   } catch (err) {
