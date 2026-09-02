@@ -57,10 +57,14 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
-		UsageMetadata *wireUsage `json:"usageMetadata"`
+		UsageMetadata *wireUsage      `json:"usageMetadata"`
+		Error         json.RawMessage `json:"error"`
 	}
 	if json.Unmarshal([]byte(ev.Data), &w) != nil {
 		return adapter.RawEvent{}
+	}
+	if len(w.Error) > 0 && string(w.Error) != "null" {
+		return adapter.RawEvent{ErrPayload: ev.Data}
 	}
 	// A blocked prompt is deliberately not reported as an in-stream error.
 	// Master design §8.1 classifies a content filter as Fatal so the chain does
