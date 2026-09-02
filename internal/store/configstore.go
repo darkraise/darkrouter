@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -50,6 +51,16 @@ func (d *DB) PutAliases(ctx context.Context, aliases map[string][]string) error 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := putAliasesTx(ctx, tx, aliases); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit alias write: %w", err)
+	}
+	return nil
+}
+
+func putAliasesTx(ctx context.Context, tx *sql.Tx, aliases map[string][]string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM aliases`); err != nil {
 		return fmt.Errorf("clear aliases: %w", err)
 	}
@@ -74,9 +85,6 @@ func (d *DB) PutAliases(ctx context.Context, aliases map[string][]string) error 
 				return fmt.Errorf("insert alias %q: %w", name, err)
 			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit alias write: %w", err)
 	}
 	return nil
 }
@@ -223,6 +231,42 @@ func (d *DB) PutPolicy(ctx context.Context, p config.PolicyConfig) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := putPolicyTx(ctx, tx, p); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit policy write: %w", err)
+	}
+	return nil
+}
+
+// PutConfig writes an alias set and a policy together, so a settings save
+// that fails halfway leaves neither half applied. A nil aliases map or policy
+// leaves that block untouched.
+func (d *DB) PutConfig(ctx context.Context, aliases map[string][]string, policy *config.PolicyConfig) error {
+	tx, err := d.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin config write: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if aliases != nil {
+		if err := putAliasesTx(ctx, tx, aliases); err != nil {
+			return err
+		}
+	}
+	if policy != nil {
+		if err := putPolicyTx(ctx, tx, *policy); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit config write: %w", err)
+	}
+	return nil
+}
+
+func putPolicyTx(ctx context.Context, tx *sql.Tx, p config.PolicyConfig) error {
 	for _, f := range policyFields {
 		v, ok := f.get(&p)
 		if !ok {
@@ -235,9 +279,6 @@ func (d *DB) PutPolicy(ctx context.Context, p config.PolicyConfig) error {
 		if err := putSetting(ctx, tx, f.key, v); err != nil {
 			return err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit policy write: %w", err)
 	}
 	return nil
 }
@@ -383,11 +424,18 @@ func (d *DB) PutModelOverride(ctx context.Context, o ModelOverride) error {
 // DeleteModelOverride removes a correction, returning the merged catalog to
 // whatever the upstream itself reports.
 func (d *DB) DeleteModelOverride(ctx context.Context, providerID, modelID string) error {
-	_, err := d.Write.ExecContext(ctx,
+	res, err := d.Write.ExecContext(ctx,
 		`DELETE FROM model_overrides WHERE provider_id = ? AND model_id = ?`,
 		providerID, modelID)
 	if err != nil {
 		return fmt.Errorf("delete model override %s/%s: %w", providerID, modelID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete model override %s/%s: %w", providerID, modelID, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("model override %s/%s: %w", providerID, modelID, ErrNotFound)
 	}
 	return nil
 }

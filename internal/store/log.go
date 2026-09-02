@@ -15,6 +15,10 @@ type AttemptRecord struct {
 	Seq        int
 	ProviderID string
 	KeyID      string
+	// KeyLabel is the credential's operator-facing label, filled by the trace
+	// read and never written: the attempt row keeps the id, and the label is
+	// whatever the credential is called when the trace is read.
+	KeyLabel   string
 	Model      string
 	Outcome    string
 	StatusCode int
