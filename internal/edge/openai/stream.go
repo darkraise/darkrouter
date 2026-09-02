@@ -126,12 +126,12 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			if ev.Usage == nil {
 				continue
 			}
-			c := chunk(id, model, map[string]any{}, nil)
-			c["usage"] = map[string]any{
-				"prompt_tokens":     ev.Usage.PromptTokens(),
-				"completion_tokens": ev.Usage.OutputTokens,
-				"total_tokens":      ev.Usage.PromptTokens() + ev.Usage.OutputTokens,
-			}
+			// The usage chunk carries no choices, which is the shape
+			// stream_options.include_usage produces and the one SDKs test
+			// for; a chunk with an empty delta reads as a content event.
+			c := chunk(id, model, nil, nil)
+			c["choices"] = []any{}
+			c["usage"] = usageBody(*ev.Usage)
 			sendErr = send(c)
 		case ir.EventMessageStop:
 			sendErr = send(chunk(id, model, map[string]any{}, finishReason(ev.StopReason)))

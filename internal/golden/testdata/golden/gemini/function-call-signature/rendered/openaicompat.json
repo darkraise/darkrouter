@@ -1,0 +1,50 @@
+{
+  "messages": [
+    {
+      "content": "Weather in Oslo?",
+      "role": "user"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"city\":\"Oslo\"}",
+            "name": "lookup"
+          },
+          "id": "call_a",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"result\":\"clear, 18C\"}",
+      "role": "tool",
+      "tool_call_id": "call_a"
+    },
+    {
+      "content": "And tomorrow?",
+      "role": "user"
+    }
+  ],
+  "model": "target-model",
+  "reasoning_effort": "low",
+  "tools": [
+    {
+      "function": {
+        "description": "weather",
+        "name": "lookup",
+        "parameters": {
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

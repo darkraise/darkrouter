@@ -1,0 +1,59 @@
+{
+  "Model": "target-model",
+  "System": null,
+  "Messages": [
+    {
+      "Role": "system",
+      "Content": [
+        {
+          "Type": "text",
+          "Text": "Reply with a JSON object holding a single key, answer.",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    },
+    {
+      "Role": "user",
+      "Content": [
+        {
+          "Type": "text",
+          "Text": "Is 91 prime?",
+          "Media": null,
+          "Thinking": null,
+          "ToolUse": null,
+          "ToolResult": null,
+          "CacheControl": null,
+          "Extra": null
+        }
+      ]
+    }
+  ],
+  "Tools": null,
+  "ToolChoice": null,
+  "ParallelToolCalls": null,
+  "MaxTokens": null,
+  "Temperature": null,
+  "TopP": null,
+  "TopK": null,
+  "StopSequences": null,
+  "Stream": false,
+  "Reasoning": null,
+  "ResponseFormat": {
+    "Type": "json_object",
+    "Schema": null,
+    "Name": "",
+    "Strict": null
+  },
+  "Safety": null,
+  "Metadata": null,
+  "Extra": {
+    "seed": 42,
+    "user": "golden"
+  },
+  "Warnings": null
+}

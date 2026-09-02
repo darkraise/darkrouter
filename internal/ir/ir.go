@@ -4,6 +4,7 @@ package ir
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -175,6 +176,39 @@ type ContentBlock struct {
 	Extra        map[string]json.RawMessage
 }
 
+// ExtraThoughtSignature keys a thought signature Gemini attached to a plain
+// text part rather than a thought or a function call. It is stored in
+// ContentBlock.Extra because a text block has no signature field, and the
+// signature must go back on the same kind of part it came from.
+const ExtraThoughtSignature = "thoughtSignature"
+
+// ExtraString reads a string-valued extra, or "" when the key is absent or
+// holds something other than a JSON string.
+func (b ContentBlock) ExtraString(key string) string {
+	raw, ok := b.Extra[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// SetExtraString stores a string-valued extra, allocating the map on first
+// use.
+func (b *ContentBlock) SetExtraString(key, value string) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	if b.Extra == nil {
+		b.Extra = map[string]json.RawMessage{}
+	}
+	b.Extra[key] = raw
+}
+
 type Message struct {
 	Role    Role
 	Content []ContentBlock
@@ -185,15 +219,18 @@ type Tool struct {
 	Description string
 	Schema      json.RawMessage
 
-	// Extra carries wire fields the IR does not model, keyed as the producing
-	// dialect spelled them: a provider-run tool's type and options, or a
-	// cache_control marker on an ordinary tool. Re-emitted verbatim by the
-	// dialect that produced it; a tool whose Extra names a type is that
-	// provider's own and is dropped, with a warning, by every other adapter.
-	// Omitted from JSON when empty so the request fixtures of every dialect
-	// stay unchanged by it.
+	// Extra carries tool fields the IR has no slot for, keyed by their wire
+	// name: OpenAI's strict flag on a function, or the body of a provider
+	// built-in tool such as Gemini's googleSearch. A built-in tool has no
+	// Name, and only the dialect that produced it can render it; every other
+	// target drops it with a warning rather than declaring a nameless
+	// function.
 	Extra map[string]json.RawMessage `json:",omitempty"`
 }
+
+// BuiltIn reports whether the tool is a provider-side capability rather than
+// a function the client implements.
+func (t Tool) BuiltIn() bool { return t.Name == "" && len(t.Extra) > 0 }
 
 type ToolChoice struct {
 	Mode string // "auto" | "none" | "any" | "tool"
@@ -321,10 +358,14 @@ const (
 
 // Delta carries incremental content for exactly one block kind.
 type Delta struct {
-	Type      BlockType
-	Text      string
-	Thinking  string
-	Signature string // thinking-block signature fragment
+	Type     BlockType
+	Text     string
+	Thinking string
+	// Signature is a whole signature or a fragment, per dialect: Anthropic
+	// streams it in pieces, Gemini attaches it whole to one part. It rides
+	// on a thinking delta, on a tool-use delta, or on a text delta when the
+	// upstream put it on a plain text part.
+	Signature string
 	ToolInput string // JSON fragment
 	ToolID    string
 	ToolName  string
@@ -396,4 +437,40 @@ func blocksHaveImage(blocks []ContentBlock) bool {
 		}
 	}
 	return false
+}
+
+// OpenBlocks tracks the blocks a stream parser has opened so they can all be
+// closed in one deterministic pass. Every flat-delta dialect needs the same
+// bookkeeping: open a block the first time a kind appears, close everything
+// when a finish reason or the end of the stream arrives.
+type OpenBlocks struct {
+	open map[int]bool
+}
+
+// Open records a block as open. Opening an open block is a no-op.
+func (o *OpenBlocks) Open(index int) {
+	if o.open == nil {
+		o.open = map[int]bool{}
+	}
+	o.open[index] = true
+}
+
+func (o *OpenBlocks) IsOpen(index int) bool { return o.open[index] }
+
+// CloseAll yields a block stop for every open block in ascending index
+// order — map order is not deterministic and the event sequence has to be —
+// and forgets them. It reports false when the consumer stopped listening.
+func (o *OpenBlocks) CloseAll(yield func(StreamEvent, error) bool) bool {
+	idxs := make([]int, 0, len(o.open))
+	for idx := range o.open {
+		idxs = append(idxs, idx)
+	}
+	sort.Ints(idxs)
+	o.open = nil
+	for _, idx := range idxs {
+		if !yield(StreamEvent{Type: EventBlockStop, Index: idx}, nil) {
+			return false
+		}
+	}
+	return true
 }

@@ -172,3 +172,38 @@ func TestWriteStreamEmitsReasoningDeltas(t *testing.T) {
 		t.Errorf("chunk 2 = %v", got[2])
 	}
 }
+
+func TestWriteStreamUsageChunkCarriesNoChoicesAndTheDetails(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := WriteStream(rec, seq(
+		ir.StreamEvent{Type: ir.EventMessageDelta, Usage: &ir.Usage{
+			InputTokens: 2, OutputTokens: 4, CacheReadTokens: 8, ReasoningTokens: 3}},
+		ir.StreamEvent{Type: ir.EventMessageStop},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usageChunk map[string]any
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if !strings.HasPrefix(line, "data: {") || !strings.Contains(line, `"usage"`) {
+			continue
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &usageChunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if usageChunk == nil {
+		t.Fatalf("no usage chunk in:\n%s", rec.Body.String())
+	}
+	if choices, ok := usageChunk["choices"].([]any); !ok || len(choices) != 0 {
+		t.Fatalf("choices = %v, want an empty array", usageChunk["choices"])
+	}
+	u := usageChunk["usage"].(map[string]any)
+	if u["prompt_tokens"] != float64(10) || u["total_tokens"] != float64(14) {
+		t.Fatalf("usage = %v", u)
+	}
+	if u["prompt_tokens_details"].(map[string]any)["cached_tokens"] != float64(8) ||
+		u["completion_tokens_details"].(map[string]any)["reasoning_tokens"] != float64(3) {
+		t.Fatalf("usage details = %v", u)
+	}
+}

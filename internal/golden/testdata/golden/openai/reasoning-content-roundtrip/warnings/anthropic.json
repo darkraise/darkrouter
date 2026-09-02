@@ -1,0 +1,4 @@
+[
+  "max_tokens -\u003e anthropic: required by the target and absent from the request, and the catalog does not know the model's maximum; substituted 4096",
+  "messages[].thinking -\u003e anthropic: thinking block without a signature; Anthropic rejects it, so it was dropped"
+]

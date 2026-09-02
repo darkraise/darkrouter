@@ -284,3 +284,99 @@ func TestParseCarriesTheStreamFlagOnPassthrough(t *testing.T) {
 		})
 	}
 }
+
+func TestParseRequestReadsJSONObjectMode(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[],"response_format":{"type":"json_object"}}`)
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" || req.ResponseFormat.Schema != nil {
+		t.Fatalf("response_format = %+v", req.ResponseFormat)
+	}
+	if parsed(t, `{"model":"m","messages":[],"response_format":{"type":"text"}}`).ResponseFormat != nil {
+		t.Fatal("text is the default and needs no IR")
+	}
+}
+
+func TestParseRequestReadsSchemaNameAndStrict(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[],
+		"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}}}`)
+	rf := req.ResponseFormat
+	if rf == nil || rf.Name != "answer" || rf.Strict == nil || !*rf.Strict {
+		t.Fatalf("response_format = %+v", rf)
+	}
+	lax := parsed(t, `{"model":"m","messages":[],
+		"response_format":{"type":"json_schema","json_schema":{"name":"r","schema":{}}}}`)
+	if lax.ResponseFormat.Strict != nil {
+		t.Fatalf("strict = %v; a client that did not ask for strict must not get it", *lax.ResponseFormat.Strict)
+	}
+}
+
+func TestParseRequestReadsAssistantReasoningContent(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[
+		{"role":"user","content":"hi"},
+		{"role":"assistant","reasoning_content":"let me think","content":"hello",
+		 "tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]}]}`)
+	got := req.Messages[1].Content
+	if len(got) != 3 || got[0].Type != ir.BlockThinking || got[0].Thinking.Text != "let me think" ||
+		got[1].Type != ir.BlockText || got[2].Type != ir.BlockToolUse {
+		t.Fatalf("assistant blocks = %+v", got)
+	}
+}
+
+func TestParseRequestCapturesOpenAIOnlyFieldsAsExtra(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[],"seed":7,"logprobs":true,"top_logprobs":2,
+		"frequency_penalty":0.5,"presence_penalty":null,"logit_bias":{"50256":-100},"user":"u",
+		"service_tier":"auto","prediction":{"type":"content","content":"x"},"modalities":["text"],
+		"audio":{"voice":"alloy","format":"wav"},"web_search_options":{},"temperature":1}`)
+	want := map[string]string{
+		"seed": "7", "logprobs": "true", "top_logprobs": "2", "frequency_penalty": "0.5",
+		"logit_bias": `{"50256":-100}`, "user": `"u"`, "service_tier": `"auto"`,
+		"prediction": `{"type":"content","content":"x"}`, "modalities": `["text"]`,
+		"audio": `{"voice":"alloy","format":"wav"}`, "web_search_options": "{}",
+	}
+	if len(req.Extra) != len(want) {
+		t.Fatalf("extra = %v, want %d keys", req.Extra, len(want))
+	}
+	for k, v := range want {
+		if string(req.Extra[k]) != v {
+			t.Errorf("extra[%s] = %s, want %s", k, req.Extra[k], v)
+		}
+	}
+	if _, ok := req.Extra["presence_penalty"]; ok {
+		t.Error("a null field is not something the client sent")
+	}
+	if _, ok := req.Extra["temperature"]; ok {
+		t.Error("temperature has an IR slot and must not be duplicated")
+	}
+	if parsed(t, `{"model":"m","messages":[]}`).Extra != nil {
+		t.Error("a request with no extras carries nil")
+	}
+}
+
+func TestParseRequestWarnsAboutWhatTheIRDrops(t *testing.T) {
+	req := parsed(t, `{"model":"m","n":3,"messages":[
+		{"role":"user","name":"alice","content":[
+			{"type":"image_url","image_url":{"url":"https://x/1.png","detail":"high"}}]},
+		{"role":"tool","tool_call_id":"c","name":"f","content":"ok"}],
+		"tools":[{"type":"function","function":{"name":"f","strict":true,"parameters":{"type":"object"}}}]}`)
+	for _, field := range []string{"n", "messages[].name", "messages[].image_url.detail", "tools[].function.strict"} {
+		found := false
+		for _, w := range req.Warnings {
+			if w.Field == field {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no warning for %s in %v", field, req.Warnings)
+		}
+	}
+	if n := len(req.Warnings); n != 4 {
+		t.Errorf("%d warnings, want 4: a tool message's name is its function and not a participant", n)
+	}
+	if string(req.Tools[0].Extra["strict"]) != "true" {
+		t.Errorf("tool extra = %v", req.Tools[0].Extra)
+	}
+	quiet := parsed(t, `{"model":"m","n":1,"messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"https://x/1.png","detail":"auto"}}]}]}`)
+	if len(quiet.Warnings) != 0 {
+		t.Errorf("warnings = %v; n:1 and detail:auto are the defaults", quiet.Warnings)
+	}
+}

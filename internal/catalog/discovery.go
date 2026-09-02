@@ -266,7 +266,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// probed. Spec §4.3: no credential is spent and no request is made, which
 	// is what "discovery is not pretended" means in practice. The credential
 	// probe confirms reachability separately, on the operator's schedule.
-	if seeded := SeedFromPreset(preset, FallbackDoc()); len(seeded) > 0 {
+	if seeded := SeedFromPreset(preset, d.doc()); len(seeded) > 0 {
 		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset))
 		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
 			log.Printf("discovery: %s: seed: %v", p.ID, err)
@@ -365,15 +365,23 @@ func (d *Discoverer) priceLookup(preset Preset) func(string) (Metadata, bool) {
 	if preset.ModelsDevID == "" {
 		return nil
 	}
-	doc := FallbackDoc()
-	if d.opts.Metadata != nil {
-		if live := d.opts.Metadata(); len(live) > 0 {
-			doc = live
-		}
-	}
+	doc := d.doc()
 	return func(modelID string) (Metadata, bool) {
 		return doc.Metadata(preset.ModelsDevID, modelID)
 	}
+}
+
+// doc is the newest models.dev document available: the syncer's when it has
+// fetched one, the embedded snapshot otherwise. Seeding and pricing read the
+// same document, so a model models.dev added this morning is seeded for a
+// kind with no listing at the same moment it becomes priceable.
+func (d *Discoverer) doc() Doc {
+	if d.opts.Metadata != nil {
+		if live := d.opts.Metadata(); len(live) > 0 {
+			return live
+		}
+	}
+	return FallbackDoc()
 }
 
 // list performs the request and classifies the response.

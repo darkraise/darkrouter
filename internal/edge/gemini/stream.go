@@ -77,6 +77,7 @@ type pendingCall struct {
 	id   string
 	name string
 	args string
+	sig  string
 }
 
 func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error], asSSE bool) error {
@@ -114,7 +115,11 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		if pc.id != "" {
 			call["id"] = pc.id
 		}
-		return partChunk([]any{map[string]any{"functionCall": call}})
+		p := map[string]any{"functionCall": call}
+		if pc.sig != "" {
+			p["thoughtSignature"] = pc.sig
+		}
+		return partChunk([]any{p})
 	}
 
 	flushAllCalls := func() error {
@@ -189,10 +194,14 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 			}
 			switch ev.Delta.Type {
 			case ir.BlockText:
-				if ev.Delta.Text == "" {
+				if ev.Delta.Text == "" && ev.Delta.Signature == "" {
 					continue
 				}
-				sendErr = partChunk([]any{map[string]any{"text": ev.Delta.Text}})
+				p := map[string]any{"text": ev.Delta.Text}
+				if ev.Delta.Signature != "" {
+					p["thoughtSignature"] = ev.Delta.Signature
+				}
+				sendErr = partChunk([]any{p})
 			case ir.BlockThinking:
 				p := map[string]any{"text": ev.Delta.Thinking, "thought": true}
 				if ev.Delta.Signature != "" {
@@ -212,6 +221,9 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 				}
 				if pc.id == "" {
 					pc.id = ev.Delta.ToolID
+				}
+				if ev.Delta.Signature != "" {
+					pc.sig = ev.Delta.Signature
 				}
 				pc.args += ev.Delta.ToolInput
 			}

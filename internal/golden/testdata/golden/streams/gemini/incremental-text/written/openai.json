@@ -52,13 +52,7 @@
   },
   {
     "data": {
-      "choices": [
-        {
-          "delta": {},
-          "finish_reason": null,
-          "index": 0
-        }
-      ],
+      "choices": [],
       "created": 0,
       "id": "r-2",
       "model": "target-model",

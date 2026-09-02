@@ -18,13 +18,7 @@
   },
   {
     "data": {
-      "choices": [
-        {
-          "delta": {},
-          "finish_reason": null,
-          "index": 0
-        }
-      ],
+      "choices": [],
       "created": 0,
       "id": "msg_5",
       "model": "target-model",

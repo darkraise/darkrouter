@@ -62,11 +62,21 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 	pending []pendingCall) ([]any, []pendingCall, []ir.Warning) {
 
 	var (
-		out     []any
-		calls   []pendingCall
-		warns   []ir.Warning
-		results int
+		out   []any
+		calls []pendingCall
+		warns []ir.Warning
 	)
+	// Results naming a pending call claim it up front, so a result without
+	// a match answers the next call nothing else claimed.
+	claimed := map[string]bool{}
+	for _, b := range blocks {
+		if b.Type == ir.BlockToolResult && b.ToolResult != nil {
+			if c, ok := callByID(pending, b.ToolResult.ToolUseID); ok {
+				claimed[c.id] = true
+			}
+		}
+	}
+	next := 0
 	for _, b := range blocks {
 		if b.CacheControl != nil {
 			warns = append(warns, ir.Warning{
@@ -77,7 +87,11 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 
 		switch b.Type {
 		case ir.BlockText:
-			out = append(out, map[string]any{"text": b.Text})
+			p := map[string]any{"text": b.Text}
+			if sig := b.ExtraString(ir.ExtraThoughtSignature); sig != "" {
+				p["thoughtSignature"] = sig
+			}
+			out = append(out, p)
 
 		case ir.BlockThinking:
 			if b.Thinking == nil {
@@ -121,20 +135,33 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 			if b.ToolUse.ID != "" {
 				call["id"] = b.ToolUse.ID
 			}
-			out = append(out, map[string]any{"functionCall": call})
+			p := map[string]any{"functionCall": call}
+			if b.ToolUse.Signature != "" {
+				// Gemini 3 rejects a follow-up turn whose calls come back
+				// without the signature it issued.
+				p["thoughtSignature"] = b.ToolUse.Signature
+			}
+			out = append(out, p)
 
 		case ir.BlockToolResult:
 			if b.ToolResult == nil {
 				continue
 			}
-			// Positional within the turn: parallel calls to one function are
-			// indistinguishable by name, and that is exactly what an agentic
-			// loop produces.
+			// By id when the result carries one, positional otherwise: parallel
+			// calls to one function are indistinguishable by name, and that is
+			// exactly what an agentic loop produces.
 			name := ""
-			if results < len(pending) {
-				name = pending[results].name
+			if found, ok := callByID(pending, b.ToolResult.ToolUseID); ok {
+				name = found.name
+			} else {
+				for next < len(pending) && claimed[pending[next].id] {
+					next++
+				}
+				if next < len(pending) {
+					name = pending[next].name
+				}
+				next++
 			}
-			results++
 
 			resp := map[string]any{"name": name, "response": responseStruct(b.ToolResult.Text())}
 			if b.ToolResult.ToolUseID != "" {
@@ -167,6 +194,18 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 		}
 	}
 	return out, calls, warns
+}
+
+func callByID(pending []pendingCall, id string) (pendingCall, bool) {
+	if id == "" {
+		return pendingCall{}, false
+	}
+	for _, c := range pending {
+		if c.id == id {
+			return c, true
+		}
+	}
+	return pendingCall{}, false
 }
 
 // responseStruct meets Gemini's requirement that a function response be an

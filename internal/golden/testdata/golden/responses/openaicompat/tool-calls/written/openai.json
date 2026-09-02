@@ -10,7 +10,7 @@
           "tool_calls": [
             {
               "function": {
-                "arguments": "\"{\\\"city\\\":\\\"Oslo\\\"}\"",
+                "arguments": "{\"city\":\"Oslo\"}",
                 "name": "lookup"
               },
               "id": "call_a",
@@ -18,7 +18,7 @@
             },
             {
               "function": {
-                "arguments": "\"{\\\"city\\\":\\\"Bergen\\\"}\"",
+                "arguments": "{\"city\":\"Bergen\"}",
                 "name": "lookup"
               },
               "id": "call_b",
