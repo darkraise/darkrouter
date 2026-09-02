@@ -1,6 +1,10 @@
 package ir
 
-import "testing"
+import (
+	"encoding/json"
+	"fmt"
+	"testing"
+)
 
 func TestNeedsDetectsTools(t *testing.T) {
 	r := &Request{Tools: []Tool{{Name: "get_weather"}}}
@@ -174,5 +178,68 @@ func TestParseSurfaceAcceptsEveryValueAndNothingElse(t *testing.T) {
 		if _, ok := ParseSurface(bad); ok {
 			t.Errorf("ParseSurface(%q) accepted a value that is not in the vocabulary", bad)
 		}
+	}
+}
+
+func TestToolBuiltInNeedsAnEmptyNameAndABody(t *testing.T) {
+	raw := json.RawMessage(`{}`)
+	cases := []struct {
+		tool Tool
+		want bool
+	}{
+		{Tool{Name: "lookup"}, false},
+		{Tool{Name: "lookup", Extra: map[string]json.RawMessage{"strict": raw}}, false},
+		{Tool{Extra: map[string]json.RawMessage{"googleSearch": raw}}, true},
+		{Tool{}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.tool.BuiltIn(); got != tc.want {
+			t.Errorf("%+v BuiltIn = %v, want %v", tc.tool, got, tc.want)
+		}
+	}
+}
+
+func TestExtraStringRoundTrips(t *testing.T) {
+	var b ContentBlock
+	if b.ExtraString(ExtraThoughtSignature) != "" {
+		t.Fatal("an absent extra reads as empty")
+	}
+	b.SetExtraString(ExtraThoughtSignature, "CtEB\"Adm=")
+	if got := b.ExtraString(ExtraThoughtSignature); got != "CtEB\"Adm=" {
+		t.Fatalf("got %q", got)
+	}
+	b.Extra["n"] = json.RawMessage(`7`)
+	if b.ExtraString("n") != "" {
+		t.Fatal("a non-string extra reads as empty")
+	}
+}
+
+func TestOpenBlocksCloseInAscendingOrderAndReset(t *testing.T) {
+	var o OpenBlocks
+	for _, i := range []int{2000, 0, 1001, 1000} {
+		o.Open(i)
+	}
+	o.Open(0)
+	if !o.IsOpen(1000) || o.IsOpen(7) {
+		t.Fatal("membership is wrong")
+	}
+	var got []int
+	ok := o.CloseAll(func(ev StreamEvent, err error) bool {
+		if ev.Type != EventBlockStop || err != nil {
+			t.Fatalf("event = %+v err = %v", ev, err)
+		}
+		got = append(got, ev.Index)
+		return true
+	})
+	if !ok || fmt.Sprint(got) != "[0 1000 1001 2000]" {
+		t.Fatalf("closed %v", got)
+	}
+	if o.IsOpen(0) || !o.CloseAll(func(StreamEvent, error) bool { t.Fatal("nothing left"); return false }) {
+		t.Fatal("CloseAll must forget what it closed")
+	}
+	o.Open(1)
+	o.Open(2)
+	if o.CloseAll(func(StreamEvent, error) bool { return false }) {
+		t.Fatal("a consumer that stops listening is reported")
 	}
 }

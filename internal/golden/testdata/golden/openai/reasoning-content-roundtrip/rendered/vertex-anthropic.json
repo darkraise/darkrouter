@@ -1,0 +1,61 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Oslo?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "id": "call_a",
+          "input": {
+            "city": "Oslo"
+          },
+          "name": "lookup",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "clear, 18C",
+              "type": "text"
+            }
+          ],
+          "tool_use_id": "call_a",
+          "type": "tool_result"
+        },
+        {
+          "text": "And tomorrow?",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "tools": [
+    {
+      "description": "weather",
+      "input_schema": {
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "lookup"
+    }
+  ]
+}

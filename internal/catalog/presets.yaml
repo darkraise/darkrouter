@@ -5,7 +5,10 @@
 # the models.dev join key from https://models.dev/api.json. Corrections live in
 # presets.overrides.yaml and are re-applied on every run.
 #
-# quirks is a closed vocabulary; an unknown entry fails the preset test.
+# quirks is a closed vocabulary; an unknown entry fails the preset test. The
+# quirks in this file survive a regeneration: the generator carries them over
+# from the previous copy of the file, and presets.overrides.yaml wins where it
+# declares any.
 
 agentrouter:
   name: AgentRouter
@@ -570,6 +573,8 @@ deepseek:
     - llm
   models_dev_id: deepseek
   website: https://platform.deepseek.com
+  quirks:
+    - echo-reasoning-content
 dgrid:
   name: DGrid
   kind: openaicompat
@@ -1242,6 +1247,9 @@ mistral:
   models_dev_id: mistral
   free_tier: true
   website: https://mistral.ai
+  quirks:
+    - strict-unknown-fields
+    - temperature-top-p-exclusive
 mixlayer:
   name: Mixlayer
   kind: openaicompat
@@ -1568,6 +1576,8 @@ openrouter:
   models_dev_id: openrouter
   free_tier: true
   website: https://openrouter.ai
+  quirks:
+    - echo-reasoning-content
 openvecta:
   name: OpenVecta
   kind: openaicompat

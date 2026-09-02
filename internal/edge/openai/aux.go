@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -25,27 +24,8 @@ type wireEmbeddingRequest struct {
 	User           string          `json:"user"`
 }
 
-// readCappedBody reads the inbound body under the configured cap, reading one
-// byte past it so "exactly at the cap" is not rejected.
-func readCappedBody(r *http.Request, maxBody int64) ([]byte, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(body)) > maxBody {
-		// Typed rather than a bare error: an oversized JSON body asks the
-		// client for the same thing an oversized upload does, and only the
-		// type can carry that distinction out to the response status.
-		return nil, &ir.Error{
-			Type:    ir.ErrPayloadTooLarge,
-			Message: fmt.Sprintf("request body exceeds %d bytes", maxBody),
-		}
-	}
-	return body, nil
-}
-
 func ParseEmbedding(r *http.Request, maxBody int64) (*ir.EmbeddingRequest, error) {
-	body, err := readCappedBody(r, maxBody)
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +169,7 @@ type wireModerationRequest struct {
 }
 
 func ParseModeration(r *http.Request, maxBody int64) (*ir.ModerationRequest, error) {
-	body, err := readCappedBody(r, maxBody)
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +264,7 @@ type wireRerankRequest struct {
 }
 
 func ParseRerank(r *http.Request, maxBody int64) (*ir.RerankRequest, error) {
-	body, err := readCappedBody(r, maxBody)
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +386,7 @@ type wireImageRequest struct {
 }
 
 func ParseImage(r *http.Request, maxBody int64) (*ir.ImageRequest, error) {
-	body, err := readCappedBody(r, maxBody)
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +470,7 @@ type wireSpeechRequest struct {
 }
 
 func ParseSpeech(r *http.Request, maxBody int64) (*ir.SpeechRequest, error) {
-	body, err := readCappedBody(r, maxBody)
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, err
 	}

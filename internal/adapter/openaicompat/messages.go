@@ -13,12 +13,22 @@ import (
 // a leading system message, and RoleSystem turns stay where they are, because
 // OpenAI permits several and their position carries meaning. Only targets with
 // a single system field need xlate.CollectSystem.
-func renderMessages(req *ir.Request, target string) ([]any, []ir.Warning) {
+//
+// foldSystem serves an upstream with no system role at all: every system
+// block, wherever it sat, is gathered in order and prepended to the first user
+// turn, which is the only place such an upstream will read an instruction.
+func renderMessages(req *ir.Request, target string, foldSystem, echoReasoning bool) ([]any, []ir.Warning) {
 	var (
 		out   []any
 		warns []ir.Warning
 	)
-	if len(req.System) > 0 {
+	msgs := req.Messages
+	var folded string
+	if foldSystem {
+		var w []ir.Warning
+		folded, msgs, w = foldSystemTurns(req, target)
+		warns = append(warns, w...)
+	} else if len(req.System) > 0 {
 		text, w := blocksText(req.System, "system[]", target)
 		warns = append(warns, w...)
 		// System blocks carry cache markers too, and a cached system prompt is
@@ -32,7 +42,6 @@ func renderMessages(req *ir.Request, target string) ([]any, []ir.Warning) {
 		}
 	}
 
-	msgs := req.Messages
 	// A conversation ending in a text-only assistant turn is Anthropic's prefill
 	// idiom, which constrains the next completion. OpenAI reads it as a finished
 	// turn and answers the wrong question, so it is dropped rather than
@@ -48,11 +57,74 @@ func renderMessages(req *ir.Request, target string) ([]any, []ir.Warning) {
 	}
 
 	for i, m := range msgs {
-		rendered, w := renderMessage(i, m, target)
+		rendered, w := renderMessage(i, m, target, echoReasoning)
 		out = append(out, rendered...)
 		warns = append(warns, w...)
 	}
+	if folded != "" {
+		out = prependToFirstUser(out, folded)
+	}
 	return out, warns
+}
+
+// foldSystemTurns gathers every system block into one string and returns the
+// conversation without its system turns. The text is what prependToFirstUser
+// places, once the turns are rendered.
+func foldSystemTurns(req *ir.Request, target string) (string, []ir.Message, []ir.Warning) {
+	var (
+		parts []string
+		warns []ir.Warning
+		rest  []ir.Message
+	)
+	collect := func(blocks []ir.ContentBlock, field string) {
+		text, w := blocksText(blocks, field, target)
+		warns = append(warns, w...)
+		for _, b := range blocks {
+			warns = append(warns, cacheWarning(b, target)...)
+		}
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	collect(req.System, "system[]")
+	for _, m := range req.Messages {
+		if m.Role == ir.RoleSystem {
+			collect(m.Content, "messages[].system")
+			continue
+		}
+		rest = append(rest, m)
+	}
+	if len(parts) == 0 {
+		return "", rest, warns
+	}
+	warns = append(warns, ir.Warning{
+		Field: "system", Target: target,
+		Reason: "the target has no system role; the instruction was folded into the first user message",
+	})
+	return strings.Join(parts, "\n\n"), rest, warns
+}
+
+// prependToFirstUser puts folded system text ahead of the first user message's
+// content, or ahead of the whole conversation when there is no user turn to
+// carry it.
+func prependToFirstUser(msgs []any, text string) []any {
+	for i, raw := range msgs {
+		m, ok := raw.(map[string]any)
+		if !ok || m["role"] != "user" {
+			continue
+		}
+		switch c := m["content"].(type) {
+		case string:
+			m["content"] = text + "\n\n" + c
+		case []any:
+			m["content"] = append([]any{map[string]any{"type": "text", "text": text}}, c...)
+		default:
+			m["content"] = text
+		}
+		msgs[i] = m
+		return msgs
+	}
+	return append([]any{map[string]any{"role": "user", "content": text}}, msgs...)
 }
 
 // isTextOnlyAssistant identifies the prefill idiom. Text and nothing else is
@@ -76,7 +148,12 @@ func isTextOnlyAssistant(m ir.Message) bool {
 // a `user` message carrying whatever else it held. OpenAI requires each result
 // in its own message keyed by tool_call_id, immediately after the assistant
 // message that made the calls, and rejects a mixed turn with a 400.
-func renderMessage(turn int, m ir.Message, target string) ([]any, []ir.Warning) {
+//
+// echoReasoning sends an assistant turn's thinking back as reasoning_content.
+// DeepSeek's thinking mode rejects a tool loop that omits it, and OpenRouter
+// forwards it to the models that need it; OpenAI itself rejects the field, so
+// it is a preset quirk rather than the default.
+func renderMessage(turn int, m ir.Message, target string, echoReasoning bool) ([]any, []ir.Warning) {
 	var (
 		out   []any
 		warns []ir.Warning
@@ -96,13 +173,25 @@ func renderMessage(turn int, m ir.Message, target string) ([]any, []ir.Warning) 
 
 	case ir.RoleAssistant:
 		var (
-			text  strings.Builder
-			calls []any
+			text      strings.Builder
+			reasoning strings.Builder
+			calls     []any
 		)
 		for _, b := range m.Content {
 			switch b.Type {
 			case ir.BlockText:
 				text.WriteString(b.Text)
+			case ir.BlockThinking:
+				if !echoReasoning {
+					warns = append(warns, ir.Warning{
+						Field: "messages[].assistant.thinking", Target: target,
+						Reason: "the target does not accept reasoning_content on an assistant turn; the block was dropped",
+					})
+					continue
+				}
+				if b.Thinking != nil {
+					reasoning.WriteString(b.Thinking.Text)
+				}
 			case ir.BlockToolUse:
 				if b.ToolUse == nil {
 					continue
@@ -136,6 +225,9 @@ func renderMessage(turn int, m ir.Message, target string) ([]any, []ir.Warning) 
 		}
 		if len(calls) > 0 {
 			msg["tool_calls"] = calls
+		}
+		if reasoning.Len() > 0 {
+			msg["reasoning_content"] = reasoning.String()
 		}
 		return append(out, msg), warns
 	}

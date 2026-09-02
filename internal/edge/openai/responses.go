@@ -106,7 +106,7 @@ type wireRespPart struct {
 // response object must repeat back, and the dialect is constructed per request
 // so it can hold it between ParseRequest and the writer.
 func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, *responsesEcho, error) {
-	body, err := readCappedBody(r, maxBody)
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, nil, nil, err
 	}

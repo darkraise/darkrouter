@@ -1,0 +1,72 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Oslo?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "reasoningContent": {
+            "reasoningText": {
+              "signature": "",
+              "text": "The user wants the weather, so I should call lookup."
+            }
+          }
+        },
+        {
+          "toolUse": {
+            "input": {
+              "city": "Oslo"
+            },
+            "name": "lookup",
+            "toolUseId": "call_a"
+          }
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "toolResult": {
+            "content": [
+              {
+                "text": "clear, 18C"
+              }
+            ],
+            "toolUseId": "call_a"
+          }
+        },
+        {
+          "text": "And tomorrow?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "description": "weather",
+          "inputSchema": {
+            "json": {
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "name": "lookup"
+        }
+      }
+    ]
+  }
+}

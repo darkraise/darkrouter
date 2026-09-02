@@ -18,13 +18,7 @@
   },
   {
     "data": {
-      "choices": [
-        {
-          "delta": {},
-          "finish_reason": null,
-          "index": 0
-        }
-      ],
+      "choices": [],
       "created": 0,
       "id": "msg_4",
       "model": "target-model",
@@ -32,6 +26,9 @@
       "usage": {
         "completion_tokens": 0,
         "prompt_tokens": 29,
+        "prompt_tokens_details": {
+          "cached_tokens": 8
+        },
         "total_tokens": 29
       }
     }
@@ -72,13 +69,7 @@
   },
   {
     "data": {
-      "choices": [
-        {
-          "delta": {},
-          "finish_reason": null,
-          "index": 0
-        }
-      ],
+      "choices": [],
       "created": 0,
       "id": "msg_4",
       "model": "target-model",
@@ -86,6 +77,9 @@
       "usage": {
         "completion_tokens": 9,
         "prompt_tokens": 29,
+        "prompt_tokens_details": {
+          "cached_tokens": 8
+        },
         "total_tokens": 38
       }
     }

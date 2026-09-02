@@ -1,4 +1,4 @@
 [
-  "messages[].assistant.thinking -\u003e openaicompat: assistant turns carry text and tool calls only",
+  "messages[].assistant.thinking -\u003e openaicompat: the target does not accept reasoning_content on an assistant turn; the block was dropped",
   "messages[].assistant.redacted_thinking -\u003e openaicompat: assistant turns carry text and tool calls only"
 ]
