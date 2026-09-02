@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/admin"
@@ -436,5 +437,17 @@ func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
 	s.breaker.Record(k, fail)
 	if s.breaker.Available(k) {
 		t.Fatal("the edited trip_after was not applied to the running breaker")
+	}
+}
+
+func TestListenerTimeoutsAreSet(t *testing.T) {
+	cfg := config.TimeoutConfig{Total: 10 * time.Second}
+	read, idle := listenerTimeouts(cfg)
+	if read != 60*time.Second || idle != 120*time.Second {
+		t.Errorf("timeouts = %v/%v, want 60s/120s", read, idle)
+	}
+	cfg.Total = 10 * time.Minute
+	if read, _ = listenerTimeouts(cfg); read != 20*time.Minute {
+		t.Errorf("read timeout = %v, want twice a long total", read)
 	}
 }
