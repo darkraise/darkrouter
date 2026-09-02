@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tiktoken-go/tokenizer"
+
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -96,5 +98,35 @@ func TestCountIgnoresMedia(t *testing.T) {
 func TestCountIsNeverNegativeOnAnEmptyRequest(t *testing.T) {
 	if got := Count(&ir.Request{}, "gpt-4o"); got < 0 {
 		t.Errorf("Count = %d", got)
+	}
+}
+
+// The codec is built once per encoding. Building it per count would pay the
+// vocabulary load on every request to an endpoint that exists to be cheap.
+func TestTheCodecIsConstructedOncePerEncoding(t *testing.T) {
+	calls := 0
+	orig := getCodec
+	getCodec = func(e tokenizer.Encoding) (tokenizer.Codec, error) {
+		calls++
+		return orig(e)
+	}
+	t.Cleanup(func() { getCodec = orig })
+	resetCodecs()
+
+	req := &ir.Request{Messages: []ir.Message{{
+		Role:    ir.RoleUser,
+		Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "the quick brown fox"}},
+	}}}
+	first := Count(req, "gpt-4o")
+	second := Count(req, "gpt-4o")
+	if first != second {
+		t.Fatalf("counts differ: %d vs %d", first, second)
+	}
+	if calls != 1 {
+		t.Errorf("codec constructed %d times, want 1", calls)
+	}
+	Count(req, "gpt-4-turbo")
+	if calls != 2 {
+		t.Errorf("a second encoding must construct its own codec once: %d calls", calls)
 	}
 }

@@ -1,18 +1,22 @@
 package exec
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/config"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 )
 
@@ -119,5 +123,126 @@ func TestHandleCountReportsAnUnknownModel(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "not_found_error") {
 		t.Errorf("body = %s; the error is written in the inbound dialect", rec.Body.String())
+	}
+}
+
+// countExecutorWith is countExecutor with collaborators, a preset and a
+// timeout policy, for the paths the native count shares with the loop.
+func countExecutorWith(t *testing.T, kind, upstreamURL, preset string, deps Deps, extraCfg string) *Executor {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "darkrouter.yaml")
+	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" + extraCfg + "providers:\n" +
+		"  - id: fake\n    kind: " + kind + "\n    base_url: " + upstreamURL +
+		"\n    api_key: ${K}\n    models: [m]\n"
+	if preset != "" {
+		body += "    preset: " + preset + "\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
+		"openaicompat": openaicompat.New(),
+		"anthropic":    anthropic.New(),
+	}, deps)
+}
+
+var fakeCountKey = health.Key{ProviderID: "fake", KeyID: "", Model: "m"}
+
+func TestHandleCountGivesUpAtTheAttemptDeadline(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	}))
+	defer up.Close()
+
+	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{},
+		"policy:\n  timeout:\n    connect: 5ms\n    first_byte: 200ms\n    total: 1s\n")
+	start := time.Now()
+	rec := postCount(t, e, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != 200 || rec.Header().Get("X-Darkrouter-Estimated") != "true" {
+		t.Fatalf("code = %d estimated = %q; a stalled native count must fall back",
+			rec.Code, rec.Header().Get("X-Darkrouter-Estimated"))
+	}
+	if time.Since(start) > 1500*time.Millisecond {
+		t.Errorf("the native count ran %v, past the attempt deadline", time.Since(start))
+	}
+}
+
+func TestHandleCountSkipsACoolingTargetAndRecordsFailures(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(503)
+	}))
+	defer up.Close()
+
+	b := health.New(3, time.Hour)
+	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{Health: b, Fleet: b}, "")
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	for i := 0; i < 3; i++ {
+		if rec := postCount(t, e, "anthropic", body); rec.Code != 200 {
+			t.Fatalf("code = %d", rec.Code)
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("upstream called %d times, want 3", calls)
+	}
+	if b.Available(fakeCountKey) {
+		t.Fatal("three 503s on the counting endpoint did not trip the breaker")
+	}
+	postCount(t, e, "anthropic", body)
+	if calls != 3 {
+		t.Error("a cooling target was still asked to count")
+	}
+}
+
+// headerResolver stands in for a non-static credential strategy.
+type headerResolver struct{}
+
+func (headerResolver) For(context.Context, auth.Target, auth.Credential) (auth.Authorizer, error) {
+	return func(_ context.Context, hr *http.Request) error {
+		hr.Header.Set("Authorization", "Bearer resolved")
+		return nil
+	}, nil
+}
+
+func TestHandleCountAppliesTheAuthorizer(t *testing.T) {
+	var got string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"input_tokens":7}`))
+	}))
+	defer up.Close()
+
+	e := countExecutorWith(t, "anthropic", up.URL, "anthropic-oauth", Deps{Auth: headerResolver{}}, "")
+	rec := postCount(t, e, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "7") {
+		t.Fatalf("code = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if got != "Bearer resolved" {
+		t.Errorf("Authorization = %q; the resolved credential must be applied", got)
+	}
+}
+
+func TestHandleCountCapsTheResponseBody(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pad":"` + strings.Repeat("x", 70<<10) + `","input_tokens":7}`))
+	}))
+	defer up.Close()
+
+	e := countExecutor(t, "anthropic", up.URL)
+	rec := postCount(t, e, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != 200 || rec.Header().Get("X-Darkrouter-Estimated") != "true" {
+		t.Fatalf("code = %d estimated = %q; an oversized count body must fall back",
+			rec.Code, rec.Header().Get("X-Darkrouter-Estimated"))
 	}
 }

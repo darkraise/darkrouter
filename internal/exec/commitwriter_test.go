@@ -63,35 +63,6 @@ func TestAnEmptyWriteDoesNotCommit(t *testing.T) {
 	}
 }
 
-func TestOnCommitFiresExactlyOnce(t *testing.T) {
-	// The loop hangs the total-to-idle timeout switch and the diagnostics
-	// headers off this hook. Firing it twice would restart the idle clock
-	// mid-stream.
-	var fired int
-	cw := NewCommitWriter(httptest.NewRecorder())
-	cw.OnCommit(func() { fired++ })
-
-	cw.WriteHeader(http.StatusOK)
-	_, _ = cw.Write([]byte("a"))
-	_, _ = cw.Write([]byte("b"))
-
-	if fired != 1 {
-		t.Errorf("OnCommit fired %d times, want 1", fired)
-	}
-}
-
-func TestOnCommitRegisteredAfterCommitFiresImmediately(t *testing.T) {
-	// Registration order must not decide whether the hook runs, or a surface
-	// that writes before the loop finishes wiring would skip the timer switch.
-	var fired int
-	cw := NewCommitWriter(httptest.NewRecorder())
-	_, _ = cw.Write([]byte("a"))
-	cw.OnCommit(func() { fired++ })
-	if fired != 1 {
-		t.Errorf("OnCommit fired %d times, want 1", fired)
-	}
-}
-
 func TestFlushPassesThroughAndCommits(t *testing.T) {
 	// SSE surfaces flush per event. A recorder implements http.Flusher, and a
 	// wrapper that swallowed it would buffer every stream to completion.

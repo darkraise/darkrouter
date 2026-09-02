@@ -77,6 +77,7 @@ func runServer(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	armSecondSignal(ctx, stop)
 
 	db, err := store.Open(*dbPath)
 	if err != nil {
@@ -164,6 +165,16 @@ func runServer(args []string) error {
 	}
 	log.Print("darkrouter stopped")
 	return nil
+}
+
+// armSecondSignal restores default signal handling once the first signal has
+// started the drain, so a second Ctrl-C kills the process instead of being
+// absorbed by a context that is already cancelled.
+func armSecondSignal(ctx context.Context, stop func()) {
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 }
 
 // runHashPassword prints a bcrypt hash for DARKROUTER_ADMIN_PASSWORD_HASH.

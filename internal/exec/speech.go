@@ -41,10 +41,7 @@ func (o *speechOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Ad
 // the request row is the only place that shows up.
 func (o *speechOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
 	defer resp.Body.Close()
-
-	ac.Rec.FinalProviderID = ac.Cand.ProviderID
-	ac.Rec.FinalModel = ac.Cand.Model
-	ac.Rec.Warnings = warningStrings(ac.Warns)
+	ac.resetIdle()
 	ttft := time.Since(ac.Rec.TS).Milliseconds()
 	ac.Rec.TTFTMs = &ttft
 
@@ -65,8 +62,9 @@ func (o *speechOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 	}
 	if err != nil && !cw.Committed() {
 		// Nothing reached the client, so the chain may still continue.
-		return adapter.OutcomeRetryableProvider, errorFor(adapter.OutcomeRetryableProvider, err)
+		return failedParse(ac, resp, err)
 	}
+	ac.served(ac.Warns)
 	return adapter.OutcomeSuccess, nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -49,6 +48,7 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 			Type: ir.ErrDarkrouter, Message: "adapter does not serve embeddings",
 		}
 	}
+	ac.resetIdle()
 	out, err := em.ParseEmbedding(resp)
 	if err != nil {
 		return failedParse(ac, resp, err)
@@ -69,14 +69,8 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 		})
 	}
 
-	ttft := time.Since(ac.Rec.TS).Milliseconds()
-	ac.Rec.TTFTMs = &ttft
 	applyUsage(ac.Rec, &out.Usage)
-	ac.Rec.FinalProviderID = ac.Cand.ProviderID
-	ac.Rec.FinalModel = ac.Cand.Model
-	// Assigned, not appended: the record must describe the translation the
-	// client received, not every attempt abandoned on the way there.
-	ac.Rec.Warnings = warningStrings(warns)
+	ac.served(warns)
 
 	ac.Rec.SurfaceMeta = map[string]any{
 		"input_count": o.req.InputCount(),
@@ -99,21 +93,19 @@ func (o *embedOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
 
 var _ SurfaceOp = (*embedOp)(nil)
 
-// failedParse is chat's parse-failure tail, shared by every auxiliary surface.
+// failedParse is the parse-failure tail every surface shares.
 //
 // A 2xx that cannot be read is a provider fault, so it rejoins the outcome path
-// and signals health. A refusal is not: recording it would trip the breaker on
-// a healthy provider, and failing over would re-ask a question every model in
-// the chain will refuse.
+// and counts against the breaker like a 5xx would. A refusal is not: it is
+// recorded as fatal, which proves the provider reachable without failing over
+// to re-ask a question every model in the chain will refuse.
 func failedParse(ac *AttemptCtx, resp *http.Response, err error) (adapter.Outcome, *ir.Error) {
 	outcome := outcomeForParseError(err)
 	if last := len(ac.Rec.Attempts) - 1; last >= 0 {
 		ac.Rec.Attempts[last].Outcome = string(outcome)
 		ac.Rec.Attempts[last].Error = err.Error()
 	}
-	if outcome != adapter.OutcomeFatal {
-		ac.Exec.recordHealthFor(ac.Cand, outcome, resp)
-	}
+	ac.recordHealth(outcome, resp)
 	var ie *ir.Error
 	if errors.As(err, &ie) {
 		return outcome, ie

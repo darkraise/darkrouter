@@ -512,3 +512,44 @@ func TestSaveConversationsDefaultsOnAndParsesOff(t *testing.T) {
 		t.Errorf("playground.save_conversations not recorded in FileKeys: %v", c.FileKeys)
 	}
 }
+
+func TestTimeoutValidation(t *testing.T) {
+	cases := []struct {
+		name, yaml, want string
+	}{
+		{"negative connect", "policy:\n  timeout:\n    connect: -1s\n", "policy.timeout.connect must be positive"},
+		{"negative first_byte", "policy:\n  timeout:\n    first_byte: -1s\n", "policy.timeout.first_byte must be positive"},
+		{"negative total", "policy:\n  timeout:\n    total: -1s\n", "policy.timeout.total must be positive"},
+		{"negative idle", "policy:\n  timeout:\n    idle: -1s\n", "policy.timeout.idle must be positive"},
+		{"total below one attempt", "policy:\n  timeout:\n    connect: 10s\n    first_byte: 60s\n    total: 30s\n",
+			"policy.timeout.total (30s) must be at least connect + first_byte (1m10s)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(minimal+tc.yaml), env(map[string]string{"GROQ_KEY": "sk-x"}))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	// Exactly connect + first_byte is enough for one attempt.
+	if _, err := Parse([]byte(minimal+"policy:\n  timeout:\n    connect: 10s\n    first_byte: 60s\n    total: 70s\n"),
+		env(map[string]string{"GROQ_KEY": "sk-x"})); err != nil {
+		t.Fatalf("a total equal to connect + first_byte must be accepted: %v", err)
+	}
+}
+
+func TestShutdownGraceDefaults(t *testing.T) {
+	c, err := Parse([]byte(minimal), env(map[string]string{"GROQ_KEY": "sk-x"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Server.ShutdownGrace != 10*time.Second {
+		t.Errorf("ShutdownGrace = %v, want 10s", c.Server.ShutdownGrace)
+	}
+	negative := strings.Replace(minimal, "server:\n", "server:\n  shutdown_grace: -1s\n", 1)
+	if _, err := Parse([]byte(negative), env(map[string]string{"GROQ_KEY": "sk-x"})); err == nil ||
+		!strings.Contains(err.Error(), "server.shutdown_grace must be positive") {
+		t.Errorf("err = %v, want a rejection", err)
+	}
+}

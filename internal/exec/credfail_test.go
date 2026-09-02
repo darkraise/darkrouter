@@ -57,18 +57,28 @@ func TestAMalformedCredentialFailsOverToTheNextProvider(t *testing.T) {
 // Making the outcome retryable must not turn a broken credential into a
 // silence the operator has to go looking for.
 func TestAMalformedCredentialWithNoAlternativeStillReports(t *testing.T) {
+	logger := &captureLogger{}
 	e := newExecutorRaw(t, []providerSpec{
 		{id: "broken", kind: "openaicompat", upstreamURL: "http://broken.invalid/v1",
 			models: []string{"m"}, preset: "anthropic-oauth"},
 	}, "sk", map[string]adapter.Adapter{"openaicompat": openaicompat.New()},
-		Deps{Auth: failingResolver{providerID: "broken"}}, 0, nil)
+		Deps{Auth: failingResolver{providerID: "broken"}, Log: logger}, 0, nil)
 
 	rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 	if rec.Code == 200 {
 		t.Fatalf("code=200; a request with no usable credential must fail")
 	}
-	if !strings.Contains(rec.Body.String(), "unexpected end of JSON input") {
-		t.Errorf("body = %s; the credential error must reach the client",
-			rec.Body.String())
+	// The client learns that the credential is the problem and nothing about
+	// what is inside it; the detail belongs to the operator's trace.
+	if body := rec.Body.String(); !strings.Contains(body, "credential unavailable") ||
+		strings.Contains(body, "unexpected end of JSON input") {
+		t.Errorf("body = %s; want the fixed message and no credential internals", body)
+	}
+	r := logger.only(t)
+	if len(r.Attempts) != 1 || !strings.Contains(r.Attempts[0].Error, "unexpected end of JSON input") {
+		t.Errorf("attempts = %+v; the credential error must reach the trace", r.Attempts)
+	}
+	if rec.Header().Get("X-Darkrouter-Attempts") != "0" {
+		t.Errorf("attempts header = %q; nothing was sent upstream", rec.Header().Get("X-Darkrouter-Attempts"))
 	}
 }

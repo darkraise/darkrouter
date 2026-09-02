@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -52,6 +53,8 @@ type Server struct {
 	src     *provider.SQLSource
 	ex      *exec.Executor
 	logw    *store.LogWriter
+	metrics *metrics
+	tokens  *tokenAuth
 	breaker *health.Breaker
 	persist *health.Persister
 
@@ -80,8 +83,6 @@ func (s *Server) Catalog() *catalog.Store { return s.cat }
 // probe. It is nil when discovery is disabled.
 func (s *Server) Discoverer() *catalog.Discoverer { return s.disc }
 
-// New wires the gateway. It loads the provider set eagerly so a bad credential
-// fails startup rather than every request.
 // Option adjusts what New builds. There is exactly one, and it exists because
 // the shipped preset set is embedded: without a seam, nothing above this package
 // can point an OAuth token endpoint at a fake, and the assembled refresh path
@@ -95,6 +96,8 @@ func WithPresets(p catalog.Presets) Option {
 	return func(o *options) { o.presets = p }
 }
 
+// New wires the gateway. It loads the provider set eagerly so a bad credential
+// fails startup rather than every request.
 func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings []string,
 	opts ...Option) (*Server, error) {
 
@@ -111,6 +114,14 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
+	met := newMetrics(breaker, logw)
+	// policy.cooldown is edited through the admin API and lands in the next
+	// config snapshot, so the breaker reads it from there rather than from the
+	// values it was built with.
+	breaker.Configure(func() (int, time.Duration) {
+		p := cfgStore.Current().Policy.Cooldown
+		return *p.TripAfter, p.Max
+	})
 
 	// Built above both the discoverer and the executor because each resolves
 	// credentials through it. Static styles need none of these collaborators:
@@ -210,7 +221,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		// and it has to mean the same thing on both.
 		"vertex": vertexadapter.NewWithFetcher(mediaFetcher),
 	}, exec.Deps{
-		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
+		Log: met, Health: breaker, Fleet: breaker, Catalog: cat,
 		Auth:      authManager,
 		Protocols: protocols,
 	})
@@ -252,6 +263,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
+		metrics: met, tokens: newTokenAuth(db),
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
 		freeSync:  freeSyncWorker,
@@ -371,14 +383,14 @@ func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		if ok, err := s.db.ProxyTokenValid(r.Context(), presented); err == nil && ok {
+		if s.tokens.accept(r.Context(), presented) {
 			h(w, r)
 			return
 		}
 		// Authentication is off only when neither mechanism is configured: a
 		// gateway with proxy tokens issued must not accept an empty header
 		// just because the shared secret is unset.
-		if shared == "" && !s.hasProxyTokens(r.Context()) {
+		if shared == "" && !s.tokens.configured(r.Context()) {
 			h(w, r)
 			return
 		}
@@ -386,20 +398,6 @@ func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 			Type: ir.ErrAuthentication, Message: "invalid proxy token",
 		})
 	}
-}
-
-// hasProxyTokens reports whether any per-client credential exists. A failure
-// to read is treated as "yes": refusing an unauthenticated request is the safe
-// answer when the store cannot say.
-func (s *Server) hasProxyTokens(ctx context.Context) bool {
-	if s.db == nil {
-		return false
-	}
-	toks, err := s.db.ProxyTokens(ctx)
-	if err != nil {
-		return true
-	}
-	return len(toks) > 0
 }
 
 // constantTimeEqual compares two secrets without leaking their lengths.
@@ -411,8 +409,6 @@ func constantTimeEqual(got, want string) bool {
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
 }
 
-// handleModels lists configured models. Aliases would be listed first, but
-// Phase 1 has none; Phase 6 replaces the backing with the catalog.
 // listedModel is one row of a client-facing listing.
 type listedModel struct {
 	ID              string
@@ -504,19 +500,28 @@ func (s *Server) AdminHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
 	})
+	// Ready means able to serve: the database answers and the live config is
+	// the one on disk. An orchestrator routes on this, so a gateway that would
+	// fail every request must not look ready.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.db.Read.PingContext(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "database: %v\n", err)
+			return
+		}
+		if err := s.store.LastError(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "config: %v\n", err)
+			return
+		}
+		fmt.Fprint(w, "ok\n")
 	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w,
-			"# HELP darkrouter_log_records_dropped_total Request records discarded because the log channel was full.\n"+
-				"# TYPE darkrouter_log_records_dropped_total counter\n"+
-				"darkrouter_log_records_dropped_total %d\n"+
-				"# HELP darkrouter_log_records_written_total Request records persisted.\n"+
-				"# TYPE darkrouter_log_records_written_total counter\n"+
-				"darkrouter_log_records_written_total %d\n",
-			s.logw.Dropped(), s.logw.Written())
+		s.metrics.write(w, s.logw.Dropped(), s.logw.Written())
 	})
 
 	// Everything else goes to the admin API, which owns its own auth. Mounted
@@ -554,7 +559,7 @@ func (s *Server) Run(ctx context.Context) error {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			if err := fn(workerCtx); err != nil {
+			if err := runWorker(workerCtx, name, fn, workerRestartDelay); err != nil {
 				log.Printf("%s: %v", name, err)
 			}
 		}()
@@ -628,18 +633,24 @@ func (s *Server) Run(ctx context.Context) error {
 	lc, cancelLC := context.WithCancel(context.Background())
 	defer cancelLC()
 
+	readTimeout, idleTimeout := listenerTimeouts(cfg.Policy.Timeout)
 	proxy := &http.Server{
 		Addr:    cfg.Server.ProxyListen,
 		Handler: s.ProxyHandler(),
 		// No WriteTimeout: it would kill long streams at a fixed age. Slowloris
-		// protection comes from ReadHeaderTimeout instead.
-		ReadHeaderTimeout: 10 * time.Second,
+		// protection comes from ReadHeaderTimeout; ReadTimeout bounds a client
+		// that sends its body at a trickle.
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
 		BaseContext:       func(net.Listener) context.Context { return lc },
 	}
 	admin := &http.Server{
 		Addr:              cfg.Server.AdminListen,
 		Handler:           s.AdminHandler(),
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       minReadTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	// Both listeners are bound before any goroutine starts. ListenAndServe would
@@ -697,6 +708,57 @@ func (s *Server) Run(ctx context.Context) error {
 	stopWorkers()
 	workers.Wait()
 	return shutdownErr
+}
+
+// Listener bounds. minReadTimeout covers max_body_bytes at modest bandwidth;
+// a proxy whose policy.timeout.total is longer gets twice that instead, so a
+// client is never cut off sooner than the gateway would cut off a provider.
+const (
+	readHeaderTimeout  = 10 * time.Second
+	minReadTimeout     = 60 * time.Second
+	listenerIdle       = 120 * time.Second
+	workerRestartDelay = time.Second
+)
+
+func listenerTimeouts(t config.TimeoutConfig) (read, idle time.Duration) {
+	read = minReadTimeout
+	if d := 2 * t.Total; d > read {
+		read = d
+	}
+	return read, listenerIdle
+}
+
+// runWorker runs fn until it returns or ctx ends, restarting it after a panic.
+// A background job that dies with a stack trace takes its whole function —
+// log writing, health persistence, discovery — down for the rest of the
+// process lifetime, which is a worse failure than the one it panicked over.
+func runWorker(ctx context.Context, name string, fn func(context.Context) error,
+	restartDelay time.Duration) error {
+
+	for {
+		err, panicked := runOnce(name, fn, ctx)
+		if !panicked {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(restartDelay):
+		}
+	}
+}
+
+func runOnce(name string, fn func(context.Context) error, ctx context.Context) (err error, panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("%s: panic: %v\n%s", name, r, debug.Stack())
+			panicked = true
+		}
+	}()
+	return fn(ctx), false
 }
 
 func ignoreClosed(err error) error {
