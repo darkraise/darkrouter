@@ -1,6 +1,9 @@
 package ir
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestNeedsDetectsTools(t *testing.T) {
 	r := &Request{Tools: []Tool{{Name: "get_weather"}}}
@@ -173,6 +176,24 @@ func TestParseSurfaceAcceptsEveryValueAndNothingElse(t *testing.T) {
 	for _, bad := range []string{"embeddings", "images", "audio", "moderations", "chat", ""} {
 		if _, ok := ParseSurface(bad); ok {
 			t.Errorf("ParseSurface(%q) accepted a value that is not in the vocabulary", bad)
+		}
+	}
+}
+
+func TestToolBuiltInNeedsAnEmptyNameAndABody(t *testing.T) {
+	raw := json.RawMessage(`{}`)
+	cases := []struct {
+		tool Tool
+		want bool
+	}{
+		{Tool{Name: "lookup"}, false},
+		{Tool{Name: "lookup", Extra: map[string]json.RawMessage{"strict": raw}}, false},
+		{Tool{Extra: map[string]json.RawMessage{"googleSearch": raw}}, true},
+		{Tool{}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.tool.BuiltIn(); got != tc.want {
+			t.Errorf("%+v BuiltIn = %v, want %v", tc.tool, got, tc.want)
 		}
 	}
 }
