@@ -57,5 +57,8 @@ func (d *DB) LoadLastUsed(ctx context.Context) (map[health.CredKey]time.Time, er
 		}
 		out[health.CredKey{ProviderID: providerID, KeyID: keyID}] = time.UnixMilli(at).UTC()
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load last used: %w", err)
+	}
+	return out, nil
 }

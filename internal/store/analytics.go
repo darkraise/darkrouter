@@ -88,7 +88,10 @@ func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]Usage
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("usage by: %w", err)
+	}
+	return out, nil
 }
 
 // RecentStats is the overview's headline numbers over a window.
@@ -227,7 +230,10 @@ func (d *DB) RecentFailovers(ctx context.Context, window time.Duration, limit in
 		}
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("recent failovers: %w", err)
+	}
+	return out, nil
 }
 
 // FailoverEdge counts requests that reached `ToProviderID` after
@@ -271,5 +277,8 @@ func (d *DB) FailoverEdges(ctx context.Context, window time.Duration) ([]Failove
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failover edges: %w", err)
+	}
+	return out, nil
 }

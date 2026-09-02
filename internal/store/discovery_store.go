@@ -63,5 +63,8 @@ func (d *DB) DiscoveryHealth(ctx context.Context) ([]DiscoveryHealthRow, error) 
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("discovery health: %w", err)
+	}
+	return out, nil
 }

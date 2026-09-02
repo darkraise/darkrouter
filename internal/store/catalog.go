@@ -122,7 +122,10 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list models: %w", err)
+	}
+	return out, nil
 }
 
 // ModelOverrides returns the operator's per-(provider, model) corrections.
@@ -160,7 +163,10 @@ func (d *DB) ModelOverrides(ctx context.Context) ([]ModelOverride, error) {
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list model overrides: %w", err)
+	}
+	return out, nil
 }
 
 // UpsertMetadata writes the models.dev half of a model's record.

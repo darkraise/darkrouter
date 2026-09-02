@@ -185,15 +185,31 @@ var policyFields = []policyField{
 // Only what is set: a caller has to tell "not overridden" from "set to zero",
 // which is what lets the config screen name the source of each value.
 func (d *DB) PolicyOverrides(ctx context.Context) (map[string]string, error) {
-	out := map[string]string{}
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT key, value FROM settings WHERE key LIKE 'policy.%'`)
+	if err != nil {
+		return nil, fmt.Errorf("read policy overrides: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	known := make(map[string]bool, len(policyFields))
 	for _, f := range policyFields {
-		v, ok, err := getSetting(ctx, d.Read, f.key)
-		if err != nil {
-			return nil, err
+		known[f.key] = true
+	}
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, fmt.Errorf("scan policy override: %w", err)
 		}
-		if ok {
-			out[f.key] = v
+		// Only the keys this binary reads. A row an older or newer build wrote
+		// under the prefix is not an override it can apply.
+		if known[k] {
+			out[k] = v
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read policy overrides: %w", err)
 	}
 	return out, nil
 }
