@@ -12,17 +12,26 @@ deterministic failover, persistence, health tracking, an admin dashboard, and
 a catalog that merges shipped presets, models.dev metadata, and live
 discovery. A request whose dialect already matches the chosen provider's wire
 format takes a fast path that forwards the body rather than re-rendering it —
-see "The fast path" below. See `docs/superpowers/specs/README.md` for the
-full design and the phase roadmap.
+see "The fast path" below.
+
+`docs/ARCHITECTURE.md` describes how the pieces fit, `docs/API.md` lists every
+admin route, `docs/DEPLOY.md` covers deployment and rollback, and
+`docs/superpowers/specs/README.md` holds the original design.
 
 ## Run
 
 ```bash
 mkdir -p data
 cp darkrouter.example.yaml data/darkrouter.yaml
+export DARKROUTER_MASTER_KEY="$(openssl rand -base64 32)"   # keep it: it unlocks stored credentials
 export GROQ_KEY=your-key
 docker compose up --build
 ```
+
+The master key encrypts every credential stored in `data/darkrouter.db`; the
+process refuses to start without one, and a database opened under a different
+key cannot read what it holds. For a real deployment put it in `.env` and keep
+a copy off the host.
 
 Then:
 
@@ -39,16 +48,20 @@ terminal.
 
 ## Deploy
 
-`.github/workflows/ci.yml` tests and lints the console, vets and tests the Go
-code with `-race`, and then builds and pushes
-`darkraise/darkrouter` — `latest` from master, semver tags from a `v*` tag, and
+`.github/workflows/ci.yml` gates every push with `gofmt`, `go vet`,
+`staticcheck`, `govulncheck`, `npm audit`, the console's tests, lint and
+build, and `go test -race -cover`; then it builds and pushes
+`darkraise/darkrouter` with an SBOM and provenance attached and a Trivy scan
+of the pushed digest — `latest` from master, semver tags from a `v*` tag, and
 an immutable `sha-` tag on every build, which is what a rollback pins to once
 `latest` has moved. Set two repository secrets: `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN`. Pull requests run the tests and push nothing.
+`DOCKERHUB_TOKEN`. Pull requests run the gates and push nothing.
 
 One image carries everything. The SPA is built in its own stage and embedded
 into the binary with `go:embed`, so there is no second container and no static
-file server to point anywhere.
+file server to point anywhere. The full procedure, including rolling back,
+verifying a local build by bytes and the hardening the compose file applies,
+is in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ```bash
 mkdir -p data && sudo chown -R 10001:10001 data   # the image's unprivileged uid
@@ -73,6 +86,44 @@ docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
 
 `GET /healthz` on the admin port reports the stamped version, so a running
 container can be matched to the build it came from.
+
+### Command line
+
+`darkrouter` with no verb runs the gateway. Two flags: `-config` (default
+`darkrouter.yaml`; the image passes `/data/darkrouter.yaml`) and `-db`, which
+defaults to `darkrouter.db` beside the config file. Two subcommands:
+
+- `hash-password [-password X]` prints a bcrypt hash for
+  `DARKROUTER_ADMIN_PASSWORD_HASH`; with no flag it reads the password from
+  stdin so it never lands in shell history.
+- `rotate-key [-db path]` re-encrypts every stored credential under a new
+  master key. The current key comes from `DARKROUTER_MASTER_KEY`, the new one
+  is read from stdin, and the gateway must be stopped while it runs. Set the
+  variable to the new value before restarting; the old key opens nothing
+  afterwards.
+
+### Backup and restore
+
+A backup is two things that are useless apart: `data/` (the config file, the
+database and its WAL) and the master key. Take the database copy either with
+the container stopped or, while it runs, with SQLite's online backup so the
+WAL is folded in consistently:
+
+```bash
+sqlite3 data/darkrouter.db ".backup 'darkrouter-$(date -u +%F).db'"
+```
+
+Store the master key with the backup but not in the same place as the
+database: a database without its key holds nothing readable, and a key
+without its database is harmless. If `rotate-key` has run since a backup was
+taken, that backup still needs the key that was current when it was taken —
+keep the old key with the old backup until the backup is retired.
+
+Restoring, and downgrading, are the same operation: stop the container, put
+the backup's `darkrouter.db` back under `data/`, set `DARKROUTER_MASTER_KEY`
+to the key that matches it, pin `DARKROUTER_TAG` to the build you want and
+start. Migrations run forward only, so a newer database is refused by an
+older binary rather than half-applied.
 
 ### LAN and internet
 
@@ -201,6 +252,11 @@ body, and Vertex encodes the model in its URL alongside the publisher.
 The admin port serves an operator dashboard at `/`, and the REST API it runs on
 at `/api/*`. Both require a session; `/healthz`, `/readyz` and `/metrics` do
 not, so an orchestrator and a Prometheus scrape keep working.
+[`docs/API.md`](docs/API.md) lists every route under `/api` with its request
+and response shape: providers and their credentials, model overrides and
+discovery, aliases and policy, route preview, requests and traces, usage,
+sessions and proxy tokens, the playground, OAuth connection, and the
+config view.
 
 Set a password before starting:
 
@@ -277,6 +333,24 @@ test runs against a known-answer vector, an SDK-encoded frame, or a fake server.
 The Converse and `rawPredict` field names in particular come from vendor
 documentation rather than from a live call.
 
+### Augment
+
+Augment publishes no HTTP API, so the `auggie` preset is an `openaicompat`
+provider whose base URL, `auggie://cli/v1`, is served by a transport that runs
+the `auggie` CLI as a subprocess (`internal/localcli`) and returns its output
+as an OpenAI-shaped response. The image installs a pinned version and the
+compose file keeps its login state in the `auggie-state` volume, so
+`docker exec -it darkrouter auggie login` once is enough; setting
+`AUGMENT_SESSION_AUTH` in `.env` is the alternative for a host that cannot
+complete the interactive login. `AUGGIE_BIN` points at a different binary
+when the bundled one is not wanted.
+
+The CLI is proprietary and its licence restricts redistribution — see
+`THIRD_PARTY_NOTICES.md`. Build with `--build-arg WITH_AUGGIE=0` for an image
+that leaves it and its Node runtime out; a request routed to the preset then
+fails with an error naming the missing binary, and everything else works
+unchanged.
+
 ## The model catalog
 
 Darkrouter ships a catalog of provider presets, so adding a known provider is a
@@ -330,6 +404,9 @@ The race detector needs cgo and a C toolchain, which a stock Windows checkout
 does not have. Run it in the build image instead:
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src golang:1.26-alpine \
+docker run --rm -v "$PWD":/src -w /src golang:1.26.6-alpine \
   sh -c 'apk add --no-cache gcc musl-dev >/dev/null && go test -race ./...'
 ```
+
+`web/go.mod` exists only to make `web/` a module of its own, so `./...` from
+the root never descends into `node_modules`; it has no Go code.
