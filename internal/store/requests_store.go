@@ -236,10 +236,15 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 		return nil, false, fmt.Errorf("read trace %q: %w", id, err)
 	}
 
+	// The label is joined at read time so a renamed credential shows its
+	// current name; a deleted one leaves the label empty and the id stands.
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path,
-		        tokens_in, tokens_out, cost_micros
-		   FROM request_attempts WHERE request_id = ? ORDER BY seq`, id)
+		`SELECT a.seq, a.provider_id, a.key_id, coalesce(k.label, ''), a.model,
+		        a.outcome, a.status_code, a.latency_ms, a.error, a.path,
+		        a.tokens_in, a.tokens_out, a.cost_micros
+		   FROM request_attempts a
+		   LEFT JOIN provider_keys k ON k.id = a.key_id
+		  WHERE a.request_id = ? ORDER BY a.seq`, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
 	}
@@ -247,7 +252,7 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	tr.Attempts = []AttemptRecord{}
 	for rows.Next() {
 		var a AttemptRecord
-		if err := rows.Scan(&a.Seq, &a.ProviderID, &a.KeyID, &a.Model,
+		if err := rows.Scan(&a.Seq, &a.ProviderID, &a.KeyID, &a.KeyLabel, &a.Model,
 			&a.Outcome, &a.StatusCode, &a.LatencyMs, &a.Error, &a.Path,
 			&a.TokensIn, &a.TokensOut, &a.CostMicros); err != nil {
 			return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
