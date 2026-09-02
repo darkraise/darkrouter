@@ -2,16 +2,60 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/darkraise/darkrouter/internal/auth"
 	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/store"
 )
+
+// providerIDPattern bounds a provider id to what a URL path segment, a log
+// line and an alias target can all carry unescaped.
+var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// maxPriority bounds priority. The value is an ordering, and a thousand
+// distinct ranks is more than any provider set needs.
+const maxPriority = 1000
+
+// authStyles is the closed vocabulary a provider row may carry.
+var authStyles = []string{
+	auth.StyleBearer, auth.StyleXAPIKey, auth.StyleAPIKey, auth.StyleQueryParam,
+	auth.StyleNone, auth.StyleOptional, auth.StyleAnonymous,
+	auth.StyleSigV4, auth.StyleGCPSA, auth.StyleOAuth,
+}
+
+func validBaseURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// validateProviderRow checks the fields a create or a patch can set. The
+// kind check is skipped when no registry was supplied, which is a test
+// building a server without an executor.
+func (s *Server) validateProviderRow(row store.ProviderRow) error {
+	if !providerIDPattern.MatchString(row.ID) {
+		return fmt.Errorf("id must match %s", providerIDPattern.String())
+	}
+	if !validBaseURL(row.BaseURL) {
+		return fmt.Errorf("base_url must be an http or https URL")
+	}
+	if s.deps.Kinds != nil && !slices.Contains(s.deps.Kinds, row.Kind) {
+		return fmt.Errorf("kind %q is not one this build serves", row.Kind)
+	}
+	if !slices.Contains(authStyles, row.AuthStyle) {
+		return fmt.Errorf("auth_style %q is not one of %s", row.AuthStyle, strings.Join(authStyles, ", "))
+	}
+	if row.Priority < 0 || row.Priority > maxPriority {
+		return fmt.Errorf("priority must be between 0 and %d", maxPriority)
+	}
+	return nil
+}
 
 // maskSecret renders a credential for display. It shows the last four characters
 // and nothing else.
@@ -69,37 +113,53 @@ type providerView struct {
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.deps.DB.ProviderRows(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	out := make([]providerView, 0, len(rows))
 	for _, p := range rows {
-		v := providerView{
-			ID: p.ID, Name: p.Name, Preset: p.Preset, Kind: p.Kind,
-			BaseURL: p.BaseURL, Priority: p.Priority, Enabled: p.Enabled,
-			AuthStyle: p.AuthStyle, Credentials: []credentialView{},
-			FreeModelsOnly: p.FreeModelsOnly,
-		}
-		if s.deps.Key != nil {
-			creds, cerr := s.deps.DB.Credentials(r.Context(), s.deps.Key, p.ID)
-			if cerr != nil {
-				writeError(w, http.StatusInternalServerError, cerr.Error())
-				return
-			}
-			for _, c := range creds {
-				// Masked at the point of decryption. The plaintext never
-				// reaches a struct that gets marshalled, which is the only
-				// way "never returns credential material" survives a refactor.
-				v.Credentials = append(v.Credentials, credentialView{
-					ID: c.ID, Label: c.Label, Masked: maskSecret(c.Secret),
-					Enabled: c.Enabled, Cooling: s.cooling(p.ID, c.ID),
-					Kind: c.Kind, ExpiresAt: c.ExpiresAt, Scope: c.Scope,
-				})
-			}
+		v, err := s.providerView(r.Context(), p)
+		if err != nil {
+			internalError(w, r, err)
+			return
 		}
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+}
+
+// providerView renders one row with its credentials. The secrets are
+// decrypted here because the masked suffix is part of the view; every other
+// reader of credentials takes the summary and never touches the keyring.
+func (s *Server) providerView(ctx context.Context, p store.ProviderRow) (providerView, error) {
+	v := providerView{
+		ID: p.ID, Name: p.Name, Preset: p.Preset, Kind: p.Kind,
+		BaseURL: p.BaseURL, Priority: p.Priority, Enabled: p.Enabled,
+		AuthStyle: p.AuthStyle, Credentials: []credentialView{},
+		FreeModelsOnly: p.FreeModelsOnly,
+	}
+	if s.deps.Key == nil {
+		return v, nil
+	}
+	creds, err := s.deps.DB.Credentials(ctx, s.deps.Key, p.ID)
+	if err != nil {
+		return providerView{}, err
+	}
+	for _, c := range creds {
+		v.Credentials = append(v.Credentials, s.credentialView(p.ID, c))
+	}
+	return v, nil
+}
+
+// credentialView masks at the point of decryption. The plaintext never
+// reaches a struct that gets marshalled, which is the only way "never returns
+// credential material" survives a refactor.
+func (s *Server) credentialView(providerID string, c store.Credential) credentialView {
+	return credentialView{
+		ID: c.ID, Label: c.Label, Masked: maskSecret(c.Secret),
+		Enabled: c.Enabled, Cooling: s.cooling(providerID, c.ID),
+		Kind: c.Kind, ExpiresAt: c.ExpiresAt, Scope: c.Scope,
+	}
 }
 
 // cooling reports whether the breaker is holding this credential down. It is
@@ -139,8 +199,7 @@ type createProviderBody struct {
 
 func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	var body createProviderBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 64<<10, &body) {
 		return
 	}
 	if body.ID == "" {
@@ -187,16 +246,21 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	if row.Name == "" {
 		row.Name = row.ID
 	}
-
-	if err := s.deps.DB.CreateProvider(r.Context(), row); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "PRIMARY KEY") {
-			writeError(w, http.StatusConflict, fmt.Sprintf("provider %q already exists", row.ID))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if row.AuthStyle == "" {
+		// The column default, applied here so the vocabulary check below
+		// sees the value the row will carry.
+		row.AuthStyle = auth.StyleBearer
+	}
+	if err := s.validateProviderRow(row); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.reloadProviders(r.Context())
+
+	if err := s.deps.DB.CreateProvider(r.Context(), row); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	s.reloadProviders(afterCommit(r))
 	// A keyless provider is discoverable the moment it exists: the sweep needs
 	// one of the provider's own keys, and this one has none to need. Waiting a
 	// quarter of an hour for its first models is the same gap the first
@@ -212,66 +276,72 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	// One decode into the patch: its pointer fields are what carry "named"
 	// versus "absent", and an absent field decodes to nil.
 	var patch store.ProviderPatch
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&patch); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 64<<10, &patch) {
 		return
 	}
-	if err := s.deps.DB.UpdateProvider(r.Context(), id, patch); err != nil {
-		if strings.Contains(err.Error(), "no such provider") {
-			writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
+	if patch.Name == nil && patch.BaseURL == nil && patch.Priority == nil &&
+		patch.Enabled == nil && patch.Region == nil && patch.Project == nil &&
+		patch.FreeModelsOnly == nil {
+		// An empty patch is a client bug, not a no-op to absorb: it means the
+		// UI sent a form it did not fill in.
+		writeError(w, http.StatusBadRequest, "the patch names no fields")
+		return
+	}
+	// Validated as the row it would produce, so the same rules apply to a
+	// patch as to a create.
+	current, err := s.deps.DB.ProviderByID(r.Context(), id)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	next := current
+	if patch.BaseURL != nil {
+		next.BaseURL = *patch.BaseURL
+	}
+	if patch.Priority != nil {
+		next.Priority = *patch.Priority
+	}
+	if err := s.validateProviderRow(next); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.reloadProviders(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+	if err := s.deps.DB.UpdateProvider(r.Context(), id, patch); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	s.reloadProviders(afterCommit(r))
+	updated, err := s.deps.DB.ProviderByID(r.Context(), id)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	view, err := s.providerView(r.Context(), updated)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// Computed before the delete, because afterwards there is no provider to
-	// match aliases against.
-	dangling := s.danglingAliases(id)
-
-	if err := s.deps.DB.DeleteProvider(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "no such provider") {
-			writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+	// Read before the delete: the cascade takes the credential rows, and
+	// their ids are what the auth manager caches under.
+	summaries, err := s.deps.DB.CredentialSummaries(r.Context())
+	if err != nil {
+		internalError(w, r, err)
 		return
 	}
-	s.reloadProviders(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": id, "dangling_aliases": dangling,
-	})
-}
-
-// danglingAliases names the aliases that will point at nothing once providerID
-// is gone.
-//
-// Master design §7 makes a dangling alias a warning rather than a validation
-// error, and this is why: if it were an error, one UI delete would make every
-// subsequent config reload fail, leaving the operator with a reload button that
-// keeps failing and no way out but SSH. The delete succeeds and reports.
-func (s *Server) danglingAliases(providerID string) []string {
-	out := []string{}
-	if s.deps.Config == nil {
-		return out
+	if err := s.deps.DB.DeleteProvider(r.Context(), id); err != nil {
+		writeStoreError(w, r, err)
+		return
 	}
-	for name, chain := range s.deps.Config.Current().Aliases {
-		for _, target := range chain {
-			p, _, found := strings.Cut(target, "/")
-			if found && p == providerID {
-				out = append(out, name)
-				break
-			}
-		}
+	for _, c := range summaries[id] {
+		s.forgetCredential(c.ID)
 	}
-	// Sorted so two deletes of the same shape produce the same dialog text.
-	sort.Strings(out)
-	return out
+	s.probes.drop(id)
+	s.reloadProviders(afterCommit(r))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // reloadProviders pushes the mutation into the running router. Without it the
@@ -314,8 +384,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body addCredentialBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 64<<10, &body) {
 		return
 	}
 	if body.Secret == "" {
@@ -326,22 +395,26 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		body.Label = "default"
 	}
 	providerID := r.PathValue("id")
+	if _, err := s.deps.DB.ProviderByID(r.Context(), providerID); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
 	// Counted before the write, so "was there anything here" is answerable
 	// afterwards. A provider with no credential cannot be swept at all: the
 	// discoverer needs one of the provider's own keys to ask what it serves,
 	// so the first key is the moment the provider becomes discoverable.
-	before, cerr := s.deps.DB.Credentials(r.Context(), s.deps.Key, providerID)
-	firstCredential := cerr == nil && len(before) == 0
+	before, cerr := s.deps.DB.CredentialSummaries(r.Context())
+	firstCredential := cerr == nil && len(before[providerID]) == 0
 
 	id, err := s.deps.DB.AddCredential(r.Context(), s.deps.Key, store.Credential{
 		ProviderID: providerID, Label: body.Label,
 		Secret: body.Secret, Enabled: true,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
-	s.reloadProviders(r.Context())
+	s.reloadProviders(afterCommit(r))
 	// Only on the first one. A bulk import of twenty keys would otherwise ask
 	// the provider to list its models twenty times, against a rate limit the
 	// operator has just finished telling us they care about — and the second
@@ -356,17 +429,16 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
-	if err := s.deps.DB.DeleteCredential(r.Context(),
-		r.PathValue("id"), r.PathValue("keyId")); err != nil {
-		if strings.Contains(err.Error(), "no such credential") {
-			writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+	keyID := r.PathValue("keyId")
+	if err := s.deps.DB.DeleteCredential(r.Context(), r.PathValue("id"), keyID); err != nil {
+		writeStoreError(w, r, err)
 		return
 	}
-	s.reloadProviders(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("keyId")})
+	// The auth manager caches an OAuth account under the credential id; a
+	// deleted credential must not keep presenting the token it minted.
+	s.forgetCredential(keyID)
+	s.reloadProviders(afterCommit(r))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {

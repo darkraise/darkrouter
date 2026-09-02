@@ -26,11 +26,13 @@ func healthEntries(t *testing.T, s *Server) []breakerEntryView {
 	if w.Code != 200 {
 		t.Fatalf("GET /api/health/providers = %d: %s", w.Code, w.Body.String())
 	}
-	var out []breakerEntryView
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+	var env struct {
+		Providers []breakerEntryView `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode: %v\n%s", err, w.Body.String())
 	}
-	return out
+	return env.Providers
 }
 
 // coolCredential trips the breaker for one credential by recording enough
