@@ -129,3 +129,50 @@ func TestParseRequestRejectsAnOversizedBody(t *testing.T) {
 		t.Fatal("want an error for a body over the cap")
 	}
 }
+
+func TestParseRequestReadsOutputConfig(t *testing.T) {
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[],
+		"output_config":{"effort":"xhigh","format":{"type":"json_schema","schema":{"type":"object"}}}}`, nil)
+	if req.Reasoning == nil || req.Reasoning.Effort != "xhigh" {
+		t.Errorf("reasoning = %+v; output_config.effort is the depth control", req.Reasoning)
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_schema" ||
+		string(req.ResponseFormat.Schema) != `{"type":"object"}` {
+		t.Errorf("response_format = %+v", req.ResponseFormat)
+	}
+}
+
+func TestParseRequestKeepsTheBetaHeader(t *testing.T) {
+	// The beta list is transport state the Anthropic adapter echoes upstream;
+	// a client that opted into a beta and gets a translated request without
+	// it sees a silently different API.
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[]}`,
+		map[string]string{"anthropic-beta": "context-1m-2025-08-07"})
+	if req.Metadata["anthropic-beta"] != "context-1m-2025-08-07" {
+		t.Errorf("metadata = %v", req.Metadata)
+	}
+}
+
+func TestParseRequestCarriesTypedServerTools(t *testing.T) {
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[],"tools":[
+		{"type":"web_search_20250305","name":"web_search","max_uses":5},
+		{"name":"f","description":"d","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}]}`, nil)
+	if len(req.Tools) != 2 {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	srv := req.Tools[0]
+	if srv.Name != "web_search" || string(srv.Extra["type"]) != `"web_search_20250305"` ||
+		string(srv.Extra["max_uses"]) != "5" {
+		t.Errorf("server tool = %+v; every wire field must survive for a verbatim re-emit", srv)
+	}
+	plain := req.Tools[1]
+	if plain.Name != "f" || string(plain.Schema) != `{"type":"object"}` {
+		t.Errorf("plain tool = %+v", plain)
+	}
+	if string(plain.Extra["cache_control"]) != `{"type":"ephemeral"}` {
+		t.Errorf("plain tool extra = %v; cache_control is a paid feature and must be kept", plain.Extra)
+	}
+	if _, ok := plain.Extra["type"]; ok {
+		t.Errorf("a plain tool must not look typed: %v", plain.Extra)
+	}
+}

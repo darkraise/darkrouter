@@ -568,3 +568,68 @@ func TestNoForcedToolChoiceDowngradesToAuto(t *testing.T) {
 		t.Errorf("tool_choice = %v, warnings = %+v", body["tool_choice"], warns)
 	}
 }
+
+func TestBuildRequestEchoesTheBetaHeader(t *testing.T) {
+	hr, _, _ := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Metadata: map[string]string{"anthropic-beta": "context-1m-2025-08-07"},
+	})
+	if got := hr.Header.Get("anthropic-beta"); got != "context-1m-2025-08-07" {
+		t.Errorf("anthropic-beta = %q", got)
+	}
+	hr, _, _ = built(t, &ir.Request{Messages: []ir.Message{userMsg("hi")}})
+	if got := hr.Header.Get("anthropic-beta"); got != "" {
+		t.Errorf("anthropic-beta = %q on a request that carried none", got)
+	}
+}
+
+func TestRenderToolsReEmitsServerToolsAndCacheControl(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools: []ir.Tool{
+			{Name: "web_search", Extra: map[string]json.RawMessage{
+				"type": json.RawMessage(`"web_search_20250305"`), "name": json.RawMessage(`"web_search"`),
+				"max_uses": json.RawMessage(`5`)}},
+			{Name: "f", Description: "d", Schema: json.RawMessage(`{"type":"object"}`),
+				Extra: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}},
+		},
+	})
+	tools := body["tools"].([]any)
+	srv := tools[0].(map[string]any)
+	if srv["type"] != "web_search_20250305" || srv["max_uses"] != float64(5) {
+		t.Errorf("server tool = %v", srv)
+	}
+	if _, ok := srv["input_schema"]; ok {
+		t.Errorf("server tool = %v; a typed tool takes no input_schema", srv)
+	}
+	plain := tools[1].(map[string]any)
+	if plain["name"] != "f" || plain["description"] != "d" {
+		t.Errorf("plain tool = %v", plain)
+	}
+	if cc, _ := plain["cache_control"].(map[string]any); cc["type"] != "ephemeral" {
+		t.Errorf("plain tool = %v; cache_control was dropped", plain)
+	}
+	if hasWarning(warns, "cache_control") || hasWarning(warns, "tools[].web_search") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestToolCacheControlCountsTowardTheBreakpointBudget(t *testing.T) {
+	cc := &ir.CacheControl{Type: "ephemeral"}
+	_, body, warns := built(t, &ir.Request{
+		Tools:  []ir.Tool{{Name: "f", Extra: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}}},
+		System: []ir.ContentBlock{{Type: ir.BlockText, Text: "s", CacheControl: cc}},
+		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "a", CacheControl: cc},
+			{Type: ir.BlockText, Text: "b", CacheControl: cc},
+			{Type: ir.BlockText, Text: "c", CacheControl: cc},
+		}}},
+	})
+	if !hasWarning(warns, "cache_control") {
+		t.Errorf("warnings = %+v; five breakpoints across tools, system and messages is one too many", warns)
+	}
+	content := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if _, ok := content[2].(map[string]any)["cache_control"]; ok {
+		t.Errorf("the surplus marker survived: %v", content[2])
+	}
+}

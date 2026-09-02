@@ -456,3 +456,22 @@ func hasWarning(warns []ir.Warning, field string) bool {
 	}
 	return false
 }
+
+func TestTypedServerToolsAreWarnedAndDropped(t *testing.T) {
+	// A typed tool runs on Anthropic's side; Converse has no toolSpec for it,
+	// and rendering it as a client tool would make the model call a function
+	// nobody implements.
+	req := simple()
+	req.Tools = []ir.Tool{
+		{Name: "web_search", Extra: map[string]json.RawMessage{"type": json.RawMessage(`"web_search_20250305"`)}},
+		{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["toolSpec"].(map[string]any)["name"] != "f" {
+		t.Errorf("tools = %#v", tools)
+	}
+	if !hasWarning(warns, "tools[].web_search") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}

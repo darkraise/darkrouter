@@ -184,6 +184,15 @@ type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+
+	// Extra carries wire fields the IR does not model, keyed as the producing
+	// dialect spelled them: a provider-run tool's type and options, or a
+	// cache_control marker on an ordinary tool. Re-emitted verbatim by the
+	// dialect that produced it; a tool whose Extra names a type is that
+	// provider's own and is dropped, with a warning, by every other adapter.
+	// Omitted from JSON when empty so the request fixtures of every dialect
+	// stay unchanged by it.
+	Extra map[string]json.RawMessage `json:",omitempty"`
 }
 
 type ToolChoice struct {

@@ -163,7 +163,9 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		body["stream"] = true
 	}
 	if len(req.Tools) > 0 {
-		body["tools"] = renderTools(req.Tools)
+		tools, w := renderTools(req.Tools, cb)
+		warns = append(warns, w...)
+		body["tools"] = tools
 	}
 	toolChoice := req.ToolChoice
 	if toolChoice != nil && traits.noForcedToolChoice && (toolChoice.Mode == "any" || toolChoice.Mode == "tool") {
@@ -230,6 +232,9 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		version = v
 	}
 	hr.Header.Set("anthropic-version", version)
+	if beta := req.Metadata["anthropic-beta"]; beta != "" {
+		hr.Header.Set("anthropic-beta", beta)
+	}
 	return hr, warns, nil
 }
 
@@ -388,20 +393,39 @@ func adaptiveEffort(req *ir.Request) string {
 	return xlate.BudgetEffort(req.Reasoning.Budget)
 }
 
-func renderTools(tools []ir.Tool) []any {
+// renderTools renders client tools from the IR's three fields and
+// provider-run tools verbatim. A typed tool takes no input_schema, and the
+// options it carries are its own fields, so nothing is synthesized for it.
+//
+// A cache_control on a tool counts toward the same four-breakpoint budget as
+// one on content: Anthropic counts them together.
+func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
+	var warns []ir.Warning
 	out := make([]any, 0, len(tools))
 	for _, t := range tools {
-		schema := t.Schema
-		// A tool with no schema still needs one: Anthropic rejects a null
-		// input_schema outright.
-		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object"}`)
+		m := map[string]any{}
+		if _, typed := t.Extra["type"]; !typed {
+			schema := t.Schema
+			// A tool with no schema still needs one: Anthropic rejects a
+			// null input_schema outright.
+			if len(schema) == 0 {
+				schema = json.RawMessage(`{"type":"object"}`)
+			}
+			m["name"], m["description"], m["input_schema"] = t.Name, t.Description, schema
 		}
-		out = append(out, map[string]any{
-			"name": t.Name, "description": t.Description, "input_schema": schema,
-		})
+		for k, v := range t.Extra {
+			m[k] = v
+		}
+		if _, ok := m["cache_control"]; ok && !cb.take() {
+			delete(m, "cache_control")
+			warns = append(warns, ir.Warning{
+				Field: "cache_control", Target: targetName,
+				Reason: "more than four breakpoints; the surplus marker was dropped",
+			})
+		}
+		out = append(out, m)
 	}
-	return out
+	return out, warns
 }
 
 // renderToolChoice maps the IR's four modes. disable_parallel_tool_use lives
