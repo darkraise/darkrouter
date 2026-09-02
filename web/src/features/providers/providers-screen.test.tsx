@@ -174,17 +174,16 @@ describe("the providers list", () => {
 })
 
 describe("adding a local runtime", () => {
-  it("offers its own action, because a local runtime has no key to paste", async () => {
+  it("is reached from the runtime's own row, not from a header action", async () => {
+    // The header carried a third button for a case the list already answers a
+    // line below: every local runtime's own row opens the address form, and
+    // the test underneath this one is that path. A header action for it was
+    // the same act in two places, one of which had to name the concept first.
     stub([groq])
     await renderScreen()
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: /add local runtime/i }),
-    )
-
-    expect(
-      await screen.findByRole("heading", { name: /add a local runtime/i }),
-    ).toBeInTheDocument()
+    await screen.findByRole("link", { name: "Ollama" })
+    expect(screen.queryByRole("button", { name: /add local runtime/i })).toBeNull()
   })
 })
 
@@ -296,5 +295,46 @@ describe("the grid view", () => {
   it("keeps the card's own Test action", async () => {
     await grid()
     expect(cardFor(/Groq/).getByRole("button", { name: /^Test/ })).toBeInTheDocument()
+  })
+})
+
+describe("the list layout", () => {
+  it("labels the view toggle with a tooltip rather than a word", async () => {
+    // The two words sat in the row the screen's own actions live in, and the
+    // glyphs already say list and grid. The accessible name is unchanged --
+    // it was always the aria-label, not the text beside it.
+    stub([groq])
+    await renderScreen()
+
+    const list = await screen.findByRole("radio", { name: "List view" })
+    expect(list).toHaveTextContent("")
+    expect(screen.getByRole("radio", { name: "Grid view" })).toHaveTextContent("")
+  })
+
+  it("marks the chosen layout as selected", async () => {
+    // The item and its tooltip both write data-state, and the selected styling
+    // is keyed on the item's -- .dr-toggle[data-state=on]. Making the item the
+    // tooltip's trigger let the tooltip's "closed" be spread over it, and the
+    // group rendered with neither option looking chosen. aria-checked stayed
+    // right through all of that, which is why nothing caught it.
+    stub([groq])
+    await renderScreen()
+
+    const list = await screen.findByRole("radio", { name: "List view" })
+    const grid = screen.getByRole("radio", { name: "Grid view" })
+    expect(list).toHaveAttribute("data-state", "on")
+    expect(grid).toHaveAttribute("data-state", "off")
+  })
+
+  it("scrolls the whole catalogue instead of paging it", async () => {
+    // Every provider the release supports is in this list, and a pager over it
+    // turned "does this release ship X" into a hunt through twenty pages.
+    // DataTable drops its pagination row model when it is given a window, so
+    // the absence of the pager is what proves the window is on.
+    stub([groq])
+    await renderScreen()
+
+    await screen.findByRole("link", { name: "Groq" })
+    expect(screen.queryByText(/rows per page/i)).toBeNull()
   })
 })
