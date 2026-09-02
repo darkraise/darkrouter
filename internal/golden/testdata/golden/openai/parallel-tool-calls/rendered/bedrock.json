@@ -42,12 +42,7 @@
             ],
             "toolUseId": "call_a"
           }
-        }
-      ],
-      "role": "user"
-    },
-    {
-      "content": [
+        },
         {
           "toolResult": {
             "content": [
@@ -57,12 +52,7 @@
             ],
             "toolUseId": "call_b"
           }
-        }
-      ],
-      "role": "user"
-    },
-    {
-      "content": [
+        },
         {
           "text": "And tomorrow?"
         }

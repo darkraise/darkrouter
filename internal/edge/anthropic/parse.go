@@ -6,27 +6,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
 type wireRequest struct {
-	Model         string          `json:"model"`
-	System        json.RawMessage `json:"system"`
-	Messages      []wireMessage   `json:"messages"`
-	Tools         []wireTool      `json:"tools"`
-	ToolChoice    *wireToolChoice `json:"tool_choice"`
-	MaxTokens     *int            `json:"max_tokens"`
-	Temperature   *float64        `json:"temperature"`
-	TopP          *float64        `json:"top_p"`
-	TopK          *int            `json:"top_k"`
-	StopSequences []string        `json:"stop_sequences"`
-	Stream        bool            `json:"stream"`
+	Model         string            `json:"model"`
+	System        json.RawMessage   `json:"system"`
+	Messages      []wireMessage     `json:"messages"`
+	Tools         []json.RawMessage `json:"tools"`
+	ToolChoice    *wireToolChoice   `json:"tool_choice"`
+	MaxTokens     *int              `json:"max_tokens"`
+	Temperature   *float64          `json:"temperature"`
+	TopP          *float64          `json:"top_p"`
+	TopK          *int              `json:"top_k"`
+	StopSequences []string          `json:"stop_sequences"`
+	Stream        bool              `json:"stream"`
 	Thinking      *struct {
 		Type         string `json:"type"`
 		BudgetTokens int    `json:"budget_tokens"`
 	} `json:"thinking"`
+	OutputConfig *struct {
+		Effort string `json:"effort"`
+		Format *struct {
+			Type   string          `json:"type"`
+			Schema json.RawMessage `json:"schema"`
+		} `json:"format"`
+	} `json:"output_config"`
 	Metadata map[string]string `json:"metadata"`
 }
 
@@ -36,9 +44,15 @@ type wireMessage struct {
 }
 
 type wireTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	// Type marks a provider-run tool (web_search_20250305, bash_20250124,
+	// ...). It has no input_schema of its own and its options are its own
+	// fields, so the whole object is carried rather than the three the IR
+	// models.
+	Type         string          `json:"type"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	CacheControl json.RawMessage `json:"cache_control"`
 }
 
 type wireToolChoice struct {
@@ -97,17 +111,34 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		Stream:        w.Stream,
 		Metadata:      w.Metadata,
 	}
-	// The inbound version is transport state the Anthropic adapter echoes
-	// upstream. Every other adapter strips it.
+	// The inbound version and beta list are transport state the Anthropic
+	// adapter echoes upstream. Every other adapter strips them.
 	if v := r.Header.Get("anthropic-version"); v != "" {
 		if req.Metadata == nil {
 			req.Metadata = map[string]string{}
 		}
 		req.Metadata["anthropic_version"] = v
 	}
+	if v := strings.Join(r.Header.Values("anthropic-beta"), ","); v != "" {
+		if req.Metadata == nil {
+			req.Metadata = map[string]string{}
+		}
+		req.Metadata["anthropic-beta"] = v
+	}
+	if oc := w.OutputConfig; oc != nil {
+		if oc.Effort != "" {
+			req.Reasoning = &ir.Reasoning{Effort: oc.Effort}
+		}
+		if oc.Format != nil && oc.Format.Type == "json_schema" {
+			req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: oc.Format.Schema}
+		}
+	}
 	if w.Thinking != nil {
 		if w.Thinking.BudgetTokens > 0 {
-			req.Reasoning = &ir.Reasoning{Budget: w.Thinking.BudgetTokens}
+			if req.Reasoning == nil {
+				req.Reasoning = &ir.Reasoning{}
+			}
+			req.Reasoning.Budget = w.Thinking.BudgetTokens
 		}
 		// The mode itself is transport state, like the version header: the
 		// Anthropic adapter needs it to choose between the manual and adaptive
@@ -139,10 +170,12 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		req.Messages = append(req.Messages, ir.Message{Role: role, Content: blocks})
 	}
 
-	for _, t := range w.Tools {
-		req.Tools = append(req.Tools, ir.Tool{
-			Name: t.Name, Description: t.Description, Schema: t.InputSchema,
-		})
+	for _, raw := range w.Tools {
+		tool, err := parseTool(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		req.Tools = append(req.Tools, tool)
 	}
 	if w.ToolChoice != nil {
 		switch w.ToolChoice.Type {
@@ -164,6 +197,29 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 	return req, &edge.Passthrough{
 		Body: body, ModelField: "model", Surface: ir.SurfaceLLM, Stream: req.Stream,
 	}, nil
+}
+
+// parseTool reads one tools[] entry. A typed entry is a provider-run tool and
+// is carried whole; a plain one keeps its cache_control marker, which the IR
+// has no field for, in Extra.
+func parseTool(raw json.RawMessage) (ir.Tool, error) {
+	var t wireTool
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return ir.Tool{}, fmt.Errorf("invalid tool: %w", err)
+	}
+	tool := ir.Tool{Name: t.Name, Description: t.Description, Schema: t.InputSchema}
+	if t.Type != "" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return ir.Tool{}, fmt.Errorf("invalid tool: %w", err)
+		}
+		tool.Extra = fields
+		return tool, nil
+	}
+	if len(t.CacheControl) > 0 && string(t.CacheControl) != "null" {
+		tool.Extra = map[string]json.RawMessage{"cache_control": t.CacheControl}
+	}
+	return tool, nil
 }
 
 // parseContent accepts both the plain-string and block-array forms. Anthropic

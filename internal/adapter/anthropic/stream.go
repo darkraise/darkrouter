@@ -18,7 +18,7 @@ type wireStreamEvent struct {
 		Model string    `json:"model"`
 		Usage wireUsage `json:"usage"`
 	} `json:"message"`
-	ContentBlock *wireBlock `json:"content_block"`
+	ContentBlock json.RawMessage `json:"content_block"`
 	Delta        *struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
@@ -34,19 +34,36 @@ type wireStreamEvent struct {
 	} `json:"error"`
 }
 
-// blockKind maps a content_block's type onto the IR's. An unrecognized kind
-// becomes text so its deltas still reach the client rather than vanishing.
-func blockKind(t string) ir.BlockType {
-	switch t {
-	case "thinking":
-		return ir.BlockThinking
-	case "redacted_thinking":
-		return ir.BlockRedactedThinking
-	case "tool_use":
-		return ir.BlockToolUse
-	default:
-		return ir.BlockText
+// blockStart maps a content_block onto the IR's opening delta. A kind the IR
+// does not model keeps its wire type and every wire field, so the Anthropic
+// writer can re-emit it and its deltas still reach the client rather than
+// arriving inside an empty text block.
+func blockStart(raw json.RawMessage) *ir.Delta {
+	d := &ir.Delta{Type: ir.BlockText}
+	if len(raw) == 0 {
+		return d
 	}
+	var b wireBlock
+	if json.Unmarshal(raw, &b) != nil {
+		return d
+	}
+	d.ToolID, d.ToolName = b.ID, b.Name
+	switch b.Type {
+	case "text", "":
+	case "thinking":
+		d.Type = ir.BlockThinking
+	case "redacted_thinking":
+		d.Type = ir.BlockRedactedThinking
+	case "tool_use":
+		d.Type = ir.BlockToolUse
+	default:
+		d.Type = ir.BlockType(b.Type)
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			d.Extra = fields
+		}
+	}
+	return d
 }
 
 // errorType maps Anthropic's error taxonomy. It matters most for
@@ -116,13 +133,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				}
 
 			case "content_block_start":
-				d := &ir.Delta{Type: ir.BlockText}
-				if ev.ContentBlock != nil {
-					d.Type = blockKind(ev.ContentBlock.Type)
-					d.ToolID = ev.ContentBlock.ID
-					d.ToolName = ev.ContentBlock.Name
-				}
-				if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: ev.Index, Delta: d}, nil) {
+				if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: ev.Index, Delta: blockStart(ev.ContentBlock)}, nil) {
 					return
 				}
 
@@ -155,8 +166,16 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				}
 
 			case "message_delta":
+				var warns []ir.Warning
 				if ev.Delta != nil && ev.Delta.StopReason != "" {
-					stop, _ = stopReason(ev.Delta.StopReason)
+					var known bool
+					stop, known = stopReason(ev.Delta.StopReason)
+					if !known {
+						warns = append(warns, ir.Warning{
+							Field: "stop_reason", Target: targetName,
+							Reason: "unrecognized value " + ev.Delta.StopReason + "; reported as end_turn",
+						})
+					}
 				}
 				if ev.Usage != nil {
 					// Merged, not replaced: message_delta reports output tokens
@@ -174,9 +193,15 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					if u.CacheWriteTokens > 0 {
 						usage.CacheWriteTokens = u.CacheWriteTokens
 					}
+					if u.CacheWrite5mTokens > 0 {
+						usage.CacheWrite5mTokens = u.CacheWrite5mTokens
+					}
+					if u.CacheWrite1hTokens > 0 {
+						usage.CacheWrite1hTokens = u.CacheWrite1hTokens
+					}
 				}
 				merged := usage
-				if !yield(ir.StreamEvent{Type: ir.EventMessageDelta, Usage: &merged}, nil) {
+				if !yield(ir.StreamEvent{Type: ir.EventMessageDelta, Usage: &merged, Warnings: warns}, nil) {
 					return
 				}
 

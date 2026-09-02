@@ -78,11 +78,18 @@ func renderBlock(b ir.ContentBlock, cb *cacheBudget) (map[string]any, []ir.Warni
 		if b.Thinking == nil {
 			return nil, nil
 		}
-		m := map[string]any{"type": "thinking", "thinking": b.Thinking.Text}
-		if b.Thinking.Signature != "" {
-			m["signature"] = b.Thinking.Signature
+		// Anthropic verifies every replayed signature. A block without one
+		// — synthesized by another dialect, or hand-written — fails the whole
+		// request, so it goes and the drop is recorded.
+		if b.Thinking.Signature == "" {
+			return nil, []ir.Warning{{
+				Field: "messages[].thinking", Target: targetName,
+				Reason: "thinking block without a signature; Anthropic rejects it, so it was dropped",
+			}}
 		}
-		return m, nil
+		return map[string]any{
+			"type": "thinking", "thinking": b.Thinking.Text, "signature": b.Thinking.Signature,
+		}, nil
 
 	case ir.BlockRedactedThinking:
 		if b.Thinking == nil {
@@ -138,6 +145,15 @@ func renderBlock(b ir.ContentBlock, cb *cacheBudget) (map[string]any, []ir.Warni
 		return m, w
 
 	default:
+		// A block this adapter's own parser carried through untouched — a
+		// server-tool block — goes back as it arrived.
+		if len(b.Extra) > 0 {
+			m := make(map[string]any, len(b.Extra))
+			for k, v := range b.Extra {
+				m[k] = v
+			}
+			return m, nil
+		}
 		return nil, []ir.Warning{{
 			Field: "messages[]." + string(b.Type), Target: targetName,
 			Reason: "unsupported content block",

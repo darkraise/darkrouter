@@ -187,3 +187,20 @@ func TestRenderBlocksDropsTheFifthCacheBreakpoint(t *testing.T) {
 		t.Errorf("warnings = %+v", warns)
 	}
 }
+
+func TestRenderBlocksDropsAnUnsignedThinkingBlock(t *testing.T) {
+	// Anthropic verifies the signature of every replayed thinking block. One
+	// without a signature — synthesized by another dialect, or hand-written —
+	// is a 400 on the whole request, so it is dropped and the drop recorded.
+	got, warns := blocks(t, []ir.ContentBlock{
+		{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "unsigned"}},
+		{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "signed", Signature: "sig"}},
+		{Type: ir.BlockText, Text: "answer"},
+	}, nil)
+	if len(got) != 2 || got[0]["type"] != "thinking" || got[1]["type"] != "text" {
+		t.Fatalf("blocks = %v; the unsigned block must go and the signed one stay", got)
+	}
+	if !hasWarning(warns, "messages[].thinking") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}

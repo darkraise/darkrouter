@@ -17,8 +17,9 @@ type wireStreamDelta struct {
 		Input string `json:"input"`
 	} `json:"toolUse"`
 	ReasoningContent *struct {
-		Text      string `json:"text"`
-		Signature string `json:"signature"`
+		Text            string `json:"text"`
+		Signature       string `json:"signature"`
+		RedactedContent string `json:"redactedContent"`
 	} `json:"reasoningContent"`
 }
 
@@ -139,6 +140,17 @@ func decodeEvent(eventType string, payload []byte) ([]ir.StreamEvent, error) {
 			return []ir.StreamEvent{{
 				Type: ir.EventContentDelta, Index: w.ContentBlockIndex,
 				Delta: &ir.Delta{Type: ir.BlockToolUse, ToolInput: w.Delta.ToolUse.Input},
+			}}, nil
+		case w.Delta.ReasoningContent != nil && w.Delta.ReasoningContent.RedactedContent != "":
+			// The IR delta has no field of its own for a redacted payload;
+			// it rides in Thinking under the redacted block kind, which is
+			// what tells a writer not to show it as reasoning text.
+			return []ir.StreamEvent{{
+				Type: ir.EventContentDelta, Index: w.ContentBlockIndex,
+				Delta: &ir.Delta{
+					Type:     ir.BlockRedactedThinking,
+					Thinking: w.Delta.ReasoningContent.RedactedContent,
+				},
 			}}, nil
 		case w.Delta.ReasoningContent != nil:
 			return []ir.StreamEvent{{

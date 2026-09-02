@@ -114,6 +114,14 @@ type TraitRule struct {
 	Adaptive     bool   `yaml:"adaptive,omitempty"`
 	ManualBudget bool   `yaml:"manual_budget,omitempty"`
 	FreeSampling bool   `yaml:"free_sampling,omitempty"`
+
+	// The three refusals a generation can add. Each is a 400 on every request
+	// of that shape, so the adapter reshapes the request and warns rather
+	// than forwarding it. Kind-neutral names: a non-Anthropic family that
+	// rejects the same shape declares the same trait.
+	NoPrefill          bool `yaml:"no_prefill,omitempty"`
+	ThinkingAlwaysOn   bool `yaml:"thinking_always_on,omitempty"`
+	NoForcedToolChoice bool `yaml:"no_forced_tool_choice,omitempty"`
 }
 
 type Presets map[string]Preset

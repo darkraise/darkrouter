@@ -180,3 +180,69 @@ func TestWriteStreamEmitsARealErrorEvent(t *testing.T) {
 		t.Error("a stream that errored must not also claim to have stopped normally")
 	}
 }
+
+func TestWriteStreamReEmitsACarriedBlockStart(t *testing.T) {
+	// A server-tool block the Anthropic adapter carried through Extra is
+	// re-emitted as it arrived. Rendering it as an empty text block would
+	// hide the search from a client that asked for it.
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventBlockStart, Index: 0, Delta: &ir.Delta{
+			Type: "web_search_tool_result", Extra: map[string]json.RawMessage{
+				"type":        json.RawMessage(`"web_search_tool_result"`),
+				"tool_use_id": json.RawMessage(`"srvtoolu_1"`),
+				"content":     json.RawMessage(`[{"type":"web_search_result","url":"https://a"}]`),
+			}}},
+		{Type: ir.EventBlockStop, Index: 0},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil)
+	cb := got[1].body["content_block"].(map[string]any)
+	if cb["type"] != "web_search_tool_result" || cb["tool_use_id"] != "srvtoolu_1" {
+		t.Errorf("content_block = %v", cb)
+	}
+	if _, ok := cb["content"].([]any); !ok {
+		t.Errorf("content_block = %v; the carried payload was lost", cb)
+	}
+}
+
+func TestWriteStreamReportsCumulativeUsageInMessageDelta(t *testing.T) {
+	// Anthropic's message_delta usage is cumulative and carries the input
+	// side too. A client summing the final event must see the whole bill,
+	// and a route served by a dialect that reports usage last has nothing
+	// else to put in message_start.
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventBlockStart, Index: 0, Delta: &ir.Delta{Type: ir.BlockText}},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "hi"}},
+		{Type: ir.EventMessageDelta, Usage: &ir.Usage{InputTokens: 10, OutputTokens: 4, CacheReadTokens: 3, CacheWriteTokens: 7}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil)
+	var delta map[string]any
+	for _, e := range got {
+		if e.name == "message_delta" {
+			delta = e.body["usage"].(map[string]any)
+		}
+	}
+	if delta["input_tokens"] != float64(10) || delta["output_tokens"] != float64(4) ||
+		delta["cache_read_input_tokens"] != float64(3) || delta["cache_creation_input_tokens"] != float64(7) {
+		t.Errorf("message_delta usage = %v", delta)
+	}
+}
+
+func TestWriteStreamStartsOnTheFirstUsageOrContent(t *testing.T) {
+	// message_start is held back until either the first usage update or the
+	// first content, whichever comes first, so an Anthropic-served route
+	// reports real input tokens inside it while an OpenAI-served one is not
+	// delayed waiting for usage that only arrives at the end.
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventMessageDelta, Usage: &ir.Usage{InputTokens: 10}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil)
+	if got[0].name != "message_start" {
+		t.Fatalf("events = %v", names(got))
+	}
+	if got[0].body["message"].(map[string]any)["usage"].(map[string]any)["input_tokens"] != float64(10) {
+		t.Errorf("message_start = %v; the usage that arrived before it must be inside it", got[0].body)
+	}
+}

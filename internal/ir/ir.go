@@ -184,6 +184,15 @@ type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+
+	// Extra carries wire fields the IR does not model, keyed as the producing
+	// dialect spelled them: a provider-run tool's type and options, or a
+	// cache_control marker on an ordinary tool. Re-emitted verbatim by the
+	// dialect that produced it; a tool whose Extra names a type is that
+	// provider's own and is dropped, with a warning, by every other adapter.
+	// Omitted from JSON when empty so the request fixtures of every dialect
+	// stay unchanged by it.
+	Extra map[string]json.RawMessage `json:",omitempty"`
 }
 
 type ToolChoice struct {
@@ -253,6 +262,14 @@ type Usage struct {
 	CacheWriteTokens int
 	ReasoningTokens  int
 	Estimated        bool
+
+	// CacheWrite5mTokens and CacheWrite1hTokens break CacheWriteTokens down
+	// by TTL where the provider reports it; Anthropic prices the two
+	// differently. Both are included in CacheWriteTokens, never in addition
+	// to it. Omitted from JSON when zero so fixtures of every dialect stay
+	// unchanged by them.
+	CacheWrite5mTokens int `json:",omitempty"`
+	CacheWrite1hTokens int `json:",omitempty"`
 }
 
 // PromptTokens is the inclusive prompt count that OpenAI-compatible and
@@ -311,6 +328,13 @@ type Delta struct {
 	ToolInput string // JSON fragment
 	ToolID    string
 	ToolName  string
+
+	// Extra carries a block-start the IR does not model — a provider's
+	// server-tool block, say — as the producing dialect's own fields, so the
+	// same dialect's writer can re-emit it verbatim. Every other writer sees
+	// a Type it does not know and skips the block. Omitted from JSON when
+	// empty so the stream fixtures of every dialect stay unchanged by it.
+	Extra map[string]json.RawMessage `json:",omitempty"`
 }
 
 type StreamEvent struct {

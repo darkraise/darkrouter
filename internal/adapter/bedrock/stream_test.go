@@ -221,3 +221,27 @@ func TestStreamReportsACorruptFrame(t *testing.T) {
 		t.Fatal("a corrupt frame must surface as an error")
 	}
 }
+
+func TestStreamCarriesRedactedReasoning(t *testing.T) {
+	var buf bytes.Buffer
+	frame(t, &buf, "messageStart", map[string]any{"role": "assistant"})
+	frame(t, &buf, "contentBlockDelta", map[string]any{
+		"contentBlockIndex": 0, "delta": map[string]any{
+			"reasoningContent": map[string]any{"redactedContent": "AAAA"}}})
+	frame(t, &buf, "contentBlockStop", map[string]any{"contentBlockIndex": 0})
+	frame(t, &buf, "messageStop", map[string]any{"stopReason": "end_turn"})
+
+	events, err := collect(t, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *ir.Delta
+	for _, ev := range events {
+		if ev.Type == ir.EventContentDelta {
+			got = ev.Delta
+		}
+	}
+	if got == nil || got.Type != ir.BlockRedactedThinking || got.Thinking != "AAAA" {
+		t.Errorf("delta = %+v, want a redacted-thinking delta carrying the payload", got)
+	}
+}

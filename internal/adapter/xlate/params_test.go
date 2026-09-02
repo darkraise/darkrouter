@@ -18,7 +18,7 @@ func TestEffortBudgetUsesTheFixedTable(t *testing.T) {
 		{"high", 0, 32768},
 		{"LOW", 0, 4096},
 		{"", 0, 0},
-		{"minimal", 0, 0},
+		{"minimal", 0, 4096},
 		{"high", 8192, 8192},
 		{"low", 65536, 4096},
 	}
@@ -154,8 +154,7 @@ func TestRequiredMaxTokensKeepsAServableClientValue(t *testing.T) {
 }
 
 func TestEffortBudgetClampIsLive(t *testing.T) {
-	// The parameter existed from phase 4 and every caller passed 0, which
-	// disabled it.
+	// The parameter once had every caller passing 0, which disabled it.
 	if got := EffortBudget("high", 8192); got != 8192 {
 		t.Errorf("EffortBudget(high, 8192) = %d, want the clamp to 8192", got)
 	}
@@ -164,5 +163,63 @@ func TestEffortBudgetClampIsLive(t *testing.T) {
 	}
 	if got := EffortBudget("low", 65536); got != 4096 {
 		t.Errorf("EffortBudget(low, 65536) = %d, want 4096", got)
+	}
+}
+
+func TestEffortBudgetBandsTheOuterEfforts(t *testing.T) {
+	// minimal has no band of its own on a budget-taking model, and neither
+	// do xhigh and max: they collapse onto the nearest band rather than
+	// being dropped, which would silently turn reasoning off.
+	for effort, want := range map[string]int{"minimal": 4096, "xhigh": 32768, "max": 32768, "MAX": 32768} {
+		if got := EffortBudget(effort, 0); got != want {
+			t.Errorf("EffortBudget(%q) = %d, want %d", effort, got, want)
+		}
+	}
+}
+
+func TestAnthropicEffortMapsMinimalOntoLow(t *testing.T) {
+	for in, want := range map[string]string{
+		"minimal": "low", "low": "low", "medium": "medium", "high": "high",
+		"xhigh": "xhigh", "max": "max", "High": "high", "": "",
+	} {
+		if got := AnthropicEffort(in); got != want {
+			t.Errorf("AnthropicEffort(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGeminiBudgetCapIsPerModel(t *testing.T) {
+	for model, want := range map[string]int{
+		"gemini-2.5-flash":                24576,
+		"gemini-2.5-flash-lite":           24576,
+		"models/gemini-2.5-flash-preview": 24576,
+		"gemini-2.5-pro":                  32768,
+		"gemini-3-pro-preview":            32768,
+		"something-else":                  32768,
+	} {
+		if got := GeminiBudgetCap(model); got != want {
+			t.Errorf("GeminiBudgetCap(%q) = %d, want %d", model, got, want)
+		}
+	}
+}
+
+func TestGeminiEffortBudgetUsesTheModelCap(t *testing.T) {
+	cases := []struct {
+		effort, model string
+		want          int
+	}{
+		{"minimal", "gemini-2.5-pro", GeminiMinBudget},
+		{"low", "gemini-2.5-pro", 4096},
+		{"medium", "gemini-2.5-flash", 16384},
+		{"high", "gemini-2.5-flash", 24576},
+		{"high", "gemini-2.5-pro", 32768},
+		{"xhigh", "gemini-2.5-flash", 24576},
+		{"max", "gemini-2.5-pro", 32768},
+		{"", "gemini-2.5-pro", 0},
+	}
+	for _, c := range cases {
+		if got := GeminiEffortBudget(c.effort, c.model); got != c.want {
+			t.Errorf("GeminiEffortBudget(%q, %q) = %d, want %d", c.effort, c.model, got, c.want)
+		}
 	}
 }

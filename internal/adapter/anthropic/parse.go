@@ -13,15 +13,25 @@ type wireUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	// CacheCreation splits the write count by TTL. The two are priced
+	// differently, and the total above already includes both.
+	CacheCreation *struct {
+		Ephemeral5m int `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func (u *wireUsage) toIR() ir.Usage {
-	return ir.Usage{
+	out := ir.Usage{
 		InputTokens:      u.InputTokens,
 		OutputTokens:     u.OutputTokens,
 		CacheWriteTokens: u.CacheCreationInputTokens,
 		CacheReadTokens:  u.CacheReadInputTokens,
 	}
+	if cc := u.CacheCreation; cc != nil {
+		out.CacheWrite5mTokens, out.CacheWrite1hTokens = cc.Ephemeral5m, cc.Ephemeral1h
+	}
+	return out
 }
 
 type wireBlock struct {
@@ -57,6 +67,17 @@ func stopReason(s string) (ir.StopReason, bool) {
 	}
 }
 
+// carriedBlock wraps a block kind the IR does not model, keeping every wire
+// field so the Anthropic writers can re-emit it verbatim. Server-tool blocks
+// are the case: web search runs upstream and its results arrive as content.
+func carriedBlock(typ string, raw json.RawMessage) (ir.ContentBlock, bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || len(fields) == 0 {
+		return ir.ContentBlock{}, false
+	}
+	return ir.ContentBlock{Type: ir.BlockType(typ), Extra: fields}, true
+}
+
 func blockToIR(b wireBlock) (ir.ContentBlock, bool) {
 	switch b.Type {
 	case "text":
@@ -79,11 +100,11 @@ func blockToIR(b wireBlock) (ir.ContentBlock, bool) {
 func ParseResponse(resp *http.Response) (*ir.Response, error) {
 	defer resp.Body.Close()
 	var w struct {
-		ID         string      `json:"id"`
-		Model      string      `json:"model"`
-		Content    []wireBlock `json:"content"`
-		StopReason string      `json:"stop_reason"`
-		Usage      wireUsage   `json:"usage"`
+		ID         string            `json:"id"`
+		Model      string            `json:"model"`
+		Content    []json.RawMessage `json:"content"`
+		StopReason string            `json:"stop_reason"`
+		Usage      wireUsage         `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
 		return nil, err
@@ -98,8 +119,15 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 			Reason: "unrecognized value " + w.StopReason + "; reported as end_turn",
 		})
 	}
-	for _, b := range w.Content {
+	for _, raw := range w.Content {
+		var b wireBlock
+		if err := json.Unmarshal(raw, &b); err != nil {
+			return nil, err
+		}
 		blk, ok := blockToIR(b)
+		if !ok {
+			blk, ok = carriedBlock(b.Type, raw)
+		}
 		if !ok {
 			out.Warnings = append(out.Warnings, ir.Warning{
 				Field: "content[]." + b.Type, Target: targetName,
