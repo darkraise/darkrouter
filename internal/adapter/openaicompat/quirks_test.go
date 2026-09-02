@@ -1,13 +1,16 @@
 package openaicompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -216,5 +219,40 @@ func TestBuildAppliesTheTargetPresetQuirks(t *testing.T) {
 	body, _ := io.ReadAll(hr.Body)
 	if !strings.Contains(string(body), `"max_completion_tokens":32`) {
 		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestReasoningContentSurvivesADeepSeekRoundTrip(t *testing.T) {
+	// A DeepSeek thinking-mode tool loop fails unless the assistant turn
+	// comes back with the reasoning it produced. Render for DeepSeek, parse
+	// the result as an OpenAI request, and the thinking block must still be
+	// there.
+	req := &ir.Request{Messages: []ir.Message{
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "weather?"}}},
+		{Role: ir.RoleAssistant, Content: []ir.ContentBlock{
+			{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "need a lookup"}},
+			{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: "c1", Name: "lookup", Input: json.RawMessage(`{}`)}},
+		}},
+		{Role: ir.RoleTool, Content: []ir.ContentBlock{{Type: ir.BlockToolResult,
+			ToolResult: &ir.ToolResult{ToolUseID: "c1", Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "sunny"}}}}}},
+	}}
+	tgt := &adapter.Target{BaseURL: "https://api.deepseek.com/v1", Model: "deepseek-reasoner"}
+	hr, warns, err := BuildRequest(context.Background(), tgt, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasWarning(warns, "messages[].assistant.thinking") {
+		t.Fatalf("warnings = %v", warns)
+	}
+	body, _ := io.ReadAll(hr.Body)
+	back, _, err := openaiedge.New().ParseRequest(
+		httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body)), 1<<20)
+	if err != nil {
+		t.Fatalf("reparse: %v\n%s", err, body)
+	}
+	assistant := back.Messages[1].Content
+	if len(assistant) != 2 || assistant[0].Type != ir.BlockThinking || assistant[0].Thinking.Text != "need a lookup" ||
+		assistant[1].Type != ir.BlockToolUse {
+		t.Fatalf("assistant turn after the round trip = %+v", assistant)
 	}
 }
