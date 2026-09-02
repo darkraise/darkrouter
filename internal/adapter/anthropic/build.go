@@ -319,11 +319,11 @@ type modelTraits struct {
 // traitsOf reads the request-shape facts off the catalog entry the executor
 // attached to the target.
 //
-// Phase 4 matched fragments of the model name here, because there was no
-// catalog. That table needed a new entry every time Anthropic shipped a
-// generation, and it was wrong for an aliased or proxied model whose name says
-// nothing about its generation — a gateway that renames claude-opus-4-5 to
-// "default" got the permissive fallback and a 400 on every reasoning request.
+// The catalog rather than the model name decides, because a name-fragment
+// table needs a new entry every time Anthropic ships a generation and is wrong
+// for an aliased or proxied model whose name says nothing about its
+// generation — a gateway that renames claude-opus-4-5 to "default" would get
+// the permissive fallback and a 400 on every reasoning request.
 //
 // The permissive fallback survives for a model the catalog does not know, which
 // is the honest answer for a self-hosted Anthropic-compatible endpoint: shape

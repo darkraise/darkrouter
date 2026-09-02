@@ -154,8 +154,7 @@ func TestRequiredMaxTokensKeepsAServableClientValue(t *testing.T) {
 }
 
 func TestEffortBudgetClampIsLive(t *testing.T) {
-	// The parameter existed from phase 4 and every caller passed 0, which
-	// disabled it.
+	// The parameter once had every caller passing 0, which disabled it.
 	if got := EffortBudget("high", 8192); got != 8192 {
 		t.Errorf("EffortBudget(high, 8192) = %d, want the clamp to 8192", got)
 	}

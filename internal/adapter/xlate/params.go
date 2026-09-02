@@ -115,7 +115,7 @@ func BudgetEffort(budget int) string {
 //   - No cap in the request: the catalog's maximum, or DefaultMaxTokens.
 //   - A cap above the model's maximum: clamped. Forwarding it is a 400 the
 //     client cannot diagnose, and keeping a servable request servable is the
-//     same choice phase 4 made for a thinking budget that exceeded max_tokens.
+//     same choice made for a thinking budget that exceeds max_tokens.
 //   - A cap the model can honor: passed through untouched and unwarned.
 func RequiredMaxTokens(req *ir.Request, target string, catalogMax int) (int, []ir.Warning) {
 	if req.MaxTokens != nil && *req.MaxTokens > 0 {

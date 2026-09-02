@@ -17,14 +17,14 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// buildAnthropic renders through phase 4's Anthropic builder and then applies
-// the two differences Vertex imposes: the model moves from the body into the
-// URL, and anthropic_version becomes a body field.
+// buildAnthropic renders through the Anthropic adapter's builder and then
+// applies the two differences Vertex imposes: the model moves from the body
+// into the URL, and anthropic_version becomes a body field.
 //
 // Rewriting the rendered body rather than reimplementing the renderer is
-// deliberate. Everything phase 4 encodes — cache breakpoints, thinking modes,
-// the assistant-prefill rules — is behavior the golden files pin, and a second
-// implementation would drift from it silently.
+// deliberate. Everything that builder encodes — cache breakpoints, thinking
+// modes, the assistant-prefill rules — is behavior the golden files pin, and a
+// second implementation would drift from it silently.
 func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	inner := *t
 	// A placeholder: the URL is replaced below. Empty would make the builder

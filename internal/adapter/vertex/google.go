@@ -8,7 +8,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// buildGoogle reuses phase 4's Gemini builder unchanged.
+// buildGoogle reuses the Gemini adapter's builder unchanged.
 //
 // That builder appends "/models/{model}:generateContent" to the target's base
 // URL, so handing it a base URL ending in the publisher segment produces

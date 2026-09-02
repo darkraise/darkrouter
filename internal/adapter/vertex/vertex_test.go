@@ -55,8 +55,8 @@ func googleTarget() *adapter.Target {
 	}
 }
 
-// The single most important pair of assertions in this package. Spec §4.1: an
-// implementer following the earlier draft would 400 on every Claude call.
+// The single most important pair of assertions in this package: sending the
+// Gemini shape to the Anthropic publisher 400s on every Claude call.
 func TestAnthropicPublisherUsesRawPredict(t *testing.T) {
 	hr, body := build(t, anthropicTarget(), req())
 
