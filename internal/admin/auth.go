@@ -31,7 +31,7 @@ func (s *Server) requireSession(h http.HandlerFunc) http.HandlerFunc {
 		if terr != nil {
 			// A database failure is not a logout. Saying 401 here would send
 			// the operator to a login screen that cannot work either.
-			writeError(w, http.StatusInternalServerError, "session lookup failed")
+			internalError(w, r, terr)
 			return
 		}
 		if !ok {
@@ -68,11 +68,12 @@ func (s *Server) requireCSRF(h http.HandlerFunc) http.HandlerFunc {
 // SPA always sends at least one.
 func sameOrigin(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
-	case "same-origin", "none":
-		// "none" is a user-initiated navigation — typing the URL, a bookmark —
-		// which cannot be attacker-driven.
+	case "same-origin":
 		return true
-	case "same-site", "cross-site":
+	case "same-site", "cross-site", "none":
+		// "none" is a user-initiated navigation — but a form the operator was
+		// tricked into submitting from a bookmarklet or a data: URL arrives
+		// the same way, and none of the SPA's own mutations do.
 		return false
 	}
 	origin := r.Header.Get("Origin")
