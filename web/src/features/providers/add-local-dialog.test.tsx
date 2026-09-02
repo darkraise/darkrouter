@@ -49,15 +49,17 @@ function stub(script: Script = {}) {
   return seen
 }
 
-function mount(onDone = vi.fn()) {
+function mount(onDone = vi.fn(), preset?: Preset) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={client}>
-      <AddLocalDialog open onOpenChange={() => {}} onDone={onDone} />
+      <AddLocalDialog preset={preset} open onOpenChange={() => {}} onDone={onDone} />
     </QueryClientProvider>,
   )
   return onDone
 }
+
+const ollama = presets[1]
 
 /** The provider icon renders an <svg><title> carrying the same name, so the
  *  row is addressed by its option role rather than by its text. */
@@ -80,37 +82,43 @@ describe("the local runtime picker", () => {
     expect(screen.queryByRole("option", { name: /Groq/ })).not.toBeInTheDocument()
   })
 
-  it("prefills the port the chosen runtime listens on", async () => {
+  it("prefills the address the chosen runtime documents", async () => {
     stub()
     mount()
     await choose("LM Studio")
-    expect(await screen.findByLabelText("Port")).toHaveValue("1234")
+    expect(await screen.findByLabelText("Base URL")).toHaveValue("http://localhost:1234/v1")
   })
 
-  it("defaults the host to the address that reaches out of the container", async () => {
+  it("asks for the address and nothing that restates it", async () => {
+    // Host and port were how the URL got built before the URL itself was
+    // editable. Keeping both would be two ways to say one thing, and a rule
+    // about which of them wins.
+    stub()
+    mount()
+    await choose("Ollama")
+    expect(await screen.findByLabelText("Base URL")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Host")).toBeNull()
+    expect(screen.queryByLabelText("Port")).toBeNull()
+  })
+
+  it("offers the address that reaches out of the container, since that default cannot", async () => {
     // Every local preset ships a localhost URL, which from inside the
-    // container is the container. Defaulting to localhost would make the
-    // common case the broken one.
-    stub()
-    mount()
-    await choose("Ollama")
-    expect(await screen.findByLabelText("Host")).toHaveValue("host.docker.internal")
-  })
-
-  it("shows the endpoint the gateway will actually call", async () => {
-    stub()
-    mount()
-    await choose("Ollama")
-    expect(
-      await screen.findByText("http://host.docker.internal:11434/v1"),
-    ).toBeInTheDocument()
-  })
-
-  it("refuses to submit while the host is blank", async () => {
+    // container is the container. The default is the documented address, so
+    // the containerised case needs somewhere to be said.
     stub()
     mount()
     const user = await choose("Ollama")
-    await user.clear(await screen.findByLabelText("Host"))
+    await user.click(await screen.findByRole("button", { name: /host\.docker\.internal/ }))
+    expect(screen.getByLabelText("Base URL")).toHaveValue(
+      "http://host.docker.internal:11434/v1",
+    )
+  })
+
+  it("refuses to submit while the address is blank", async () => {
+    stub()
+    mount()
+    const user = await choose("Ollama")
+    await user.clear(await screen.findByLabelText("Base URL"))
     expect(screen.getByRole("button", { name: /^Add/ })).toBeDisabled()
   })
 })
@@ -127,7 +135,7 @@ describe("adding a local runtime", () => {
     expect(create?.body).toEqual({
       id: "ollama",
       preset: "ollama",
-      base_url: "http://host.docker.internal:11434/v1",
+      base_url: "http://localhost:11434/v1",
       enabled: true,
     })
   })
@@ -176,7 +184,7 @@ describe("a runtime that is already configured", () => {
 
 describe("reopening the dialog", () => {
   it("starts from scratch rather than from the last attempt", async () => {
-    // The dialog outlives any one visit. A port left over from a failed
+    // The dialog outlives any one visit. An address left over from a failed
     // attempt would silently be reused by the next one, which reads as the
     // add failing for no reason.
     stub()
@@ -187,9 +195,9 @@ describe("reopening the dialog", () => {
       </QueryClientProvider>,
     )
     const user = await choose("Ollama")
-    await user.clear(await screen.findByLabelText("Port"))
-    await user.type(screen.getByLabelText("Port"), "11999")
-    expect(screen.getByLabelText("Port")).toHaveValue("11999")
+    await user.clear(await screen.findByLabelText("Base URL"))
+    await user.type(screen.getByLabelText("Base URL"), "http://gw:11999/v1")
+    expect(screen.getByLabelText("Base URL")).toHaveValue("http://gw:11999/v1")
 
     const render_ = (open: boolean) =>
       view.rerender(
@@ -200,8 +208,96 @@ describe("reopening the dialog", () => {
     render_(false)
     render_(true)
 
-    expect(screen.queryByLabelText("Port")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument()
     await choose("Ollama")
-    expect(await screen.findByLabelText("Port")).toHaveValue("11434")
+    expect(await screen.findByLabelText("Base URL")).toHaveValue("http://localhost:11434/v1")
+  })
+})
+
+describe("the base URL box", () => {
+  it("carries an address no host-and-port pair could have expressed", async () => {
+    const seen = stub()
+    const onDone = mount()
+    const user = await choose("Ollama")
+    const url = await screen.findByLabelText("Base URL")
+    await user.clear(url)
+    await user.type(url, "https://box.lan:8443/openai/v1")
+
+    await user.click(screen.getByRole("button", { name: /^Add/ }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("ollama"))
+    const create = seen.find((c) => c.path === "/api/providers" && c.method === "POST")
+    expect(create?.body).toMatchObject({ base_url: "https://box.lan:8443/openai/v1" })
+  })
+
+  it("refuses to submit what is not an http URL", async () => {
+    stub()
+    mount()
+    const user = await choose("Ollama")
+    const url = await screen.findByLabelText("Base URL")
+    await user.clear(url)
+    await user.type(url, "box.lan:8443")
+    expect(screen.getByRole("button", { name: /^Add/ })).toBeDisabled()
+  })
+})
+
+describe("a runtime started behind a token", () => {
+  it("stores the key and replaces the preset's keyless auth style", async () => {
+    const seen = stub()
+    const onDone = mount()
+    const user = await choose("Ollama")
+    await user.type(await screen.findByLabelText("API key"), "sk-local-1")
+    await user.click(screen.getByRole("button", { name: /^Add/ }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("ollama"))
+    const create = seen.find((c) => c.path === "/api/providers" && c.method === "POST")
+    expect(create?.body).toMatchObject({ auth_style: "bearer" })
+    const key = seen.find((c) => c.path === "/api/providers/ollama/keys")
+    expect(key?.body).toEqual({ label: "default", secret: "sk-local-1" })
+  })
+
+  it("asks nothing about how to send it, because there is one answer", async () => {
+    // Every local server that reads a token reads Authorization: Bearer. The
+    // x-api-key and api-key styles are hosted-API conventions, so a picker
+    // here would be a choice with three wrong options.
+    stub()
+    mount()
+    const user = await choose("Ollama")
+    await user.type(await screen.findByLabelText("API key"), "sk-local-1")
+    expect(screen.queryByLabelText("Sent as")).toBeNull()
+  })
+
+  it("stores the key before the probe, so the probe is not refused by it", async () => {
+    const seen = stub()
+    mount()
+    const user = await choose("Ollama")
+    await user.type(await screen.findByLabelText("API key"), "sk-local-1")
+    await user.click(screen.getByRole("button", { name: /^Add/ }))
+
+    await waitFor(() => expect(seen.some((c) => c.path.endsWith("/test"))).toBe(true))
+    const keyAt = seen.findIndex((c) => c.path === "/api/providers/ollama/keys")
+    const probeAt = seen.findIndex((c) => c.path.endsWith("/test"))
+    expect(keyAt).toBeGreaterThan(-1)
+    expect(keyAt).toBeLessThan(probeAt)
+  })
+
+  it("adds nothing about auth when the box is left empty", async () => {
+    const seen = stub()
+    mount()
+    const user = await choose("Ollama")
+    await user.click(screen.getByRole("button", { name: /^Add/ }))
+
+    await waitFor(() => expect(seen.some((c) => c.path.endsWith("/test"))).toBe(true))
+    const create = seen.find((c) => c.path === "/api/providers" && c.method === "POST")
+    expect(create?.body).not.toHaveProperty("auth_style")
+    expect(seen.some((c) => c.path === "/api/providers/ollama/keys")).toBe(false)
+  })
+})
+
+describe("opening on a runtime a row already named", () => {
+  it("skips the picker and starts from that runtime's address", async () => {
+    stub()
+    mount(vi.fn(), ollama)
+    expect(await screen.findByLabelText("Base URL")).toHaveValue("http://localhost:11434/v1")
+    expect(screen.queryByRole("option", { name: /LM Studio/ })).not.toBeInTheDocument()
   })
 })

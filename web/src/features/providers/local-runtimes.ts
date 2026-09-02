@@ -13,46 +13,36 @@ export function localRuntimes(presets: Preset[]): Preset[] {
   return presets.filter(isLocalPreset).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export function portOf(p: Preset): string {
-  const u = new URL(p.base_url)
-  if (u.port) return u.port
-  return u.protocol === "https:" ? "443" : "80"
-}
-
-/**
- * Reduces what was typed in the Host box to a bare host.
- *
- * Pasting the whole endpoint into a box labelled Host is the likeliest wrong
- * input there is, and what was meant is unambiguous, so it is read rather than
- * rejected.
- */
-export function normalizeHost(raw: string): string {
-  let h = raw.trim()
-  h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
-  h = h.replace(/\/.*$/, "")
-  if (h.startsWith("[")) {
-    const end = h.indexOf("]")
-    return end === -1 ? h : h.slice(0, end + 1)
+/** Mirrors the backend's check at internal/admin/providers.go:33, so a URL the
+ *  server would reject is caught before a provider row is created for it. */
+export function validBaseUrl(raw: string): boolean {
+  let u: URL
+  try {
+    u = new URL(raw.trim())
+  } catch {
+    return false
   }
-  // One colon is a host:port that the port box owns. Two or more is an IPv6
-  // literal, where every colon belongs to the address itself.
-  if ((h.match(/:/g) ?? []).length === 1) h = h.replace(/:\d+$/, "")
-  return h
+  return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== ""
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"])
+
+/** Whether an address names this machine from the caller's own point of view,
+ *  which inside a container is the container and not the operator's desktop. */
+export function isLoopbackUrl(raw: string): boolean {
+  if (!validBaseUrl(raw)) return false
+  return LOOPBACK_HOSTS.has(new URL(raw.trim()).hostname.replace(/^\[|\]$/g, ""))
 }
 
 /**
- * The endpoint the gateway will call, or null when the form cannot yet make
- * one. Host and port replace the preset's authority; its path is kept, which
- * is what lets lemonade's /api/v1 and docker-model-runner's /engines/v1 work
- * without either being named here.
+ * The same address reached through a different host.
+ *
+ * Scheme, port and path are the runtime's, and only the host is the operator's
+ * problem — which is the whole of the container case, where every preset's
+ * localhost has to become the gateway's name and nothing else changes.
  */
-export function composeBaseUrl(p: Preset, host: string, port: string): string | null {
-  const h = normalizeHost(host)
-  if (h === "") return null
-  if (!/^\d+$/.test(port)) return null
-  const n = Number(port)
-  if (n < 1 || n > 65535) return null
-  const u = new URL(p.base_url)
-  const authority = h.includes(":") && !h.startsWith("[") ? `[${h}]` : h
-  return `${u.protocol}//${authority}:${n}${u.pathname}`
+export function withHost(raw: string, host: string): string {
+  const u = new URL(raw.trim())
+  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
+  return `${u.protocol}//${authority}${u.port ? `:${u.port}` : ""}${u.pathname}${u.search}`
 }
