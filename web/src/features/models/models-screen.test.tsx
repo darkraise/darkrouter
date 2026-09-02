@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -62,7 +63,7 @@ const catalog = (): CatalogResponse => ({
   models: [
     {
       model: "gpt-5",
-      providers: ["openai"],
+      providers: ["openai", "groq"],
       surfaces: ["chat"],
       context_window: 128000,
       max_output_tokens: 4096,
@@ -137,5 +138,20 @@ describe("the models table", () => {
     }
     expect(screen.getByPlaceholderText("Model")).toBeInTheDocument()
     expect(screen.getByPlaceholderText("Provider")).toBeInTheDocument()
+  })
+
+  it("shows the first serving provider in full, and the ladder on request", async () => {
+    // The per-row ladder is what pushed Publisher, Surfaces, State and
+    // Source off the right edge at 1440. The row now carries one chip and
+    // opens the ladder only when asked.
+    mockCatalog()
+    await renderAt("/")
+    const chip = await screen.findByText("openai/gpt-5")
+    const row = chip.closest("tr")
+    if (!row) throw new Error("expected the chip inside a table row")
+    expect(within(row).queryByText("groq/gpt-5")).not.toBeInTheDocument()
+
+    await userEvent.click(within(row).getByRole("button", { name: /1 more/ }))
+    expect(within(row).getByText("groq/gpt-5")).toBeInTheDocument()
   })
 })

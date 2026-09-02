@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { Badge, Button } from "darkraise-ui"
+import { Badge, Button, Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui"
 import { ModelCombobox } from "../shell/model-combobox"
 import { CapabilityTriad, ScaleBar } from "../shell/measures"
 import { ModelState } from "../shell/status-mark"
@@ -91,9 +91,55 @@ export function facetRow(m: Model): Row {
   }
 }
 
-// The facet columns take string headers rather than sortable ones: a facet
-// and the column menu are both labelled from the header when it is a string
-// and from the accessor key otherwise, and "surface_list" is not a label.
+/**
+ * Who serves the model, folded to one chip.
+ *
+ * The full compressed ladder sat in every row and was what pushed Publisher,
+ * Surfaces, State and Source off the right edge of a 1440px window. The
+ * first provider — the one the router would arrive at first — is the chip;
+ * the rest are a count, and the ladder opens under it on request.
+ */
+function ServesCell({ row }: { row: Row }) {
+  const [open, setOpen] = useState(false)
+  const first = row.providers[0]
+  if (first === undefined) return <span className="text-[hsl(var(--legend))]">—</span>
+  const rest = row.providers.length - 1
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="font-mono text-sm">
+              {first}/{row.model}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <span className="flex flex-col font-mono text-sm">
+              {row.providers.map((p) => (
+                <span key={p}>
+                  {p}/{row.model}
+                </span>
+              ))}
+            </span>
+          </TooltipContent>
+        </Tooltip>
+        {rest > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={open}
+            aria-label={`${open ? "Hide" : "Show"} the ${row.providers.length} providers serving ${row.model} (${rest} more)`}
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? "less" : `+${rest} more`}
+          </Button>
+        )}
+      </span>
+      {open && <Ladder mode="compressed" catalog rows={compressedRows(row)} />}
+    </div>
+  )
+}
+
 // `darkraise-ui` bundles its own tanstack/react-table internally and does not
 // re-export its column types, so the shape is pulled from the component's own
 // signature rather than from a second, independently-versioned install of the
@@ -106,15 +152,13 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       accessorKey: "model",
       header: ({ column }) => <ColumnHeader column={column} title="Model" />,
       cell: ({ row }) => (
-        <span className="font-mono text-sm">{row.original.model}</span>
+        <span className="block min-w-[16rem] font-mono text-sm">{row.original.model}</span>
       ),
     },
     {
       id: "serves",
       header: "Serves",
-      cell: ({ row }) => (
-        <Ladder mode="compressed" catalog rows={compressedRows(row.original)} />
-      ),
+      cell: ({ row }) => <ServesCell row={row.original} />,
     },
     {
       accessorKey: "context_window",
@@ -244,8 +288,18 @@ export function ModelsScreen() {
     () => [...new Set((catalog.data?.models ?? []).flatMap((m) => m.providers))].sort(),
     [catalog.data],
   )
-  const models = (catalog.data?.models ?? []).filter((m) => matches(m, filters))
+  const models = useMemo(
+    () => (catalog.data?.models ?? []).filter((m) => matches(m, filters)),
+    [catalog.data, filters],
+  )
+  // Both memoised: DataTable rebuilds its table model when either changes
+  // identity, and the catalogue polls every thirty seconds.
+  const rows = useMemo(() => models.map(facetRow), [models])
   const [editing, setEditing] = useState<{ provider: string; model: string } | null>(null)
+  const columns = useMemo(
+    () => buildColumns((provider, model) => setEditing({ provider, model })),
+    [],
+  )
   const filtered = Object.values(filters).some((v) => v !== "")
 
   return (
@@ -277,13 +331,15 @@ export function ModelsScreen() {
         />
       </div>
 
+      {/* Paged rather than windowed: a row grows when its ladder is opened,
+          and a fixed-height window cannot hold a row that changes height. */}
       <DataTable
-        data={models.map(facetRow)}
-        columns={buildColumns((provider, model) => setEditing({ provider, model }))}
+        data={rows}
+        columns={columns}
         facets={["surface_list", "state", "caps", "band", "merge_source"]}
         searchKey="model"
         searchPlaceholder="Search models"
-        virtualize={{ rowHeight: 40, height: 640 }}
+        isLoading={catalog.isPending}
       />
 
       {models.length === 0 && (
@@ -296,7 +352,7 @@ export function ModelsScreen() {
               hint="A sweep asks each provider what it serves, using one of that provider's own keys — so a provider needs an account before it can answer."
               action={
                 <Button asChild size="sm">
-                  <Link to="/providers">Add a provider account</Link>
+                  <Link to="/providers">Add a provider credential</Link>
                 </Button>
               }
               preview={<GhostRows />}
