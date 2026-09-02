@@ -73,6 +73,27 @@ interval in `catalog.sync_interval`.
 
 ---
 
+## Augment CLI
+
+`@augmentcode/auggie` 0.36.0, installed into the image by the Dockerfile's
+`auggie` stage and run by `internal/localcli` as the Augment provider. It is
+not linked into the binary and not part of the console bundle; it is a
+separate program carried in the image for convenience, and `--build-arg
+WITH_AUGGIE=0` produces an image without it.
+
+- **Licence:** custom proprietary (the package declares `SEE LICENSE IN
+  LICENSE.md`). Copyright (c) 2025, Augment Computing, Inc.
+- **Terms that matter here:** use requires an active Augment subscription;
+  redistribution "in part or in whole" and embedding "into commercially sold
+  or distributed software or services" need Augment's written permission;
+  the CLI is distributed "exclusively through" Augment's npm registry.
+  An operator who builds and runs the image for their own account is inside
+  the "internal scripting and automation" the licence permits. Publishing an
+  image that contains the CLI is redistribution under those terms; whoever
+  publishes one should either hold that permission or build with
+  `WITH_AUGGIE=0`.
+- **Source:** https://www.npmjs.com/package/@augmentcode/auggie
+
 ## Bundled JavaScript
 
 Shipped inside the console bundle, which is embedded in the binary. All MIT.
@@ -82,7 +103,7 @@ Shipped inside the console bundle, which is embedded in the binary. All MIT.
 | `@lobehub/icons` | Copyright (c) 2023 LobeHub |
 | `@tanstack/react-query` | Copyright (c) 2021-present Tanner Linsley |
 | `@tanstack/react-router` | Copyright (c) 2021-present Tanner Linsley |
-| `@tanstack/react-table` | Copyright (c) 2016 Tanner Linsley |
+| `@tanstack/react-table` | Copyright (c) 2016 Tanner Linsley — listed while `web/package.json` depends on it; drop this row if the console stops importing it |
 | `@xyflow/react` | Copyright (c) 2019-2025 webkid GmbH |
 | `darkraise-ui` | — |
 | `react` | Copyright (c) Meta Platforms, Inc. and affiliates. |

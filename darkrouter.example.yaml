@@ -14,6 +14,12 @@ server:
   shutdown_grace: 30s
   sse:
     max_line_bytes: 1048576
+    # How much of a streamed response one attempt may buffer before it is
+    # committed to the client. Until the first token is committed a failure
+    # still fails over; after it the client is already reading. The first_byte
+    # timeout alone does not bound this, because a provider can emit megabytes
+    # of preamble inside that window.
+    max_precommit_bytes: 1048576
 
 providers:
   - id: groq
@@ -28,24 +34,17 @@ providers:
     models:
       - openai/gpt-oss-120b
 
-# Bedrock and Vertex carry endpoint properties rather than a base URL. Both are
-# database-managed like every other provider since phase 7 — this block is
-# imported once and then ignored — but the fields are shown here because they
-# have no equivalent anywhere else:
+# Bedrock and Vertex cannot be configured in this file. They carry endpoint
+# properties rather than a base URL and a key -- an AWS region and credential
+# pair for Bedrock; a GCP project, location and service-account credential for
+# Vertex -- and a provider entry here only knows id, kind, preset, base_url,
+# api_key, priority and models. Add them from the console's Providers screen
+# (or POST /api/providers), where those fields exist and the credential is
+# stored encrypted. The vertex-anthropic preset selects the rawPredict route
+# with the Anthropic payload.
 #
-#   - id: bedrock
-#     kind: bedrock
-#     preset: bedrock
-#     region: us-east-1          # the endpoint, not part of the model id
-#
-#   - id: vertex
-#     kind: vertex
-#     preset: vertex             # or vertex-anthropic, which selects the
-#     project: my-gcp-project    # rawPredict route and the Anthropic payload
-#     location: us-central1
-#
-# A Claude subscription is connected from the dashboard rather than configured
-# here: there is no key to write down, only a flow to complete.
+# A Claude subscription is likewise connected from the console rather than
+# configured here: there is no key to write down, only a flow to complete.
 
 # Aliases and policy are imported into the database on the first run and edited
 # through the admin API from then on, exactly as providers: already is. After
