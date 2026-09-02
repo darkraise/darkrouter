@@ -60,8 +60,11 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 			body["additionalModelRequestFields"] = extra
 		}
 	}
-	if tc := toolConfig(req); tc != nil {
-		body["toolConfig"] = tc
+	if tc, w := toolConfig(req); tc != nil || len(w) > 0 {
+		warns = append(warns, w...)
+		if tc != nil {
+			body["toolConfig"] = tc
+		}
 	}
 	if req.TopK != nil {
 		// topK lives in additionalModelRequestFields, which is per-family and
@@ -182,12 +185,22 @@ func inferenceConfig(req *ir.Request) map[string]any {
 	return cfg
 }
 
-func toolConfig(req *ir.Request) map[string]any {
+func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 	if len(req.Tools) == 0 {
-		return nil
+		return nil, nil
 	}
+	var warns []ir.Warning
 	tools := make([]any, 0, len(req.Tools))
 	for _, t := range req.Tools {
+		// A typed tool runs on its own provider's side. Rendering it as a
+		// toolSpec would have the model call a function nobody implements.
+		if _, typed := t.Extra["type"]; typed {
+			warns = append(warns, ir.Warning{
+				Field: "tools[]." + t.Name, Target: targetName,
+				Reason: "provider-run tool has no Converse equivalent; dropped",
+			})
+			continue
+		}
 		schema := t.Schema
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object"}`)
@@ -200,6 +213,9 @@ func toolConfig(req *ir.Request) map[string]any {
 				"inputSchema": map[string]any{"json": schema},
 			},
 		})
+	}
+	if len(tools) == 0 {
+		return nil, warns
 	}
 	cfg := map[string]any{"tools": tools}
 	if tc := req.ToolChoice; tc != nil {
@@ -214,7 +230,7 @@ func toolConfig(req *ir.Request) map[string]any {
 		// "none" has no Converse spelling. Omitting toolChoice is the closest
 		// honest rendering; the model may still call a tool.
 	}
-	return cfg
+	return cfg, warns
 }
 
 // renderMessages maps IR turns to Converse turns, merging consecutive

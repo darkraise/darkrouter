@@ -77,8 +77,10 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		stop      = ir.StopEndTurn
 	)
 
-	// start is deferred until the first event that is not a usage update, so an
-	// Anthropic-served route can report real input tokens inside message_start.
+	// start is held back until the first usage update or the first content,
+	// whichever comes first: an Anthropic-served route reports real input
+	// tokens inside message_start, and a route whose dialect reports usage
+	// last is not delayed waiting for it.
 	start := func() error {
 		if started {
 			return nil
@@ -193,6 +195,9 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		case ir.EventMessageDelta:
 			if ev.Usage != nil {
 				usage = *ev.Usage
+				if err := start(); err != nil {
+					return err
+				}
 			}
 			if ev.StopReason != "" {
 				stop = ev.StopReason
@@ -210,7 +215,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			}
 			if err := send("message_delta", map[string]any{
 				"delta": map[string]any{"stop_reason": stopReasonWire(stop), "stop_sequence": nil},
-				"usage": map[string]any{"output_tokens": usage.OutputTokens},
+				"usage": usageBody(usage),
 			}); err != nil {
 				return err
 			}
@@ -228,7 +233,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 	}
 	if err := send("message_delta", map[string]any{
 		"delta": map[string]any{"stop_reason": stopReasonWire(stop), "stop_sequence": nil},
-		"usage": map[string]any{"output_tokens": usage.OutputTokens},
+		"usage": usageBody(usage),
 	}); err != nil {
 		return err
 	}

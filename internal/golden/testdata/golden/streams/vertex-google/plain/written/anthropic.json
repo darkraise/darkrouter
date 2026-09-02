@@ -68,6 +68,9 @@
       },
       "type": "message_delta",
       "usage": {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "input_tokens": 7,
         "output_tokens": 3
       }
     },
