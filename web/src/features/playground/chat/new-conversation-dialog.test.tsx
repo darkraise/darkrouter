@@ -156,9 +156,10 @@ describe("the new-conversation dialog", () => {
 
     await userEvent.keyboard("{Escape}")
 
-    // jsdom plays no exit animation, so the closed dialog may still be in
-    // the tree; its state is what says it closed.
-    expect(screen.getByRole("dialog", { name: /manage presets/i })).toHaveAttribute("data-state", "closed")
+    // Whether the closed dialog is already out of the tree depends on the
+    // exit transition, which jsdom does not play; either way it is closed.
+    const manage = screen.queryByRole("dialog", { name: /manage presets/i })
+    expect(manage === null || manage.getAttribute("data-state") === "closed").toBe(true)
     expect(screen.getByRole("dialog", { name: /new conversation/i })).toBeInTheDocument()
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
