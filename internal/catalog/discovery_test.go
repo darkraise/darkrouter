@@ -500,3 +500,21 @@ func TestAKeyedProviderWithNoCredentialIsNotSwept(t *testing.T) {
 		t.Error("a keyed provider with no credential must not be swept")
 	}
 }
+
+func TestSeedingReadsTheSyncedDocument(t *testing.T) {
+	// A seed-only kind has no listing to refresh from, so the synced document
+	// is the only way a model models.dev added after the build reaches it.
+	preset := Embedded()["vertex"]
+	live := Doc{preset.ModelsDevID: {"fresh-model": {ContextWindow: 1, PriceKnown: true}}}
+	d := &Discoverer{opts: DiscoveryOptions{Metadata: func() Doc { return live }}}
+	seeded := SeedFromPreset(preset, d.doc())
+	if len(seeded) != 1 || seeded[0].ModelID != "fresh-model" {
+		t.Fatalf("seeded = %+v, want the synced document's model", seeded)
+	}
+	for _, meta := range []func() Doc{nil, func() Doc { return Doc{} }} {
+		d := &Discoverer{opts: DiscoveryOptions{Metadata: meta}}
+		if len(SeedFromPreset(preset, d.doc())) == 0 {
+			t.Error("the embedded snapshot did not seed")
+		}
+	}
+}
