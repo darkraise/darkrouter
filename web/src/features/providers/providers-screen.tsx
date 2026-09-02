@@ -17,6 +17,7 @@ import {
   TableRow,
   ToggleGroup,
   ToggleGroupItem,
+  toast,
 } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
@@ -29,7 +30,7 @@ import {
   useProviders,
   useUsage,
 } from "../../lib/queries"
-import type { BreakerEntry, Preset } from "../../lib/api-types"
+import type { BreakerEntry, Preset, ProbeResult } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
 import { NoMatch } from "../shell/empty-state"
 import { TestDrawer } from "./test-drawer"
@@ -47,9 +48,9 @@ import {
   type ConnectionType,
   type ProviderRow,
 } from "./provider-rows"
-import { breakersFor, discoveryLine } from "./provider-state"
+import { breakersFor, discoveryLine, probeOutcome } from "./provider-state"
 
-export { breakersFor, discoveryLine, providerState } from "./provider-state"
+export { breakersFor, discoveryLine, probeOutcome, providerState } from "./provider-state"
 
 export type ProviderView = "list" | "grid"
 
@@ -144,9 +145,13 @@ export function ProvidersScreen() {
     invalidates: [keys.models],
   })
   const probe = useApiMutation({
-    mutationFn: (id: string) => api.post(`/api/providers/${id}/test`, {}),
-    success: "Probe sent",
+    mutationFn: (id: string) => api.post<ProbeResult>(`/api/providers/${id}/test`, {}),
     invalidates: [keys.providers, keys.health],
+    onSuccess: (result) => {
+      const verdict = probeOutcome(result)
+      if (verdict.kind === "success") toast.success(verdict.message)
+      else toast.error(verdict.message)
+    },
   })
 
   const all = mergeProviderRows(presets.data?.presets ?? [], providers.data?.providers ?? [])
