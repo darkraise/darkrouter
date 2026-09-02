@@ -125,12 +125,12 @@ describe("a provider nobody has configured", () => {
     expect(screen.getByText("Free tier")).toBeInTheDocument()
   })
 
-  it("offers the accounts dialog on the provider already chosen", async () => {
+  it("offers the credentials dialog on the provider already chosen", async () => {
     // No picker: the operator named the provider by navigating to it.
     stub([], [preset])
     await renderProvider("groq")
 
-    await userEvent.click(await screen.findByRole("button", { name: /add the first account/i }))
+    await userEvent.click(await screen.findByRole("button", { name: /add the first credential/i }))
     expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
   })
