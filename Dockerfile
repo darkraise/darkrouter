@@ -59,12 +59,12 @@ RUN npm install -g --prefix /opt/auggie @augmentcode/auggie@${AUGGIE_VERSION}
 
 # The empty counterpart: the final stage copies /opt/auggie unconditionally,
 # so the stage it copies from has to exist either way.
-FROM alpine:3.22 AS auggie-0
+FROM alpine:3.24 AS auggie-0
 RUN mkdir -p /opt/auggie
 
 FROM auggie-${WITH_AUGGIE} AS auggie
 
-FROM alpine:3.22
+FROM alpine:3.24
 ARG WITH_AUGGIE
 # nodejs is here for auggie alone — the gateway itself is a static binary and
 # needs no runtime. It is the cost of a vendor who ships a CLI instead of an API.
