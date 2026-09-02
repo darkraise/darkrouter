@@ -20,6 +20,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // configStoreFor writes a minimal config and opens a store over it. aliases is
@@ -71,7 +72,7 @@ func testServerFullWithConfig(t *testing.T, extra string) (*Server, *store.DB) {
 
 func testServerFullWith(t *testing.T, aliases, extra string) (*Server, *store.DB) {
 	t.Helper()
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +183,7 @@ func testServerWithCatalog(t *testing.T, aliases string) (*Server, *store.DB) {
 // than a mock.
 func testServerWithExecutor(t *testing.T, upstreamURL, model string) *Server {
 	t.Helper()
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
