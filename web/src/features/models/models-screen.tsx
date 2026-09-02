@@ -8,6 +8,7 @@ import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Model, Pricing } from "../../lib/api-types"
+import { pricePerMillion } from "../../lib/format"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
 import { OverrideEditor } from "./override-editor"
@@ -59,17 +60,6 @@ export function tokenLabel(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`
   return String(tokens)
-}
-
-export function priceLabel(p: Pricing | null): string {
-  // Unpriced is not free. An em-dash is the same claim the spend tile and
-  // every cost cell already make.
-  if (p === null) return "—"
-  // Four places, matching formatCost: two would round a real sub-cent price
-  // like 4,000 micros ($0.004/MTok) down to $0.00, the exact string this
-  // function reserves for "unpriced".
-  const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(4)}`
-  return `${dollars(p.input_micros)} / ${dollars(p.output_micros)}`
 }
 
 export function priceBand(p: Pricing | null): string {
@@ -156,7 +146,11 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       accessorKey: "band",
       header: ({ column }) => <ColumnHeader column={column} title="Price" />,
       cell: ({ row }) => (
-        <span className="tabular-nums">{priceLabel(row.original.pricing)}</span>
+        <span className="tabular-nums">
+          {row.original.pricing
+            ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
+            : "—"}
+        </span>
       ),
     },
     {

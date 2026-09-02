@@ -108,7 +108,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
         <ProviderIcon preset={preset.id} id={preset.id} name={preset.name} size={44} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{preset.name}</h1>
+            <h2 className="truncate text-2xl font-semibold tracking-tight">{preset.name}</h2>
             <Badge variant={STATE_VARIANT.unconfigured}>unconfigured</Badge>
             {preset.free_tier && <Badge variant="secondary">Free tier</Badge>}
           </div>
@@ -313,12 +313,14 @@ export function ProviderDetail() {
       </Link>
 
       {/* The identity and the two things done to a provider from outside it —
-          switch it off, and everything else is per-account below. */}
+          switch it off, and everything else is per-credential below. An h2:
+          the app header already holds the page's h1, and this is a section
+          of that page. */}
       <header className="mt-3 mb-6 flex flex-wrap items-center gap-4 border-b pb-5">
         <ProviderIcon preset={provider.preset} id={provider.id} name={provider.name} size={44} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{provider.name}</h1>
+            <h2 className="truncate text-2xl font-semibold tracking-tight">{provider.name}</h2>
             <Badge variant={STATE_VARIANT[state]}>{state}</Badge>
           </div>
           <p className="mt-0.5 font-mono text-sm text-[hsl(var(--legend))]">

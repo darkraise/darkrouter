@@ -5,7 +5,7 @@ import {
 } from "darkraise-ui"
 import { EmptyState } from "../shell/empty-state"
 import type { Model } from "../../lib/api-types"
-import { priceLabel } from "../models/models-screen"
+import { pricePerMillion } from "../../lib/format"
 
 /** Tokens read as thousands, because 131072 is a number nobody holds in their
  *  head and 131k is the one on the vendor's own page. */
@@ -80,10 +80,14 @@ export function ProviderModels({ models, loading }: { models: Model[]; loading: 
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Model</TableHead>
+                <TableHead className="min-w-[16rem]">Model</TableHead>
                 <TableHead>Capabilities</TableHead>
                 <TableHead className="text-right">Context</TableHead>
-                <TableHead className="text-right">$ / M tokens</TableHead>
+                {/* The unit once, here; the cells carry only the numbers.
+                    Input then output, the order every vendor quotes. */}
+                <TableHead className="text-right" title="input / output">
+                  $ / M tokens
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -116,7 +120,9 @@ export function ProviderModels({ models, loading }: { models: Model[]; loading: 
                     {contextLabel(m.context_window)}
                   </TableCell>
                   <TableCell className="text-right font-mono whitespace-nowrap text-[hsl(var(--legend))]">
-                    {priceLabel(m.pricing)}
+                    {m.pricing
+                      ? `${pricePerMillion(m.pricing.input_micros)} / ${pricePerMillion(m.pricing.output_micros)}`
+                      : "—"}
                   </TableCell>
                 </TableRow>
               ))}
