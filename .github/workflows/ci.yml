@@ -16,6 +16,12 @@ env:
 permissions:
   contents: read
 
+# A push that lands while the previous run is still going supersedes it: the
+# older commit's result would be discarded on merge anyway.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: vet and test
@@ -44,19 +50,37 @@ jobs:
         working-directory: web
         run: |
           npm ci
+          npm audit --audit-level=high
           npm test
           npm run lint
           npm run build
 
+      # gofmt prints the files it would change and exits 0 either way, so the
+      # gate has to be on the output rather than the exit status.
+      - name: gofmt
+        run: |
+          out=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$out" ]; then
+            echo "gofmt would reformat:"
+            echo "$out"
+            exit 1
+          fi
+
       - name: go vet
         run: go vet ./...
+
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       # CGO is what -race needs. ubuntu-latest ships gcc, so this only has to be
       # asked for rather than installed.
       - name: go test -race
         env:
           CGO_ENABLED: 1
-        run: go test -race -count=1 ./...
+        run: go test -race -cover -count=1 ./...
 
   image:
     name: build and push image
@@ -93,11 +117,17 @@ jobs:
       # host, which is x86_64. Adding linux/arm64 here means QEMU emulation for
       # the Go and npm stages and a much longer build, so it is left out until
       # something actually needs it.
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
+          # The SBOM and the max-mode provenance attestation travel with the
+          # image so a consumer can verify what went into it and from which
+          # commit, without trusting the tag alone.
+          sbom: true
+          provenance: mode=max
           # metadata-action's version output is the tag it derived: the semver
           # for a v-tag, the branch name otherwise. That is what the admin port's
           # /healthz reports, so a running container can be matched to a build.
@@ -107,3 +137,14 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Scan what was actually pushed, by digest, so the report describes the
+      # bytes a deployment will pull rather than a local rebuild of them.
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
