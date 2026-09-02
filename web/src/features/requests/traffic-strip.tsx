@@ -1,4 +1,4 @@
-import type { TableRow } from "./requests-columns"
+import type { RequestTableRow } from "./requests-columns"
 
 /**
  * The page of requests, as a shape.
@@ -16,7 +16,7 @@ export type Bucket = { at: number; total: number; failed: number }
 /** Buckets over the span the loaded rows actually cover, so the strip is a
  *  picture of the page rather than of a clock. Fewer rows than buckets is not
  *  a problem: an empty bucket is a real gap in traffic and reads as one. */
-export function bucketRequests(rows: TableRow[], count = 40): Bucket[] {
+export function bucketRequests(rows: RequestTableRow[], count = 40): Bucket[] {
   if (rows.length === 0) return []
   const times = rows.map((r) => r.ts_ms)
   const from = Math.min(...times)
@@ -57,7 +57,7 @@ export function edgeLabels(fromMs: number, toMs: number): [string, string] {
   return [fmt(from), fmt(to)]
 }
 
-export function TrafficStrip({ rows }: { rows: TableRow[] }) {
+export function TrafficStrip({ rows }: { rows: RequestTableRow[] }) {
   const buckets = bucketRequests(rows)
   if (buckets.length === 0) return null
   const peak = Math.max(...buckets.map((b) => b.total), 1)

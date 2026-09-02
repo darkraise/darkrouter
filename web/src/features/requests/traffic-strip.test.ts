@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { bucketRequests, edgeLabels } from "./traffic-strip"
-import type { TableRow } from "./requests-columns"
+import type { RequestTableRow } from "./requests-columns"
 
-const row = (ts_ms: number, status = "success"): TableRow =>
+const row = (ts_ms: number, status = "success"): RequestTableRow =>
   ({
     id: String(ts_ms), ts_ms, status, dialect: "openai", surface: "llm",
     model: "m", provider: "p", alias: "", attempts: 1, tokens_in: 0,
     tokens_out: 0, total_ms: 10, path: "passthrough",
     failover: "single",
-  }) as unknown as TableRow
+  }) as unknown as RequestTableRow
 
 describe("the traffic strip", () => {
   it("spreads the loaded page across its buckets", () => {
