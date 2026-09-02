@@ -169,8 +169,8 @@ func TestASignedProviderFailsOverLikeAnyOther(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	const model = "shared-model"
-	g.mustAdmin(t, "POST", "/api/providers", fmt.Sprintf(
-		`{"id":"bed","kind":"bedrock","base_url":"http://127.0.0.1:1","auth_style":"sigv4","region":"us-east-1","priority":99}`),
+	g.mustAdmin(t, "POST", "/api/providers",
+		`{"id":"bed","kind":"bedrock","base_url":"http://127.0.0.1:1","auth_style":"sigv4","region":"us-east-1","priority":99}`,
 		http.StatusCreated)
 	g.mustAdmin(t, "POST", "/api/providers/bed/keys", fmt.Sprintf(
 		`{"label":"k","secret":%s}`,
