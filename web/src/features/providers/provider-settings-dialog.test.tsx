@@ -107,3 +107,24 @@ describe("reopening the settings dialog", () => {
     expect(screen.getByLabelText("Priority")).toHaveValue("42")
   })
 })
+
+describe("settingsPatch base URL", () => {
+  it("sends the base URL once it differs from the provider's", () => {
+    const p = provider()
+    expect(settingsPatch(draft(p, { baseUrl: "http://gw:11434/v1" }), p)).toEqual({
+      base_url: "http://gw:11434/v1",
+    })
+  })
+
+  it("ignores surrounding whitespace rather than writing it", () => {
+    const p = provider({ base_url: "http://gw:11434/v1" })
+    expect(settingsPatch(draft(p, { baseUrl: "  http://gw:11434/v1  " }), p)).toEqual({})
+  })
+
+  it("leaves an emptied box alone instead of clearing the endpoint", () => {
+    // A provider with no base URL is unreachable, and the backend rejects the
+    // write anyway. Refusing to send it keeps a slip from becoming a 400.
+    const p = provider()
+    expect(settingsPatch(draft(p, { baseUrl: "   " }), p)).toEqual({})
+  })
+})
