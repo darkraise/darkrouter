@@ -9,7 +9,7 @@
 # anyway. Tags in this file: node:24-alpine, golang:1.26.6-alpine, alpine:3.22.
 ARG WITH_AUGGIE=1
 
-FROM node:24-alpine AS web
+FROM node:26-alpine AS web
 # Mirrors the repo layout so the bundle lands where vite.config.ts points it,
 # at /src/internal/admin/dist.
 WORKDIR /src/web
@@ -51,7 +51,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # stage without duplicating the final one. The argument itself is declared
 # at the top of the file: an ARG a FROM line reads has to precede every stage.
 
-FROM node:24-alpine AS auggie-1
+FROM node:26-alpine AS auggie-1
 # Pinned for the reason web/ uses npm ci: an image is meant to be reproducible,
 # and an unpinned CLI would change under a rebuild that touched nothing else.
 ARG AUGGIE_VERSION=0.36.0
