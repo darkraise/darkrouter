@@ -5,26 +5,28 @@
  * charts specifically read as the reserved cooling amber and healthy green --
  * so a series would look like a state.
  *
- * The replacement is one accent differentiated by fill rather than by hue:
- * solid, 60% tint, 45° hatch, dot, outline. Five series stay distinguishable
- * without borrowing a colour that means something else, and it survives
- * greyscale printing and the commonest colour-vision deficiencies.
+ * The replacement is five hues spaced around the cool half of the wheel and
+ * kept clear of red, amber and green: blue, violet, teal, magenta, indigo.
+ * Five series stay tellable apart without borrowing a colour that means
+ * something else on the same screen.
  *
  * Scoped to a class rather than :root, because custom properties inherit and a
  * class on an ancestor wins -- the ramp must not leak onto any other screen.
  */
 .chart-scope {
-  --chart-1: var(--primary);
-  --chart-2: var(--primary);
-  --chart-3: var(--primary);
-  --chart-4: var(--primary);
-  --chart-5: var(--primary);
+  --chart-1: 217 80% 58%;
+  --chart-2: 268 65% 62%;
+  --chart-3: 186 70% 42%;
+  --chart-4: 322 65% 58%;
+  --chart-5: 244 55% 62%;
 }
 
-/* Fill patterns are referenced by id from the SVG the chart renders. */
-.chart-scope .chart-fill-tint { opacity: 0.6; }
-.chart-scope .chart-fill-outline {
-  fill: transparent;
-  stroke: hsl(var(--primary));
-  stroke-width: 1.5;
+/* The library's chart container and tooltip sit below the 14px floor. Axis
+   ticks inherit from the container, and recharts measures the rendered size
+   to lay them out, so the token is set here rather than as a number on the
+   axis -- a number would freeze the ticks when the font-size axis moves. */
+.chart-scope .dr-chart,
+.chart-scope .dr-chart-tooltip,
+.chart-scope .recharts-cartesian-axis-tick-value {
+  font-size: var(--text-sm);
 }
