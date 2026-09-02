@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useRef, useState, type FormEvent } from "react"
 import { Button } from "darkraise-ui/components/button"
 import { Card } from "darkraise-ui/components/card"
 import {
@@ -7,13 +7,19 @@ import {
   PasswordInputField,
   PasswordInputVisibilityTrigger,
 } from "darkraise-ui/components/password-input"
-import { api, setCsrfToken } from "../lib/api"
+import { api, ApiError, setCsrfToken } from "../lib/api"
 import { IdentityMark } from "../features/shell/identity-mark"
+
+/** The server's exact wording for a refused password. Naming it opts this
+ *  one 401 out of the global logout, which would otherwise treat a typo as
+ *  a dead session and remount the screen the operator is already on. */
+const REJECTED = "invalid password"
 
 export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const field = useRef<HTMLInputElement>(null)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -23,14 +29,15 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
       const res = await api.post<{ authenticated: boolean; csrf_token: string }>(
         "/api/auth/login",
         { password },
+        { expectedRejection: REJECTED },
       )
       setCsrfToken(res.csrf_token)
       onAuthenticated()
     } catch (err) {
-      // One message for a wrong password and an unconfigured hash, matching the
-      // server: an operator reading "no password is set" learns the port is
-      // open.
-      setError((err as Error).message || "login failed")
+      const refused = err instanceof ApiError && err.status === 401 && err.message === REJECTED
+      setError(refused ? "Wrong password. Try again." : (err as Error).message || "login failed")
+      setPassword("")
+      field.current?.focus()
     } finally {
       setBusy(false)
     }
@@ -50,9 +57,11 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
           <PasswordInput>
             <PasswordInputControl>
               <PasswordInputField
+                ref={field}
                 autoFocus
                 autoComplete="current-password"
                 placeholder="Admin password"
+                aria-invalid={error !== "" || undefined}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
