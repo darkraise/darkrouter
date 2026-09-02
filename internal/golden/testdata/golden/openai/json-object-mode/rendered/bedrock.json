@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Is 91 prime?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "system": [
+    {
+      "text": "Reply with a JSON object holding a single key, answer."
+    }
+  ]
+}

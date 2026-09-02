@@ -11,7 +11,7 @@ import (
 // rather than against map[string]any, which is what the provider sees.
 func rendered(t *testing.T, req *ir.Request) ([]map[string]any, []ir.Warning) {
 	t.Helper()
-	msgs, warns := renderMessages(req, "openaicompat", false)
+	msgs, warns := renderMessages(req, "openaicompat", false, false)
 	b, err := json.Marshal(msgs)
 	if err != nil {
 		t.Fatal(err)
@@ -205,5 +205,33 @@ func TestRenderMessagesWarnsOnSystemCacheControl(t *testing.T) {
 	})
 	if !hasWarning(warns, "cache_control") {
 		t.Errorf("warnings = %+v; a cached system prompt is the most valuable marker there is", warns)
+	}
+}
+
+func TestRenderMessagesEchoesReasoningOnlyWhenTheTargetWantsIt(t *testing.T) {
+	req := &ir.Request{Messages: []ir.Message{
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "weather?"}}},
+		{Role: ir.RoleAssistant, Content: []ir.ContentBlock{
+			{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "need a lookup"}},
+			{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: "c1", Name: "lookup", Input: json.RawMessage(`{}`)}},
+		}},
+		{Role: ir.RoleTool, Content: []ir.ContentBlock{{Type: ir.BlockToolResult,
+			ToolResult: &ir.ToolResult{ToolUseID: "c1", Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "sunny"}}}}}},
+	}}
+	echoed, warns := renderMessages(req, "openaicompat", false, true)
+	assistant := echoed[1].(map[string]any)
+	if assistant["reasoning_content"] != "need a lookup" {
+		t.Fatalf("assistant = %v", assistant)
+	}
+	if hasWarning(warns, "messages[].assistant.thinking") {
+		t.Fatalf("warnings = %v", warns)
+	}
+
+	dropped, warns := renderMessages(req, "openaicompat", false, false)
+	if _, present := dropped[1].(map[string]any)["reasoning_content"]; present {
+		t.Fatal("reasoning_content reached a target that rejects it")
+	}
+	if !hasWarning(warns, "messages[].assistant.thinking") {
+		t.Fatalf("warnings = %v", warns)
 	}
 }

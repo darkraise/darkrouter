@@ -1,0 +1,69 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Oslo?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "toolUse": {
+            "input": {
+              "city": "Oslo"
+            },
+            "name": "lookup",
+            "toolUseId": "call_a"
+          }
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "toolResult": {
+            "content": [
+              {
+                "text": "clear, 18C"
+              }
+            ],
+            "toolUseId": "call_a"
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "And tomorrow?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "description": "weather",
+          "inputSchema": {
+            "json": {
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "name": "lookup"
+        }
+      }
+    ]
+  }
+}

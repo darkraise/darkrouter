@@ -22,7 +22,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 
 func buildRequest(ctx context.Context, t *adapter.Target, req *ir.Request, q quirkSet) (*http.Request, []ir.Warning, error) {
 	var warns []ir.Warning
-	msgs, mwarns := renderMessages(req, targetName, q.has("no-system-role"))
+	msgs, mwarns := renderMessages(req, targetName, q.has("no-system-role"), q.has("echo-reasoning-content"))
 	warns = append(warns, mwarns...)
 	body := map[string]any{
 		"model":    t.Model,
@@ -91,15 +91,8 @@ func buildRequest(ctx context.Context, t *adapter.Target, req *ir.Request, q qui
 			})
 		}
 	}
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
-		body["response_format"] = map[string]any{
-			"type": "json_schema",
-			"json_schema": map[string]any{
-				"name":   "response",
-				"strict": true,
-				"schema": req.ResponseFormat.Schema,
-			},
-		}
+	if rf := renderResponseFormat(req.ResponseFormat); rf != nil {
+		body["response_format"] = rf
 	}
 	if req.ParallelToolCalls != nil {
 		switch {
@@ -128,10 +121,22 @@ func buildRequest(ctx context.Context, t *adapter.Target, req *ir.Request, q qui
 		}
 	}
 	if len(req.Tools) > 0 {
-		body["tools"] = renderTools(req.Tools)
+		tools, w := renderTools(req.Tools)
+		warns = append(warns, w...)
+		if len(tools) > 0 {
+			body["tools"] = tools
+		}
 	}
 	if req.ToolChoice != nil {
 		body["tool_choice"] = renderToolChoice(req.ToolChoice)
+	}
+	// Extra holds the OpenAI-only fields the inbound dialect could not place
+	// in the IR. A key the IR already rendered is not overwritten: the IR is
+	// the translated truth, and Extra only fills the gaps around it.
+	for k, v := range req.Extra {
+		if _, taken := body[k]; !taken {
+			body[k] = v
+		}
 	}
 	stream := req.Stream
 	if stream && len(req.Tools) > 0 && q.has("no-tool-streaming") {
@@ -167,19 +172,57 @@ func buildRequest(ctx context.Context, t *adapter.Target, req *ir.Request, q qui
 	return hr, warns, nil
 }
 
-func renderTools(tools []ir.Tool) []any {
+// renderResponseFormat emits OpenAI's response_format. strict is sent only
+// when the client asked for it: strict mode rejects schemas that are fine
+// otherwise (every property required, additionalProperties false), so
+// switching it on unasked turns a working request into a 400.
+func renderResponseFormat(rf *ir.ResponseFormat) map[string]any {
+	if rf == nil {
+		return nil
+	}
+	switch rf.Type {
+	case "json_object":
+		return map[string]any{"type": "json_object"}
+	case "json_schema":
+		name := rf.Name
+		if name == "" {
+			name = "response"
+		}
+		schema := map[string]any{"name": name, "schema": rf.Schema}
+		if rf.Strict != nil && *rf.Strict {
+			schema["strict"] = true
+		}
+		return map[string]any{"type": "json_schema", "json_schema": schema}
+	}
+	return nil
+}
+
+func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
+	var warns []ir.Warning
 	out := make([]any, 0, len(tools))
 	for _, t := range tools {
-		out = append(out, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        t.Name,
-				"description": t.Description,
-				"parameters":  t.Schema,
-			},
-		})
+		if t.BuiltIn() {
+			for k := range t.Extra {
+				warns = append(warns, ir.Warning{
+					Field: "tools[]." + k, Target: targetName,
+					Reason: "provider built-in tool has no equivalent; the tool was dropped",
+				})
+			}
+			continue
+		}
+		fn := map[string]any{
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  t.Schema,
+		}
+		for k, v := range t.Extra {
+			if _, taken := fn[k]; !taken {
+				fn[k] = v
+			}
+		}
+		out = append(out, map[string]any{"type": "function", "function": fn})
 	}
-	return out
+	return out, warns
 }
 
 func renderToolChoice(tc *ir.ToolChoice) any {

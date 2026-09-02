@@ -1,0 +1,65 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Weather in Oslo?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "The user wants the weather, so I should call lookup.",
+          "thought": true
+        },
+        {
+          "functionCall": {
+            "args": {
+              "city": "Oslo"
+            },
+            "id": "call_a",
+            "name": "lookup"
+          }
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_a",
+            "name": "lookup",
+            "response": {
+              "result": "clear, 18C"
+            }
+          }
+        },
+        {
+          "text": "And tomorrow?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "description": "weather",
+          "name": "lookup",
+          "parameters": {
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ]
+}
