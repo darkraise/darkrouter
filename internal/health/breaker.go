@@ -208,18 +208,20 @@ func (b *Breaker) Record(k Key, s Signal) {
 	case adapter.OutcomeRetryableProvider:
 		b.releaseProbeLocked(ck)
 		st := b.getLocked(k)
-		if s.StatusCode == 429 {
-			if s.HasRetryAfter {
-				d := s.RetryAfter
-				if d > b.max {
-					d = b.max
-				}
-				st.coolingUntil = now.Add(d)
-				st.retryAfterOnly = true
-				st.probing = false
-				b.dirty = true
-				return
+		if s.HasRetryAfter {
+			// The provider said how long it needs, on a 429 or a 503 alike.
+			// That is more precise than the ladder and does not trip it.
+			d := s.RetryAfter
+			if d > b.max {
+				d = b.max
 			}
+			st.coolingUntil = now.Add(d)
+			st.retryAfterOnly = true
+			st.probing = false
+			b.dirty = true
+			return
+		}
+		if s.StatusCode == 429 {
 			b.coolLocked(st, now, st.backoffLevel)
 			return
 		}
