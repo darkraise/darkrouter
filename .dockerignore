@@ -1,7 +1,22 @@
 .git
-web/node_modules
+**/node_modules
 # The image builds its own bundle in the web stage; a host build in the context
 # would be copied in by `COPY . .` and then overwritten, for no purpose.
 internal/admin/dist
-darkrouter.db*
-*.db
+web/dist
+# Secrets and live state. None of these belong in an image layer, and a build
+# context that carries them is one `COPY . .` away from shipping them.
+.env*
+.uat-credentials
+data/
+data-backup/
+*.db*
+# Host build outputs and local tooling state.
+darkrouter
+darkrouter.exe
+presetgen
+.playwright-mcp/
+.agents/
+.codex/
+docs/
+providers.png
