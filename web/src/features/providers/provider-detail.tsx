@@ -135,10 +135,10 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
             Add provider
           </Button>
         ) : (
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="size-[var(--icon-size)]" />
-            Add credentials
-          </Button>
+          // Nothing here. The panel below opens on "Add the first credential",
+          // which is this same act with the explanation attached, and a header
+          // button a few pixels above it was the choice offered twice.
+          null
         )}
       </header>
 
@@ -325,6 +325,16 @@ export function ProviderDetail() {
   if (!provider) return null
 
   const state = providerState(provider)
+  // Asked of the preset, not the row. A local runtime's row holds the address
+  // the gateway can actually reach it on, and adding one rewrites the host —
+  // inside a container "localhost" is the container, so a runtime on the
+  // operator's desktop is stored as its LAN address and stops looking local.
+  // The preset is the thing that says what kind of provider this is; the row
+  // is only the fallback for one imported from config with no preset behind it.
+  //
+  // Deliberately narrower than "runs a program on this box", which does take a
+  // credential when you want it to use a session of yours rather than its own.
+  const localRuntime = isLocalPreset(preset ?? provider)
   const cooling = breakersFor(health.data ?? [], provider.id)
   const accountsSummary = accountSummary(provider, cooling)
   const models = modelsFor(catalog.data?.models ?? [], provider.id)
@@ -439,10 +449,18 @@ export function ProviderDetail() {
           <section>
             <div className="mb-2 flex items-center justify-between gap-2">
               <h2 className="text-sm font-medium">Credentials</h2>
-              <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
-                <Plus className="size-[var(--icon-size)]" />
-                Add credentials
-              </Button>
+              {/* Two conditions, two different reasons.
+                  A local runtime holds no credential at all: what it needed was
+                  the address it listens on, and that is what its row already is.
+                  And while the list is empty the panel below carries its own
+                  call to action, so this button was the same act offered twice
+                  a few pixels apart. */}
+              {provider.credentials.length > 0 && !localRuntime && (
+                <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
+                  <Plus className="size-[var(--icon-size)]" />
+                  Add credentials
+                </Button>
+              )}
             </div>
 
             {provider.credentials.length === 0 ? (
@@ -455,7 +473,13 @@ export function ProviderDetail() {
                     : "This provider has no credentials"
                 }
                 hint={
-                  !/^https?:\/\//i.test(provider.base_url ?? "")
+                  // First, because the branches below it all end by offering a
+                  // credential, and this panel no longer has a button to do it
+                  // with. A hint that promises an act the page does not offer
+                  // is worse than no hint.
+                  localRuntime
+                    ? `${provider.name} is a model server on this machine, reached at the address it listens on rather than with a key. There is no account here to hold one, and it needs none to be routed to.`
+                    : !/^https?:\/\//i.test(provider.base_url ?? "")
                     ? `${provider.name} runs a program on this machine, and that program holds its own login, so the router can choose it as it is. Add a credential only to hand it a session of your own instead of the one it keeps on disk.`
                     : provider.auth_style === "anonymous"
                       ? `${provider.name} is reached with the key it publishes, which this release ships, so the router can choose it as it is. A credential of your own can still be added — a registered key buys a shorter queue.`
@@ -464,9 +488,13 @@ export function ProviderDetail() {
                         : `The router cannot choose ${provider.name} until it has a key to send with. Its settings and priority are kept either way.`
                 }
                 action={
-                  <Button size="sm" variant={isKeyless(provider) ? "secondary" : "default"} onClick={() => setAddOpen(true)}>
-                    {isKeyless(provider) ? "Add a credential anyway" : "Add the first credential"}
-                  </Button>
+                  // A local runtime is reached by address and takes no key, so
+                  // this panel explains the state and offers nothing to do.
+                  localRuntime ? undefined : (
+                    <Button size="sm" variant={isKeyless(provider) ? "secondary" : "default"} onClick={() => setAddOpen(true)}>
+                      {isKeyless(provider) ? "Add a credential anyway" : "Add the first credential"}
+                    </Button>
+                  )
                 }
               />
             ) : (

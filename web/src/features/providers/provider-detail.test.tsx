@@ -299,3 +299,60 @@ describe("the page outline", () => {
     expect(container.querySelector("h1")).toBeNull()
   })
 })
+
+describe("the credentials panel", () => {
+  it("offers the act once while the list is empty, not twice", async () => {
+    // The panel below the heading opens on its own call to action, with the
+    // sentence explaining what a credential buys. A second button in the
+    // heading a few pixels above it was the same act, minus the explanation.
+    stub([configured], [preset])
+    await renderProvider("groq")
+
+    expect(
+      await screen.findByRole("button", { name: /add the first credential/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^add credentials$/i })).toBeNull()
+  })
+
+  it("puts the button back once there is a list to add to", async () => {
+    // With rows on screen the empty panel is gone, so the heading is the only
+    // place left to offer a second key -- and a second key is ordinary.
+    stub([{ ...configured, credentials: [cred] }], [preset])
+    await renderProvider("groq")
+
+    expect(
+      await screen.findByRole("button", { name: /^add credentials$/i }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers nothing at all for a local runtime", async () => {
+    // A model server on this machine is reached by the address it listens on,
+    // which its row already holds. There is no account to put a key in, so an
+    // add button here is an act that cannot be completed.
+    // The row's address is not localhost, and that is the real shape: adding a
+    // runtime rewrites the host, because inside a container "localhost" is the
+    // container rather than the operator's desktop. Only the preset still says
+    // loopback, so the preset is what this has to be read from.
+    const ollama: Provider = {
+      ...configured,
+      id: "ollama",
+      name: "Ollama",
+      preset: "ollama",
+      base_url: "http://192.168.0.196:11434/v1",
+      auth_style: "none",
+    }
+    stub([ollama], [
+      { ...preset, id: "ollama", name: "Ollama", base_url: "http://localhost:11434/v1" },
+    ])
+    await renderProvider("ollama")
+
+    await screen.findByRole("heading", { name: "Ollama" })
+    // Every wording, not one of them: the panel says "Add the first
+    // credential", the heading says "Add credentials", and a keyless provider
+    // says "Add a credential anyway". None of the three belongs here.
+    expect(screen.queryAllByRole("button", { name: /credential/i })).toEqual([])
+    // And the panel must not promise the act it no longer offers.
+    expect(screen.queryByText(/a credential can still be added/i)).toBeNull()
+    expect(screen.getByText(/address it listens on/i)).toBeInTheDocument()
+  })
+})
