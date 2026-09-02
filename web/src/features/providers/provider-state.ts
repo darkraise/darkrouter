@@ -1,4 +1,5 @@
-import type { BreakerEntry, DiscoveryHealthRow, Provider } from "../../lib/api-types"
+import type { BreakerEntry, DiscoveryHealthRow, ProbeResult, Provider } from "../../lib/api-types"
+import { duration } from "../../lib/format"
 
 export type ProviderState = "healthy" | "degraded" | "disabled" | "unconfigured"
 
@@ -69,4 +70,19 @@ export function discoveryLine(row: DiscoveryHealthRow | undefined): string {
     parts.push(`missing for ${row.max_missing_streak} sweeps`)
   }
   return parts.join(" · ")
+}
+
+export type ProbeOutcome = { kind: "success" | "error"; message: string }
+
+/** What a probe proved, as the toast should say it. A refused credential
+ *  arrives as a 200 with `ok:false` — the button exists to discover exactly
+ *  that — so the verdict is read from the body, never from the status. */
+export function probeOutcome(result: ProbeResult): ProbeOutcome {
+  if (!result.ok) {
+    return { kind: "error", message: result.error || "the provider refused the credential" }
+  }
+  const parts = ["Credential accepted"]
+  if (result.model_count !== undefined) parts.push(`${result.model_count} models`)
+  parts.push(duration(result.latency_ms))
+  return { kind: "success", message: parts.join(" · ") }
 }

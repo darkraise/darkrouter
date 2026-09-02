@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { breakersFor, discoveryLine, providerState } from "./providers-screen"
+import { breakersFor, discoveryLine, probeOutcome, providerState } from "./providers-screen"
 import { filterProviderRows, mergeProviderRows } from "./provider-rows"
 import type { BreakerEntry, Credential, Provider } from "../../lib/api-types"
 
@@ -133,5 +133,23 @@ describe("a keyless provider", () => {
     expect(filterProviderRows(rows, { configuredOnly: true }).map((r) => r.id)).toEqual([
       "ollama",
     ])
+  })
+})
+
+describe("a row probe's verdict", () => {
+  it("reads the rejection out of a 200 rather than calling it sent", () => {
+    // A refused credential is a 200 with ok:false. Toasting "Probe sent" on
+    // it told the operator the opposite of what the provider just said.
+    expect(probeOutcome({ ok: false, probe: "models", latency_ms: 120, error: "401 from upstream" }))
+      .toEqual({ kind: "error", message: "401 from upstream" })
+  })
+
+  it("names the model count and latency when the credential is accepted", () => {
+    expect(probeOutcome({ ok: true, probe: "models", latency_ms: 120, model_count: 40 }))
+      .toEqual({ kind: "success", message: "Credential accepted · 40 models · 120 ms" })
+  })
+
+  it("has a reason even when the provider gave none", () => {
+    expect(probeOutcome({ ok: false, probe: "models", latency_ms: 0 }).message).toMatch(/refused/i)
   })
 })
