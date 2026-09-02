@@ -6,7 +6,6 @@ import type {
   ConfigResponse,
   CatalogResponse,
   DiscoveryHealthResponse,
-  Healthz,
   Overview,
   PlaygroundConversation,
   PlaygroundConversationDetail,
@@ -54,7 +53,6 @@ export const keys = {
   health: ["health", "providers"] as const,
   proxyTokens: ["proxy-tokens"] as const,
   sessions: ["sessions"] as const,
-  healthz: ["healthz"] as const,
   discovery: ["health", "discovery"] as const,
   policy: ["policy"] as const,
   override: (provider: string, model: string) =>
@@ -233,16 +231,6 @@ export function useSessions(extra?: Extra<Session[]>) {
     queryKey: keys.sessions,
     queryFn: async ({ signal }) =>
       (await api.get<SessionsResponse>("/api/sessions", { signal })).sessions,
-    ...extra,
-  })
-}
-
-export function useHealthz(extra?: Extra<Healthz>) {
-  return useQuery({
-    queryKey: keys.healthz,
-    queryFn: ({ signal }) => api.get<Healthz>("/healthz", { signal }),
-    // The ops footer's numbers move with the log writer, not with a request.
-    refetchInterval: POLL.slow,
     ...extra,
   })
 }

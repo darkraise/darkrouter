@@ -80,8 +80,8 @@ describe("poll cadence", () => {
 })
 
 describe("the new surfaces", () => {
-  it("keys healthz, discovery and policy distinctly", () => {
-    const flat = [keys.healthz, keys.discovery, keys.policy, keys.health].map((k) =>
+  it("keys discovery and policy distinctly from health", () => {
+    const flat = [keys.discovery, keys.policy, keys.health].map((k) =>
       JSON.stringify(k),
     )
     expect(new Set(flat).size).toBe(flat.length)
