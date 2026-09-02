@@ -23,6 +23,7 @@ func newRedirectListener(port int) (net.Listener, error) {
 // redirectListener receives exactly one callback and stops.
 type redirectListener struct {
 	srv  *http.Server
+	ln   net.Listener
 	once sync.Once
 	done chan struct{}
 	// served closes once the callback has answered, which is the signal to
@@ -38,6 +39,13 @@ func (r *redirectListener) markServed() {
 func (r *redirectListener) stop() {
 	r.once.Do(func() {
 		close(r.done)
+		// The socket is closed here, synchronously, rather than left to
+		// Shutdown: Serve may not have taken the listener yet, and a stop
+		// that returned with the port still bound made the next flow's
+		// bind fail on a port nobody was using.
+		if r.ln != nil {
+			_ = r.ln.Close()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = r.srv.Shutdown(ctx)
@@ -62,7 +70,7 @@ func (s *Server) startListener(flow auth.Flow, port int, sessionID string, ttl t
 		return fmt.Errorf("cannot listen on the registered redirect port %d: %w", port, err)
 	}
 
-	rl := &redirectListener{done: make(chan struct{}), served: make(chan struct{})}
+	rl := &redirectListener{ln: ln, done: make(chan struct{}), served: make(chan struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		// The stop happens off this goroutine: Shutdown waits for in-flight
