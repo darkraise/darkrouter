@@ -94,7 +94,7 @@ export function StrategyCard({
 
       <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-sm text-[hsl(var(--legend))]">
         <span>
-          Within a provider, the least recently used account goes first.
+          Within a provider, the least recently used credential goes first.
         </span>
         {policy && (
           <>

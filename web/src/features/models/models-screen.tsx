@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { Badge, Button } from "darkraise-ui"
+import { Badge, Button, Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui"
 import { ModelCombobox } from "../shell/model-combobox"
 import { CapabilityTriad, ScaleBar } from "../shell/measures"
 import { ModelState } from "../shell/status-mark"
@@ -8,6 +8,7 @@ import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Model, Pricing } from "../../lib/api-types"
+import { pricePerMillion } from "../../lib/format"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
 import { OverrideEditor } from "./override-editor"
@@ -61,17 +62,6 @@ export function tokenLabel(tokens: number): string {
   return String(tokens)
 }
 
-export function priceLabel(p: Pricing | null): string {
-  // Unpriced is not free. An em-dash is the same claim the spend tile and
-  // every cost cell already make.
-  if (p === null) return "—"
-  // Four places, matching formatCost: two would round a real sub-cent price
-  // like 4,000 micros ($0.004/MTok) down to $0.00, the exact string this
-  // function reserves for "unpriced".
-  const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(4)}`
-  return `${dollars(p.input_micros)} / ${dollars(p.output_micros)}`
-}
-
 export function priceBand(p: Pricing | null): string {
   if (p === null) return "unpriced"
   const perMTok = p.input_micros / 1_000_000
@@ -101,27 +91,77 @@ export function facetRow(m: Model): Row {
   }
 }
 
+/**
+ * Who serves the model, folded to one chip.
+ *
+ * The full compressed ladder sat in every row and was what pushed Publisher,
+ * Surfaces, State and Source off the right edge of a 1440px window. The
+ * first provider — the one the router would arrive at first — is the chip;
+ * the rest are a count, and the ladder opens under it on request.
+ */
+function ServesCell({ row }: { row: Row }) {
+  const [open, setOpen] = useState(false)
+  const first = row.providers[0]
+  if (first === undefined) return <span className="text-[hsl(var(--legend))]">—</span>
+  const rest = row.providers.length - 1
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="font-mono text-sm">
+              {first}/{row.model}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <span className="flex flex-col font-mono text-sm">
+              {row.providers.map((p) => (
+                <span key={p}>
+                  {p}/{row.model}
+                </span>
+              ))}
+            </span>
+          </TooltipContent>
+        </Tooltip>
+        {rest > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={open}
+            aria-label={`${open ? "Hide" : "Show"} the ${row.providers.length} providers serving ${row.model} (${rest} more)`}
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? "less" : `+${rest} more`}
+          </Button>
+        )}
+      </span>
+      {open && <Ladder mode="compressed" catalog rows={compressedRows(row)} />}
+    </div>
+  )
+}
+
 // `darkraise-ui` bundles its own tanstack/react-table internally and does not
 // re-export its column types, so the shape is pulled from the component's own
 // signature rather than from a second, independently-versioned install of the
 // same package — the two do not agree on what a ColumnDef looks like.
 type Columns = Parameters<typeof DataTable<Row, unknown>>[0]["columns"]
 
-function buildColumns(onEdit: (provider: string, model: string) => void): Columns {
+// The facet columns take string headers rather than sortable ones: a facet
+// and the column menu are both labelled from the header when it is a string
+// and from the accessor key otherwise, and "surface_list" is not a label.
+function buildColumns(onEdit: (providers: string[], model: string) => void): Columns {
   return [
     {
       accessorKey: "model",
       header: ({ column }) => <ColumnHeader column={column} title="Model" />,
       cell: ({ row }) => (
-        <span className="font-mono text-sm">{row.original.model}</span>
+        <span className="block min-w-[16rem] font-mono text-sm">{row.original.model}</span>
       ),
     },
     {
       id: "serves",
       header: "Serves",
-      cell: ({ row }) => (
-        <Ladder mode="compressed" catalog rows={compressedRows(row.original)} />
-      ),
+      cell: ({ row }) => <ServesCell row={row.original} />,
     },
     {
       accessorKey: "context_window",
@@ -154,9 +194,13 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       // Grouped by band rather than by exact price: a facet filters on exact
       // values, and no two models share a price down to the micro-dollar.
       accessorKey: "band",
-      header: ({ column }) => <ColumnHeader column={column} title="Price" />,
+      header: "Band",
       cell: ({ row }) => (
-        <span className="tabular-nums">{priceLabel(row.original.pricing)}</span>
+        <span className="tabular-nums whitespace-nowrap">
+          {row.original.pricing
+            ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
+            : "—"}
+        </span>
       ),
     },
     {
@@ -166,7 +210,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     },
     {
       accessorKey: "surface_list",
-      header: ({ column }) => <ColumnHeader column={column} title="Surfaces" />,
+      header: "Surfaces",
       cell: ({ row }) => (
         <span className="font-mono text-sm">{row.original.surface_list || "—"}</span>
       ),
@@ -193,12 +237,12 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     },
     {
       accessorKey: "state",
-      header: ({ column }) => <ColumnHeader column={column} title="State" />,
+      header: "State",
       cell: ({ row }) => <ModelState state={row.original.state} />,
     },
     {
       accessorKey: "merge_source",
-      header: ({ column }) => <ColumnHeader column={column} title="Source" />,
+      header: "Source",
       cell: ({ row }) => (
         <Badge variant="outline" className="font-mono text-sm">
           {row.original.merge_source}
@@ -215,16 +259,14 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       enableHiding: false,
       cell: ({ row }) => {
         // A model row folds every provider that serves it; an override is
-        // per (provider, model), so the editor has to pick one. The catalog
-        // order's first entry is the same provider the compressed ladder
-        // draws first.
-        const provider = row.original.providers[0]
-        if (!provider) return null
+        // per (provider, model), so the editor opens on the first — the one
+        // the chip beside it names — and offers the rest.
+        if (row.original.providers.length === 0) return null
         return (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onEdit(provider, row.original.model)}
+            onClick={() => onEdit(row.original.providers, row.original.model)}
           >
             Override
           </Button>
@@ -247,8 +289,18 @@ export function ModelsScreen() {
     () => [...new Set((catalog.data?.models ?? []).flatMap((m) => m.providers))].sort(),
     [catalog.data],
   )
-  const models = (catalog.data?.models ?? []).filter((m) => matches(m, filters))
-  const [editing, setEditing] = useState<{ provider: string; model: string } | null>(null)
+  const models = useMemo(
+    () => (catalog.data?.models ?? []).filter((m) => matches(m, filters)),
+    [catalog.data, filters],
+  )
+  // Both memoised: DataTable rebuilds its table model when either changes
+  // identity, and the catalogue polls every thirty seconds.
+  const rows = useMemo(() => models.map(facetRow), [models])
+  const [editing, setEditing] = useState<{ providers: string[]; model: string } | null>(null)
+  const columns = useMemo(
+    () => buildColumns((providers, model) => setEditing({ providers, model })),
+    [],
+  )
   const filtered = Object.values(filters).some((v) => v !== "")
 
   return (
@@ -260,7 +312,7 @@ export function ModelsScreen() {
       <div className="mb-4 flex flex-wrap gap-2">
         <ModelCombobox
           label="Filter by model"
-          placeholder="model"
+          placeholder="Model"
           value={filters.model}
           onChange={(v) => setFilter("model", v)}
           candidates={modelNames}
@@ -270,7 +322,7 @@ export function ModelsScreen() {
         />
         <ModelCombobox
           label="Filter by provider"
-          placeholder="provider"
+          placeholder="Provider"
           value={filters.provider}
           onChange={(v) => setFilter("provider", v)}
           candidates={providerNames}
@@ -280,13 +332,15 @@ export function ModelsScreen() {
         />
       </div>
 
+      {/* Paged rather than windowed: a row grows when its ladder is opened,
+          and a fixed-height window cannot hold a row that changes height. */}
       <DataTable
-        data={models.map(facetRow)}
-        columns={buildColumns((provider, model) => setEditing({ provider, model }))}
+        data={rows}
+        columns={columns}
         facets={["surface_list", "state", "caps", "band", "merge_source"]}
         searchKey="model"
         searchPlaceholder="Search models"
-        virtualize={{ rowHeight: 40, height: 640 }}
+        isLoading={catalog.isPending}
       />
 
       {models.length === 0 && (
@@ -299,7 +353,7 @@ export function ModelsScreen() {
               hint="A sweep asks each provider what it serves, using one of that provider's own keys — so a provider needs an account before it can answer."
               action={
                 <Button asChild size="sm">
-                  <Link to="/providers">Add a provider account</Link>
+                  <Link to="/providers">Add a provider credential</Link>
                 </Button>
               }
               preview={<GhostRows />}
@@ -310,7 +364,7 @@ export function ModelsScreen() {
 
       {editing && (
         <OverrideEditor
-          provider={editing.provider}
+          providers={editing.providers}
           model={editing.model}
           onClose={() => setEditing(null)}
         />

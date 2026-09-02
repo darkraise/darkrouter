@@ -18,7 +18,7 @@ describe("the override editor", () => {
         status: 200, headers: { "Content-Type": "application/json" },
       }),
     ))
-    mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
     await waitFor(() =>
       // A string, not a number: NumberBox renders a text field that parses
       // rather than an <input type="number">, so the DOM value is the text.
@@ -30,7 +30,7 @@ describe("the override editor", () => {
     // A model with no override is the normal case, and an error banner over
     // the normal case teaches the operator to ignore banners.
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
-    mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
     await waitFor(() =>
       expect(screen.getByLabelText(/context window/i)).toHaveValue(""),
     )
@@ -55,7 +55,7 @@ describe("the override editor", () => {
       )
     })
     vi.stubGlobal("fetch", fetchMock)
-    mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
     const surfaces = await screen.findByLabelText(/surfaces/i)
     await waitFor(() => expect(surfaces).toHaveValue("chat"))
     await userEvent.clear(surfaces)
@@ -81,7 +81,7 @@ describe("the override editor", () => {
       return new Response("", { status: 404 })
     })
     vi.stubGlobal("fetch", fetchMock)
-    mount(<OverrideEditor provider="groq" model="m" onClose={() => {}} />)
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
     await userEvent.type(await screen.findByLabelText(/context window/i), "32000")
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
     await waitFor(() => {
@@ -94,5 +94,56 @@ describe("the override editor", () => {
         surfaces: [],
       })
     })
+  })
+})
+
+describe("the override editor's state", () => {
+  it("offers a provider picker only when the model is served by more than one", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
+    const { unmount } = mount(<OverrideEditor providers={["groq", "nebius"]} model="m" onClose={() => {}} />)
+    const picker = await screen.findByRole("combobox", { name: /provider/i })
+    expect(picker).toHaveTextContent("groq")
+    unmount()
+
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    await screen.findByLabelText(/context window/i)
+    expect(screen.queryByRole("combobox", { name: /provider/i })).not.toBeInTheDocument()
+  })
+
+  it("says it is loading, and will not save, until the current override is known", async () => {
+    // Save on an editor still loading would PUT a blank row over whatever
+    // is there: the replace semantics make "not loaded yet" the same as
+    // "empty" on the wire.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})))
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    expect(await screen.findByText(/loading/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("will not save over an override it could not read", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ error: "store unavailable" }), {
+        status: 500, headers: { "Content-Type": "application/json" },
+      }),
+    ))
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not load/i)
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("holds Save down while a write is in flight", async () => {
+    let settle: (r: Response) => void = () => {}
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      if ((init as RequestInit)?.method === "PUT") return new Promise<Response>((r) => { settle = r })
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    await userEvent.type(await screen.findByLabelText(/context window/i), "32000")
+    const save = screen.getByRole("button", { name: /save/i })
+    await userEvent.click(save)
+    await waitFor(() => expect(save).toBeDisabled())
+    settle(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }))
+    await waitFor(() => expect(save).toBeEnabled())
   })
 })

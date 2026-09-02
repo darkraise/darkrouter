@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AliasEditor } from "./routing-screen"
 
 const cred = () => ({
@@ -198,5 +198,61 @@ describe("an alias added somewhere else", () => {
     )
 
     expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/edited")
+  })
+})
+
+describe("AliasEditor keyboard reorder", () => {
+  it("moves a target with the buttons, for whoever cannot drag", async () => {
+    // Drag and drop is pointer-only. The fallback order is the whole point
+    // of a chain, so changing it has to be reachable from the keyboard.
+    mount({ chain: ["groq/a", "groq/b", "groq/c"] })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+
+    await user.click(screen.getByRole("button", { name: "Move chain target 2 up" }))
+    expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/b")
+    expect(screen.getByLabelText("chain target 2")).toHaveValue("groq/a")
+
+    await user.click(screen.getByRole("button", { name: "Move chain target 2 down" }))
+    expect(screen.getByLabelText("chain target 3")).toHaveValue("groq/a")
+  })
+
+  it("cannot move the first target up or the last one down", async () => {
+    mount({ chain: ["groq/a", "groq/b"] })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    expect(screen.getByRole("button", { name: "Move chain target 1 up" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Move chain target 2 down" })).toBeDisabled()
+  })
+})
+
+describe("saving", () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  it("refreshes the catalogue, whose alias column reads the same map", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+      expect(keys).toContain(JSON.stringify(["models"]))
+    })
+  })
+
+  it("does not shout when it cannot save", () => {
+    // A disabled filled button is still the loudest thing on the card. The
+    // outline reads as "not now" rather than "press me".
+    mount({ chain: [] })
+    const save = screen.getByRole("button", { name: "Save" })
+    expect(save).toBeDisabled()
+    expect(save).toHaveAttribute("data-variant", "outline")
   })
 })

@@ -43,6 +43,20 @@ describe("buildChainGraph", () => {
     expect(nodes.map((n) => n.data.kind)).toEqual(["origin", "candidate", "skip"])
   })
 
+  it("says why a rung was skipped, and how many credentials it stands for", () => {
+    // The ladder shows the skip reason; the graph said only "skipped", which
+    // is the one word the dimmed node already conveys.
+    const { nodes } = buildChainGraph("sonnet", [
+      row({ rank: 1, target: "groq/a", reasonProse: "× 2 credentials" }),
+      row({ rank: 2, target: "nebius/b", reasonCode: "cooling", terminated: true }),
+    ])
+    expect(nodes.map((n) => n.data.note)).toEqual([
+      "would be tried in this order",
+      "× 2 credentials",
+      "cooling",
+    ])
+  })
+
   it("still draws the request when nothing routed", () => {
     // The skips are the only account of why nothing routed, and an empty
     // canvas would say less than the error does.

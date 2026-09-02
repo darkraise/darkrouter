@@ -1,11 +1,11 @@
-import { useMemo, useRef, useState } from "react"
-import { Plus } from "lucide-react"
+import { useId, useMemo, useRef, useState } from "react"
+import { ChevronDown, ChevronUp, Plus } from "lucide-react"
 import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useAliases, useModels, usePolicy, useProviders } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
-import type { Aliases, RoutePreview } from "../../lib/api-types"
+import type { Aliases, RouteCandidate, RoutePreview, RouteSkip } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { ConfirmButton } from "../shell/confirm-button"
 import { EmptyState, GhostChain } from "../shell/empty-state"
@@ -25,22 +25,57 @@ import { ModelCombobox, modelCandidates } from "../shell/model-combobox"
  * and misreport failover order.
  */
 export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
-  const candidates: LadderRow<PredictiveMark>[] = p.candidates.map((c, i) => ({
-    rank: i + 1,
-    // Hollow: nothing has been sent. This is what the router would do.
-    mark: "skipped",
-    target: `${c.provider_id}/${c.model}`,
-    reasonCode: c.inferred ? "inferred" : undefined,
-    reasonProse: c.inferred ? "capabilities were guessed" : undefined,
-  }))
-  const skipped: LadderRow<PredictiveMark>[] = p.skips.map((s, i) => ({
-    rank: candidates.length + i + 1,
-    mark: s.reason === "cooling" ? "cooling" : "skipped",
-    target: `${s.provider_id}/${s.model}`,
-    reasonCode: s.reason,
-    terminated: true,
-  }))
-  return [...candidates, ...skipped]
+  const candidates = collapse(p.candidates, (c) => `${c.provider_id}/${c.model}`).map(
+    ({ first: c, count }): Omit<LadderRow<PredictiveMark>, "rank"> => ({
+      // Hollow: nothing has been sent. This is what the router would do.
+      mark: "skipped",
+      target: `${c.provider_id}/${c.model}`,
+      reasonCode: c.inferred ? "inferred" : undefined,
+      reasonProse: prose(c.inferred ? "capabilities were guessed" : undefined, count),
+    }),
+  )
+  // Keyed on the reason as well: two cooling keys are one fact, but a
+  // cooling key and a disabled one are two, and folding them would hide the
+  // reason an operator can act on.
+  const skipped = collapse(p.skips, (s) => `${s.provider_id}/${s.model}\u0000${s.reason}`).map(
+    ({ first: s, count }): Omit<LadderRow<PredictiveMark>, "rank"> => ({
+      mark: s.reason === "cooling" ? "cooling" : "skipped",
+      target: `${s.provider_id}/${s.model}`,
+      reasonCode: s.reason,
+      reasonProse: prose(undefined, count),
+      terminated: true,
+    }),
+  )
+  return [...candidates, ...skipped].map((row, i) => ({ ...row, rank: i + 1 }))
+}
+
+/**
+ * One rung per (provider, model), however many credentials the router would
+ * walk through on it.
+ *
+ * The endpoint lists every (provider, credential, model) it would try, so
+ * three keys on one provider came back as three rows saying the same thing —
+ * which reads as three providers until the operator notices the keys differ.
+ * The first key decides where the rung sits, since that is where the router
+ * would arrive first.
+ */
+function collapse<T extends RouteCandidate | RouteSkip>(
+  items: T[],
+  keyOf: (item: T) => string,
+): { first: T; count: number }[] {
+  const groups = new Map<string, { first: T; count: number }>()
+  for (const item of items) {
+    const key = keyOf(item)
+    const group = groups.get(key)
+    if (group) group.count++
+    else groups.set(key, { first: item, count: 1 })
+  }
+  return [...groups.values()]
+}
+
+function prose(note: string | undefined, count: number): string | undefined {
+  const parts = [note, count > 1 ? `× ${count} credentials` : undefined].filter(Boolean)
+  return parts.length > 0 ? parts.join(" · ") : undefined
 }
 
 /** Reorder one target. Returns a new array: the draft is React state, and a
@@ -84,11 +119,9 @@ export function validateChain(
       ? ctx
       : {
           providers: knownProviders.map((id) => ({
-            id, name: id, preset: id, kind: "", base_url: "", priority: 0, enabled: true,
-            auth_style: "", credentials: [{
-              id: "assumed", label: "assumed", masked: "", enabled: true,
-              cooling: false, kind: "static",
-            }], free_models_only: false,
+            id,
+            enabled: true,
+            credentials: [{ enabled: true, cooling: false }],
           })),
           models: ctx?.models ?? [],
         }
@@ -146,8 +179,11 @@ export function AliasEditor({
   candidates?: string[]
   onPreview?: (name: string) => void
 }) {
+  // The prefix is this editor's alone, so two editors on one page cannot
+  // mint the same row id; the counter only has to be unique within it.
+  const idPrefix = useId()
   const idCounter = useRef(0)
-  const makeId = () => `row-${idCounter.current++}`
+  const makeId = () => `${idPrefix}${idCounter.current++}`
 
   const [draft, setDraft] = useState<Record<string, DraftRow[]>>(() =>
     toDraftRows(aliases, makeId),
@@ -175,7 +211,8 @@ export function AliasEditor({
   const save = useApiMutation({
     mutationFn: (next: Aliases) => api.put("/api/aliases", next),
     success: "Aliases saved",
-    invalidates: [keys.aliases, keys.config],
+    // The catalogue too: its alias column is read from the same map.
+    invalidates: [keys.aliases, keys.config, keys.models],
   })
 
   // Trimmed and stripped of in-progress blanks: what would actually be sent,
@@ -206,13 +243,12 @@ export function AliasEditor({
     setDraft((d) => ({ ...d, [name]: (d[name] ?? []).filter((r) => r.id !== id) }))
   }
 
+  function move(name: string, from: number, to: number) {
+    setDraft((d) => ({ ...d, [name]: reorderRows(d[name] ?? [], from, to) }))
+  }
+
   function drop(name: string, toIndex: number) {
-    if (dragTarget && dragTarget.name === name) {
-      setDraft((d) => ({
-        ...d,
-        [name]: reorderRows(d[name] ?? [], dragTarget.index, toIndex),
-      }))
-    }
+    if (dragTarget && dragTarget.name === name) move(name, dragTarget.index, toIndex)
     setDragTarget(null)
   }
 
@@ -353,6 +389,27 @@ export function AliasEditor({
                           candidates={candidates}
                           placeholder="provider/model, or a model name"
                         />
+                        {/* Drag is pointer-only, and the order is the whole
+                            point of a chain: the buttons are how it is changed
+                            from the keyboard. */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Move ${name} target ${index + 1} up`}
+                          disabled={index === 0}
+                          onClick={() => move(name, index, index - 1)}
+                        >
+                          <ChevronUp className="size-[var(--icon-size)]" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Move ${name} target ${index + 1} down`}
+                          disabled={index === rows.length - 1}
+                          onClick={() => move(name, index, index + 1)}
+                        >
+                          <ChevronDown className="size-[var(--icon-size)]" />
+                        </Button>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -416,7 +473,15 @@ export function AliasEditor({
           }}
         />
         <div className="ml-auto flex gap-2">
-          <Button size="sm" disabled={hasProblems} onClick={() => save.mutate(cleaned)}>
+          {/* Outline while it cannot act: a disabled filled button is still
+              the loudest thing on the card, and reads as "press me" rather
+              than "not yet". */}
+          <Button
+            size="sm"
+            variant={hasProblems ? "outline" : "default"}
+            disabled={hasProblems}
+            onClick={() => save.mutate(cleaned)}
+          >
             Save
           </Button>
           <Button
@@ -435,8 +500,12 @@ export function AliasEditor({
   )
 }
 
+/** The filter this screen keeps in the URL. A module constant so the hook
+ *  sees the same array each render rather than a fresh literal. */
+const ROUTING_FIELDS = ["alias"] as const
+
 export function RoutingScreen() {
-  const [filters, setFilter] = useSearchFilters(["alias"] as const)
+  const [filters, setFilter] = useSearchFilters(ROUTING_FIELDS)
   const aliases = useAliases()
   const providers = useProviders()
   const models = useModels()
@@ -479,7 +548,8 @@ export function RoutingScreen() {
     run.mutate(name)
   }
 
-  const rows = preview ? previewRows(preview.result) : []
+  // Memoised: the graph rebuilds its nodes when the rows change identity.
+  const rows = useMemo(() => (preview ? previewRows(preview.result) : []), [preview])
 
   return (
     <>
@@ -522,6 +592,7 @@ export function RoutingScreen() {
           />
           <Button
             size="sm"
+            variant={run.isPending ? "outline" : "default"}
             disabled={run.isPending}
             onClick={() => run.mutate(filters.alias)}
           >

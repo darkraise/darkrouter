@@ -145,10 +145,10 @@ export function AccountFields({
           // a mode has to be one thing or the other, so that is ignored.
           if (mode === "single" || mode === "bulk") onChange({ ...value, mode })
         }}
-        aria-label="How many accounts to add"
+        aria-label="How many credentials to add"
         className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
       >
-        <ToggleGroupItem value="single">Single account</ToggleGroupItem>
+        <ToggleGroupItem value="single">Single credential</ToggleGroupItem>
         <ToggleGroupItem value="bulk">Bulk import</ToggleGroupItem>
       </ToggleGroup>
 
@@ -205,7 +205,7 @@ export function AccountFields({
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="account-bulk">Accounts, one per line</Label>
+            <Label htmlFor="account-bulk">Credentials, one per line</Label>
             <Textarea
               id="account-bulk"
               rows={12}
@@ -229,7 +229,7 @@ export function AccountFields({
                 className="w-40"
               />
               <span className="text-sm text-[hsl(var(--legend))]">
-                For the lines that name no account.
+                For the lines that name no credential.
               </span>
             </div>
             {/* The count and the masked heads confirm the paste landed the way
@@ -238,7 +238,7 @@ export function AccountFields({
             <p className="text-sm text-[hsl(var(--legend))]">
               {parsed.length === 0
                 ? "Nothing to import yet"
-                : `${parsed.length} ${parsed.length === 1 ? "account" : "accounts"} · ${parsed
+                : `${parsed.length} ${parsed.length === 1 ? "credential" : "credentials"} · ${parsed
                     .slice(0, 3)
                     .map((a) => `${a.label} ${maskSecret(a.secret)}`)
                     .join(", ")}${parsed.length > 3 ? " …" : ""}`}

@@ -1,7 +1,6 @@
 import { MessageSquare } from "lucide-react"
 import { Badge, Button, Card } from "darkraise-ui"
-import type { BreakerEntry } from "../../lib/api-types"
-import { AccountStrip, ShareMeter } from "../shell/measures"
+import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
 import { ProviderIcon } from "./provider-icon"
 import type { ProviderRow } from "./provider-rows"
 import { STATE_VARIANT } from "./provider-state"
@@ -16,13 +15,15 @@ import { STATE_VARIANT } from "./provider-state"
  */
 export function ProviderCard({
   row,
-  cooling,
+  mix,
   share,
   onOpen,
   onTest,
 }: {
   row: ProviderRow
-  cooling: BreakerEntry[]
+  /** The accounts by what the router can do with them, taken once per row
+   *  set by the screen rather than again here. */
+  mix: AccountMix
   /** Share of the window's requests, or undefined for a provider that served
    *  none — an empty meter and no meter say different things. */
   share?: number
@@ -31,11 +32,6 @@ export function ProviderCard({
    *  that has no account and needs one. */
   onTest?: () => void
 }) {
-  const creds = row.provider?.credentials ?? []
-  const coolingIds = new Set(cooling.map((c) => c.key_id))
-  const disabled = creds.filter((c) => !c.enabled).length
-  const cool = creds.filter((c) => c.enabled && (c.cooling || coolingIds.has(c.id))).length
-  const mix = { usable: creds.length - disabled - cool, cooling: cool, disabled }
   return (
     <Card className={row.configured ? "p-0" : "p-0 opacity-70"}>
       <button
@@ -57,7 +53,7 @@ export function ProviderCard({
           <dd className="text-right tabular-nums">
             {row.priority ?? <span className="text-[hsl(var(--legend))]">—</span>}
           </dd>
-          <dt className="text-[hsl(var(--legend))]">Accounts</dt>
+          <dt className="text-[hsl(var(--legend))]">Credentials</dt>
           <dd className="flex justify-end">
             {row.accounts > 0 ? (
               <AccountStrip mix={mix} label={`${mix.usable}/${row.accounts}`} />

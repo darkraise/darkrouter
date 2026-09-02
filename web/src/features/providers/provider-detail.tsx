@@ -108,7 +108,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
         <ProviderIcon preset={preset.id} id={preset.id} name={preset.name} size={44} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{preset.name}</h1>
+            <h2 className="truncate text-2xl font-semibold tracking-tight">{preset.name}</h2>
             <Badge variant={STATE_VARIANT.unconfigured}>unconfigured</Badge>
             {preset.free_tier && <Badge variant="secondary">Free tier</Badge>}
           </div>
@@ -124,7 +124,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
         ) : (
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="size-[var(--icon-size)]" />
-            Add accounts
+            Add credentials
           </Button>
         )}
       </header>
@@ -139,15 +139,15 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
               localProgram
                 ? "It runs a program on this machine, and that program holds its own login. " +
                   "Adding the provider is the whole of the setup if the program is already " +
-                  "signed in; otherwise add an account and paste its session, which the " +
+                  "signed in; otherwise add a credential and paste its session, which the " +
                   "next screen explains."
                 : keyless
                 ? preset.auth_kind === "optional"
-                  ? "It answers without a credential, so adding it is the whole of the setup. An account can be added later — this provider serves more generously when it knows who is calling."
+                  ? "It answers without a credential, so adding it is the whole of the setup. A credential can be added later — this provider serves more generously when it knows who is calling."
                   : preset.auth_kind === "anonymous"
-                    ? "It needs a credential and publishes one, which this release ships, so adding it is the whole of the setup. An account of your own can be added later — a registered key buys a shorter queue."
+                    ? "It needs a credential and publishes one, which this release ships, so adding it is the whole of the setup. A credential of your own can be added later — a registered key buys a shorter queue."
                     : "It asks for no credential, so adding it is the whole of the setup. The router can choose it as soon as it exists, and discovery lists its models on the next sweep."
-                  : "The router cannot choose it until it has a key to send with. The first account creates the provider and starts discovery."
+                  : "The router cannot choose it until it has a key to send with. The first credential creates the provider and starts discovery."
             }
             action={
               keyless ? (
@@ -177,7 +177,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
                 </div>
               ) : (
                 <Button size="sm" onClick={() => setAddOpen(true)}>
-                  Add the first account
+                  Add the first credential
                 </Button>
               )
             }
@@ -191,7 +191,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
                 needs a credential. */}
             <EmptyState
               title="Nothing has asked this provider what it serves"
-              hint="Discovery lists a provider's models with one of its own keys, so the catalogue fills in once an account exists."
+              hint="Discovery lists a provider's models with one of its own keys, so the catalogue fills in once a credential exists."
             />
           </section>
         </div>
@@ -271,7 +271,7 @@ export function ProviderDetail() {
   const toggle = useApiMutation({
     mutationFn: (enabled: boolean) => api.patch(`/api/providers/${id}`, { enabled }),
     success: "Provider updated",
-    invalidates: [keys.providers, keys.overview],
+    invalidates: [keys.providers, keys.overview, keys.health, keys.discovery],
   })
   // No row is not the same as no such provider: the list holds every provider
   // the release supports, and clicking one that nobody has configured has to
@@ -313,12 +313,14 @@ export function ProviderDetail() {
       </Link>
 
       {/* The identity and the two things done to a provider from outside it —
-          switch it off, and everything else is per-account below. */}
+          switch it off, and everything else is per-credential below. An h2:
+          the app header already holds the page's h1, and this is a section
+          of that page. */}
       <header className="mt-3 mb-6 flex flex-wrap items-center gap-4 border-b pb-5">
         <ProviderIcon preset={provider.preset} id={provider.id} name={provider.name} size={44} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{provider.name}</h1>
+            <h2 className="truncate text-2xl font-semibold tracking-tight">{provider.name}</h2>
             <Badge variant={STATE_VARIANT[state]}>{state}</Badge>
           </div>
           <p className="mt-0.5 font-mono text-sm text-[hsl(var(--legend))]">
@@ -339,7 +341,7 @@ export function ProviderDetail() {
             title={`Disable ${provider.name}?`}
             description={
               provider.credentials.length > 0
-                ? `The router stops choosing it, and requests that would have gone to its ${provider.credentials.length} ${provider.credentials.length === 1 ? "account" : "accounts"} fail over to whatever else can serve them. Nothing is deleted.`
+                ? `The router stops choosing it, and requests that would have gone to its ${provider.credentials.length} ${provider.credentials.length === 1 ? "credential" : "credentials"} fail over to whatever else can serve them. Nothing is deleted.`
                 : "The router stops choosing it. Nothing is deleted."
             }
             confirmLabel="Disable"
@@ -373,7 +375,7 @@ export function ProviderDetail() {
           <Sparkline points={series} />
         </Stat>
         <Stat
-          caption="accounts usable"
+          caption="credentials usable"
           value={`${accountsSummary.usable}/${accountsSummary.total}`}
           note={
             accountsSummary.cooling > 0
@@ -408,10 +410,10 @@ export function ProviderDetail() {
         <div className="flex min-w-0 flex-col gap-6">
           <section>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-medium">Accounts</h2>
+              <h2 className="text-sm font-medium">Credentials</h2>
               <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
                 <Plus className="size-[var(--icon-size)]" />
-                Add accounts
+                Add credentials
               </Button>
             </div>
 
@@ -421,21 +423,21 @@ export function ProviderDetail() {
               <EmptyState
                 title={
                   isKeyless(provider)
-                    ? "This provider needs no account"
-                    : "This provider has no accounts"
+                    ? "This provider needs no credential"
+                    : "This provider has no credentials"
                 }
                 hint={
                   !/^https?:\/\//i.test(provider.base_url ?? "")
-                    ? `${provider.name} runs a program on this machine, and that program holds its own login, so the router can choose it as it is. Add an account only to hand it a session of your own instead of the one it keeps on disk.`
+                    ? `${provider.name} runs a program on this machine, and that program holds its own login, so the router can choose it as it is. Add a credential only to hand it a session of your own instead of the one it keeps on disk.`
                     : provider.auth_style === "anonymous"
-                      ? `${provider.name} is reached with the key it publishes, which this release ships, so the router can choose it as it is. An account of your own can still be added — a registered key buys a shorter queue.`
+                      ? `${provider.name} is reached with the key it publishes, which this release ships, so the router can choose it as it is. A credential of your own can still be added — a registered key buys a shorter queue.`
                       : isKeyless(provider)
-                        ? `${provider.name} is reached with no credential, so the router can choose it as it is. An account can still be added if your endpoint sits behind one.`
+                        ? `${provider.name} is reached with no credential, so the router can choose it as it is. A credential can still be added if your endpoint sits behind one.`
                         : `The router cannot choose ${provider.name} until it has a key to send with. Its settings and priority are kept either way.`
                 }
                 action={
                   <Button size="sm" variant={isKeyless(provider) ? "secondary" : "default"} onClick={() => setAddOpen(true)}>
-                    {isKeyless(provider) ? "Add an account anyway" : "Add the first account"}
+                    {isKeyless(provider) ? "Add a credential anyway" : "Add the first credential"}
                   </Button>
                 }
               />
@@ -497,7 +499,7 @@ export function ProviderDetail() {
           {cooling.length > 0 && (
             <Card className="border-[hsl(var(--warning))] p-4">
               <h2 className="mb-2 text-sm font-medium">
-                {cooling.length} {cooling.length === 1 ? "account" : "accounts"} cooling
+                {cooling.length} {cooling.length === 1 ? "credential" : "credentials"} cooling
               </h2>
               <ul className="flex flex-col gap-1 font-mono text-sm text-[hsl(var(--legend))]">
                 {cooling.map((e) => (

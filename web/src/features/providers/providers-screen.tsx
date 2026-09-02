@@ -1,7 +1,7 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { MessageSquare, Plus, Radio, RefreshCw, RotateCcw } from "lucide-react"
 import { useSearchFilters } from "../../lib/search-filters"
-import { useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
   Badge,
   Button,
@@ -9,15 +9,14 @@ import {
   Input,
   Label,
   Switch,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   ToggleGroup,
   ToggleGroupItem,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  toast,
 } from "darkraise-ui"
+import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
@@ -29,7 +28,7 @@ import {
   useProviders,
   useUsage,
 } from "../../lib/queries"
-import type { BreakerEntry, Preset } from "../../lib/api-types"
+import type { BreakerEntry, DiscoveryHealthRow, Preset, ProbeResult } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
 import { NoMatch } from "../shell/empty-state"
 import { TestDrawer } from "./test-drawer"
@@ -41,15 +40,18 @@ import { ProviderIcon } from "./provider-icon"
 import {
   filterProviderRows,
   filterSummary,
+  CONNECTION_DESCRIPTION,
   CONNECTION_LABEL,
   connectionCounts,
   mergeProviderRows,
   type ConnectionType,
   type ProviderRow,
 } from "./provider-rows"
-import { breakersFor, discoveryLine } from "./provider-state"
+import { breakersFor, discoveryLine, probeOutcome } from "./provider-state"
+import { dateTime, zoneLabel } from "../../lib/format"
+import "./providers-table.css"
 
-export { breakersFor, discoveryLine, providerState } from "./provider-state"
+export { breakersFor, discoveryLine, probeOutcome, providerState } from "./provider-state"
 
 export type ProviderView = "list" | "grid"
 
@@ -79,12 +81,260 @@ export function readView(store: Pick<Storage, "getItem">): ProviderView {
 /** A row's accounts by what the router can do with them right now. The list
  *  has the credentials for a configured provider and nothing for one that has
  *  never been set up, which is why this reads the row rather than a Provider. */
-function accountMix(row: ProviderRow, cooling: BreakerEntry[]): AccountMix {
+export function accountMix(row: ProviderRow, cooling: BreakerEntry[]): AccountMix {
   const creds = row.provider?.credentials ?? []
   const coolingIds = new Set(cooling.map((c) => c.key_id))
   const disabled = creds.filter((c) => !c.enabled).length
   const cool = creds.filter((c) => c.enabled && (c.cooling || coolingIds.has(c.id))).length
   return { usable: creds.length - disabled - cool, cooling: cool, disabled }
+}
+
+/**
+ * One line of the list, with every reading its cells need already taken.
+ *
+ * Computed once over the row set rather than once per cell: the breaker
+ * filter and the account mix were each being run several times per row on
+ * every render of a two-hundred-row table.
+ */
+export type ListRow = {
+  row: ProviderRow
+  cooling: BreakerEntry[]
+  mix: AccountMix
+  /** Share of the window's requests, or undefined for a provider that served
+   *  none — an empty meter and no meter say different things. */
+  share?: number
+  discovery?: DiscoveryHealthRow
+}
+
+export function listRows(
+  rows: ProviderRow[],
+  health: BreakerEntry[],
+  share: Map<string, number>,
+  discovery: DiscoveryHealthRow[],
+): ListRow[] {
+  const servedTotal = Math.max([...share.values()].reduce((n, v) => n + v, 0), 1)
+  const discoveryById = new Map(discovery.map((d) => [d.provider_id, d]))
+  return rows.map((row) => {
+    const cooling = breakersFor(health, row.id)
+    const served = share.get(row.id)
+    return {
+      row,
+      cooling,
+      mix: accountMix(row, cooling),
+      share: served ? served / servedTotal : undefined,
+      discovery: discoveryById.get(row.id),
+    }
+  })
+}
+
+/** What the cells can do to a row. Passed in rather than closed over so the
+ *  column set can be built once and kept across renders. */
+type RowActions = {
+  onTest: (row: ProviderRow) => void
+  onProbe: (id: string) => void
+  onDiscover: (id: string) => void
+  onReset: (id: string) => void
+  onAdd: (row: ProviderRow) => void
+}
+
+// `darkraise-ui` bundles its own tanstack/react-table and does not re-export
+// its column types, so the shape is pulled from the component's own signature
+// rather than from a second install of the same package.
+type Columns = Parameters<typeof DataTable<ListRow, unknown>>[0]["columns"]
+
+function buildColumns(actions: RowActions): Columns {
+  return [
+    {
+      id: "name",
+      accessorFn: (r) => r.row.name,
+      header: ({ column }) => <ColumnHeader column={column} title="Provider" />,
+      cell: ({ row: { original: r } }) => (
+        // Two lines and a 36px mark: the name is the way into a provider, and
+        // a single line of small text is a harder target than it is a denser
+        // list.
+        <span className="flex min-w-[14rem] items-center gap-3">
+          <ProviderIcon preset={r.row.preset} id={r.row.id} name={r.row.name} size={36} />
+          <span className="flex min-w-0 flex-col">
+            <Link
+              to="/providers/$id"
+              params={{ id: r.row.id }}
+              className="truncate font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
+            >
+              {r.row.name}
+            </Link>
+            <span className="truncate font-mono text-sm text-[hsl(var(--legend))]">
+              {r.row.id} · {r.row.kind}
+            </span>
+          </span>
+          {r.row.freeTier && <Badge variant="secondary">Free tier</Badge>}
+        </span>
+      ),
+    },
+    {
+      id: "priority",
+      accessorFn: (r) => r.row.priority ?? -1,
+      header: ({ column }) => <ColumnHeader column={column} title="Priority" />,
+      cell: ({ row: { original: r } }) => (
+        <span className="tabular-nums">
+          {r.row.priority ?? <span className="text-[hsl(var(--legend))]">—</span>}
+        </span>
+      ),
+    },
+    {
+      id: "credentials",
+      header: "Credentials",
+      cell: ({ row: { original: r } }) =>
+        r.row.accounts > 0 ? (
+          <AccountStrip mix={r.mix} label={`${r.mix.usable}/${r.row.accounts}`} />
+        ) : (
+          <span className="text-[hsl(var(--legend))]">none</span>
+        ),
+    },
+    {
+      id: "traffic",
+      // The window is in the header because it is the one thing the meter
+      // cannot say about itself.
+      header: "Traffic · 30d",
+      cell: ({ row: { original: r } }) =>
+        r.share !== undefined ? (
+          <ShareMeter fraction={r.share} label={`${Math.round(r.share * 100)}%`} />
+        ) : (
+          <span className="text-[hsl(var(--legend))]">—</span>
+        ),
+    },
+    {
+      id: "discovery",
+      header: "Discovery",
+      cell: ({ row: { original: r } }) => {
+        if (!r.row.provider) return <span className="text-[hsl(var(--legend))]">—</span>
+        const line = discoveryLine(r.discovery)
+        const warn = r.discovery !== undefined && r.discovery.max_missing_streak > 0
+        // A tooltip rather than a title: the line is longer than the cell as
+        // soon as a provider has anything to report, and a title never shows
+        // on touch or on keyboard focus.
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={0}
+                className={
+                  warn
+                    ? "block max-w-[11rem] truncate text-sm text-[hsl(var(--warning))]"
+                    : "block max-w-[11rem] truncate text-sm text-[hsl(var(--legend))]"
+                }
+              >
+                {line}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <span className="text-sm">{line}</span>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
+    },
+    {
+      id: "state",
+      header: "State",
+      // A mark, not the word: most of two hundred rows are unconfigured, and
+      // a column of that word repeated is text the eye reads to learn it
+      // says nothing new.
+      cell: ({ row: { original: r } }) => <ProviderStateMark state={r.row.state} />,
+    },
+    {
+      id: "actions",
+      header: "",
+      // Not data, so not something to hide — and the sticky column below
+      // relies on it always being the last one rendered.
+      enableHiding: false,
+      cell: ({ row: { original: r } }) => <RowActionCell r={r} actions={actions} />,
+    },
+  ]
+}
+
+function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
+  const { row, cooling } = r
+  // A keyless provider is testable with nothing set up: there is no account
+  // to add, so offering "Add credentials" there is a button whose whole job
+  // is unavailable.
+  if (row.keyless && !row.configured) {
+    return (
+      <span className="flex gap-2">
+        <Button
+          size="icon"
+          variant="ghost"
+          title={`Test — send a message through ${row.name}`}
+          onClick={() => actions.onTest(row)}
+        >
+          <MessageSquare className="size-[var(--icon-size)]" />
+          <span className="sr-only">Test</span>
+        </Button>
+      </span>
+    )
+  }
+  if (!row.configured) {
+    return (
+      <span className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={() => actions.onAdd(row)}>
+          <Plus className="size-[var(--icon-size)]" />
+          Add credentials
+        </Button>
+      </span>
+    )
+  }
+  return (
+    // Icon-only, and not for fashion: four labelled actions made the row
+    // wider than the column that holds it. The name survives as the tooltip
+    // and the accessible name.
+    // Probe asks whether the credential is accepted; Test asks whether a real
+    // completion comes back. Both, because a key can be valid on a provider
+    // that serves nothing an operator asked for.
+    <span className="flex gap-2">
+      <Button
+        size="icon"
+        variant="ghost"
+        title="Test — send a message through this provider"
+        onClick={() => actions.onTest(row)}
+      >
+        <MessageSquare className="size-[var(--icon-size)]" />
+        <span className="sr-only">Test</span>
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        title="Probe — check the credential is accepted"
+        onClick={() => actions.onProbe(row.id)}
+      >
+        <Radio className="size-[var(--icon-size)]" />
+        <span className="sr-only">Probe</span>
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        title="Discover — sweep this provider's models now"
+        onClick={() => actions.onDiscover(row.id)}
+      >
+        <RefreshCw className="size-[var(--icon-size)]" />
+        <span className="sr-only">Discover</span>
+      </Button>
+      {/* Only offered when there is something to clear: a reset on a healthy
+          provider invites a click that does nothing and teaches the operator
+          to distrust it. */}
+      {cooling.length > 0 && (
+        <ConfirmButton
+          size="icon"
+          variant="ghost"
+          title={`Reset the breaker on ${row.name}?`}
+          description="The cooldown is cleared and the router starts dispatching here again immediately. If whatever tripped it has not been fixed, it trips straight back — with the backoff starting over from the beginning."
+          confirmLabel="Reset breaker"
+          onConfirm={() => actions.onReset(row.id)}
+        >
+          <RotateCcw className="size-[var(--icon-size)]" />
+          <span className="sr-only">Reset breaker</span>
+        </ConfirmButton>
+      )}
+    </span>
+  )
 }
 
 export function ProvidersScreen() {
@@ -113,25 +363,17 @@ export function ProvidersScreen() {
   const configuredOnly = filters.configured === "1"
   const freeTier = filters.free_tier === "1"
 
-  // Every row goes to the same place. Clicking a provider means "show me this
-  // provider", and a click that opened a dialog for some rows and navigated
-  // for others made the destination depend on database state the operator
-  // cannot see. The detail page renders an unconfigured provider from its
-  // preset and offers the accounts dialog there.
-  function open(row: ProviderRow) {
-    void navigate({ to: "/providers/$id", params: { id: row.id } })
-  }
-
-  // Requests served per provider over the window, and their sum. The share a
-  // provider carries is the fact the list cannot otherwise show: two healthy
-  // providers look identical until one of them turns out to be serving
-  // everything.
-  const share = new Map<string, number>()
-  for (const day of byProvider.data?.days ?? []) {
-    if (!day.key) continue
-    share.set(day.key, (share.get(day.key) ?? 0) + day.requests)
-  }
-  const servedTotal = [...share.values()].reduce((n, v) => n + v, 0)
+  // Requests served per provider over the window. The share a provider
+  // carries is the fact the list cannot otherwise show: two healthy providers
+  // look identical until one of them turns out to be serving everything.
+  const share = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const day of byProvider.data?.days ?? []) {
+      if (!day.key) continue
+      out.set(day.key, (out.get(day.key) ?? 0) + day.requests)
+    }
+    return out
+  }, [byProvider.data])
 
   const reset = useApiMutation({
     mutationFn: (id: string) => api.post(`/api/providers/${id}/breaker/reset`, {}),
@@ -141,21 +383,60 @@ export function ProvidersScreen() {
   const discover = useApiMutation({
     mutationFn: (id: string) => api.post(`/api/providers/${id}/discover`, {}),
     success: "Discovery sweep queued",
-    invalidates: [keys.models],
+    invalidates: [keys.models, keys.discovery],
   })
   const probe = useApiMutation({
-    mutationFn: (id: string) => api.post(`/api/providers/${id}/test`, {}),
-    success: "Probe sent",
+    mutationFn: (id: string) => api.post<ProbeResult>(`/api/providers/${id}/test`, {}),
     invalidates: [keys.providers, keys.health],
+    onSuccess: (result) => {
+      const verdict = probeOutcome(result)
+      if (verdict.kind === "success") toast.success(verdict.message)
+      else toast.error(verdict.message)
+    },
   })
 
-  const all = mergeProviderRows(presets.data?.presets ?? [], providers.data?.providers ?? [])
-  const rows = filterProviderRows(all, { q, state, connection, configuredOnly, freeTier })
+  // Memoised on the query results, not on the `?? []` defaults: those build a
+  // fresh array on every render while the data is undefined, and every memo
+  // below them would recompute each time.
+  const presetRows = useMemo(() => presets.data?.presets ?? [], [presets.data])
+  const providerRows = useMemo(() => providers.data?.providers ?? [], [providers.data])
+  const healthRows = useMemo(() => health.data ?? [], [health.data])
+  const discoveryRows = useMemo(() => discovery.data?.providers ?? [], [discovery.data])
+  const all = useMemo(() => mergeProviderRows(presetRows, providerRows), [presetRows, providerRows])
+  const rows = useMemo(
+    () => filterProviderRows(all, { q, state, connection, configuredOnly, freeTier }),
+    [all, q, state, connection, configuredOnly, freeTier],
+  )
+  const list = useMemo(
+    () => listRows(rows, healthRows, share, discoveryRows),
+    [rows, healthRows, share, discoveryRows],
+  )
   // Counted over everything the other filters leave, not over the whole
   // catalogue: a chip reading 40 beside a list of 6 would be counting rows
   // the screen is not showing.
-  const counts = connectionCounts(
-    filterProviderRows(all, { q, state, configuredOnly, freeTier }),
+  const counts = useMemo(
+    () => connectionCounts(filterProviderRows(all, { q, state, configuredOnly, freeTier })),
+    [all, q, state, configuredOnly, freeTier],
+  )
+
+  // The mutation triggers are stable across renders, so the column set is
+  // built once and DataTable is not handed a new table definition per poll.
+  const columns = useMemo(
+    () =>
+      buildColumns({
+        onTest: setTesting,
+        onProbe: probe.mutate,
+        onDiscover: discover.mutate,
+        onReset: reset.mutate,
+        onAdd: (row) => {
+          // The row already names the provider. Opening the picker here would
+          // ask an operator to find, among two hundred, the one whose button
+          // they just pressed.
+          setAddPreset(presetRows.find((p) => p.id === row.id) ?? null)
+          setAddOpen(true)
+        },
+      }),
+    [probe.mutate, discover.mutate, reset.mutate, presetRows],
   )
 
   return (
@@ -191,7 +472,7 @@ export function ProvidersScreen() {
           }}
         >
           <Plus className="size-[var(--icon-size)]" />
-          Add accounts
+          Add credentials
         </Button>
       </div>
 
@@ -275,6 +556,7 @@ export function ProvidersScreen() {
             value={type}
             disabled={counts[type] === 0}
             className={CHIP_SHAPE}
+            title={CONNECTION_DESCRIPTION[type]}
           >
             {CONNECTION_LABEL[type]}
             <span className="tabular-nums text-[hsl(var(--legend))]">{counts[type]}</span>
@@ -282,244 +564,51 @@ export function ProvidersScreen() {
         ))}
       </ToggleGroup>
 
-      {rows.length === 0 ? (
+      {presets.isSuccess && providers.isSuccess && rows.length === 0 ? (
         // Only ever a filter miss: the list is every provider the release
         // supports, so it is never empty on its own.
         <NoMatch what="providers" onClear={clearFilters} />
       ) : view === "grid" ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {rows.map((row) => (
+          {list.map((r) => (
             <ProviderCard
-              key={row.id}
-              row={row}
-              cooling={breakersFor(health.data ?? [], row.id)}
-              onTest={() => setTesting(row)}
-              share={
-                share.get(row.id)
-                  ? (share.get(row.id) ?? 0) / Math.max(servedTotal, 1)
-                  : undefined
-              }
-              onOpen={() => open(row)}
+              key={r.row.id}
+              row={r.row}
+              mix={r.mix}
+              onTest={() => setTesting(r.row)}
+              share={r.share}
+              onOpen={() => void navigate({ to: "/providers/$id", params: { id: r.row.id } })}
             />
           ))}
         </div>
       ) : (
-        // Scrolls rather than clips: the provider column carries two lines and
-        // a mark, and the actions are three words wide.
-        <Card className="overflow-x-auto p-0">
-          {/* A minimum width so the table overflows the card and scrolls,
-              rather than squeezing the actions column until its labels clip. */}
-          <Table className="min-w-[56rem]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Provider</TableHead>
-              <TableHead>Priority</TableHead>
-              <TableHead>Accounts</TableHead>
-              <TableHead title="Share of the requests served in the last 30 days">
-                Traffic
-              </TableHead>
-              <TableHead>Discovery</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => {
-              const cooling = breakersFor(health.data ?? [], row.id)
-              const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === row.id)
-              return (
-                <TableRow
-                  key={row.id}
-                  onClick={() => open(row)}
-                  tabIndex={0}
-                  role="button"
-                  onKeyDown={(e) => {
-                    // Only the row itself. Enter on a button inside the row —
-                    // Probe, Discover, the breaker-reset confirm and its own
-                    // buttons in the portal — bubbles up here, and
-                    // preventDefault would suppress that button's activation
-                    // and navigate away instead. stopPropagation on the cell
-                    // guards clicks; it does not guard keys.
-                    if (e.target !== e.currentTarget) return
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      open(row)
-                    }
-                  }}
-                  className="cursor-pointer hover:bg-[hsl(var(--muted))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))] focus-visible:-outline-offset-2"
-                >
-                  {/* Two lines and a 36px mark: the row is the primary way into
-                      a provider, and a single line of small text is a harder
-                      target than it is a denser list. */}
-                  <TableCell className="py-3">
-                    <span className="flex items-center gap-3">
-                      <ProviderIcon preset={row.preset} id={row.id} name={row.name} size={36} />
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate font-medium">{row.name}</span>
-                        <span className="truncate font-mono text-sm text-[hsl(var(--legend))]">
-                          {row.id} · {row.kind}
-                        </span>
-                      </span>
-                      {row.freeTier && <Badge variant="secondary">Free tier</Badge>}
-                    </span>
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {row.priority ?? <span className="text-[hsl(var(--legend))]">—</span>}
-                  </TableCell>
-                  <TableCell>
-                    {row.accounts > 0 ? (
-                      <AccountStrip
-                        mix={accountMix(row, cooling)}
-                        label={`${accountMix(row, cooling).usable}/${row.accounts}`}
-                      />
-                    ) : (
-                      <span className="text-[hsl(var(--legend))]">none</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {share.get(row.id) ? (
-                      <ShareMeter
-                        fraction={(share.get(row.id) ?? 0) / Math.max(servedTotal, 1)}
-                        label={`${Math.round(((share.get(row.id) ?? 0) / Math.max(servedTotal, 1)) * 100)}%`}
-                      />
-                    ) : (
-                      <span className="text-[hsl(var(--legend))]">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell
-                    title={row.provider ? discoveryLine(discoveryRow) : undefined}
-                    className={
-                      discoveryRow && discoveryRow.max_missing_streak > 0
-                        ? "max-w-[11rem] truncate text-sm text-[hsl(var(--warning))]"
-                        : "max-w-[11rem] truncate text-sm text-[hsl(var(--legend))]"
-                    }
-                  >
-                    {row.provider ? discoveryLine(discoveryRow) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    {/* A mark, not the word: most of two hundred rows are
-                        unconfigured, and a column of that word repeated is
-                        text the eye reads to learn it says nothing new. */}
-                    <ProviderStateMark state={row.state} />
-                  </TableCell>
-                  {/* The row opens the provider; these act on it in place, so
-                      they must not also open it — by pointer or by keyboard.
-                      The row's own handler ignores anything that did not start
-                      on the row, which covers the confirm dialog's buttons too:
-                      those portal to the body but stay React children of this
-                      cell, so their events bubble here. */}
-                  <TableCell className="flex gap-2 py-3" onClick={(e) => e.stopPropagation()}>
-                    {/* A keyless provider is testable with nothing set up:
-                        there is no account to add, so offering "Add accounts"
-                        there is a button whose whole job is unavailable. */}
-                    {row.keyless && !row.configured ? (
-                      // Nothing else applies yet: probing and sweeping act on
-                      // a database row this provider does not have, and Test
-                      // is the one action that can make it.
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        title={`Test — send a message through ${row.name}`}
-                        onClick={() => setTesting(row)}
-                      >
-                        <MessageSquare className="size-[var(--icon-size)]" />
-                        <span className="sr-only">Test</span>
-                      </Button>
-                    ) : row.configured ? (
-                      <>
-                        {/* Icon-only, and not for fashion: four labelled
-                            actions made the row 1358px wide inside a 1294px
-                            column, which put Discover past the right edge of a
-                            1600px window. The name survives as the tooltip and
-                            the accessible name.
-                            Probe asks whether the credential is accepted; Test
-                            asks whether a real completion comes back. Both,
-                            because a key can be valid on a provider that
-                            serves nothing an operator asked for. */}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          title="Test — send a message through this provider"
-                          onClick={() => setTesting(row)}
-                        >
-                          <MessageSquare className="size-[var(--icon-size)]" />
-                          <span className="sr-only">Test</span>
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          title="Probe — check the credential is accepted"
-                          onClick={() => probe.mutate(row.id)}
-                        >
-                          <Radio className="size-[var(--icon-size)]" />
-                          <span className="sr-only">Probe</span>
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          title="Discover — sweep this provider's models now"
-                          onClick={() => discover.mutate(row.id)}
-                        >
-                          <RefreshCw className="size-[var(--icon-size)]" />
-                          <span className="sr-only">Discover</span>
-                        </Button>
-                        {/* Only offered when there is something to clear: a
-                            reset on a healthy provider invites a click that
-                            does nothing and teaches the operator to distrust
-                            it. */}
-                        {cooling.length > 0 && (
-                          <ConfirmButton
-                            size="icon"
-                            variant="ghost"
-                            title={`Reset the breaker on ${row.name}?`}
-                            description="The cooldown is cleared and the router starts dispatching here again immediately. If whatever tripped it has not been fixed, it trips straight back — with the backoff starting over from the beginning."
-                            confirmLabel="Reset breaker"
-                            onConfirm={() => reset.mutate(row.id)}
-                          >
-                            <RotateCcw className="size-[var(--icon-size)]" />
-                            <span className="sr-only">Reset breaker</span>
-                          </ConfirmButton>
-                        )}
-                      </>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          // The row already names the provider. Opening the
-                          // picker here would ask an operator to find, among
-                          // two hundred, the one whose button they just
-                          // pressed.
-                          setAddPreset(
-                            presets.data?.presets.find((p) => p.id === row.id) ?? null,
-                          )
-                          setAddOpen(true)
-                        }}
-                      >
-                        <Plus className="size-[var(--icon-size)]" />
-                        Add accounts
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-            </TableBody>
-          </Table>
-        </Card>
+        // Paged rather than one long scroll: two hundred rows of a 36px mark
+        // and two lines each is a page taller than any window, and the
+        // configured providers sort first so the first page is the one that
+        // carries traffic.
+        <div className="providers-table">
+          <DataTable
+            data={list}
+            columns={columns}
+            isLoading={presets.isPending || providers.isPending}
+          />
+        </div>
       )}
 
-      {(health.data ?? []).some((e) => e.cooling_until) && (
+      {healthRows.some((e) => e.cooling_until) && (
         <Card className="mt-6 p-4">
-          <h2 className="mb-2 text-sm font-medium">Cooling credentials</h2>
+          <h2 className="mb-2 text-sm font-medium">
+            Cooling credentials
+            <span className="ml-2 font-normal text-[hsl(var(--legend))]">{zoneLabel()}</span>
+          </h2>
           <ul className="flex flex-col gap-1 font-mono text-sm">
-            {(health.data ?? [])
+            {healthRows
               .filter((e) => e.cooling_until)
               .map((e) => (
                 <li key={`${e.provider_id}/${e.key_id}/${e.model}`}>
                   {e.provider_id}/{e.key_id || "—"} · backoff {e.backoff_level} ·{" "}
                   {e.consecutive_failures} consecutive failures · until{" "}
-                  {new Date(e.cooling_until as string).toLocaleTimeString()}
+                  {dateTime(e.cooling_until as string)}
                 </li>
               ))}
           </ul>
