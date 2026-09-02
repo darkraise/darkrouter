@@ -53,6 +53,7 @@ type Server struct {
 	src     *provider.SQLSource
 	ex      *exec.Executor
 	logw    *store.LogWriter
+	metrics *metrics
 	tokens  *tokenAuth
 	breaker *health.Breaker
 	persist *health.Persister
@@ -82,8 +83,6 @@ func (s *Server) Catalog() *catalog.Store { return s.cat }
 // probe. It is nil when discovery is disabled.
 func (s *Server) Discoverer() *catalog.Discoverer { return s.disc }
 
-// New wires the gateway. It loads the provider set eagerly so a bad credential
-// fails startup rather than every request.
 // Option adjusts what New builds. There is exactly one, and it exists because
 // the shipped preset set is embedded: without a seam, nothing above this package
 // can point an OAuth token endpoint at a fake, and the assembled refresh path
@@ -97,6 +96,8 @@ func WithPresets(p catalog.Presets) Option {
 	return func(o *options) { o.presets = p }
 }
 
+// New wires the gateway. It loads the provider set eagerly so a bad credential
+// fails startup rather than every request.
 func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings []string,
 	opts ...Option) (*Server, error) {
 
@@ -113,6 +114,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	logw := store.NewLogWriter(db, store.LogOptions{})
 	breaker := health.New(*cfg.Policy.Cooldown.TripAfter, cfg.Policy.Cooldown.Max)
+	met := newMetrics(breaker, logw)
 	// policy.cooldown is edited through the admin API and lands in the next
 	// config snapshot, so the breaker reads it from there rather than from the
 	// values it was built with.
@@ -219,7 +221,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		// and it has to mean the same thing on both.
 		"vertex": vertexadapter.NewWithFetcher(mediaFetcher),
 	}, exec.Deps{
-		Log: logw, Health: breaker, Fleet: breaker, Catalog: cat,
+		Log: met, Health: breaker, Fleet: breaker, Catalog: cat,
 		Auth:      authManager,
 		Protocols: protocols,
 	})
@@ -261,7 +263,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
-		tokens:  newTokenAuth(db),
+		metrics: met, tokens: newTokenAuth(db),
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
 		freeSync:  freeSyncWorker,
@@ -407,8 +409,6 @@ func constantTimeEqual(got, want string) bool {
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
 }
 
-// handleModels lists configured models. Aliases would be listed first, but
-// Phase 1 has none; Phase 6 replaces the backing with the catalog.
 // listedModel is one row of a client-facing listing.
 type listedModel struct {
 	ID              string
@@ -500,19 +500,28 @@ func (s *Server) AdminHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
 	})
+	// Ready means able to serve: the database answers and the live config is
+	// the one on disk. An orchestrator routes on this, so a gateway that would
+	// fail every request must not look ready.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.db.Read.PingContext(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "database: %v\n", err)
+			return
+		}
+		if err := s.store.LastError(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "config: %v\n", err)
+			return
+		}
+		fmt.Fprint(w, "ok\n")
 	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w,
-			"# HELP darkrouter_log_records_dropped_total Request records discarded because the log channel was full.\n"+
-				"# TYPE darkrouter_log_records_dropped_total counter\n"+
-				"darkrouter_log_records_dropped_total %d\n"+
-				"# HELP darkrouter_log_records_written_total Request records persisted.\n"+
-				"# TYPE darkrouter_log_records_written_total counter\n"+
-				"darkrouter_log_records_written_total %d\n",
-			s.logw.Dropped(), s.logw.Written())
+		s.metrics.write(w, s.logw.Dropped(), s.logw.Written())
 	})
 
 	// Everything else goes to the admin API, which owns its own auth. Mounted

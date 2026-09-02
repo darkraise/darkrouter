@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -437,6 +438,29 @@ func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
 	s.breaker.Record(k, fail)
 	if s.breaker.Available(k) {
 		t.Fatal("the edited trip_after was not applied to the running breaker")
+	}
+}
+
+func TestReadyzReports503WhenTheConfigIsInvalid(t *testing.T) {
+	s := newTestServer(t, "")
+	s.store.RecordError(errors.New("bad edit"))
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "bad edit") {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+}
+
+func TestReadyzReports503WhenTheDatabaseIsGone(t *testing.T) {
+	s := newTestServer(t, "")
+	_ = s.db.Close()
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503", rec.Code)
 	}
 }
 
