@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter/xlate"
@@ -30,6 +31,18 @@ type wireRequest struct {
 	ResponseFormat      *wireResponseFormat `json:"response_format"`
 	ParallelToolCalls   *bool               `json:"parallel_tool_calls"`
 	Metadata            map[string]string   `json:"metadata"`
+	N                   *int                `json:"n"`
+}
+
+// extraFields are the OpenAI-only request fields the IR has no slot for. They
+// are carried verbatim in Request.Extra so an OpenAI-compatible target sees
+// them again, and every other target drops them with a warning. n is not
+// among them: several choices cannot be expressed in the IR at all, so it is
+// warned about at parse time and never forwarded.
+var extraFields = []string{
+	"seed", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty",
+	"logit_bias", "user", "service_tier", "prediction", "modalities", "audio",
+	"web_search_options",
 }
 
 type wireMessage struct {
@@ -38,6 +51,11 @@ type wireMessage struct {
 	Name       string          `json:"name"`
 	ToolCallID string          `json:"tool_call_id"`
 	ToolCalls  []wireToolCall  `json:"tool_calls"`
+	// ReasoningContent is the thinking an assistant turn produced, replayed
+	// by clients of DeepSeek and OpenRouter. It has to reach the IR as a
+	// thinking block, because DeepSeek's thinking mode rejects a tool loop
+	// that comes back without it.
+	ReasoningContent string `json:"reasoning_content"`
 	// FunctionCall is the pre-2023 single-call form. Some SDK versions still
 	// replay it from stored history.
 	FunctionCall *wireFunctionCall `json:"function_call"`
@@ -67,6 +85,7 @@ type wireTool struct {
 		Name        string          `json:"name"`
 		Description string          `json:"description"`
 		Parameters  json.RawMessage `json:"parameters"`
+		Strict      *bool           `json:"strict"`
 	} `json:"function"`
 }
 
@@ -75,6 +94,7 @@ type wireResponseFormat struct {
 	JSONSchema *struct {
 		Name   string          `json:"name"`
 		Schema json.RawMessage `json:"schema"`
+		Strict *bool           `json:"strict"`
 	} `json:"json_schema"`
 }
 
@@ -82,7 +102,8 @@ type wirePart struct {
 	Type     string `json:"type"`
 	Text     string `json:"text"`
 	ImageURL *struct {
-		URL string `json:"url"`
+		URL    string `json:"url"`
+		Detail string `json:"detail"`
 	} `json:"image_url"`
 	InputAudio *struct {
 		Data   string `json:"data"`
@@ -128,22 +149,37 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 	if w.Reasoning != nil {
 		req.Reasoning = &ir.Reasoning{Effort: *w.Reasoning}
 	}
-	if w.ResponseFormat != nil && w.ResponseFormat.Type == "json_schema" && w.ResponseFormat.JSONSchema != nil {
-		req.ResponseFormat = &ir.ResponseFormat{
-			Type: "json_schema", Schema: w.ResponseFormat.JSONSchema.Schema,
-		}
+	req.ResponseFormat = parseResponseFormat(w.ResponseFormat)
+	if w.N != nil && *w.N > 1 {
+		req.Warnings = append(req.Warnings, ir.Warning{
+			Field: "n", Target: dialectName,
+			Reason: "one choice is produced; the request asked for " + strconv.Itoa(*w.N),
+		})
 	}
+	req.Extra = captureExtra(body)
 	for i, m := range w.Messages {
-		msg, err := parseMessage(i, m)
+		msg, warns, err := parseMessage(i, m)
 		if err != nil {
 			return nil, nil, err
 		}
 		req.Messages = append(req.Messages, msg)
+		req.Warnings = append(req.Warnings, warns...)
 	}
 	for _, t := range w.Tools {
-		req.Tools = append(req.Tools, ir.Tool{
+		tool := ir.Tool{
 			Name: t.Function.Name, Description: t.Function.Description, Schema: t.Function.Parameters,
-		})
+		}
+		if t.Function.Strict != nil {
+			// Strict mode is an OpenAI contract — every property required,
+			// additionalProperties false — that no other target enforces, so
+			// it travels as an extra rather than a first-class field.
+			tool.Extra = map[string]json.RawMessage{"strict": json.RawMessage(strconv.FormatBool(*t.Function.Strict))}
+			req.Warnings = append(req.Warnings, ir.Warning{
+				Field: "tools[].function.strict", Target: dialectName,
+				Reason: "strict schema mode is honored by OpenAI-compatible targets only",
+			})
+		}
+		req.Tools = append(req.Tools, tool)
 	}
 	// Legacy declarations are translated rather than rejected: nothing
 	// downstream should have to know the old spelling existed.
@@ -162,6 +198,53 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 	}, nil
 }
 
+// dialectName labels the warnings this edge produces.
+const dialectName = "openai"
+
+// parseResponseFormat reads the three shapes OpenAI documents. text is the
+// default and needs no IR; json_object is a mode without a schema; json_schema
+// carries the schema with its name and strictness.
+func parseResponseFormat(rf *wireResponseFormat) *ir.ResponseFormat {
+	if rf == nil {
+		return nil
+	}
+	switch rf.Type {
+	case "json_object":
+		return &ir.ResponseFormat{Type: "json_object"}
+	case "json_schema":
+		if rf.JSONSchema == nil {
+			return nil
+		}
+		return &ir.ResponseFormat{
+			Type: "json_schema", Schema: rf.JSONSchema.Schema,
+			Name: rf.JSONSchema.Name, Strict: rf.JSONSchema.Strict,
+		}
+	}
+	return nil
+}
+
+// captureExtra lifts the OpenAI-only fields out of the raw body. The body has
+// already been decoded once into the typed form, so a second decode into a map
+// cannot fail; a null value is left out, since the client sent nothing.
+func captureExtra(body []byte) map[string]json.RawMessage {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return nil
+	}
+	var out map[string]json.RawMessage
+	for _, k := range extraFields {
+		v, ok := top[k]
+		if !ok || string(v) == "null" {
+			continue
+		}
+		if out == nil {
+			out = map[string]json.RawMessage{}
+		}
+		out[k] = v
+	}
+	return out
+}
+
 func mapRole(role string) ir.Role {
 	switch role {
 	case "system", "developer": // newer clients send "developer" for system
@@ -176,21 +259,22 @@ func mapRole(role string) ir.Role {
 }
 
 // parseContent accepts both the plain-string and multi-part forms.
-func parseContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
+func parseContent(raw json.RawMessage) ([]ir.ContentBlock, []ir.Warning, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		if s == "" {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return []ir.ContentBlock{{Type: ir.BlockText, Text: s}}, nil
+		return []ir.ContentBlock{{Type: ir.BlockText, Text: s}}, nil, nil
 	}
 	var parts []wirePart
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, fmt.Errorf("unsupported message content: %w", err)
+		return nil, nil, fmt.Errorf("unsupported message content: %w", err)
 	}
+	var warns []ir.Warning
 	out := make([]ir.ContentBlock, 0, len(parts))
 	for _, p := range parts {
 		switch p.Type {
@@ -199,6 +283,12 @@ func parseContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 		case "image_url":
 			if p.ImageURL == nil {
 				continue
+			}
+			if p.ImageURL.Detail != "" && p.ImageURL.Detail != "auto" {
+				warns = append(warns, ir.Warning{
+					Field: "messages[].image_url.detail", Target: dialectName,
+					Reason: "image detail has no equivalent in the IR; the image is sent at default detail",
+				})
 			}
 			// A data URI is inline content, not an address. Leaving it in URL
 			// makes Anthropic emit source.type "url" for base64 and makes
@@ -226,7 +316,7 @@ func parseContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 			}})
 		}
 	}
-	return out, nil
+	return out, warns, nil
 }
 
 func parseToolChoice(raw json.RawMessage) *ir.ToolChoice {
@@ -265,11 +355,17 @@ func parseToolChoice(raw json.RawMessage) *ir.ToolChoice {
 // parseMessage converts one wire message. The turn index is needed because a
 // legacy function message carries no call id and one has to be synthesized
 // from its position.
-func parseMessage(turn int, m wireMessage) (ir.Message, error) {
+func parseMessage(turn int, m wireMessage) (ir.Message, []ir.Warning, error) {
 	role := mapRole(m.Role)
-	blocks, err := parseContent(m.Content)
+	blocks, warns, err := parseContent(m.Content)
 	if err != nil {
-		return ir.Message{}, err
+		return ir.Message{}, nil, err
+	}
+	if m.Name != "" && role != ir.RoleTool {
+		warns = append(warns, ir.Warning{
+			Field: "messages[].name", Target: dialectName,
+			Reason: "participant names have no equivalent in the IR; the name was dropped",
+		})
 	}
 
 	if role == ir.RoleTool {
@@ -280,7 +376,14 @@ func parseMessage(turn int, m wireMessage) (ir.Message, error) {
 		return ir.Message{Role: role, Content: []ir.ContentBlock{{
 			Type:       ir.BlockToolResult,
 			ToolResult: &ir.ToolResult{ToolUseID: id, Content: blocks},
-		}}}, nil
+		}}}, warns, nil
+	}
+	if role == ir.RoleAssistant && m.ReasoningContent != "" {
+		// Thinking precedes the answer it produced, which is the order every
+		// target that replays reasoning expects.
+		blocks = append([]ir.ContentBlock{{
+			Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: m.ReasoningContent},
+		}}, blocks...)
 	}
 
 	for i, tc := range m.ToolCalls {
@@ -305,7 +408,7 @@ func parseMessage(turn int, m wireMessage) (ir.Message, error) {
 			},
 		})
 	}
-	return ir.Message{Role: role, Content: blocks}, nil
+	return ir.Message{Role: role, Content: blocks}, warns, nil
 }
 
 // argumentsOrEmpty guards the IR against an empty Input, which would serialize
