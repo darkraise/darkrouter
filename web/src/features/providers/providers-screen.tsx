@@ -1,9 +1,11 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react"
@@ -82,6 +84,16 @@ const CHIP_SHAPE = "gap-1.5 rounded-full px-3"
 /** Shortest the windowed list is allowed to get, and what it falls back to
  *  where nothing can be measured. */
 const MIN_LIST_HEIGHT = 320
+
+/** A floor, not a guess. The real row height is read back from the rows,
+ *  because the density and font-size axes both move it and the window is
+ *  placed from whatever number it is told. Low enough that no theme sits
+ *  under it, so the measurement always converges from below. */
+const MIN_ROW_HEIGHT = 32
+
+/** The axes that change how tall a row wants to be. Their pinned height has
+ *  to be let go before a smaller one can be observed. */
+const ROW_HEIGHT_AXES = ["data-density", "data-font-size"]
 const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
 
 /**
@@ -98,8 +110,12 @@ const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
  * changes for two different reasons -- the window resizing, and the filters
  * above wrapping to another line and pushing the table down.
  */
-function useFillHeight(ref: RefObject<HTMLDivElement | null>): number {
+function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
+  height: number
+  rowHeight: number
+} {
   const [height, setHeight] = useState(MIN_LIST_HEIGHT)
+  const [rowHeight, setRowHeight] = useState(MIN_ROW_HEIGHT)
 
   const measure = useCallback(() => {
     const el = ref.current
@@ -115,26 +131,71 @@ function useFillHeight(ref: RefObject<HTMLDivElement | null>): number {
     // The window's top does not move when its height changes, so this is a
     // fixed point rather than a circular one.
     const box = el.querySelector(".dr-data-table-viewport") ?? el
-    const next = Math.max(Math.round(bottom - box.getBoundingClientRect().top), MIN_LIST_HEIGHT)
-    // Only a real change: the table's own height is one of the things being
-    // observed, so an unguarded write would answer its own notification.
-    setHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev))
+    if (bottom > 0) {
+      const next = Math.max(Math.round(bottom - box.getBoundingClientRect().top), MIN_LIST_HEIGHT)
+      // Only a real change: the table's own height is one of the things being
+      // observed, so an unguarded write would answer its own notification.
+      setHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev))
+    }
+
+    // The pinned height is a floor, so a row whose content does not fit
+    // reports the taller figure it actually took. Reading the tallest one back
+    // and pinning to that settles in a step or two and lands on the natural
+    // row height for whatever density and font size are in force.
+    const rows = el.querySelectorAll<HTMLElement>(
+      "tbody tr:not(.dr-data-table-virtual-pad)",
+    )
+    let tallest = 0
+    for (const row of rows) tallest = Math.max(tallest, row.getBoundingClientRect().height)
+    if (tallest > 0) {
+      const next = Math.max(Math.ceil(tallest), MIN_ROW_HEIGHT)
+      setRowHeight((prev) => (prev !== next ? next : prev))
+    }
   }, [ref])
 
+  // After every render, not only on mount. The space left over depends on
+  // everything stacked above the table, and most of what changes it -- a
+  // filter chip wrapping to a second line, the density axis, the catalogue
+  // arriving -- moves the table without resizing it or the pane, so no
+  // observer fires and a mount-only measurement stays wrong for good.
+  useLayoutEffect(measure)
+
   useEffect(() => {
-    measure()
+    const el = ref.current
+    if (!el) return
     window.addEventListener("resize", measure)
     const observer = new ResizeObserver(measure)
-    const pane = ref.current?.closest(".dr-sidebar-layout-content")
+    const pane = el.closest(".dr-sidebar-layout-content")
     if (pane) observer.observe(pane)
-    if (ref.current) observer.observe(ref.current)
+    observer.observe(el)
+    // The panel above is what decides where the table starts.
+    if (el.previousElementSibling) observer.observe(el.previousElementSibling)
+    // Changing density or font size has to let the pin go before it can be
+    // re-measured. The pinned height is a floor, so while it stands no row
+    // can report wanting less than it, and a list that had been at spacious
+    // would keep those rows for ever after a switch to compact. Dropping back
+    // to the floor lets the measurement climb to the new height from below.
+    const axes = new MutationObserver(() => setRowHeight(MIN_ROW_HEIGHT))
+    axes.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ROW_HEIGHT_AXES,
+    })
+    // Inter arrives after first paint and re-flows everything above the
+    // table. Nothing re-renders for it, so the measurement has to be asked
+    // for again explicitly.
+    let cancelled = false
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) measure()
+    })
     return () => {
+      cancelled = true
       window.removeEventListener("resize", measure)
       observer.disconnect()
+      axes.disconnect()
     }
   }, [measure, ref])
 
-  return height
+  return { height, rowHeight }
 }
 
 /** Which layout an operator last chose.
@@ -442,7 +503,7 @@ export function ProvidersScreen() {
   const [localPreset, setLocalPreset] = useState<Preset | null>(null)
   const [keylessPreset, setKeylessPreset] = useState<Preset | null>(null)
   const tableRef = useRef<HTMLDivElement | null>(null)
-  const listHeight = useFillHeight(tableRef)
+  const { height: listHeight, rowHeight } = useListMetrics(tableRef)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
   const [addPreset, setAddPreset] = useState<Preset | null>(null)
@@ -750,12 +811,16 @@ export function ProvidersScreen() {
         //
         // The row height is declared, not measured, so providers-table.css
         // pins every row to it. The two numbers have to agree.
-        <div className="providers-table" ref={tableRef}>
+        <div
+          className="providers-table"
+          ref={tableRef}
+          style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
+        >
           <DataTable
             data={list}
             columns={columns}
             isLoading={presets.isPending || providers.isPending}
-            virtualize={{ rowHeight: 60, height: listHeight }}
+            virtualize={{ rowHeight, height: listHeight }}
           />
         </div>
       )}
