@@ -15,7 +15,8 @@
             "Name": "screenshot",
             "Input": {
               "url": "https://x.invalid"
-            }
+            },
+            "Signature": ""
           },
           "ToolResult": null,
           "CacheControl": null,

@@ -21,12 +21,8 @@ const SERIES_WINDOW = "30d"
  *  $0.004 today has not spent nothing, and `$0.00` is the exact string that
  *  would claim it had. Unpriced is not zero either — a model with no catalog
  *  price has an unknown cost. */
-export function money(micros: number, priced: boolean): string {
-  if (!priced) return "—"
-  const dollars = micros / 1_000_000
-  if (dollars > 0 && dollars < 0.01) return `$${dollars.toFixed(4)}`
-  return `$${dollars.toFixed(2)}`
-}
+import { money } from "@/lib/format"
+export { money }
 
 /** Milliseconds as a reading rather than a raw field. Seconds past the
  *  thousand, because `4100ms` makes the reader do the division. */
@@ -316,7 +312,7 @@ export function OverviewScreen() {
                     caption="today_spend"
                     window="since 00:00 UTC"
                     readings={[
-                      { value: money(o.today_spend.micros, o.today_spend.priced) },
+                      { value: money(o.today_spend.priced ? (o.today_spend.micros ?? 0) : null) },
                     ]}
                     points={spendSeries(days)}
                     seriesLabel={`${SERIES_WINDOW} · spend per day`}

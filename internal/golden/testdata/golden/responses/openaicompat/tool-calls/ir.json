@@ -10,7 +10,8 @@
       "ToolUse": {
         "ID": "call_a",
         "Name": "lookup",
-        "Input": "{\"city\":\"Oslo\"}"
+        "Input": "{\"city\":\"Oslo\"}",
+        "Signature": ""
       },
       "ToolResult": null,
       "CacheControl": null,
@@ -24,7 +25,8 @@
       "ToolUse": {
         "ID": "call_b",
         "Name": "lookup",
-        "Input": "{\"city\":\"Bergen\"}"
+        "Input": "{\"city\":\"Bergen\"}",
+        "Signature": ""
       },
       "ToolResult": null,
       "CacheControl": null,

@@ -35,8 +35,9 @@ export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
   }))
   const skipped: LadderRow<PredictiveMark>[] = p.skips.map((s, i) => ({
     rank: candidates.length + i + 1,
-    mark: s.includes("cooling") ? "cooling" : "skipped",
-    target: s,
+    mark: s.reason === "cooling" ? "cooling" : "skipped",
+    target: `${s.provider_id}/${s.model}`,
+    reasonCode: s.reason,
     terminated: true,
   }))
   return [...candidates, ...skipped]
