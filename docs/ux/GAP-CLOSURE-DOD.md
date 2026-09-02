@@ -4,6 +4,14 @@ Assessed 2026-08-27 on `feat/console-gap-closure` and statically reverified
 2026-09-01 after the Playground review fixes, against the Definition of Done
 table in `docs/superpowers/plans/2026-08-27-phase14-console-gap-closure.md`.
 
+**Update 2026-09-02.** The live half this document records as unperformed
+was run: the console was exercised against this machine's UAT instance and a
+shadow container, with Chat and Compare completed end to end against Groq.
+The rows below are left as the static gate found them on 2026-08-27; the
+per-row UAT outcomes were not recorded row by row, so "UAT not performed"
+here means "not performed by this gate", and `docs/PROGRESS.md` carries the
+2026-09-02 result.
+
 **What this document can and cannot say.** Every command half of every row
 below was run and its output checked. Every UAT half — D1 through D18a — was
 **not performed**, because no provider credential exists in this environment

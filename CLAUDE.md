@@ -51,40 +51,8 @@ that only exists in the working tree is not done: the Go binary embeds the
 console bundle at compile time, so neither `npm run build` nor `go build`
 changes what the running container serves.
 
-```bash
-docker build -t darkraise/darkrouter:latest .
-docker compose -f compose.prod.yml -f compose.uat.yml up -d darkrouter
-```
-
-The `compose.uat.yml` overlay is required. `compose.prod.yml` alone sets
-`pull_policy: always` and would pull the published image from Docker Hub,
-discarding the local build; the overlay sets `pull_policy: never`. The
-Dockerfile runs `npm ci && npm run build` itself, so the image is built from
-source and does not depend on a local `web/dist`.
-
-Then verify, rather than assuming the deploy took:
-
-```bash
-docker ps --filter name=darkrouter --format '{{.Names}}\t{{.Status}}'
-curl -s http://localhost:8091/healthz
-```
-
-The host publishes **8090** (proxy) and **8091** (admin) — 8080 and 8081 belong
-to other containers on this machine, and querying them returns a different
-service's response that looks like a passing check.
-
-Confirm the deployed console is the build you just made by comparing bytes,
-not filenames. Vite's asset hash is **not** stable across build environments:
-the image builds at `/src/web` and you build at the repo path, and the two
-produce the same bundle under different `index-<hash>.js` names. A filename
-comparison reports a false mismatch on a perfectly good deploy.
-
-```bash
-(cd web && npm run build)
-asset=$(curl -s http://localhost:8091/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js')
-curl -s "http://localhost:8091/$asset" > /tmp/served.js
-cmp /tmp/served.js internal/admin/dist/assets/index-*.js && echo "deploy matches source"
-```
-
-Pass `--build-arg VERSION=...` when the build is meant to identify itself;
-without it the binary and `/healthz` report `dev`.
+The build, deploy and byte-level verification procedure is in
+**[`docs/DEPLOY.md`](docs/DEPLOY.md)** under "Local build (UAT)". Two things
+from it that are easy to get wrong: the `compose.uat.yml` overlay is required
+or the published image is pulled over the local build, and this machine
+publishes the admin port on **8091** (8081 is a different container).
