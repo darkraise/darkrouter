@@ -4,12 +4,23 @@ import (
 	"bytes"
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// Go's MIME table has no .webmanifest, so http.FileServer falls back to
+// sniffing and labels the manifest text/plain. The manifest spec tells a
+// browser not to check the type, so nothing breaks -- but a JSON document
+// served as plain text is wrong, and DevTools says so out loud.
+func init() {
+	if err := mime.AddExtensionType(".webmanifest", "application/manifest+json"); err != nil {
+		panic(err)
+	}
+}
 
 // distFS is the built SPA.
 //

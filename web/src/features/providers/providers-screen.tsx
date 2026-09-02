@@ -1,4 +1,14 @@
-import { useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from "react"
 import { MessageSquare, Plus, Radio, RefreshCw, RotateCcw } from "lucide-react"
 import { useSearchFilters } from "../../lib/search-filters"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -70,7 +80,123 @@ const CONNECTION_ORDER: ConnectionType[] = ["key", "local", "none", "oauth", "si
 /** The pill shape only. Selected, hover and disabled are the group's, which
  *  is the point of moving to one. */
 const CHIP_SHAPE = "gap-1.5 rounded-full px-3"
+
+/** Shortest the windowed list is allowed to get, and what it falls back to
+ *  where nothing can be measured. */
+const MIN_LIST_HEIGHT = 320
+
+/** A floor, not a guess. The real row height is read back from the rows,
+ *  because the density and font-size axes both move it and the window is
+ *  placed from whatever number it is told. Low enough that no theme sits
+ *  under it, so the measurement always converges from below. */
+const MIN_ROW_HEIGHT = 32
+
+/** The axes that change how tall a row wants to be. Their pinned height has
+ *  to be let go before a smaller one can be observed. */
+const ROW_HEIGHT_AXES = ["data-density", "data-font-size"]
 const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
+
+/**
+ * How tall the windowed list may be: whatever is left between the top of the
+ * table and the bottom of the pane that scrolls.
+ *
+ * Measured rather than fixed. A constant has to be short enough for the
+ * shortest screen it will ever meet, which on a tall one leaves the list
+ * ending in mid-air with a band of empty page under it. And the number has to
+ * be true as well as tall: DataTable places its window from this figure, so a
+ * height that disagrees with the box actually rendered shows the wrong rows.
+ *
+ * The observer watches the pane and the table, because the space left over
+ * changes for two different reasons -- the window resizing, and the filters
+ * above wrapping to another line and pushing the table down.
+ */
+function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
+  height: number
+  rowHeight: number
+} {
+  const [height, setHeight] = useState(MIN_LIST_HEIGHT)
+  const [rowHeight, setRowHeight] = useState(MIN_ROW_HEIGHT)
+
+  const measure = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const pane = el.closest(".dr-sidebar-layout-content")
+    const bottom = pane
+      ? pane.getBoundingClientRect().bottom -
+        parseFloat(getComputedStyle(pane).paddingBottom || "0")
+      : window.innerHeight
+    // From the scrolling box, not the container: DataTable puts its own
+    // toolbar above the window, so measuring the outer element overshoots by
+    // the height of that row and pushes the list past the bottom of the pane.
+    // The window's top does not move when its height changes, so this is a
+    // fixed point rather than a circular one.
+    const box = el.querySelector(".dr-data-table-viewport") ?? el
+    if (bottom > 0) {
+      const next = Math.max(Math.round(bottom - box.getBoundingClientRect().top), MIN_LIST_HEIGHT)
+      // Only a real change: the table's own height is one of the things being
+      // observed, so an unguarded write would answer its own notification.
+      setHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev))
+    }
+
+    // The pinned height is a floor, so a row whose content does not fit
+    // reports the taller figure it actually took. Reading the tallest one back
+    // and pinning to that settles in a step or two and lands on the natural
+    // row height for whatever density and font size are in force.
+    const rows = el.querySelectorAll<HTMLElement>(
+      "tbody tr:not(.dr-data-table-virtual-pad)",
+    )
+    let tallest = 0
+    for (const row of rows) tallest = Math.max(tallest, row.getBoundingClientRect().height)
+    if (tallest > 0) {
+      const next = Math.max(Math.ceil(tallest), MIN_ROW_HEIGHT)
+      setRowHeight((prev) => (prev !== next ? next : prev))
+    }
+  }, [ref])
+
+  // After every render, not only on mount. The space left over depends on
+  // everything stacked above the table, and most of what changes it -- a
+  // filter chip wrapping to a second line, the density axis, the catalogue
+  // arriving -- moves the table without resizing it or the pane, so no
+  // observer fires and a mount-only measurement stays wrong for good.
+  useLayoutEffect(measure)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    window.addEventListener("resize", measure)
+    const observer = new ResizeObserver(measure)
+    const pane = el.closest(".dr-sidebar-layout-content")
+    if (pane) observer.observe(pane)
+    observer.observe(el)
+    // The panel above is what decides where the table starts.
+    if (el.previousElementSibling) observer.observe(el.previousElementSibling)
+    // Changing density or font size has to let the pin go before it can be
+    // re-measured. The pinned height is a floor, so while it stands no row
+    // can report wanting less than it, and a list that had been at spacious
+    // would keep those rows for ever after a switch to compact. Dropping back
+    // to the floor lets the measurement climb to the new height from below.
+    const axes = new MutationObserver(() => setRowHeight(MIN_ROW_HEIGHT))
+    axes.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ROW_HEIGHT_AXES,
+    })
+    // Inter arrives after first paint and re-flows everything above the
+    // table. Nothing re-renders for it, so the measurement has to be asked
+    // for again explicitly.
+    let cancelled = false
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) measure()
+    })
+    return () => {
+      cancelled = true
+      window.removeEventListener("resize", measure)
+      observer.disconnect()
+      axes.disconnect()
+    }
+  }, [measure, ref])
+
+  return { height, rowHeight }
+}
 
 /** Which layout an operator last chose.
  *
@@ -371,11 +497,13 @@ export function ProvidersScreen() {
   const discovery = useDiscoveryHealth()
   const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
-  const [addLocalOpen, setAddLocalOpen] = useState(false)
-  // Which runtime the local dialog opens on. Null with the dialog open is the
-  // picker the header button means; a row's own button has already named one.
+  // Which runtime the local dialog opens on. The dialog is reached only by
+  // naming one -- a local preset's own card -- so the preset is both the
+  // subject and the open flag.
   const [localPreset, setLocalPreset] = useState<Preset | null>(null)
   const [keylessPreset, setKeylessPreset] = useState<Preset | null>(null)
+  const tableRef = useRef<HTMLDivElement | null>(null)
+  const { height: listHeight, rowHeight } = useListMetrics(tableRef)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
   const [addPreset, setAddPreset] = useState<Preset | null>(null)
@@ -486,50 +614,136 @@ export function ProvidersScreen() {
 
   return (
     <>
-      {/* The page's own name is in the app header; this row is what the
-          screen can do. */}
-      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+      {/* Everything above the results stays put while they scroll.
+
+          The pane that scrolls is the layout's content column, not the
+          window, so this sticks to that. The pane is padded, which the block
+          has to cover in two different ways: sideways a negative margin
+          reaches into it, but upwards it cannot, because a sticky element is
+          clamped to its containing block and the containing block starts
+          below the padding. That band is painted by a shadow instead --
+          see providers-table.css. */}
+      <div className="providers-sticky-panel sticky top-0 z-20 -mx-6 bg-[hsl(var(--background))] px-6">
+        {/* The page's own name is in the app header; this row is what the
+            screen can do. */}
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+          <ToggleGroup
+            type="single"
+            value={view}
+            onValueChange={(next) => {
+              if (next !== "list" && next !== "grid") return
+              setView(next)
+              localStorage.setItem(VIEW_KEY, next)
+            }}
+            aria-label="Provider layout"
+            className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
+          >
+            {/* Glyph only. The label is a tooltip rather than a word beside the
+                mark: two words of chrome sat where the screen's own actions are,
+                and the aria-label is what carries the name either way.
+
+                The trigger is the span, not the item. Both components write
+                `data-state` -- the tooltip its open/closed, the item its on/off
+                -- and Slot merges the child's props over the trigger's, so an
+                item made the trigger receives "closed" and is spread over its
+                own "on". The selected chip then matches no rule and the group
+                renders with nothing chosen. A wrapper keeps each state on the
+                element that owns it, and the tooltip still opens on keyboard
+                focus because onFocus and onBlur bubble. */}
+            <ViewToggle value="list" label="List view">
+              <ListGlyph />
+            </ViewToggle>
+            <ViewToggle value="grid" label="Grid view">
+              <GridGlyph />
+            </ViewToggle>
+          </ToggleGroup>
+          <Button
+            size="sm"
+            onClick={() => {
+              setAddPreset(null)
+              setAddOpen(true)
+            }}
+          >
+            <Plus className="size-[var(--icon-size)]" />
+            Add credentials
+          </Button>
+        </div>
+
+        {/* The list is every provider the release supports, so it needs a way
+            back down to the handful that carry traffic. */}
+        <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
+          <Input
+            placeholder="Search providers"
+            value={q}
+            onChange={(e) => setFilter("q", e.target.value)}
+            className="w-56"
+            aria-label="Search providers"
+          />
+          <FilterSelect
+            label="State"
+            value={state}
+            options={STATES}
+            onChange={(next) => setFilter("state", next)}
+          />
+          <div className="flex items-center gap-2">
+            <Switch
+              id="providers-configured"
+              checked={configuredOnly}
+              onCheckedChange={(next) => setFilter("configured", next ? "1" : "")}
+            />
+            <Label htmlFor="providers-configured">Configured only</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="providers-free-tier"
+              checked={freeTier}
+              onCheckedChange={(next) => setFilter("free_tier", next ? "1" : "")}
+            />
+            <Label htmlFor="providers-free-tier">Free tier</Label>
+          </div>
+          <span className="ml-auto text-sm text-[hsl(var(--legend))]">
+            {filterSummary(rows.length, all.length)}
+          </span>
+        </Card>
+
+        {/* One chip per way of connecting, with its count. A quick filter beats
+            another dropdown here: "the ones I run myself" is a question an
+            operator asks by pointing, and a count that reads zero answers it
+            before the click. */}
+        {/* A ToggleGroup, like the view switcher above and the time windows on
+            Requests. Hand-rolled, this was one screen holding two idioms for
+            "a row of buttons, exactly one active" — and a zero-count chip was
+            disabled but still a tab stop, where the group's roving focus steps
+            over it.
+
+            "all" is a sentinel rather than the empty string the filter stores:
+            an empty value cannot be held by a controlled group, which is the
+            same trick requests-screen plays with its range. */}
         <ToggleGroup
           type="single"
-          value={view}
-          onValueChange={(next) => {
-            if (next !== "list" && next !== "grid") return
-            setView(next)
-            localStorage.setItem(VIEW_KEY, next)
-          }}
-          aria-label="Provider layout"
-          className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
-        >
-          <ToggleGroupItem value="list" aria-label="List view">
-            <ListGlyph />
-            List
-          </ToggleGroupItem>
-          <ToggleGroupItem value="grid" aria-label="Grid view">
-            <GridGlyph />
-            Grid
-          </ToggleGroupItem>
-        </ToggleGroup>
-        <Button
-          size="sm"
           variant="outline"
-          onClick={() => {
-            setLocalPreset(null)
-            setAddLocalOpen(true)
-          }}
+          value={connection === "" ? "all" : connection}
+          onValueChange={(v) => setFilter("connection", !v || v === "all" ? "" : v)}
+          className="mb-3 flex-wrap justify-start gap-2"
         >
-          <Plus className="size-[var(--icon-size)]" />
-          Add local runtime
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => {
-            setAddPreset(null)
-            setAddOpen(true)
-          }}
-        >
-          <Plus className="size-[var(--icon-size)]" />
-          Add credentials
-        </Button>
+          <ToggleGroupItem value="all" className={CHIP_SHAPE}>
+            All
+            <span className="tabular-nums text-[hsl(var(--legend))]">{all.length}</span>
+          </ToggleGroupItem>
+          {CONNECTION_ORDER.map((type) => (
+            <ToggleGroupItem
+              key={type}
+              value={type}
+              disabled={counts[type] === 0}
+              className={CHIP_SHAPE}
+              title={CONNECTION_DESCRIPTION[type]}
+            >
+              {CONNECTION_LABEL[type]}
+              <span className="tabular-nums text-[hsl(var(--legend))]">{counts[type]}</span>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+
       </div>
 
       <TestDrawer
@@ -553,93 +767,17 @@ export function ProvidersScreen() {
 
       <AddLocalDialog
         preset={localPreset}
-        open={addLocalOpen || localPreset !== null}
+        open={localPreset !== null}
         onOpenChange={(next) => {
           if (next) return
-          setAddLocalOpen(false)
           setLocalPreset(null)
         }}
         onDone={(id) => {
-          setAddLocalOpen(false)
           setLocalPreset(null)
           void navigate({ to: "/providers/$id", params: { id } })
         }}
       />
 
-      {/* The list is every provider the release supports, so it needs a way
-          back down to the handful that carry traffic. */}
-      <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
-        <Input
-          placeholder="Search providers"
-          value={q}
-          onChange={(e) => setFilter("q", e.target.value)}
-          className="w-56"
-          aria-label="Search providers"
-        />
-        <FilterSelect
-          label="State"
-          value={state}
-          options={STATES}
-          onChange={(next) => setFilter("state", next)}
-        />
-        <div className="flex items-center gap-2">
-          <Switch
-            id="providers-configured"
-            checked={configuredOnly}
-            onCheckedChange={(next) => setFilter("configured", next ? "1" : "")}
-          />
-          <Label htmlFor="providers-configured">Configured only</Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            id="providers-free-tier"
-            checked={freeTier}
-            onCheckedChange={(next) => setFilter("free_tier", next ? "1" : "")}
-          />
-          <Label htmlFor="providers-free-tier">Free tier</Label>
-        </div>
-        <span className="ml-auto text-sm text-[hsl(var(--legend))]">
-          {filterSummary(rows.length, all.length)}
-        </span>
-      </Card>
-
-      {/* One chip per way of connecting, with its count. A quick filter beats
-          another dropdown here: "the ones I run myself" is a question an
-          operator asks by pointing, and a count that reads zero answers it
-          before the click. */}
-      {/* A ToggleGroup, like the view switcher above and the time windows on
-          Requests. Hand-rolled, this was one screen holding two idioms for
-          "a row of buttons, exactly one active" — and a zero-count chip was
-          disabled but still a tab stop, where the group's roving focus steps
-          over it.
-
-          "all" is a sentinel rather than the empty string the filter stores:
-          an empty value cannot be held by a controlled group, which is the
-          same trick requests-screen plays with its range. */}
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        value={connection === "" ? "all" : connection}
-        onValueChange={(v) => setFilter("connection", !v || v === "all" ? "" : v)}
-        className="mb-3 flex-wrap justify-start gap-2"
-      >
-        <ToggleGroupItem value="all" className={CHIP_SHAPE}>
-          All
-          <span className="tabular-nums text-[hsl(var(--legend))]">{all.length}</span>
-        </ToggleGroupItem>
-        {CONNECTION_ORDER.map((type) => (
-          <ToggleGroupItem
-            key={type}
-            value={type}
-            disabled={counts[type] === 0}
-            className={CHIP_SHAPE}
-            title={CONNECTION_DESCRIPTION[type]}
-          >
-            {CONNECTION_LABEL[type]}
-            <span className="tabular-nums text-[hsl(var(--legend))]">{counts[type]}</span>
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
 
       {presets.isSuccess && providers.isSuccess && rows.length === 0 ? (
         // Only ever a filter miss: the list is every provider the release
@@ -664,15 +802,25 @@ export function ProvidersScreen() {
           ))}
         </div>
       ) : (
-        // Paged rather than one long scroll: two hundred rows of a 36px mark
-        // and two lines each is a page taller than any window, and the
-        // configured providers sort first so the first page is the one that
-        // carries traffic.
-        <div className="providers-table">
+        // Windowed rather than paged. The catalogue is the whole list of
+        // providers the release supports, and a pager over it turned "does
+        // this release ship X" into a hunt through twenty pages. Setting
+        // `virtualize` is what drops the pager: the component swaps its
+        // pagination row model for a scrolling window, so every row is
+        // reachable by scrolling and only the visible ones are rendered.
+        //
+        // The row height is declared, not measured, so providers-table.css
+        // pins every row to it. The two numbers have to agree.
+        <div
+          className="providers-table"
+          ref={tableRef}
+          style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
+        >
           <DataTable
             data={list}
             columns={columns}
             isLoading={presets.isPending || providers.isPending}
+            virtualize={{ rowHeight, height: listHeight }}
           />
         </div>
       )}
@@ -697,6 +845,35 @@ export function ProvidersScreen() {
         </Card>
       )}
     </>
+  )
+}
+
+/** One glyph in the view switcher, with its name in a tooltip.
+ *
+ *  The span exists to carry the tooltip. See the note at the call site: the
+ *  item cannot be the trigger without losing the `data-state` its own selected
+ *  styling is keyed on. `flex` keeps it a transparent flex item, so the group
+ *  measures and spaces the buttons exactly as it did without it. */
+function ViewToggle({
+  value,
+  label,
+  children,
+}: {
+  value: ProviderView
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="flex">
+          <ToggleGroupItem value={value} aria-label={label}>
+            {children}
+          </ToggleGroupItem>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
 

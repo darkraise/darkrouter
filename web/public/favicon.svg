@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges">
+  <title>darkrouter</title>
+  <!--
+    The identity mark reduced for a tab strip, on its own 16-unit grid.
+
+    Not a scaled copy of the console's 24-grid mark. At 16px those hairlines
+    land on two thirds of a pixel and blur into two grey rows, and crispEdges
+    cannot rescue a fractional scale. Here every stroke is one unit, so 16, 32,
+    48 and 64 are integer multiples and every one of them is crisp.
+
+    The closed bezel is the one element dropped. Rendered at 16px it fills the
+    canvas and the mark reads as a grid in a box, with the pip lost against the
+    right edge it touches; four corner brackets give the bracket-and-crosshair
+    silhouette §3.5 asks the small size to carry, and hand the pip back its
+    contrast. Everything that carries meaning survives: spine, three stubs, two
+    skip marks, and the one branch that reaches the pip.
+
+    Colours are fixed rather than the legend and primary theme tokens, which
+    are computed at runtime against whatever background the operator's theme
+    resolved to, and a browser tab strip is not that background. The dark
+    hairline is lifted off the ramp to hsl(26 12% 65%) because the legend
+    token's own dark value clears only 2.9:1 against Chrome's dark chrome,
+    short of the 3:1 a graphic needs.
+  -->
+  <style>
+    .hair { fill: #7B6C60 }
+    @media (prefers-color-scheme: dark) { .hair { fill: #B0A49B } }
+  </style>
+  <g class="hair">
+    <!-- Bezel, reduced to its corners. -->
+    <rect x="0" y="0" width="4" height="1"/><rect x="0" y="0" width="1" height="4"/>
+    <rect x="11" y="0" width="4" height="1"/><rect x="14" y="0" width="1" height="4"/>
+    <rect x="0" y="14" width="4" height="1"/><rect x="0" y="11" width="1" height="4"/>
+    <rect x="11" y="14" width="4" height="1"/><rect x="14" y="11" width="1" height="4"/>
+    <!-- Spine, in three segments. One rule top to bottom would fill the
+         1-unit cores of both skip marks and render them solid. -->
+    <rect x="7" y="0" width="1" height="3"/>
+    <rect x="7" y="6" width="1" height="3"/>
+    <rect x="7" y="12" width="1" height="3"/>
+    <!-- Two stubs stop at the spine; the middle one crosses it and runs on. -->
+    <rect x="0" y="4" width="6" height="1"/>
+    <rect x="0" y="7" width="13" height="1"/>
+    <rect x="0" y="10" width="6" height="1"/>
+    <!-- The skip marks. -->
+    <path fill-rule="evenodd" d="M6 3h3v3H6z M7 4h1v1H7z"/>
+    <path fill-rule="evenodd" d="M6 9h3v3H6z M7 10h1v1H7z"/>
+  </g>
+  <!-- The branch that was taken, pushed past the corner line. -->
+  <rect x="13" y="6" width="3" height="3" fill="#E56748"/>
+</svg>

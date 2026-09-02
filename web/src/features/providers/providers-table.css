@@ -19,3 +19,79 @@
     linear-gradient(hsl(var(--muted) / 0.5), hsl(var(--muted) / 0.5)),
     hsl(var(--card));
 }
+
+/* Windowed rather than paged, and a window's arithmetic is only as good as the
+   row height it is told. DataTable places every row from that one number, so
+   rows that render 57px next to neighbours at 60px walk the list out of step
+   with its own scrollbar — three pixels a row is six hundred over the whole
+   catalogue. Pinning every row to one height is what makes the declared
+   figure true.
+
+   The height is a variable, not a constant, because the density and font-size
+   axes both move it: at spacious and large a row wants 70px, and a 60px rule
+   is only a floor, so the rows quietly grew past the number the window was
+   placed from. The screen reads the tallest row back and sets the variable to
+   it, so the two always agree whatever the operator has picked.
+
+   The spacer rows are excluded by name: their whole job is to be exactly as
+   tall as the rows they stand in for, and a fixed height would collapse them. */
+/* auto, so that with no script the rows are simply their natural height:
+   a wrong constant here would be worse than no pin at all. The screen
+   overwrites this with the height it measured. */
+.providers-table {
+  --row-h: auto;
+}
+
+.providers-table .dr-data-table-frame tbody tr:not(.dr-data-table-virtual-pad) {
+  height: var(--row-h);
+}
+
+/* The column names stay put while the rows scroll under them.
+
+   Paged, the header was never more than ten rows from the top of the screen.
+   Windowed, it scrolls out of the viewport within a second and leaves two
+   hundred rows of unlabelled columns behind it, so it sticks to the top of the
+   viewport the component inserts.
+
+   The actions column is already sticky against the right edge, so where the
+   two meet the header has to win: its cell is the one that must cover both the
+   rows passing underneath and the column passing across. */
+/* One scroll container, not two. The wrapper carries overflow-x for the wide
+   table, and a box with overflow-x: auto computes overflow-y to auto as well
+   -- so it, not the viewport, was the nearest scrolling ancestor, and a header
+   sticking to it stuck to a box that never scrolls vertically. Handing both
+   axes to the viewport gives the header and the actions column the same box to
+   stick to, which is the one that actually moves. */
+.providers-table .dr-data-table-frame .dr-table-wrapper {
+  overflow: visible;
+}
+
+.providers-table .dr-data-table-viewport {
+  overflow-x: auto;
+}
+
+.providers-table .dr-data-table-frame thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: hsl(var(--card));
+}
+
+.providers-table .dr-data-table-frame thead th:last-child {
+  z-index: 3;
+}
+
+/* The band of pane padding above the sticky filter panel.
+
+   The panel covers the pane's side padding with a negative margin, but it
+   cannot do the same upwards: a sticky element is clamped to its containing
+   block, and the containing block starts below the pane's padding-top. So the
+   panel sits 24px short of the top of the scrollport and rows scroll through
+   the gap above it.
+
+   A shadow paints that band. It is drawn outside the border box, so the
+   clamp does not apply to it, and it is solid rather than blurred because it
+   is standing in for the page's own ground. */
+.providers-sticky-panel {
+  box-shadow: 0 -1.5rem 0 0 hsl(var(--background));
+}
