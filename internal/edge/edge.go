@@ -2,12 +2,32 @@
 package edge
 
 import (
+	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"net/url"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 )
+
+// ReadCappedBody reads an inbound body under the configured cap, reading one
+// byte past it so "exactly at the cap" is not rejected. An oversized body is
+// a typed error: it asks the client for the same thing an oversized upload
+// does, and only the type carries that distinction out to the status code.
+func ReadCappedBody(r *http.Request, maxBody int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBody {
+		return nil, &ir.Error{
+			Type:    ir.ErrPayloadTooLarge,
+			Message: fmt.Sprintf("request body exceeds %d bytes", maxBody),
+		}
+	}
+	return body, nil
+}
 
 // Passthrough carries what the phase 9 fast path needs to forward a request
 // without re-rendering it. Every dialect populates it; eligibility is decided

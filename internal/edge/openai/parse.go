@@ -4,7 +4,6 @@ package openai
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -119,12 +118,9 @@ type wirePart struct {
 // ParseRequest reads the body fully — retrying requires replaying it — and
 // converts it to the canonical IR.
 func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	body, err := edge.ReadCappedBody(r, maxBody)
 	if err != nil {
 		return nil, nil, err
-	}
-	if int64(len(body)) > maxBody {
-		return nil, nil, fmt.Errorf("request body exceeds %d bytes", maxBody)
 	}
 	var w wireRequest
 	if err := json.Unmarshal(body, &w); err != nil {
