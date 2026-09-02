@@ -78,6 +78,7 @@ export function ToolInputs({
             // composer uses. Not on a field whose own separator is the
             // newline, where Enter would fire the run mid-list.
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return
               if (f.key !== primaryKey || f.key === "documents") return
               if (e.key !== "Enter" || e.shiftKey) return
               if (busy || !ready) return
