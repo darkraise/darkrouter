@@ -33,11 +33,16 @@ export class ApiError extends Error {
   }
 }
 
-// Exported so a caller that talks to the executor with its own fetch — the
-// playground's aux and count calls, which need response headers request()
-// does not expose — can trigger the same shared side effect stream() does,
-// rather than growing a second notion of "the session died".
-export function loggedOut(): never {
+/** A failure the next attempt might not repeat: the network dropped, or the
+ *  server answered 5xx. A 4xx is the server's verdict on the request itself
+ *  and comes back identical however often it is retried. */
+export function isTransient(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status >= 500
+  // fetch rejects with a TypeError when the connection itself fails.
+  return err instanceof TypeError
+}
+
+function loggedOut(): never {
   csrfToken = ""
   unauthorizedListeners.forEach((fn) => fn())
   throw new ApiError(401, "not authenticated")
@@ -80,7 +85,7 @@ export async function throwOnExecutorError(res: Response): Promise<never> {
   throw new ApiError(res.status, message)
 }
 
-type RequestOptions = {
+export type RequestOptions = {
   /**
    * Some routes answer 401 for two unrelated reasons: the session died
    * before the handler ran (requireSession, always "not authenticated"), or
@@ -92,6 +97,9 @@ type RequestOptions = {
    * goes through loggedOut() same as every other request.
    */
   expectedRejection?: string
+  /** TanStack Query's, so a query whose screen unmounted stops mid-flight
+   *  rather than landing in a cache nobody is reading. */
+  signal?: AbortSignal
 }
 
 /** Peeks at a 401 body without consuming it, to tell the two reasons apart. */
@@ -116,9 +124,6 @@ async function request<T>(
     // Spec §3: bound to the session by HMAC, so a token from another session
     // is worthless and one the client never received cannot be guessed.
     headers["X-CSRF-Token"] = csrfToken
-    // Belt and braces with the browser's own header: the server accepts either,
-    // and an older client that sends neither is refused.
-    headers["Sec-Fetch-Site"] = "same-origin"
   }
 
   const res = await fetch(path, {
@@ -128,6 +133,7 @@ async function request<T>(
     // Same-origin: the SPA is served by the API's own port, so the cookie
     // travels without any cross-origin machinery.
     credentials: "same-origin",
+    signal: opts?.signal,
   })
 
   if (res.status === 401) {
@@ -150,11 +156,11 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>("GET", path),
+  get: <T>(path: string, opts?: RequestOptions) => request<T>("GET", path, undefined, opts),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>("POST", path, body, opts),
-  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
-  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
-  del: <T>(path: string) => request<T>("DELETE", path),
+  patch: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>("PATCH", path, body, opts),
+  put: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>("PUT", path, body, opts),
+  del: <T>(path: string, opts?: RequestOptions) => request<T>("DELETE", path, undefined, opts),
 }
 
 /** What a streamed call reports back before its body starts arriving. */
@@ -183,7 +189,6 @@ export async function* stream(
     headers: {
       "Content-Type": "application/json",
       "X-CSRF-Token": csrfToken,
-      "Sec-Fetch-Site": "same-origin",
     },
     body: JSON.stringify(body),
     credentials: "same-origin",
@@ -203,7 +208,13 @@ export async function* stream(
   try {
     for (;;) {
       const { done, value } = await reader.read()
-      if (done) return
+      if (done) {
+        // A multi-byte character split across the last two chunks is still
+        // buffered in the decoder; flushing is what emits it.
+        const tail = decoder.decode()
+        if (tail) yield tail
+        return
+      }
       yield decoder.decode(value, { stream: true })
     }
   } finally {
