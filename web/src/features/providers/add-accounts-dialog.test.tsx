@@ -87,6 +87,15 @@ describe("filterPresets", () => {
     )
     expect(out.map((p) => p.id)).toEqual(["groq"])
   })
+
+  it("drops an excluded preset, and drops it before the search term", () => {
+    // Excluding after the search would leave the preset one keystroke away
+    // from being offered again, which is not what excluding it means.
+    const all = [preset({ id: "ollama", name: "Ollama" }), preset({ id: "groq", name: "Groq" })]
+    const exclude = new Set(["ollama"])
+    expect(filterPresets(all, { exclude }).map((p) => p.id)).toEqual(["groq"])
+    expect(filterPresets(all, { q: "ollama", exclude })).toEqual([])
+  })
 })
 
 describe("planFor", () => {
@@ -487,5 +496,42 @@ describe("the wizard opened from a provider", () => {
       ])
     })
     await waitFor(() => expect(onDone).toHaveBeenCalledWith("groq"))
+  })
+})
+
+describe("the provider picker and local runtimes", () => {
+  const ollama = preset({ id: "ollama", name: "Ollama", base_url: "http://localhost:11434/v1" })
+  const added = (): Provider => ({
+    ...provider("ollama"),
+    base_url: "http://localhost:11434/v1",
+  })
+
+  it("stops offering a local runtime once it has a row", async () => {
+    // Its row is the address it listens on, and that is the whole of its
+    // setup. Left in the picker it is a provider you can select and then find
+    // nothing to type, because there is no key a local server wants.
+    stub([ollama, preset({ id: "groq", name: "Groq" })], [added()])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    expect(await screen.findByRole("option", { name: /groq/i })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /ollama/i })).toBeNull()
+  })
+
+  it("cannot be searched back into the picker", async () => {
+    stub([ollama, preset({ id: "groq", name: "Groq" })], [added()])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await screen.findByRole("option", { name: /groq/i })
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "ollama")
+    await waitFor(() => expect(screen.queryByRole("option", { name: /groq/i })).toBeNull())
+    expect(screen.queryByRole("option", { name: /ollama/i })).toBeNull()
+  })
+
+  it("still offers one nobody has added yet", async () => {
+    // The exclusion is about the row existing, not about being local.
+    stub([ollama], [])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    expect(await screen.findByRole("option", { name: /ollama/i })).toBeInTheDocument()
   })
 })
