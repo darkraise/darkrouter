@@ -70,8 +70,21 @@ services:
       # database, and without this volume every deploy would log it out.
       - auggie-state:/home/darkrouter/.augment
 
+    # The process needs nothing beyond the two volumes: the binary is static,
+    # the state lives under /data, and the Augment CLI keeps its session in
+    # its own volume. Everything else is sealed. /tmp is a tmpfs because Go's
+    # os.CreateTemp and the bundled Node runtime expect a writable one.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    # A runaway request log or a fork bomb in a provider CLI stops here rather
+    # than at the host's memory. The gateway itself idles well under 100 MB.
+    mem_limit: 1g
+    pids_limit: 512
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/readyz"]
