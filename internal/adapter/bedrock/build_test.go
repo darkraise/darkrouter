@@ -259,22 +259,6 @@ func TestSurfacesIsLLMOnly(t *testing.T) {
 	}
 }
 
-func TestEscapePathSegmentMatchesTheAWSRule(t *testing.T) {
-	// url.PathEscape leaves ':' alone, which is legal in a path segment and is
-	// not what AWS signs. Every inference-profile id contains one, so this is
-	// the difference between working and a 403 on every request.
-	for in, want := range map[string]string{
-		"anthropic.claude-3-5-sonnet-20241022-v2:0": "anthropic.claude-3-5-sonnet-20241022-v2%3A0",
-		"us.anthropic.claude-x-v1:0":                "us.anthropic.claude-x-v1%3A0",
-		"plain-model_1.0~x":                         "plain-model_1.0~x",
-		"a/b":                                       "a%2Fb",
-	} {
-		if got := escapePathSegment(in); got != want {
-			t.Errorf("escapePathSegment(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestASystemTurnBecomesTheSystemField(t *testing.T) {
 	// The OpenAI edge leaves a developer or system turn as an ir.RoleSystem
 	// message rather than moving it to Request.System. Rendering that as a user

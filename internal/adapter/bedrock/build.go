@@ -83,7 +83,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	}
 	// The colon in a model or inference-profile id is part of the canonical URI
 	// the signature covers, so it is escaped here rather than left raw.
-	u := base + "/model/" + escapePathSegment(t.Model) + "/" + route
+	u := base + "/model/" + adapter.EscapePathSegment(t.Model) + "/" + route
 
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
@@ -93,28 +93,6 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// No credential header. internal/auth signs this request, and a key written
 	// here would travel in a header the signature does not cover.
 	return hr, warns, nil
-}
-
-// escapePathSegment percent-encodes everything outside RFC 3986's unreserved
-// set.
-//
-// url.PathEscape is not equivalent and not usable here: it leaves ':' alone,
-// which is legal in a path segment but is not what AWS signs. smithy-go's own
-// EscapePath says it outright — "AWS expects every character except these to be
-// escaped" — and since every Bedrock inference-profile id contains a colon,
-// getting this wrong is a 403 on every request with no cause attached.
-func escapePathSegment(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-			c == '-' || c == '.' || c == '_' || c == '~' {
-			b.WriteByte(c)
-			continue
-		}
-		fmt.Fprintf(&b, "%%%02X", c)
-	}
-	return b.String()
 }
 
 func renderSystem(blocks []ir.ContentBlock) []any {

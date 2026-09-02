@@ -61,7 +61,7 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 		method = ":streamRawPredict"
 	}
 	endpoint := baseFor(t) + "/" + PublisherAnthropic +
-		"/models/" + escapePathSegment(t.Model) + method
+		"/models/" + adapter.EscapePathSegment(t.Model) + method
 
 	out, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
@@ -71,24 +71,6 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 	// anthropic-version is a body field here, not a header. Sending only the
 	// header is a 400: Vertex reads the body.
 	return out, warns, nil
-}
-
-// escapePathSegment percent-encodes everything outside RFC 3986's unreserved
-// set. url.PathEscape leaves ':' alone, and while Vertex does not sign the path
-// the way Bedrock does, a model id carrying one would otherwise open a path
-// segment the API does not match.
-func escapePathSegment(s string) string {
-	var b bytes.Buffer
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-			c == '-' || c == '.' || c == '_' || c == '~' {
-			b.WriteByte(c)
-			continue
-		}
-		fmt.Fprintf(&b, "%%%02X", c)
-	}
-	return b.String()
 }
 
 // parseResponse dispatches on the payload's own shape.
@@ -147,5 +129,3 @@ func parseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 	}
 	return geminiadapter.ParseStream(br, maxLine)
 }
-
-var _ = adapter.OutcomeSuccess
