@@ -18,6 +18,7 @@ import { useApiMutation } from "../../lib/mutations"
 import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
+import { isLocalPreset } from "./local-runtimes"
 import { AccountFields, secretFieldFor, type AccountDraft, emptyAccounts } from "./account-fields"
 import {
   addAccountsLabel,
@@ -31,10 +32,19 @@ import { ProviderIcon } from "./provider-icon"
 
 export function filterPresets(
   presets: Preset[],
-  f: { q?: string; surface?: string; authKind?: string; freeTier?: boolean },
+  f: {
+    q?: string
+    surface?: string
+    authKind?: string
+    freeTier?: boolean
+    /** Ids the picker must not offer at all. Applied before the search term,
+     *  so an excluded preset cannot be typed back into view either. */
+    exclude?: ReadonlySet<string>
+  },
 ): Preset[] {
   const q = (f.q ?? "").toLowerCase()
   return presets.filter((p) => {
+    if (f.exclude?.has(p.id)) return false
     if (q && !p.id.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false
     if (f.surface && !p.surfaces.includes(f.surface)) return false
     if (f.authKind && p.auth_kind !== f.authKind) return false
@@ -330,7 +340,15 @@ export function AddAccountsDialog({
   })
 
   const all = presets.data?.presets ?? []
-  const filtered = filterPresets(all, { q, surface, authKind, freeTier })
+  // A local runtime that already has a row is not a candidate for a
+  // credential: what it needed was the address it listens on, and that is what
+  // the row is. Ordinary providers stay listed however many credentials they
+  // already hold, because a second key is a real thing to want.
+  const configuredIds = new Set((providers.data?.providers ?? []).map((p) => p.id))
+  const exclude = new Set(
+    all.filter((p) => isLocalPreset(p) && configuredIds.has(p.id)).map((p) => p.id),
+  )
+  const filtered = filterPresets(all, { q, surface, authKind, freeTier, exclude })
   const surfaceOptions = distinctSorted(all.flatMap((p) => p.surfaces))
   const authKindOptions = distinctSorted(all.map((p) => p.auth_kind))
   const count = countAccounts(accounts)
