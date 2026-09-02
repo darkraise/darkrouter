@@ -1,6 +1,7 @@
 import { Card } from "darkraise-ui"
-import { formatCost, type TurnRoute } from "./message"
-import { duration, tokensPerSecond, type StreamMetrics } from "./metrics"
+import { count, duration, money } from "../../lib/format"
+import type { TurnRoute } from "./message"
+import { tokensPerSecond, type StreamMetrics } from "./metrics"
 
 /** What a conversation has spent so far, summed from the turns that have a
  *  trace. A turn whose trace was swept by log retention contributes nothing
@@ -50,12 +51,6 @@ export function consumptionOf(
     tokensIn, tokensOut, reasoningTokens, costMicros,
     counted, priced, partialPrices, turns,
   }
-}
-
-/** Grouped thousands, because a six-figure context is the number an operator
- *  is watching approach a limit and `128000` does not read as one. */
-function count(n: number): string {
-  return n.toLocaleString("en-US")
 }
 
 function Reading({ label, value }: { label: string; value: string }) {
@@ -117,7 +112,7 @@ export function TokenPanel({
         ) : null}
         <Reading
           label="cost"
-          value={hasKnownPrice ? formatCost(consumption.costMicros) : "—"}
+          value={hasKnownPrice ? money(consumption.costMicros) : "—"}
         />
         {partialCost ? (
           <p className="pt-1 text-sm text-[hsl(var(--legend))]">

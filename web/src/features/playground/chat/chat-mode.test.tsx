@@ -416,7 +416,7 @@ describe("Chat mode", () => {
     // The duration replaces the bare "routed" that the stored row alone
     // could offer. (The button's accessible name is its aria-label, so the
     // reading is the text.)
-    expect(await screen.findByText("2.4s")).toBeInTheDocument()
+    expect(await screen.findByText("2.4 s")).toBeInTheDocument()
   })
 
   it("fixes the model once a turn has been sent", async () => {

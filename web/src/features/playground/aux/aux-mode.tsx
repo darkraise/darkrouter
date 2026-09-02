@@ -21,7 +21,7 @@ import {
   postAux,
   postCount,
   readFileAsBase64,
-  readOutcome,
+  outcomeOfResponse,
   readCount,
   runSummary,
   surfaceInfo,
@@ -115,11 +115,18 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
   }
 
   async function pickFile(surface: AuxSurface, file: File) {
-    const file_b64 = await readFileAsBase64(file)
-    setForms((f) => ({
-      ...f,
-      [surface]: { ...(f[surface] ?? {}), file_b64, filename: file.name },
-    }))
+    try {
+      const file_b64 = await readFileAsBase64(file)
+      setForms((f) => ({
+        ...f,
+        [surface]: { ...(f[surface] ?? {}), file_b64, filename: file.name },
+      }))
+      setErrors((e) => ({ ...e, [surface]: "" }))
+    } catch (err) {
+      // A file that vanished between the picker and the read, or one the
+      // browser cannot open. Said where the run's own failures are said.
+      setErrors((e) => ({ ...e, [surface]: (err as Error).message }))
+    }
   }
 
   async function run(surface: AuxSurface) {
@@ -144,7 +151,7 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
           body = { ...body, body: { ...body.body, documents: documentLines(current.documents ?? "") } }
         }
         res = await postAux(body, controller.signal)
-        outcome = await readOutcome(surface, res, current, (url) => {
+        outcome = await outcomeOfResponse(surface, res, current, (url) => {
           objectUrls.current.push(url)
         })
       }

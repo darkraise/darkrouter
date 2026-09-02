@@ -1,7 +1,8 @@
-import { useState } from "react"
+import { memo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Brain, Check, ChevronRight, Copy, CornerDownRight, TriangleAlert } from "lucide-react"
 import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger } from "darkraise-ui"
+import { count, duration, money } from "../../lib/format"
 import { ProviderIcon } from "../providers/provider-icon"
 import { Markdown } from "./markdown"
 import type { TurnThinking } from "./lib/use-chat-run"
@@ -72,8 +73,12 @@ export function routeFromTrace(trace: RequestTrace): TurnRoute {
 }
 
 /** A turn the operator typed. Right, tinted, and only as wide as it needs:
- *  the asymmetry is what lets someone scan who said what without reading. */
-export function UserTurn({ text }: { text: string }) {
+ *  the asymmetry is what lets someone scan who said what without reading.
+ *
+ *  Memoised, as is the assistant turn: a streaming answer re-renders the
+ *  transcript on every chunk, and every earlier turn would otherwise be
+ *  re-rendered — and its markdown re-parsed — for text that has not changed. */
+export const UserTurn = memo(function UserTurn({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
       <div className="max-w-[42rem] rounded-[var(--radius)] rounded-br-sm bg-[hsl(var(--muted))] px-4 py-2.5">
@@ -81,7 +86,7 @@ export function UserTurn({ text }: { text: string }) {
       </div>
     </div>
   )
-}
+})
 
 /**
  * A turn a provider answered.
@@ -91,7 +96,7 @@ export function UserTurn({ text }: { text: string }) {
  * running the same prompt across four providers is comparing answers, and
  * which one produced this is the first thing they need.
  */
-export function AssistantTurn({
+export const AssistantTurn = memo(function AssistantTurn({
   text,
   route,
   thinking,
@@ -142,7 +147,7 @@ export function AssistantTurn({
           <StreamingHint />
         ) : text === "" && streaming ? null : (
           <div className="min-w-0">
-            <Markdown text={text} />
+            <Markdown text={text} streaming={streaming} />
             {streaming ? <Caret /> : null}
           </div>
         )}
@@ -153,7 +158,7 @@ export function AssistantTurn({
       {!streaming && text !== "" ? <CopyTurn text={text} /> : null}
     </div>
   )
-}
+})
 
 /**
  * The model's own working, folded away.
@@ -181,7 +186,7 @@ function Thinking({ thinking }: { thinking: TurnThinking }) {
           className={`size-[var(--icon-size,1rem)] ${settled ? "" : "motion-safe:animate-pulse"}`}
           aria-hidden="true"
         />
-        {settled ? `Thinking in ${shortDuration(Math.round(thinking.ms!))}` : "Thinking…"}
+        {settled ? `Thinking in ${duration(thinking.ms)}` : "Thinking…"}
       </CollapsibleTrigger>
       <CollapsibleContent>
         {/* Its own quiet ground and a capped height: the working is often
@@ -216,7 +221,7 @@ function UnreadableThinking({ tokens }: { tokens: number }) {
       title="The gateway counted these tokens from the provider's usage. The reasoning text itself was not in the reply."
     >
       <Brain className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
-      Reasoned for {tokens.toLocaleString("en-US")} tokens · working not returned
+      Reasoned for {count(tokens)} tokens · working not returned
     </p>
   )
 }
@@ -248,11 +253,6 @@ function Caret() {
   )
 }
 
-/** The reading a quiet line keeps, and the first thing the full line says. */
-function shortDuration(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
-}
-
 /**
  * The route, under the answer it explains.
  *
@@ -277,20 +277,20 @@ function RouteLine({ route, quiet = false }: { route: TurnRoute; quiet?: boolean
         onClick={() => setExpanded(true)}
         className="w-fit text-sm text-[hsl(var(--legend))] underline-offset-2 hover:underline"
       >
-        {route.totalMs === null ? "routed" : shortDuration(route.totalMs)}
+        {route.totalMs === null ? "routed" : duration(route.totalMs)}
       </button>
     )
   }
 
   const parts: string[] = []
   if (route.totalMs !== null) {
-    parts.push(shortDuration(route.totalMs))
+    parts.push(duration(route.totalMs))
   }
   if (route.tokensIn !== null && route.tokensOut !== null) {
-    parts.push(`${route.tokensIn} in · ${route.tokensOut} out`)
+    parts.push(`${count(route.tokensIn)} in · ${count(route.tokensOut)} out`)
   }
   if (route.costMicros !== null) {
-    parts.push(formatCost(route.costMicros))
+    parts.push(money(route.costMicros))
   }
 
   return (
@@ -354,16 +354,6 @@ function TurnWarnings({ warnings }: { warnings: string[] }) {
       ))}
     </ul>
   )
-}
-
-/** Cost lands in micros. Below a cent the useful reading is the fraction, not
- *  a rounded zero that says the call was free when it was not. */
-export function formatCost(micros: number): string {
-  if (micros === 0) return "$0.0000"
-  const dollars = micros / 1_000_000
-  if (dollars >= 0.01) return `$${dollars.toFixed(2)}`
-  if (dollars >= 0.0001) return `$${dollars.toFixed(4)}`
-  return "<$0.0001"
 }
 
 function CopyTurn({ text }: { text: string }) {

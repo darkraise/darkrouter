@@ -1,6 +1,7 @@
 import { Button, Card } from "darkraise-ui"
 import { MessageSquarePlus, Trash2 } from "lucide-react"
 import { relativeTime } from "../../../lib/time"
+import { useNow } from "../lib/use-now"
 import type { PlaygroundConversation } from "../../../lib/api-types"
 
 /**
@@ -62,6 +63,7 @@ export function HistoryRail({
   onDelete: (conversation: PlaygroundConversation) => void
   idPrefix?: string
 }) {
+  const now = useNow()
   return (
     // Fills the panel it was given rather than holding a width of its own.
     // The 260px it used to be fixed at made the drag handle beside it inert:
@@ -106,7 +108,7 @@ export function HistoryRail({
                         would indent the first away from the edge it reads
                         against. */}
                     <span className="shrink-0 font-normal text-[hsl(var(--legend))] group-hover:invisible group-focus-within:invisible">
-                      {relativeTime(new Date(c.updated_at).getTime())}
+                      {relativeTime(new Date(c.updated_at).getTime(), now)}
                     </span>
                   </span>
                   {/* One line, and only one: the rail is for recognising a

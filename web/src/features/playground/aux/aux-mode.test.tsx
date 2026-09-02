@@ -20,14 +20,16 @@ vi.mock("./tool-rail", () => ({
   ),
 }))
 vi.mock("./tool-inputs", () => ({
-  ToolInputs: ({ onField, onRun, form }: {
+  ToolInputs: ({ onField, onRun, onFile, form }: {
     onField: (key: string, value: string) => void
     onRun: () => void
+    onFile: (file: File) => void
     form: Record<string, string>
   }) => (
     <>
       <button onClick={() => onField("input", "hello")}>Fill input</button>
       <button onClick={onRun}>Run auxiliary</button>
+      <button onClick={() => onFile(new File(["x"], "a.wav"))}>Pick file</button>
       <span data-testid="dialect">{form.dialect ?? ""}</span>
     </>
   ),
@@ -39,9 +41,11 @@ vi.mock("../../../lib/queries", async (importOriginal) => ({
 }))
 vi.mock("./results", () => ({ RunCard: () => null }))
 vi.mock("./run-readings", () => ({ RunReadings: () => null }))
+const readFileMock = vi.hoisted(() => vi.fn())
 vi.mock("./surfaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./surfaces")>()),
   postAux: postAuxMock,
+  readFileAsBase64: readFileMock,
 }))
 
 describe("Auxiliary visibility", () => {
@@ -64,6 +68,15 @@ describe("Auxiliary visibility", () => {
     rerender(<AuxMode active={false} />)
 
     await waitFor(() => expect(signals[0]?.aborted).toBe(true))
+  })
+
+  it("reports a file that could not be read instead of hanging", async () => {
+    // FileReader rejects on a file that vanished or cannot be opened; an
+    // unhandled rejection left the form silently without its file.
+    readFileMock.mockRejectedValue(new Error("file vanished"))
+    render(<AuxMode active />)
+    await userEvent.click(screen.getByRole("button", { name: "Pick file" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/file vanished/)
   })
 
   it("opens on the first tool the rail lists", () => {
