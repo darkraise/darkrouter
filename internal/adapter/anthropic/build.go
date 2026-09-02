@@ -383,7 +383,7 @@ func adaptiveEffort(req *ir.Request) string {
 		return ""
 	}
 	if req.Reasoning.Effort != "" {
-		return strings.ToLower(req.Reasoning.Effort)
+		return xlate.AnthropicEffort(req.Reasoning.Effort)
 	}
 	return xlate.BudgetEffort(req.Reasoning.Budget)
 }

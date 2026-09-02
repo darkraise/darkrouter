@@ -17,6 +17,15 @@ func blockStartBody(d *ir.Delta) map[string]any {
 	if d == nil {
 		return map[string]any{"type": "text", "text": ""}
 	}
+	// A block the Anthropic adapter carried through untouched goes back as
+	// it arrived.
+	if len(d.Extra) > 0 {
+		m := make(map[string]any, len(d.Extra))
+		for k, v := range d.Extra {
+			m[k] = v
+		}
+		return m
+	}
 	switch d.Type {
 	case ir.BlockThinking:
 		return map[string]any{"type": "thinking", "thinking": "", "signature": ""}
@@ -158,6 +167,12 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			wire, err := openBlock(ev.Index, ev.Delta)
 			if err != nil {
 				return err
+			}
+			// Anthropic has no delta form for a redacted payload — it ships
+			// whole inside the block start — so there is nothing valid to
+			// send for one that arrived incrementally.
+			if ev.Delta.Type == ir.BlockRedactedThinking {
+				continue
 			}
 			if err := send("content_block_delta", map[string]any{
 				"index": wire, "delta": deltaBody(ev.Delta),

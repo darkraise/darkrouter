@@ -311,6 +311,13 @@ type Delta struct {
 	ToolInput string // JSON fragment
 	ToolID    string
 	ToolName  string
+
+	// Extra carries a block-start the IR does not model — a provider's
+	// server-tool block, say — as the producing dialect's own fields, so the
+	// same dialect's writer can re-emit it verbatim. Every other writer sees
+	// a Type it does not know and skips the block. Omitted from JSON when
+	// empty so the stream fixtures of every dialect stay unchanged by it.
+	Extra map[string]json.RawMessage `json:",omitempty"`
 }
 
 type StreamEvent struct {

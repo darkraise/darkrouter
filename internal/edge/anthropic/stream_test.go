@@ -180,3 +180,27 @@ func TestWriteStreamEmitsARealErrorEvent(t *testing.T) {
 		t.Error("a stream that errored must not also claim to have stopped normally")
 	}
 }
+
+func TestWriteStreamReEmitsACarriedBlockStart(t *testing.T) {
+	// A server-tool block the Anthropic adapter carried through Extra is
+	// re-emitted as it arrived. Rendering it as an empty text block would
+	// hide the search from a client that asked for it.
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventBlockStart, Index: 0, Delta: &ir.Delta{
+			Type: "web_search_tool_result", Extra: map[string]json.RawMessage{
+				"type":        json.RawMessage(`"web_search_tool_result"`),
+				"tool_use_id": json.RawMessage(`"srvtoolu_1"`),
+				"content":     json.RawMessage(`[{"type":"web_search_result","url":"https://a"}]`),
+			}}},
+		{Type: ir.EventBlockStop, Index: 0},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil)
+	cb := got[1].body["content_block"].(map[string]any)
+	if cb["type"] != "web_search_tool_result" || cb["tool_use_id"] != "srvtoolu_1" {
+		t.Errorf("content_block = %v", cb)
+	}
+	if _, ok := cb["content"].([]any); !ok {
+		t.Errorf("content_block = %v; the carried payload was lost", cb)
+	}
+}
