@@ -352,6 +352,8 @@ export function FlowGraph({
         zoomOnScroll={false}
         panOnScroll={false}
         preventScrolling={false}
+        // The canvas is one panel of a console, not a React Flow showcase.
+        proOptions={{ hideAttribution: true }}
         aria-label="Routing flow: aliases, the router, and providers in priority order"
       >
         <FitOnResize target={wrap} />
