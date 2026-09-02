@@ -73,26 +73,6 @@ func login(t *testing.T, s *Server) (*http.Cookie, string) {
 	return w.Result().Cookies()[0], body.CSRF
 }
 
-func TestEveryEndpointExceptStatusRequiresASession(t *testing.T) {
-	// Spec §4: auth/status is reachable without a session because the SPA
-	// calls it to decide whether to render the login screen. Everything else
-	// is closed.
-	s, _ := testServer(t)
-	for _, ep := range []struct {
-		method, path string
-	}{
-		{"GET", "/api/config"}, {"POST", "/api/config/reload"}, {"POST", "/api/auth/logout"},
-	} {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(ep.method, ep.path, strings.NewReader("{}"))
-		r.Header.Set("Sec-Fetch-Site", "same-origin")
-		s.Handler().ServeHTTP(w, r)
-		if w.Code != http.StatusUnauthorized {
-			t.Errorf("%s %s without a session = %d, want 401", ep.method, ep.path, w.Code)
-		}
-	}
-}
-
 func TestAuthStatusIsReachableWithoutASession(t *testing.T) {
 	s, _ := testServer(t)
 	w := httptest.NewRecorder()

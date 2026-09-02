@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 )
 
 // sessionTTL is spec §3's default, sliding on every authenticated request.
+// store.SessionMaxAge caps the whole life regardless of use.
 const sessionTTL = 30 * 24 * time.Hour
 
 // sessionCookie is the cookie name. It is not "session" so it cannot collide
@@ -30,15 +32,19 @@ const sessionCookie = "darkrouter_session"
 // set by a cross-site form post at all.
 const csrfHeader = "X-CSRF-Token"
 
-// Deps are the admin server's collaborators. Every field except DB and
-// PasswordHash is optional, so a handler test can build a server without
-// standing up a router, a catalog and a breaker.
+// sweepInterval is how often expired sessions and abandoned OAuth flows are
+// dropped while the process runs.
+const sweepInterval = time.Hour
+
 // DiscoveryTrigger asks for one provider's models to be listed now, rather
 // than at the next sweep. Satisfied by *catalog.Discoverer.
 type DiscoveryTrigger interface {
 	Trigger(providerID string)
 }
 
+// Deps are the admin server's collaborators. Every field except DB and
+// PasswordHash is optional, so a handler test can build a server without
+// standing up a router, a catalog and a breaker.
 type Deps struct {
 	DB           *store.DB
 	PasswordHash string
@@ -56,13 +62,18 @@ type Deps struct {
 	Presets  catalog.Presets
 	Warnings []string
 
+	// Kinds names the adapter kinds this build can serve, so a provider
+	// cannot be created for one no adapter exists for. The registry lives
+	// with the executor's construction; nil skips the check.
+	Kinds []string
+
 	// Exec is the same executor the proxy port uses. The playground runs real
 	// requests through it so what it verifies is the gateway rather than
 	// itself.
 	Exec *exec.Executor
 
-	// Flows holds in-progress OAuth connect attempts. Nil disables the two
-	// OAuth routes, which is what every test that does not exercise them wants.
+	// Flows holds in-progress OAuth connect attempts. Nil disables the OAuth
+	// routes, which is what every test that does not exercise them wants.
 	Flows *auth.FlowStore
 
 	// HTTP is the client used for token exchange and credential probes. Nil
@@ -89,116 +100,199 @@ type Server struct {
 	csrf   *CSRF
 	mux    *http.ServeMux
 	probes probeLocks
+	logins *loginLimiter
 
 	// listeners are the temporary loopback servers receiving OAuth redirects,
 	// keyed by provider so a second flow replaces the first rather than failing
 	// to bind a port the first still holds.
 	listenerMu sync.Mutex
 	listeners  map[string]*redirectListener
+
+	// stopSweep ends the background sweeper; closeOnce makes Close idempotent
+	// because both the server's shutdown path and a test's cleanup reach it.
+	stopSweep chan struct{}
+	closeOnce sync.Once
 }
 
-// New builds the admin server and sweeps expired sessions.
-//
-// The sweep runs here rather than on a timer because sessions outlive the
-// process: nothing else would ever remove them, and a thirty-day TTL means a
-// long-lived deployment accumulates a row per login forever.
+// New builds the admin server, reconciles the password hash with the
+// environment, sweeps expired sessions once, and starts the periodic sweeper.
 func New(deps Deps) (*Server, error) {
 	if deps.DB == nil {
 		return nil, fmt.Errorf("admin: DB is required")
 	}
-	csrf, err := NewCSRF(context.Background(), deps.DB)
+	ctx := context.Background()
+	csrf, err := NewCSRF(ctx, deps.DB)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := deps.DB.SweepSessions(context.Background()); err != nil {
+	s := &Server{
+		deps: deps, csrf: csrf,
+		logins:    newLoginLimiter(loginRate, loginBurst, loginConcurrency),
+		stopSweep: make(chan struct{}),
+	}
+	if err := s.reconcilePasswordHash(ctx); err != nil {
+		return nil, fmt.Errorf("admin: %w", err)
+	}
+	if _, err := deps.DB.SweepSessions(ctx); err != nil {
 		return nil, fmt.Errorf("admin: sweep sessions: %w", err)
 	}
-	s := &Server{deps: deps, csrf: csrf}
 	s.routes()
+	go s.sweep()
 	return s, nil
 }
 
-func (s *Server) Handler() http.Handler { return s.mux }
+// sweep drops expired sessions and abandoned OAuth flows while the process
+// runs. Sessions outlive the process, so a startup-only sweep leaves a
+// long-lived deployment accumulating a row per login; a flow store swept only
+// on Claim keeps every abandoned verifier until the next connect.
+func (s *Server) sweep() {
+	t := time.NewTicker(sweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.stopSweep:
+			return
+		case now := <-t.C:
+			s.sweepOnce(now)
+		}
+	}
+}
 
-// routes registers every endpoint. Read handlers are wrapped in requireSession;
+func (s *Server) sweepOnce(now time.Time) {
+	if _, err := s.deps.DB.SweepSessions(context.Background()); err != nil {
+		log.Printf("admin: sweep sessions: %v", err)
+	}
+	if s.deps.Flows != nil {
+		s.deps.Flows.Sweep(now)
+	}
+}
+
+// Handler is the mux behind the security headers every response carries.
+func (s *Server) Handler() http.Handler { return securityHeaders(s.mux) }
+
+// routeAuth is what a route requires of its caller.
+type routeAuth int
+
+const (
+	// routePublic is reachable without a session.
+	routePublic routeAuth = iota
+	// routeSession needs a valid cookie.
+	routeSession
+	// routeCSRF needs the cookie, a same-origin request and the CSRF token.
+	routeCSRF
+)
+
+type route struct {
+	method  string
+	pattern string
+	auth    routeAuth
+	handler http.HandlerFunc
+}
+
+// routeTable is every endpoint with the guard it needs. One table rather
+// than a list of registrations so a test can walk it and check that every
+// route really carries its guard, including the one nobody has written yet.
+func (s *Server) routeTable() []route {
+	rs := []route{
+		// The one endpoint reachable without a session: the SPA calls it to
+		// decide whether to render the login screen.
+		{"GET", "/api/auth/status", routePublic, s.handleAuthStatus},
+		{"POST", "/api/auth/login", routePublic, s.handleLogin},
+		{"POST", "/api/auth/logout", routeCSRF, s.handleLogout},
+
+		{"GET", "/api/presets", routeSession, s.handlePresets},
+		{"GET", "/api/providers", routeSession, s.handleListProviders},
+		{"POST", "/api/providers", routeCSRF, s.handleCreateProvider},
+		{"PATCH", "/api/providers/{id}", routeCSRF, s.handlePatchProvider},
+		{"DELETE", "/api/providers/{id}", routeCSRF, s.handleDeleteProvider},
+		{"POST", "/api/providers/{id}/test", routeCSRF, s.handleProbe},
+		{"POST", "/api/providers/{id}/keys", routeCSRF, s.handleAddCredential},
+		{"PATCH", "/api/providers/{id}/keys/{keyId}", routeCSRF, s.handlePatchCredential},
+		{"DELETE", "/api/providers/{id}/keys/{keyId}", routeCSRF, s.handleDeleteCredential},
+
+		{"POST", "/api/playground", routeCSRF, s.handlePlayground},
+		{"POST", "/api/playground/count", routeCSRF, s.handlePlaygroundCount},
+		{"POST", "/api/playground/aux", routeCSRF, s.handlePlaygroundAux},
+
+		{"GET", "/api/playground/presets", routeSession, s.handleListPlaygroundPresets},
+		{"POST", "/api/playground/presets", routeCSRF, s.handleCreatePlaygroundPreset},
+		{"PATCH", "/api/playground/presets/{id}", routeCSRF, s.handleUpdatePlaygroundPreset},
+		{"DELETE", "/api/playground/presets/{id}", routeCSRF, s.handleDeletePlaygroundPreset},
+
+		{"GET", "/api/playground/conversations", routeSession, s.handleListPlaygroundConversations},
+		{"POST", "/api/playground/conversations", routeCSRF, s.requireConversationSaving(s.handleCreatePlaygroundConversation)},
+		// The exact literal beside the wildcard below it: ServeMux prefers the
+		// literal, so the purge and the single delete coexist.
+		{"DELETE", "/api/playground/conversations", routeCSRF, s.handlePurgePlaygroundConversations},
+		{"GET", "/api/playground/conversations/{id}", routeSession, s.handleGetPlaygroundConversation},
+		{"PATCH", "/api/playground/conversations/{id}", routeCSRF, s.requireConversationSaving(s.handleUpdatePlaygroundConversation)},
+		{"DELETE", "/api/playground/conversations/{id}", routeCSRF, s.handleDeletePlaygroundConversation},
+		{"POST", "/api/playground/conversations/{id}/messages", routeCSRF, s.requireConversationSaving(s.handleAppendPlaygroundTurn)},
+
+		{"GET", "/api/overview", routeSession, s.handleOverview},
+		{"GET", "/api/usage", routeSession, s.handleUsage},
+		{"GET", "/api/models", routeSession, s.handleModels},
+		{"GET", "/api/requests", routeSession, s.handleListRequests},
+		{"GET", "/api/requests/{id}", routeSession, s.handleRequestTrace},
+
+		{"GET", "/api/config", routeSession, s.handleConfig},
+		{"PUT", "/api/config", routeCSRF, s.handleConfigPut},
+		{"POST", "/api/config/reload", routeCSRF, s.handleConfigReload},
+
+		{"GET", "/api/health/providers", routeSession, s.handleHealthProviders},
+		{"GET", "/api/health/discovery", routeSession, s.handleDiscoveryHealth},
+		{"POST", "/api/providers/{id}/breaker/reset", routeCSRF, s.handleBreakerReset},
+		{"POST", "/api/providers/{id}/discover", routeCSRF, s.handleForceDiscover},
+		{"POST", "/api/catalog/sync", routeCSRF, s.handleForceCatalogSync},
+		{"POST", "/api/route/preview", routeCSRF, s.handleRoutePreview},
+
+		{"GET", "/api/aliases", routeSession, s.handleAliases},
+		{"PUT", "/api/aliases", routeCSRF, s.handlePutAliases},
+		{"GET", "/api/policy", routeSession, s.handlePolicy},
+		{"PUT", "/api/policy", routeCSRF, s.handlePutPolicy},
+		{"GET", "/api/models/{provider}/{model}/override", routeSession, s.handleGetOverride},
+		{"PUT", "/api/models/{provider}/{model}/override", routeCSRF, s.handlePutOverride},
+		{"DELETE", "/api/models/{provider}/{model}/override", routeCSRF, s.handleDeleteOverride},
+
+		{"GET", "/api/proxy-tokens", routeSession, s.handleListProxyTokens},
+		{"POST", "/api/proxy-tokens", routeCSRF, s.handleCreateProxyToken},
+		{"DELETE", "/api/proxy-tokens/{id}", routeCSRF, s.handleDeleteProxyToken},
+
+		{"GET", "/api/sessions", routeSession, s.handleListSessions},
+		{"DELETE", "/api/sessions/{id}", routeCSRF, s.handleDeleteSession},
+		{"POST", "/api/auth/password", routeCSRF, s.handleChangePassword},
+	}
+	// The OAuth routes need somewhere to keep a flow between start and
+	// callback. Without a store every call would fail on a nil map, so they
+	// are absent rather than broken.
+	if s.deps.Flows != nil {
+		rs = append(rs,
+			route{"POST", "/api/providers/{id}/oauth/start", routeCSRF, s.handleOAuthStart},
+			route{"POST", "/api/providers/{id}/oauth/complete", routeCSRF, s.handleOAuthComplete},
+			// requireSession rather than requireCSRF: a top-level navigation
+			// carries no header to check. State does that work — see
+			// handleOAuthCallback.
+			route{"GET", "/api/oauth/callback", routeSession, s.handleOAuthCallback},
+		)
+	}
+	return rs
+}
+
+// routes registers the table. Read handlers are wrapped in requireSession;
 // mutating ones in requireCSRF, which wraps requireSession itself, so a route
 // cannot accidentally get one check and not the other.
 func (s *Server) routes() {
 	s.mux = http.NewServeMux()
-
-	// The one endpoint reachable without a session: the SPA calls it to decide
-	// whether to render the login screen.
-	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
-	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
-	s.mux.HandleFunc("POST /api/auth/logout", s.requireCSRF(s.handleLogout))
-
-	s.mux.HandleFunc("GET /api/presets", s.requireSession(s.handlePresets))
-	s.mux.HandleFunc("GET /api/providers", s.requireSession(s.handleListProviders))
-	s.mux.HandleFunc("POST /api/providers", s.requireCSRF(s.handleCreateProvider))
-	s.mux.HandleFunc("PATCH /api/providers/{id}", s.requireCSRF(s.handlePatchProvider))
-	s.mux.HandleFunc("DELETE /api/providers/{id}", s.requireCSRF(s.handleDeleteProvider))
-	s.mux.HandleFunc("POST /api/providers/{id}/test", s.requireCSRF(s.handleProbe))
-	s.mux.HandleFunc("POST /api/providers/{id}/keys", s.requireCSRF(s.handleAddCredential))
-	s.mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handleDeleteCredential))
-
-	s.mux.HandleFunc("POST /api/providers/{id}/oauth/start", s.requireCSRF(s.handleOAuthStart))
-	s.mux.HandleFunc("POST /api/providers/{id}/oauth/complete", s.requireCSRF(s.handleOAuthComplete))
-	// requireSession rather than requireCSRF: a top-level navigation carries no
-	// header to check. State does that work — see handleOAuthCallback.
-	s.mux.HandleFunc("GET /api/oauth/callback", s.requireSession(s.handleOAuthCallback))
-
-	s.mux.HandleFunc("POST /api/playground", s.requireCSRF(s.handlePlayground))
-	s.mux.HandleFunc("POST /api/playground/count", s.requireCSRF(s.handlePlaygroundCount))
-	s.mux.HandleFunc("POST /api/playground/aux", s.requireCSRF(s.handlePlaygroundAux))
-
-	s.mux.HandleFunc("GET /api/playground/presets", s.requireSession(s.handleListPlaygroundPresets))
-	s.mux.HandleFunc("POST /api/playground/presets", s.requireCSRF(s.handleCreatePlaygroundPreset))
-	s.mux.HandleFunc("PATCH /api/playground/presets/{id}", s.requireCSRF(s.handleUpdatePlaygroundPreset))
-	s.mux.HandleFunc("DELETE /api/playground/presets/{id}", s.requireCSRF(s.handleDeletePlaygroundPreset))
-
-	s.mux.HandleFunc("GET /api/playground/conversations", s.requireSession(s.handleListPlaygroundConversations))
-	s.mux.HandleFunc("POST /api/playground/conversations", s.requireCSRF(s.requireConversationSaving(s.handleCreatePlaygroundConversation)))
-	// The exact literal beside the wildcard below it: ServeMux prefers the
-	// literal, so the purge and the single delete coexist.
-	s.mux.HandleFunc("DELETE /api/playground/conversations", s.requireCSRF(s.handlePurgePlaygroundConversations))
-	s.mux.HandleFunc("GET /api/playground/conversations/{id}", s.requireSession(s.handleGetPlaygroundConversation))
-	s.mux.HandleFunc("PATCH /api/playground/conversations/{id}", s.requireCSRF(s.requireConversationSaving(s.handleUpdatePlaygroundConversation)))
-	s.mux.HandleFunc("DELETE /api/playground/conversations/{id}", s.requireCSRF(s.handleDeletePlaygroundConversation))
-	s.mux.HandleFunc("POST /api/playground/conversations/{id}/messages", s.requireCSRF(s.requireConversationSaving(s.handleAppendPlaygroundTurn)))
-
-	s.mux.HandleFunc("GET /api/overview", s.requireSession(s.handleOverview))
-	s.mux.HandleFunc("GET /api/usage", s.requireSession(s.handleUsage))
-	s.mux.HandleFunc("GET /api/models", s.requireSession(s.handleModels))
-	s.mux.HandleFunc("GET /api/requests", s.requireSession(s.handleListRequests))
-	s.mux.HandleFunc("GET /api/requests/{id}", s.requireSession(s.handleRequestTrace))
-
-	s.mux.HandleFunc("GET /api/config", s.requireSession(s.handleConfig))
-	s.mux.HandleFunc("PUT /api/config", s.requireCSRF(s.handleConfigPut))
-
-	s.mux.HandleFunc("GET /api/health/providers", s.requireSession(s.handleHealthProviders))
-	s.mux.HandleFunc("GET /api/health/discovery", s.requireSession(s.handleDiscoveryHealth))
-	s.mux.HandleFunc("POST /api/providers/{id}/breaker/reset", s.requireCSRF(s.handleBreakerReset))
-	s.mux.HandleFunc("POST /api/providers/{id}/discover", s.requireCSRF(s.handleForceDiscover))
-	s.mux.HandleFunc("POST /api/catalog/sync", s.requireCSRF(s.handleForceCatalogSync))
-	s.mux.HandleFunc("POST /api/route/preview", s.requireCSRF(s.handleRoutePreview))
-
-	s.mux.HandleFunc("GET /api/aliases", s.requireSession(s.handleAliases))
-	s.mux.HandleFunc("PUT /api/aliases", s.requireCSRF(s.handlePutAliases))
-	s.mux.HandleFunc("GET /api/policy", s.requireSession(s.handlePolicy))
-	s.mux.HandleFunc("PUT /api/policy", s.requireCSRF(s.handlePutPolicy))
-	s.mux.HandleFunc("GET /api/models/{provider}/{model}/override", s.requireSession(s.handleGetOverride))
-	s.mux.HandleFunc("PUT /api/models/{provider}/{model}/override", s.requireCSRF(s.handlePutOverride))
-	s.mux.HandleFunc("DELETE /api/models/{provider}/{model}/override", s.requireCSRF(s.handleDeleteOverride))
-
-	s.mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", s.requireCSRF(s.handlePatchCredential))
-	s.mux.HandleFunc("GET /api/proxy-tokens", s.requireSession(s.handleListProxyTokens))
-	s.mux.HandleFunc("POST /api/proxy-tokens", s.requireCSRF(s.handleCreateProxyToken))
-	s.mux.HandleFunc("DELETE /api/proxy-tokens/{id}", s.requireCSRF(s.handleDeleteProxyToken))
-
-	s.mux.HandleFunc("GET /api/sessions", s.requireSession(s.handleListSessions))
-	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.requireCSRF(s.handleDeleteSession))
-	s.mux.HandleFunc("POST /api/auth/password", s.requireCSRF(s.handleChangePassword))
-	s.mux.HandleFunc("POST /api/config/reload", s.requireCSRF(s.handleConfigReload))
+	for _, r := range s.routeTable() {
+		h := r.handler
+		switch r.auth {
+		case routeSession:
+			h = s.requireSession(h)
+		case routeCSRF:
+			h = s.requireCSRF(h)
+		}
+		s.mux.HandleFunc(r.method+" "+r.pattern, h)
+	}
 
 	// A mistyped API path must answer as an API path. Without these an
 	// unknown /api/… would fall through to the SPA and return HTML, and the
@@ -236,8 +330,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"error": msg})
 }
 
-// probeLocks serializes probes per provider. Declared here so Server can embed
-// it; the probe handler that uses it arrives with its own task.
+// probeLocks serializes probes per provider.
 type probeLocks struct {
 	mu sync.Mutex
 	m  map[string]*sync.Mutex
@@ -253,4 +346,12 @@ func (l *probeLocks) get(providerID string) *sync.Mutex {
 		l.m[providerID] = &sync.Mutex{}
 	}
 	return l.m[providerID]
+}
+
+// drop forgets a provider's lock once the provider is gone. A probe already
+// holding it finishes on its own reference.
+func (l *probeLocks) drop(providerID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.m, providerID)
 }
