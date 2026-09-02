@@ -292,7 +292,7 @@ func TestForwardStreamRefusesAnOversizedPreCommitBuffer(t *testing.T) {
 	}
 }
 
-func TestForwardStreamDropsHopByHopAndEncodingHeaders(t *testing.T) {
+func TestForwardStreamForwardsOnlyAllowlistedHeaders(t *testing.T) {
 	cw, ac := forwardFixture(t)
 	resp := streamResponse("data: c-first\n\n")
 	resp.Header.Set("Content-Type", "text/event-stream")
@@ -301,18 +301,26 @@ func TestForwardStreamDropsHopByHopAndEncodingHeaders(t *testing.T) {
 	resp.Header.Set("Connection", "keep-alive")
 	resp.Header.Set("Keep-Alive", "timeout=5")
 	resp.Header.Set("X-Request-Id", "upstream-id")
+	resp.Header.Set("Cache-Control", "no-store")
+	resp.Header.Set("X-RateLimit-Remaining-Tokens", "12")
+	resp.Header.Set("Set-Cookie", "session=abc")
+	resp.Header.Set("Access-Control-Allow-Origin", "*")
+	resp.Header.Set("Server", "upstream/1.0")
 
 	if _, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, noStreamError{}, false); ierr != nil {
 		t.Fatal(ierr)
 	}
 	h := cw.Header()
-	if h.Get("Content-Type") != "text/event-stream" {
-		t.Errorf("Content-Type = %q", h.Get("Content-Type"))
+	for k, want := range map[string]string{
+		"Content-Type": "text/event-stream", "X-Request-Id": "upstream-id",
+		"Cache-Control": "no-store", "X-RateLimit-Remaining-Tokens": "12",
+	} {
+		if h.Get(k) != want {
+			t.Errorf("%s = %q, want %q", k, h.Get(k), want)
+		}
 	}
-	if h.Get("X-Request-Id") != "upstream-id" {
-		t.Error("a dialect-meaningful header was dropped")
-	}
-	for _, k := range []string{"Content-Encoding", "Content-Length", "Connection", "Keep-Alive"} {
+	for _, k := range []string{"Content-Encoding", "Content-Length", "Connection", "Keep-Alive",
+		"Set-Cookie", "Access-Control-Allow-Origin", "Server"} {
 		if h.Get(k) != "" {
 			t.Errorf("%s was forwarded: %q", k, h.Get(k))
 		}
