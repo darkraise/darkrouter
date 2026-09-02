@@ -163,3 +163,18 @@ func TestAnOversizedPayloadIs413(t *testing.T) {
 		t.Errorf("body = %s; the type must stay in the documented set", w.Body.String())
 	}
 }
+
+func TestWriteResponseBreaksOutCacheWriteTTLs(t *testing.T) {
+	got := written(t, &ir.Response{
+		Usage: ir.Usage{InputTokens: 10, CacheWriteTokens: 7, CacheWrite5mTokens: 2, CacheWrite1hTokens: 5},
+	})
+	usage := got["usage"].(map[string]any)
+	cc, ok := usage["cache_creation"].(map[string]any)
+	if !ok || cc["ephemeral_5m_input_tokens"] != float64(2) || cc["ephemeral_1h_input_tokens"] != float64(5) {
+		t.Errorf("usage = %v; the TTL split is what a client prices by", usage)
+	}
+	plain := written(t, &ir.Response{Usage: ir.Usage{InputTokens: 10}})
+	if _, ok := plain["usage"].(map[string]any)["cache_creation"]; ok {
+		t.Errorf("usage = %v; no split was reported, so none is claimed", plain["usage"])
+	}
+}

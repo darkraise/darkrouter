@@ -54,8 +54,17 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if cfg := inferenceConfig(req); len(cfg) > 0 {
 		body["inferenceConfig"] = cfg
 	}
-	if tc := toolConfig(req); tc != nil {
-		body["toolConfig"] = tc
+	if extra, w := additionalFields(t, req); len(extra) > 0 || len(w) > 0 {
+		warns = append(warns, w...)
+		if len(extra) > 0 {
+			body["additionalModelRequestFields"] = extra
+		}
+	}
+	if tc, w := toolConfig(req); tc != nil || len(w) > 0 {
+		warns = append(warns, w...)
+		if tc != nil {
+			body["toolConfig"] = tc
+		}
 	}
 	if req.TopK != nil {
 		// topK lives in additionalModelRequestFields, which is per-family and
@@ -83,7 +92,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	}
 	// The colon in a model or inference-profile id is part of the canonical URI
 	// the signature covers, so it is escaped here rather than left raw.
-	u := base + "/model/" + escapePathSegment(t.Model) + "/" + route
+	u := base + "/model/" + adapter.EscapePathSegment(t.Model) + "/" + route
 
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
@@ -95,36 +104,68 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	return hr, warns, nil
 }
 
-// escapePathSegment percent-encodes everything outside RFC 3986's unreserved
-// set.
-//
-// url.PathEscape is not equivalent and not usable here: it leaves ':' alone,
-// which is legal in a path segment but is not what AWS signs. smithy-go's own
-// EscapePath says it outright — "AWS expects every character except these to be
-// escaped" — and since every Bedrock inference-profile id contains a colon,
-// getting this wrong is a 403 on every request with no cause attached.
-func escapePathSegment(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-			c == '-' || c == '.' || c == '_' || c == '~' {
-			b.WriteByte(c)
-			continue
-		}
-		fmt.Fprintf(&b, "%%%02X", c)
-	}
-	return b.String()
-}
-
 func renderSystem(blocks []ir.ContentBlock) []any {
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		if b.Type == ir.BlockText && b.Text != "" {
 			out = append(out, map[string]any{"text": b.Text})
+			if b.CacheControl != nil {
+				out = append(out, cachePoint())
+			}
 		}
 	}
 	return out
+}
+
+// cachePoint is Converse's spelling of a cache breakpoint. It is a block of
+// its own placed after the content it closes, rather than an attribute on
+// that content, and it takes no TTL.
+func cachePoint() map[string]any {
+	return map[string]any{"cachePoint": map[string]any{"type": "default"}}
+}
+
+// isAnthropicModel reports whether a Bedrock model id names a Claude model.
+// Every Anthropic id on Bedrock carries the "anthropic." vendor segment,
+// whether bare, behind a geo prefix, or inside an inference-profile ARN.
+func isAnthropicModel(model string) bool {
+	return strings.Contains(strings.ToLower(model), "anthropic.")
+}
+
+// additionalFields renders what Converse only accepts per model family.
+// reasoning_config is Anthropic's; other publishers spell thinking
+// differently or not at all, and sending it to them is a ValidationException.
+func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.Warning) {
+	r := req.Reasoning
+	if r == nil || r.Disabled {
+		return nil, nil
+	}
+	if !isAnthropicModel(t.Model) {
+		return nil, []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "reasoning_config is an Anthropic-only additional field; dropped for this publisher",
+		}}
+	}
+	var warns []ir.Warning
+	budget := r.Budget
+	if budget == 0 {
+		budget = xlate.EffortBudget(r.Effort, t.Info.MaxOutputTokens)
+	}
+	if req.MaxTokens != nil && *req.MaxTokens > 0 && budget >= *req.MaxTokens {
+		budget = *req.MaxTokens - 1
+		warns = append(warns, ir.Warning{
+			Field: "reasoning.budget", Target: targetName,
+			Reason: "clamped below max_tokens, which Anthropic requires to be larger",
+		})
+	}
+	if budget < 1024 {
+		return nil, append(warns, ir.Warning{
+			Field: "reasoning", Target: targetName,
+			Reason: "budget below Anthropic's 1024-token minimum; thinking disabled",
+		})
+	}
+	return map[string]any{
+		"reasoning_config": map[string]any{"type": "enabled", "budget_tokens": budget},
+	}, warns
 }
 
 func inferenceConfig(req *ir.Request) map[string]any {
@@ -144,12 +185,22 @@ func inferenceConfig(req *ir.Request) map[string]any {
 	return cfg
 }
 
-func toolConfig(req *ir.Request) map[string]any {
+func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 	if len(req.Tools) == 0 {
-		return nil
+		return nil, nil
 	}
+	var warns []ir.Warning
 	tools := make([]any, 0, len(req.Tools))
 	for _, t := range req.Tools {
+		// A typed tool runs on its own provider's side. Rendering it as a
+		// toolSpec would have the model call a function nobody implements.
+		if _, typed := t.Extra["type"]; typed {
+			warns = append(warns, ir.Warning{
+				Field: "tools[]." + t.Name, Target: targetName,
+				Reason: "provider-run tool has no Converse equivalent; dropped",
+			})
+			continue
+		}
 		schema := t.Schema
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object"}`)
@@ -162,6 +213,9 @@ func toolConfig(req *ir.Request) map[string]any {
 				"inputSchema": map[string]any{"json": schema},
 			},
 		})
+	}
+	if len(tools) == 0 {
+		return nil, warns
 	}
 	cfg := map[string]any{"tools": tools}
 	if tc := req.ToolChoice; tc != nil {
@@ -176,29 +230,48 @@ func toolConfig(req *ir.Request) map[string]any {
 		// "none" has no Converse spelling. Omitting toolChoice is the closest
 		// honest rendering; the model may still call a tool.
 	}
-	return cfg
+	return cfg, warns
 }
 
-// renderMessages maps IR turns to Converse turns.
+// renderMessages maps IR turns to Converse turns, merging consecutive
+// same-role turns into one.
 //
 // Converse has no tool role: a tool result is user content carrying a toolResult
 // block. Getting that wrong is a 400 on every tool loop, which is why it is the
-// first thing the tests assert.
+// first thing the tests assert. It also requires strictly alternating roles,
+// and the IR routinely produces two user turns in a row — a tool-result turn
+// follows a user turn in every agentic loop.
 func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
-	var warns []ir.Warning
-	out := make([]any, 0, len(msgs))
+	var (
+		warns   []ir.Warning
+		out     = make([]any, 0, len(msgs))
+		curRole string
+		content []any
+	)
+	flush := func() {
+		if curRole == "" {
+			return
+		}
+		out = append(out, map[string]any{"role": curRole, "content": content})
+		curRole, content = "", nil
+	}
 	for _, m := range msgs {
 		role := "user"
 		if m.Role == ir.RoleAssistant {
 			role = "assistant"
 		}
-		content, w := renderBlocks(m.Content)
+		blocks, w := renderBlocks(m.Content)
 		warns = append(warns, w...)
-		if len(content) == 0 {
+		if len(blocks) == 0 {
 			continue
 		}
-		out = append(out, map[string]any{"role": role, "content": content})
+		if role != curRole {
+			flush()
+			curRole = role
+		}
+		content = append(content, blocks...)
 	}
+	flush()
 	return out, warns
 }
 
@@ -206,6 +279,7 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 	var warns []ir.Warning
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
+		before := len(out)
 		switch b.Type {
 		case ir.BlockText:
 			if b.Text != "" {
@@ -221,10 +295,16 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 			if b.ToolUse == nil {
 				continue
 			}
+			// Converse takes the arguments as an object and rejects null;
+			// a call made with no arguments is {}.
+			input := b.ToolUse.Input
+			if len(input) == 0 {
+				input = json.RawMessage(`{}`)
+			}
 			out = append(out, map[string]any{"toolUse": map[string]any{
 				"toolUseId": b.ToolUse.ID,
 				"name":      b.ToolUse.Name,
-				"input":     b.ToolUse.Input,
+				"input":     input,
 			}})
 		case ir.BlockToolResult:
 			if b.ToolResult == nil {
@@ -240,18 +320,35 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 				res["status"] = "error"
 			}
 			out = append(out, map[string]any{"toolResult": res})
-		case ir.BlockThinking, ir.BlockRedactedThinking:
-			// reasoningContent is emitted by the model, not accepted from the
-			// client on Converse. Replaying it would be a 400.
-			warns = append(warns, ir.Warning{
-				Field: "thinking", Target: targetName,
-				Reason: "Converse does not accept reasoning blocks as input",
-			})
+		case ir.BlockThinking:
+			if b.Thinking == nil {
+				continue
+			}
+			// Replayed byte-identical: an Anthropic model with thinking on
+			// verifies the signature chain across a tool loop, and a turn
+			// missing its reasoning invalidates the next call.
+			out = append(out, map[string]any{"reasoningContent": map[string]any{
+				"reasoningText": map[string]any{
+					"text": b.Thinking.Text, "signature": b.Thinking.Signature,
+				},
+			}})
+		case ir.BlockRedactedThinking:
+			if b.Thinking == nil {
+				continue
+			}
+			out = append(out, map[string]any{"reasoningContent": map[string]any{
+				"redactedContent": b.Thinking.Data,
+			}})
 		default:
 			warns = append(warns, ir.Warning{
 				Field: string(b.Type), Target: targetName,
 				Reason: "no Converse content block for this type",
 			})
+		}
+		// A breakpoint closes the block that carried it, so it follows only a
+		// block that was actually rendered.
+		if b.CacheControl != nil && len(out) > before {
+			out = append(out, cachePoint())
 		}
 	}
 	return out, warns

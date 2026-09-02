@@ -74,7 +74,7 @@ func TestStreamingUsesTheStreamRoute(t *testing.T) {
 
 func TestModelIdIsPathEscaped(t *testing.T) {
 	// The colon in a model id is part of the canonical URI the signature
-	// covers. Task 3's known-answer vector was generated against %3A.
+	// covers, and the SigV4 known-answer vector was generated against %3A.
 	_, url, _ := build(t, &adapter.Target{Region: "us-east-1", Model: "us.anthropic.claude-x-v1:0"}, simple())
 	if !strings.Contains(url, "us.anthropic.claude-x-v1%3A0") {
 		t.Errorf("url = %s; the model id is not escaped", url)
@@ -228,14 +228,16 @@ func TestToolResultsBecomeUserContent(t *testing.T) {
 	if last["role"] != "user" {
 		t.Errorf("tool result role = %v, want user", last["role"])
 	}
-	res := last["content"].([]any)[0].(map[string]any)["toolResult"].(map[string]any)
+	// Merged into the preceding user turn, so the result is its last block.
+	content := last["content"].([]any)
+	res := content[len(content)-1].(map[string]any)["toolResult"].(map[string]any)
 	if res["toolUseId"] != "tu_1" {
 		t.Errorf("toolResult = %#v", res)
 	}
 }
 
 func TestNoCredentialHeaderIsWritten(t *testing.T) {
-	// Signing is the authorizer's job, Task 1. An adapter that also wrote a
+	// Signing is the authorizer's job. An adapter that also wrote a
 	// header would put a key in a request the signature does not cover.
 	hr, _, err := New().BuildRequest(context.Background(),
 		&adapter.Target{Region: "us-east-1", Model: "m", APIKey: "should-be-ignored"}, simple())
@@ -256,22 +258,6 @@ func TestSurfacesIsLLMOnly(t *testing.T) {
 	}
 	if s.Has(ir.SurfaceEmbedding) {
 		t.Error("embedding must not be claimed")
-	}
-}
-
-func TestEscapePathSegmentMatchesTheAWSRule(t *testing.T) {
-	// url.PathEscape leaves ':' alone, which is legal in a path segment and is
-	// not what AWS signs. Every inference-profile id contains one, so this is
-	// the difference between working and a 403 on every request.
-	for in, want := range map[string]string{
-		"anthropic.claude-3-5-sonnet-20241022-v2:0": "anthropic.claude-3-5-sonnet-20241022-v2%3A0",
-		"us.anthropic.claude-x-v1:0":                "us.anthropic.claude-x-v1%3A0",
-		"plain-model_1.0~x":                         "plain-model_1.0~x",
-		"a/b":                                       "a%2Fb",
-	} {
-		if got := escapePathSegment(in); got != want {
-			t.Errorf("escapePathSegment(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -297,5 +283,195 @@ func TestASystemTurnBecomesTheSystemField(t *testing.T) {
 	}
 	if n := len(body["messages"].([]any)); n != 1 {
 		t.Errorf("messages = %d, want 1: the system turn was not removed", n)
+	}
+}
+
+func anthropicTarget(model string) *adapter.Target {
+	return &adapter.Target{Region: "us-east-1", Model: model}
+}
+
+func TestConsecutiveSameRoleTurnsAreMerged(t *testing.T) {
+	// Converse requires strictly alternating roles. The IR routinely holds two
+	// user turns in a row — a tool-result turn followed by the next question —
+	// and sending them separately is a 400 on every agentic loop.
+	req := simple()
+	req.Messages = []ir.Message{
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "weather?"}}},
+		{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
+			ID: "call_a", Name: "lookup", Input: json.RawMessage(`{"city":"Oslo"}`)}}}},
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockToolResult, ToolResult: &ir.ToolResult{
+			ToolUseID: "call_a", Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "clear"}}}}}},
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "and tomorrow?"}}},
+	}
+	body, _, _ := build(t, anthropicTarget(req.Model), req)
+	msgs := body["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("messages = %d, want 3 alternating turns: %#v", len(msgs), msgs)
+	}
+	last := msgs[2].(map[string]any)
+	if last["role"] != "user" {
+		t.Errorf("last role = %v", last["role"])
+	}
+	if content := last["content"].([]any); len(content) != 2 {
+		t.Errorf("merged user content = %#v, want the tool result and the text", content)
+	}
+}
+
+func TestEmptyToolInputIsAnObject(t *testing.T) {
+	// A tool called with no arguments arrives with a nil Input. Converse
+	// rejects a null toolUse.input; {} is the call as the model made it.
+	req := simple()
+	req.Messages = append(req.Messages, ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{
+		Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: "call_a", Name: "ping"},
+	}}})
+	body, _, _ := build(t, anthropicTarget(req.Model), req)
+	msgs := body["messages"].([]any)
+	use := msgs[1].(map[string]any)["content"].([]any)[0].(map[string]any)["toolUse"].(map[string]any)
+	if input, ok := use["input"].(map[string]any); !ok || len(input) != 0 {
+		t.Errorf("input = %#v, want {}", use["input"])
+	}
+}
+
+func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
+	req := simple()
+	req.Reasoning = &ir.Reasoning{Budget: 2048}
+	body, _, warns := build(t, anthropicTarget("us.anthropic.claude-sonnet-4-20250514-v1:0"), req)
+
+	extra, ok := body["additionalModelRequestFields"].(map[string]any)
+	if !ok {
+		t.Fatalf("additionalModelRequestFields = %#v", body["additionalModelRequestFields"])
+	}
+	cfg, _ := extra["reasoning_config"].(map[string]any)
+	if cfg["type"] != "enabled" || cfg["budget_tokens"] != float64(2048) {
+		t.Errorf("reasoning_config = %#v", cfg)
+	}
+	for _, w := range warns {
+		if w.Field == "reasoning" {
+			t.Errorf("warned about a reasoning request the model can serve: %v", w)
+		}
+	}
+
+	// An effort rather than a budget is banded through the shared table, so
+	// the same request reasons to the same depth here as it does elsewhere.
+	req.Reasoning = &ir.Reasoning{Effort: "high"}
+	body, _, _ = build(t, anthropicTarget("anthropic.claude-3-7-sonnet-20250219-v1:0"), req)
+	cfg = body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	if cfg["budget_tokens"] != float64(32768) {
+		t.Errorf("effort high budget = %v", cfg["budget_tokens"])
+	}
+}
+
+func TestReasoningBudgetIsClampedBelowMaxTokens(t *testing.T) {
+	// Bedrock enforces Anthropic's rule that the budget is smaller than the
+	// output cap. Clamping keeps a servable request servable rather than
+	// raising the one control the client actually set.
+	req := simple()
+	max := 4000
+	req.MaxTokens = &max
+	req.Reasoning = &ir.Reasoning{Budget: 8000}
+	body, _, warns := build(t, anthropicTarget("anthropic.claude-3-7-sonnet-20250219-v1:0"), req)
+	cfg := body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	if cfg["budget_tokens"] != float64(3999) {
+		t.Errorf("budget = %v, want 3999", cfg["budget_tokens"])
+	}
+	if !hasWarning(warns, "reasoning.budget") {
+		t.Errorf("no clamp warning: %+v", warns)
+	}
+}
+
+func TestReasoningIsWarnedForOtherPublishers(t *testing.T) {
+	// reasoning_config is Anthropic's additional field. Sending it to Nova
+	// or Llama is a ValidationException, and silently dropping it hides a
+	// request that reasons less than the client asked.
+	req := simple()
+	req.Reasoning = &ir.Reasoning{Effort: "high"}
+	body, _, warns := build(t, anthropicTarget("amazon.nova-pro-v1:0"), req)
+	if _, ok := body["additionalModelRequestFields"]; ok {
+		t.Errorf("reasoning_config sent to a non-Anthropic model: %#v", body["additionalModelRequestFields"])
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("no warning named reasoning: %+v", warns)
+	}
+}
+
+func TestCacheControlBecomesACachePoint(t *testing.T) {
+	req := simple()
+	req.System = []ir.ContentBlock{{Type: ir.BlockText, Text: "long preamble",
+		CacheControl: &ir.CacheControl{Type: "ephemeral"}}}
+	req.Messages = []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+		{Type: ir.BlockText, Text: "context", CacheControl: &ir.CacheControl{Type: "ephemeral", TTL: "1h"}},
+		{Type: ir.BlockText, Text: "question"},
+	}}}
+	body, _, _ := build(t, anthropicTarget(req.Model), req)
+
+	sys := body["system"].([]any)
+	if len(sys) != 2 {
+		t.Fatalf("system = %#v, want the block and a cachePoint after it", sys)
+	}
+	if cp, _ := sys[1].(map[string]any)["cachePoint"].(map[string]any); cp["type"] != "default" {
+		t.Errorf("system cachePoint = %#v", sys[1])
+	}
+	content := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if len(content) != 3 {
+		t.Fatalf("content = %#v, want text, cachePoint, text", content)
+	}
+	if _, ok := content[1].(map[string]any)["cachePoint"]; !ok {
+		t.Errorf("content[1] = %#v, want a cachePoint", content[1])
+	}
+}
+
+func TestReasoningBlocksAreReplayedOnAssistantTurns(t *testing.T) {
+	// Converse takes reasoningContent back on an assistant turn, and
+	// Anthropic models on Bedrock require it for a multi-turn tool loop with
+	// thinking on: dropping it invalidates the signature chain.
+	req := simple()
+	req.Messages = append(req.Messages, ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{
+		{Type: ir.BlockThinking, Thinking: &ir.Thinking{Text: "hmm", Signature: "sig"}},
+		{Type: ir.BlockRedactedThinking, Thinking: &ir.Thinking{Data: "AAAA"}},
+		{Type: ir.BlockText, Text: "answer"},
+	}})
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	content := body["messages"].([]any)[1].(map[string]any)["content"].([]any)
+	if len(content) != 3 {
+		t.Fatalf("content = %#v", content)
+	}
+	rt := content[0].(map[string]any)["reasoningContent"].(map[string]any)["reasoningText"].(map[string]any)
+	if rt["text"] != "hmm" || rt["signature"] != "sig" {
+		t.Errorf("reasoningText = %#v", rt)
+	}
+	red := content[1].(map[string]any)["reasoningContent"].(map[string]any)
+	if red["redactedContent"] != "AAAA" {
+		t.Errorf("redactedContent = %#v", red)
+	}
+	if hasWarning(warns, "thinking") {
+		t.Errorf("warned about a block that was rendered: %+v", warns)
+	}
+}
+
+func hasWarning(warns []ir.Warning, field string) bool {
+	for _, w := range warns {
+		if w.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTypedServerToolsAreWarnedAndDropped(t *testing.T) {
+	// A typed tool runs on Anthropic's side; Converse has no toolSpec for it,
+	// and rendering it as a client tool would make the model call a function
+	// nobody implements.
+	req := simple()
+	req.Tools = []ir.Tool{
+		{Name: "web_search", Extra: map[string]json.RawMessage{"type": json.RawMessage(`"web_search_20250305"`)}},
+		{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["toolSpec"].(map[string]any)["name"] != "f" {
+		t.Errorf("tools = %#v", tools)
+	}
+	if !hasWarning(warns, "tools[].web_search") {
+		t.Errorf("warnings = %+v", warns)
 	}
 }

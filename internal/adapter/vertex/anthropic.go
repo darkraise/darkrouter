@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
@@ -16,14 +17,14 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// buildAnthropic renders through phase 4's Anthropic builder and then applies
-// the two differences Vertex imposes: the model moves from the body into the
-// URL, and anthropic_version becomes a body field.
+// buildAnthropic renders through the Anthropic adapter's builder and then
+// applies the two differences Vertex imposes: the model moves from the body
+// into the URL, and anthropic_version becomes a body field.
 //
 // Rewriting the rendered body rather than reimplementing the renderer is
-// deliberate. Everything phase 4 encodes — cache breakpoints, thinking modes,
-// the assistant-prefill rules — is behavior the golden files pin, and a second
-// implementation would drift from it silently.
+// deliberate. Everything that builder encodes — cache breakpoints, thinking
+// modes, the assistant-prefill rules — is behavior the golden files pin, and a
+// second implementation would drift from it silently.
 func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	inner := *t
 	// A placeholder: the URL is replaced below. Empty would make the builder
@@ -61,7 +62,7 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 		method = ":streamRawPredict"
 	}
 	endpoint := baseFor(t) + "/" + PublisherAnthropic +
-		"/models/" + escapePathSegment(t.Model) + method
+		"/models/" + adapter.EscapePathSegment(t.Model) + method
 
 	out, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
@@ -73,31 +74,22 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 	return out, warns, nil
 }
 
-// escapePathSegment percent-encodes everything outside RFC 3986's unreserved
-// set. url.PathEscape leaves ':' alone, and while Vertex does not sign the path
-// the way Bedrock does, a model id carrying one would otherwise open a path
-// segment the API does not match.
-func escapePathSegment(s string) string {
-	var b bytes.Buffer
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-			c == '-' || c == '.' || c == '_' || c == '~' {
-			b.WriteByte(c)
-			continue
-		}
-		fmt.Fprintf(&b, "%%%02X", c)
-	}
-	return b.String()
-}
-
-// parseResponse dispatches on the payload's own shape.
+// parseResponse dispatches on the publisher.
 //
-// Neither ParseResponse nor ParseStream is handed a Target, so the publisher is
-// not available. That is fine because the two shapes are unambiguous: an
-// Anthropic response carries a top-level content array and type "message", a
-// Gemini one carries candidates.
+// The parser is not handed a Target, but a response from the HTTP client
+// carries the request it answers, and that request's URL names the publisher
+// segment this adapter itself wrote. A response with no request attached — a
+// test double, or a body replayed from a trace — falls back to the payload's
+// own shape, which is unambiguous between the two: an Anthropic response
+// carries a top-level content array and type "message", a Gemini one carries
+// candidates.
 func parseResponse(resp *http.Response) (*ir.Response, error) {
+	if pub, ok := publisherOfResponse(resp); ok {
+		if pub == PublisherAnthropic {
+			return anthropicadapter.ParseResponse(resp)
+		}
+		return geminiadapter.ParseResponse(resp)
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	closeErr := resp.Body.Close()
 	if err != nil {
@@ -115,6 +107,20 @@ func parseResponse(resp *http.Response) (*ir.Response, error) {
 		return anthropicadapter.ParseResponse(restore())
 	}
 	return geminiadapter.ParseResponse(restore())
+}
+
+func publisherOfResponse(resp *http.Response) (string, bool) {
+	if resp.Request == nil || resp.Request.URL == nil {
+		return "", false
+	}
+	path := resp.Request.URL.Path
+	switch {
+	case strings.Contains(path, "/"+PublisherAnthropic+"/"):
+		return PublisherAnthropic, true
+	case strings.Contains(path, "/"+PublisherGoogle+"/"):
+		return PublisherGoogle, true
+	}
+	return "", false
 }
 
 func isAnthropicShape(raw []byte) bool {
@@ -147,5 +153,3 @@ func parseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 	}
 	return geminiadapter.ParseStream(br, maxLine)
 }
-
-var _ = adapter.OutcomeSuccess

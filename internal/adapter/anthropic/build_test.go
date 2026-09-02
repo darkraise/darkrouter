@@ -28,9 +28,9 @@ func builtFor(t *testing.T, model string, req *ir.Request) (*http.Request, map[s
 
 // builtWith is builtFor with the catalog's view of the model supplied.
 //
-// From phase 6 the request shape is decided by these traits rather than by the
-// model name, so a test that exercises per-generation behavior has to say which
-// generation it means. catalog_traits_test.go in internal/catalog is what
+// The request shape is decided by these traits rather than by the model name,
+// so a test that exercises per-generation behavior has to say which generation
+// it means. catalog_traits_test.go in internal/catalog is what
 // asserts the shipped preset produces these same values for these same names.
 func builtWith(t *testing.T, model string, info adapter.ModelInfo, req *ir.Request) (*http.Request, map[string]any, []ir.Warning) {
 	t.Helper()
@@ -406,7 +406,7 @@ func TestTraitsComeFromTheTargetNotTheName(t *testing.T) {
 }
 
 func TestUnknownTraitsStayPermissiveAndWarn(t *testing.T) {
-	// The behavior for an unknown model is unchanged from phase 4: the request
+	// The behavior for an unknown model is the permissive fallback: the request
 	// is shaped by what the client asked for, and the guess is warned about.
 	_, _, warns := builtFor(t, "who-knows", &ir.Request{
 		Messages:  []ir.Message{userMsg("hi")},
@@ -451,5 +451,185 @@ func TestTheNameHeuristicIsGone(t *testing.T) {
 		if strings.Contains(string(src), gone) {
 			t.Errorf("%s is still in build.go; the heuristic was not removed", gone)
 		}
+	}
+}
+
+func prefillConversation() []ir.Message {
+	return []ir.Message{
+		userMsg("return JSON"),
+		{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}},
+	}
+}
+
+func TestNoPrefillDropsTheTrailingAssistantTurn(t *testing.T) {
+	// The 4.6+ generations return a 400 for a trailing assistant turn whether
+	// or not thinking is on. The drop is always warned about: silently
+	// removing the client's format hint is how a JSON answer turns into prose
+	// with no trace of why.
+	_, body, warns := builtWith(t, "claude-opus-4-6",
+		adapter.ModelInfo{Adaptive: true, ManualBudget: true, FreeSampling: true, NoPrefill: true, TraitsKnown: true},
+		&ir.Request{Messages: prefillConversation()})
+	if len(body["messages"].([]any)) != 1 {
+		t.Errorf("messages = %v; this model rejects a prefill outright", body["messages"])
+	}
+	if !hasWarning(warns, "messages[last].assistant_prefill") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestAdaptiveThinkingWarnsWhenItDropsAPrefill(t *testing.T) {
+	_, body, warns := builtWith(t, "claude-opus-4-6",
+		adapter.ModelInfo{Adaptive: true, ManualBudget: true, FreeSampling: true, TraitsKnown: true},
+		&ir.Request{Messages: prefillConversation(), Reasoning: &ir.Reasoning{Effort: "low"}})
+	if len(body["messages"].([]any)) != 1 {
+		t.Errorf("messages = %v", body["messages"])
+	}
+	if !hasWarning(warns, "messages[last].assistant_prefill") {
+		t.Errorf("warnings = %+v; a drop under adaptive thinking was silent", warns)
+	}
+}
+
+func TestThinkingAlwaysOnNeverSendsDisabled(t *testing.T) {
+	info := adapter.ModelInfo{Adaptive: true, ThinkingAlwaysOn: true, TraitsKnown: true}
+	// A client that asked for thinking off gets a warning and no field: the
+	// model rejects the explicit off switch, and omitting it is the only
+	// request it accepts.
+	_, body, warns := builtWith(t, "claude-fable-5", info, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Metadata: map[string]string{"anthropic_thinking_type": "disabled"},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v; this model rejects thinking.type disabled", body["thinking"])
+	}
+	if !hasWarning(warns, "thinking") {
+		t.Errorf("warnings = %+v; the ignored off switch must be visible", warns)
+	}
+
+	// The IR's own spelling of the same instruction.
+	_, body, warns = builtWith(t, "claude-fable-5", info, &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Disabled: true},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v", body["thinking"])
+	}
+	if !hasWarning(warns, "thinking") {
+		t.Errorf("warnings = %+v", warns)
+	}
+
+	// A plain request on a model that thinks by default sends nothing and
+	// has nothing to warn about.
+	_, body, warns = builtWith(t, "claude-fable-5", info, &ir.Request{Messages: []ir.Message{userMsg("hi")}})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v", body["thinking"])
+	}
+	if hasWarning(warns, "thinking") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestAdaptiveModelsStillSendDisabledWhenAsked(t *testing.T) {
+	_, body, _ := builtWith(t, "claude-opus-4-7", adapter.ModelInfo{Adaptive: true, TraitsKnown: true}, &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Disabled: true},
+	})
+	if th, _ := body["thinking"].(map[string]any); th["type"] != "disabled" {
+		t.Errorf("thinking = %v; an explicit off is honoured where the model has the switch", body["thinking"])
+	}
+}
+
+func TestNoForcedToolChoiceDowngradesToAuto(t *testing.T) {
+	info := adapter.ModelInfo{Adaptive: true, ThinkingAlwaysOn: true, NoForcedToolChoice: true, TraitsKnown: true}
+	for _, tc := range []*ir.ToolChoice{{Mode: "any"}, {Mode: "tool", Name: "f"}} {
+		off := false
+		_, body, warns := builtWith(t, "claude-fable-5-1", info, &ir.Request{
+			Messages:          []ir.Message{userMsg("hi")},
+			Tools:             []ir.Tool{{Name: "f"}},
+			ToolChoice:        tc,
+			ParallelToolCalls: &off,
+		})
+		choice := body["tool_choice"].(map[string]any)
+		if choice["type"] != "auto" {
+			t.Errorf("tool_choice for %s = %v; forced tool use is a 400 on this model", tc.Mode, choice)
+		}
+		if choice["disable_parallel_tool_use"] != true {
+			t.Errorf("tool_choice = %v; the parallel setting survives the downgrade", choice)
+		}
+		if !hasWarning(warns, "tool_choice") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	}
+	// none and auto are unaffected.
+	_, body, warns := builtWith(t, "claude-fable-5-1", info, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")}, Tools: []ir.Tool{{Name: "f"}},
+		ToolChoice: &ir.ToolChoice{Mode: "none"},
+	})
+	if body["tool_choice"].(map[string]any)["type"] != "none" || hasWarning(warns, "tool_choice") {
+		t.Errorf("tool_choice = %v, warnings = %+v", body["tool_choice"], warns)
+	}
+}
+
+func TestBuildRequestEchoesTheBetaHeader(t *testing.T) {
+	hr, _, _ := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Metadata: map[string]string{"anthropic-beta": "context-1m-2025-08-07"},
+	})
+	if got := hr.Header.Get("anthropic-beta"); got != "context-1m-2025-08-07" {
+		t.Errorf("anthropic-beta = %q", got)
+	}
+	hr, _, _ = built(t, &ir.Request{Messages: []ir.Message{userMsg("hi")}})
+	if got := hr.Header.Get("anthropic-beta"); got != "" {
+		t.Errorf("anthropic-beta = %q on a request that carried none", got)
+	}
+}
+
+func TestRenderToolsReEmitsServerToolsAndCacheControl(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools: []ir.Tool{
+			{Name: "web_search", Extra: map[string]json.RawMessage{
+				"type": json.RawMessage(`"web_search_20250305"`), "name": json.RawMessage(`"web_search"`),
+				"max_uses": json.RawMessage(`5`)}},
+			{Name: "f", Description: "d", Schema: json.RawMessage(`{"type":"object"}`),
+				Extra: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}},
+		},
+	})
+	tools := body["tools"].([]any)
+	srv := tools[0].(map[string]any)
+	if srv["type"] != "web_search_20250305" || srv["max_uses"] != float64(5) {
+		t.Errorf("server tool = %v", srv)
+	}
+	if _, ok := srv["input_schema"]; ok {
+		t.Errorf("server tool = %v; a typed tool takes no input_schema", srv)
+	}
+	plain := tools[1].(map[string]any)
+	if plain["name"] != "f" || plain["description"] != "d" {
+		t.Errorf("plain tool = %v", plain)
+	}
+	if cc, _ := plain["cache_control"].(map[string]any); cc["type"] != "ephemeral" {
+		t.Errorf("plain tool = %v; cache_control was dropped", plain)
+	}
+	if hasWarning(warns, "cache_control") || hasWarning(warns, "tools[].web_search") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestToolCacheControlCountsTowardTheBreakpointBudget(t *testing.T) {
+	cc := &ir.CacheControl{Type: "ephemeral"}
+	_, body, warns := built(t, &ir.Request{
+		Tools:  []ir.Tool{{Name: "f", Extra: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}}},
+		System: []ir.ContentBlock{{Type: ir.BlockText, Text: "s", CacheControl: cc}},
+		Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "a", CacheControl: cc},
+			{Type: ir.BlockText, Text: "b", CacheControl: cc},
+			{Type: ir.BlockText, Text: "c", CacheControl: cc},
+		}}},
+	})
+	if !hasWarning(warns, "cache_control") {
+		t.Errorf("warnings = %+v; five breakpoints across tools, system and messages is one too many", warns)
+	}
+	content := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if _, ok := content[2].(map[string]any)["cache_control"]; ok {
+		t.Errorf("the surplus marker survived: %v", content[2])
 	}
 }

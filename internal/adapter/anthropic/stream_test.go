@@ -133,3 +133,55 @@ func TestParseStreamYieldsAnInStreamError(t *testing.T) {
 		t.Errorf("error = %+v; Anthropic sends overloaded_error under a 200", e)
 	}
 }
+
+func TestParseStreamWarnsOnAnUnknownStopReason(t *testing.T) {
+	body := sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"brand_new"},"usage":{"output_tokens":1}}`) +
+		sseEvent("message_stop", `{"type":"message_stop"}`)
+	evs, err := collect(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs[0].Warnings) != 1 || evs[0].Warnings[0].Field != "stop_reason" {
+		t.Errorf("message_delta warnings = %+v; an unrecognized value degrades to end_turn and must say so", evs[0].Warnings)
+	}
+	if evs[1].StopReason != ir.StopEndTurn {
+		t.Errorf("stop = %q", evs[1].StopReason)
+	}
+}
+
+func TestParseStreamCarriesServerToolBlocks(t *testing.T) {
+	// A server_tool_use block streams its input like a tool_use, and a
+	// web_search_tool_result arrives whole in content_block_start. Neither
+	// is text; both used to become an empty text block that hid the search.
+	body := sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}}`) +
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"x\"}"}}`) +
+		sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://a"}]}}`)
+	evs, err := collect(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := evs[0].Delta; d.Type != "server_tool_use" || d.ToolID != "srvtoolu_1" || d.ToolName != "web_search" ||
+		string(d.Extra["id"]) != `"srvtoolu_1"` {
+		t.Errorf("server_tool_use start = %+v", d)
+	}
+	if d := evs[1].Delta; d.Type != ir.BlockToolUse || d.ToolInput != `{"query":"x"}` {
+		t.Errorf("input delta = %+v", d)
+	}
+	if d := evs[2].Delta; d.Type != "web_search_tool_result" || string(d.Extra["tool_use_id"]) != `"srvtoolu_1"` ||
+		len(d.Extra["content"]) == 0 {
+		t.Errorf("web_search_tool_result start = %+v", d)
+	}
+}
+
+func TestParseStreamCarriesCacheWriteTTLs(t *testing.T) {
+	body := sseEvent("message_start", `{"type":"message_start","message":{"id":"m","model":"c","usage":{"input_tokens":10,"cache_creation_input_tokens":7,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":5}}}}`) +
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`)
+	evs, err := collect(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := evs[len(evs)-1].Usage
+	if u == nil || u.CacheWrite5mTokens != 2 || u.CacheWrite1hTokens != 5 || u.CacheWriteTokens != 7 {
+		t.Errorf("usage = %+v", u)
+	}
+}

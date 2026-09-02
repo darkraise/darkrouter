@@ -86,3 +86,39 @@ func TestAnUnknownCacheWriteRateCostsNothingRatherThanGuessing(t *testing.T) {
 		t.Fatalf("cost = %v, want 1000 with no cache-write rate", got)
 	}
 }
+
+func TestReasoningTokensAreBilledAtTheOutputRate(t *testing.T) {
+	// Gemini reports thoughts separately from candidates and bills them as
+	// output. Leaving them out under-reports every reasoning request.
+	p := Pricing{Known: true, InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 2_000_000}
+	got := p.Cost(Tokens{Input: 1000, Output: 500, Reasoning: 250})
+	if got == nil || *got != 1000+1000+500 {
+		t.Fatalf("cost = %v, want 2500", got)
+	}
+}
+
+func TestCacheWritesAreBilledByTTL(t *testing.T) {
+	// Anthropic prices a 5-minute write at 1.25x input and a 1-hour write
+	// at 2x. The catalog's single cache-write rate covers only the writes
+	// whose TTL the response did not break out.
+	p := Pricing{
+		Known: true, InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 2_000_000,
+		CacheWriteMicrosPerMTok: 1_250_000,
+	}
+	got := p.Cost(Tokens{Input: 1000, CacheWrite: 3000, CacheWrite5m: 1000, CacheWrite1h: 1000})
+	// 1000*1 + 1000*1.25 + 1000*2 + the remaining 1000 at the catalog rate 1.25
+	want := int64(1000 + 1250 + 2000 + 1250)
+	if got == nil || *got != want {
+		t.Fatalf("cost = %v, want %d", got, want)
+	}
+}
+
+func TestCostMicrosIsTheFourFieldForm(t *testing.T) {
+	p := Pricing{Known: true, InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 2_000_000,
+		CacheReadMicrosPerMTok: 100_000, CacheWriteMicrosPerMTok: 1_250_000}
+	a := p.CostMicros(2000, 500, 8000, 4000)
+	b := p.Cost(Tokens{Input: 2000, Output: 500, CacheRead: 8000, CacheWrite: 4000})
+	if a == nil || b == nil || *a != *b {
+		t.Fatalf("CostMicros = %v, Cost = %v; the two forms must agree", a, b)
+	}
+}

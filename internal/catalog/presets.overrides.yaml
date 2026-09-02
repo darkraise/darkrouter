@@ -10,16 +10,22 @@ anthropic:
   # 400 on that model — output_config.effort and adaptive thinking are
   # different controls sharing a word. These rules are therefore declared
   # rather than derived. Longest match wins.
+  #
+  # The three refusal traits are declared from the API reference rather than
+  # verified live: no_prefill on every 4.6-and-later family, and
+  # thinking_always_on plus no_forced_tool_choice on the Fable and Mythos
+  # lines. These rows are the operator's to correct when a family turns out to
+  # accept a shape listed here as refused, or to refuse one that is not.
   model_traits:
-    - {match: mythos-preview, adaptive: true, manual_budget: true}
-    - {match: opus-4-7, adaptive: true}
-    - {match: opus-4-8, adaptive: true}
-    - {match: opus-5, adaptive: true}
-    - {match: sonnet-5, adaptive: true}
-    - {match: fable-5, adaptive: true}
-    - {match: mythos-5, adaptive: true}
-    - {match: opus-4-6, adaptive: true, manual_budget: true, free_sampling: true}
-    - {match: sonnet-4-6, adaptive: true, manual_budget: true, free_sampling: true}
+    - {match: mythos-preview, adaptive: true, manual_budget: true, no_prefill: true, thinking_always_on: true, no_forced_tool_choice: true}
+    - {match: opus-4-7, adaptive: true, no_prefill: true}
+    - {match: opus-4-8, adaptive: true, no_prefill: true}
+    - {match: opus-5, adaptive: true, no_prefill: true}
+    - {match: sonnet-5, adaptive: true, no_prefill: true}
+    - {match: fable-5, adaptive: true, no_prefill: true, thinking_always_on: true, no_forced_tool_choice: true}
+    - {match: mythos-5, adaptive: true, no_prefill: true, thinking_always_on: true, no_forced_tool_choice: true}
+    - {match: opus-4-6, adaptive: true, manual_budget: true, free_sampling: true, no_prefill: true}
+    - {match: sonnet-4-6, adaptive: true, manual_budget: true, free_sampling: true, no_prefill: true}
     - {match: opus-4-5, manual_budget: true, free_sampling: true}
     - {match: sonnet-4-5, manual_budget: true, free_sampling: true}
     - {match: haiku-4-5, manual_budget: true, free_sampling: true}

@@ -63,18 +63,37 @@ func responseBlocks(blocks []ir.ContentBlock) []any {
 			out = append(out, map[string]any{
 				"type": "tool_use", "id": b.ToolUse.ID, "name": b.ToolUse.Name, "input": input,
 			})
+		default:
+			// A block the Anthropic adapter carried through untouched — a
+			// server-tool block — goes back as it arrived.
+			if len(b.Extra) > 0 {
+				m := make(map[string]any, len(b.Extra))
+				for k, v := range b.Extra {
+					m[k] = v
+				}
+				out = append(out, m)
+			}
 		}
 	}
 	return out
 }
 
 func usageBody(u ir.Usage) map[string]any {
-	return map[string]any{
+	body := map[string]any{
 		"input_tokens":                u.InputTokens,
 		"output_tokens":               u.OutputTokens,
 		"cache_read_input_tokens":     u.CacheReadTokens,
 		"cache_creation_input_tokens": u.CacheWriteTokens,
 	}
+	// Only when the upstream broke the writes out by TTL: claiming a split
+	// that was not reported would price every write as a 5-minute one.
+	if u.CacheWrite5mTokens > 0 || u.CacheWrite1hTokens > 0 {
+		body["cache_creation"] = map[string]any{
+			"ephemeral_5m_input_tokens": u.CacheWrite5mTokens,
+			"ephemeral_1h_input_tokens": u.CacheWrite1hTokens,
+		}
+	}
+	return body
 }
 
 func messageID(id string) string {

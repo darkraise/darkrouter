@@ -17,6 +17,15 @@ func blockStartBody(d *ir.Delta) map[string]any {
 	if d == nil {
 		return map[string]any{"type": "text", "text": ""}
 	}
+	// A block the Anthropic adapter carried through untouched goes back as
+	// it arrived.
+	if len(d.Extra) > 0 {
+		m := make(map[string]any, len(d.Extra))
+		for k, v := range d.Extra {
+			m[k] = v
+		}
+		return m
+	}
 	switch d.Type {
 	case ir.BlockThinking:
 		return map[string]any{"type": "thinking", "thinking": "", "signature": ""}
@@ -68,8 +77,10 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		stop      = ir.StopEndTurn
 	)
 
-	// start is deferred until the first event that is not a usage update, so an
-	// Anthropic-served route can report real input tokens inside message_start.
+	// start is held back until the first usage update or the first content,
+	// whichever comes first: an Anthropic-served route reports real input
+	// tokens inside message_start, and a route whose dialect reports usage
+	// last is not delayed waiting for it.
 	start := func() error {
 		if started {
 			return nil
@@ -159,6 +170,12 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			if err != nil {
 				return err
 			}
+			// Anthropic has no delta form for a redacted payload — it ships
+			// whole inside the block start — so there is nothing valid to
+			// send for one that arrived incrementally.
+			if ev.Delta.Type == ir.BlockRedactedThinking {
+				continue
+			}
 			if err := send("content_block_delta", map[string]any{
 				"index": wire, "delta": deltaBody(ev.Delta),
 			}); err != nil {
@@ -178,6 +195,9 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		case ir.EventMessageDelta:
 			if ev.Usage != nil {
 				usage = *ev.Usage
+				if err := start(); err != nil {
+					return err
+				}
 			}
 			if ev.StopReason != "" {
 				stop = ev.StopReason
@@ -195,7 +215,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			}
 			if err := send("message_delta", map[string]any{
 				"delta": map[string]any{"stop_reason": stopReasonWire(stop), "stop_sequence": nil},
-				"usage": map[string]any{"output_tokens": usage.OutputTokens},
+				"usage": usageBody(usage),
 			}); err != nil {
 				return err
 			}
@@ -213,7 +233,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 	}
 	if err := send("message_delta", map[string]any{
 		"delta": map[string]any{"stop_reason": stopReasonWire(stop), "stop_sequence": nil},
-		"usage": map[string]any{"output_tokens": usage.OutputTokens},
+		"usage": usageBody(usage),
 	}); err != nil {
 		return err
 	}

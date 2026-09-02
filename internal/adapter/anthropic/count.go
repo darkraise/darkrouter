@@ -23,7 +23,7 @@ func (a *Adapter) BuildCountRequest(ctx context.Context, t *adapter.Target, req 
 		return nil, err
 	}
 
-	raw, err := readAndRestore(hr)
+	raw, err := drainBody(hr)
 	if err != nil {
 		return nil, err
 	}
@@ -67,9 +67,9 @@ func (a *Adapter) ParseCountResponse(resp *http.Response) (int, error) {
 
 var _ adapter.TokenCounter = (*Adapter)(nil)
 
-// readAndRestore drains a freshly built request's body. The request is discarded
-// immediately afterwards, so nothing has to be put back.
-func readAndRestore(hr *http.Request) ([]byte, error) {
+// drainBody reads and closes a freshly built request's body. The request is
+// discarded immediately afterwards, so nothing has to be put back.
+func drainBody(hr *http.Request) ([]byte, error) {
 	if hr.Body == nil {
 		return []byte("{}"), nil
 	}

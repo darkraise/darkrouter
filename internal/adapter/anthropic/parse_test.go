@@ -97,3 +97,34 @@ func TestClassifyUsesTheSharedLadder(t *testing.T) {
 		t.Errorf("404 = %q", got)
 	}
 }
+
+func TestParseResponseCarriesServerToolBlocks(t *testing.T) {
+	got := parseBody(t, `{"id":"msg_1","model":"claude-x","stop_reason":"end_turn",
+		"content":[
+			{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"x"}},
+			{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://a"}]},
+			{"type":"text","text":"found it"}],
+		"usage":{"input_tokens":1,"output_tokens":1}}`)
+	if len(got.Content) != 3 {
+		t.Fatalf("content = %+v; server tool blocks must be carried, not dropped", got.Content)
+	}
+	if got.Content[0].Type != "server_tool_use" || string(got.Content[0].Extra["name"]) != `"web_search"` {
+		t.Errorf("server_tool_use = %+v", got.Content[0])
+	}
+	if got.Content[1].Type != "web_search_tool_result" || len(got.Content[1].Extra["content"]) == 0 {
+		t.Errorf("web_search_tool_result = %+v", got.Content[1])
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("warnings = %+v; a carried block is not a loss", got.Warnings)
+	}
+}
+
+func TestParseResponseReadsCacheWriteTTLs(t *testing.T) {
+	got := parseBody(t, `{"id":"msg_1","model":"claude-x","stop_reason":"end_turn","content":[],
+		"usage":{"input_tokens":10,"output_tokens":4,"cache_creation_input_tokens":7,
+			"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":5}}}`)
+	u := got.Usage
+	if u.CacheWriteTokens != 7 || u.CacheWrite5mTokens != 2 || u.CacheWrite1hTokens != 5 {
+		t.Errorf("usage = %+v; the TTL split prices a 1h write at 2x and a 5m one at 1.25x", u)
+	}
+}

@@ -41,7 +41,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// exclusive per generation: type "enabled" is a 400 on Claude 4.7 and
 	// later, and type "adaptive" is a 400 on Claude 4.5 and earlier. Getting
 	// this wrong makes every reasoning request against that generation fail.
-	thinking, manual := false, false
+	thinking := false
 	mode := thinkingMode(req, traits)
 	if mode != modeNone && !traits.known {
 		// Warned here rather than unconditionally: an unrecognized name only
@@ -94,15 +94,27 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 			})
 		default:
 			body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
-			thinking, manual = true, true
+			thinking = true
 		}
 
 	case modeDisabled:
+		switch {
+		// A model that always thinks rejects the off switch. Omitting the
+		// field is the only request it accepts, and the client's instruction
+		// was still not followed, which is worth saying.
+		case traits.thinkingAlwaysOn:
+			warns = append(warns, ir.Warning{
+				Field: "thinking", Target: targetName,
+				Reason: "this model cannot turn thinking off; the request was sent with thinking on",
+			})
 		// Only adaptive-capable models have an explicit off switch; on older
 		// ones, omitting the field is what "no thinking" means.
-		if traits.adaptive {
+		case traits.adaptive:
 			body["thinking"] = map[string]any{"type": "disabled"}
 		}
+	}
+	if traits.thinkingAlwaysOn {
+		thinking = true
 	}
 
 	// Sampling parameters. On the newest generation any non-default value is a
@@ -151,9 +163,19 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		body["stream"] = true
 	}
 	if len(req.Tools) > 0 {
-		body["tools"] = renderTools(req.Tools)
+		tools, w := renderTools(req.Tools, cb)
+		warns = append(warns, w...)
+		body["tools"] = tools
 	}
-	if tc := renderToolChoice(req.ToolChoice, req.ParallelToolCalls); tc != nil {
+	toolChoice := req.ToolChoice
+	if toolChoice != nil && traits.noForcedToolChoice && (toolChoice.Mode == "any" || toolChoice.Mode == "tool") {
+		warns = append(warns, ir.Warning{
+			Field: "tool_choice", Target: targetName,
+			Reason: "this model rejects a forced tool choice; downgraded to auto",
+		})
+		toolChoice = &ir.ToolChoice{Mode: "auto"}
+	}
+	if tc := renderToolChoice(toolChoice, req.ParallelToolCalls); tc != nil {
 		body["tool_choice"] = tc
 	}
 	// Structured output is generally available: no beta header, and the schema
@@ -176,13 +198,18 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	}
 
 	// Rendered last, because the assistant-prefill rule depends on whether
-	// thinking ended up enabled: a prefill is rejected while it is.
-	msgs, w := renderMessages(req, cb, thinking)
+	// thinking ended up enabled: a prefill is rejected while it is, and
+	// outright on the generations that removed prefill.
+	dropPrefill := (thinking || traits.noPrefill) && droppedPrefill(req)
+	msgs, w := renderMessages(req, cb, dropPrefill)
 	warns = append(warns, w...)
-	if thinking && manual && droppedPrefill(req) {
+	if dropPrefill {
+		reason := "response prefill is rejected while thinking is on; the turn was dropped"
+		if traits.noPrefill {
+			reason = "this model rejects a response prefill; the turn was dropped"
+		}
 		warns = append(warns, ir.Warning{
-			Field: "messages[last].assistant_prefill", Target: targetName,
-			Reason: "response prefill is rejected while thinking is on; the turn was dropped",
+			Field: "messages[last].assistant_prefill", Target: targetName, Reason: reason,
 		})
 	}
 	body["messages"] = msgs
@@ -205,6 +232,9 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		version = v
 	}
 	hr.Header.Set("anthropic-version", version)
+	if beta := req.Metadata["anthropic-beta"]; beta != "" {
+		hr.Header.Set("anthropic-beta", beta)
+	}
 	return hr, warns, nil
 }
 
@@ -213,9 +243,8 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 // a tool-result turn follows a user turn in every agentic loop.
 //
 // A trailing text-only assistant turn is Anthropic's prefill idiom and is
-// normally preserved. It is dropped when thinking is on, which Anthropic
-// rejects outright.
-func renderMessages(req *ir.Request, cb *cacheBudget, thinking bool) ([]any, []ir.Warning) {
+// normally preserved. The caller decides when it has to go.
+func renderMessages(req *ir.Request, cb *cacheBudget, dropPrefill bool) ([]any, []ir.Warning) {
 	var (
 		out     []any
 		warns   []ir.Warning
@@ -231,7 +260,7 @@ func renderMessages(req *ir.Request, cb *cacheBudget, thinking bool) ([]any, []i
 	}
 
 	msgs := xlate.NonSystemMessages(req.Messages)
-	if thinking && droppedPrefill(req) {
+	if dropPrefill {
 		msgs = msgs[:len(msgs)-1]
 	}
 	for _, m := range msgs {
@@ -256,7 +285,8 @@ func renderMessages(req *ir.Request, cb *cacheBudget, thinking bool) ([]any, []i
 
 // droppedPrefill reports whether the conversation ends in the prefill idiom —
 // a trailing assistant turn holding only text. Anthropic rejects a prefill
-// while thinking is on, so that combination has to give one of them up.
+// while thinking is on, and some generations reject it outright, so that
+// combination has to give one of them up.
 func droppedPrefill(req *ir.Request) bool {
 	msgs := xlate.NonSystemMessages(req.Messages)
 	if len(msgs) == 0 {
@@ -280,16 +310,20 @@ type modelTraits struct {
 	manualBudget bool // accepts thinking: {"type": "enabled", budget_tokens}
 	freeSampling bool // accepts non-default temperature, top_p, or top_k
 	known        bool
+
+	noPrefill          bool // rejects a trailing assistant turn
+	thinkingAlwaysOn   bool // rejects thinking: {"type": "disabled"}
+	noForcedToolChoice bool // rejects tool_choice any and tool
 }
 
 // traitsOf reads the request-shape facts off the catalog entry the executor
 // attached to the target.
 //
-// Phase 4 matched fragments of the model name here, because there was no
-// catalog. That table needed a new entry every time Anthropic shipped a
-// generation, and it was wrong for an aliased or proxied model whose name says
-// nothing about its generation — a gateway that renames claude-opus-4-5 to
-// "default" got the permissive fallback and a 400 on every reasoning request.
+// The catalog rather than the model name decides, because a name-fragment
+// table needs a new entry every time Anthropic ships a generation and is wrong
+// for an aliased or proxied model whose name says nothing about its
+// generation — a gateway that renames claude-opus-4-5 to "default" would get
+// the permissive fallback and a 400 on every reasoning request.
 //
 // The permissive fallback survives for a model the catalog does not know, which
 // is the honest answer for a self-hosted Anthropic-compatible endpoint: shape
@@ -299,10 +333,13 @@ func traitsOf(info adapter.ModelInfo) modelTraits {
 		return modelTraits{adaptive: true, manualBudget: true, freeSampling: true}
 	}
 	return modelTraits{
-		adaptive:     info.Adaptive,
-		manualBudget: info.ManualBudget,
-		freeSampling: info.FreeSampling,
-		known:        true,
+		adaptive:           info.Adaptive,
+		manualBudget:       info.ManualBudget,
+		freeSampling:       info.FreeSampling,
+		known:              true,
+		noPrefill:          info.NoPrefill,
+		thinkingAlwaysOn:   info.ThinkingAlwaysOn,
+		noForcedToolChoice: info.NoForcedToolChoice,
 	}
 }
 
@@ -320,7 +357,7 @@ const (
 // through xlate so a request reasons the same depth either way.
 func thinkingMode(req *ir.Request, traits modelTraits) thinkingChoice {
 	inbound := req.Metadata["anthropic_thinking_type"]
-	if inbound == "disabled" {
+	if inbound == "disabled" || (req.Reasoning != nil && req.Reasoning.Disabled) {
 		return modeDisabled
 	}
 	if req.Reasoning == nil && inbound == "" {
@@ -351,25 +388,44 @@ func adaptiveEffort(req *ir.Request) string {
 		return ""
 	}
 	if req.Reasoning.Effort != "" {
-		return strings.ToLower(req.Reasoning.Effort)
+		return xlate.AnthropicEffort(req.Reasoning.Effort)
 	}
 	return xlate.BudgetEffort(req.Reasoning.Budget)
 }
 
-func renderTools(tools []ir.Tool) []any {
+// renderTools renders client tools from the IR's three fields and
+// provider-run tools verbatim. A typed tool takes no input_schema, and the
+// options it carries are its own fields, so nothing is synthesized for it.
+//
+// A cache_control on a tool counts toward the same four-breakpoint budget as
+// one on content: Anthropic counts them together.
+func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
+	var warns []ir.Warning
 	out := make([]any, 0, len(tools))
 	for _, t := range tools {
-		schema := t.Schema
-		// A tool with no schema still needs one: Anthropic rejects a null
-		// input_schema outright.
-		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object"}`)
+		m := map[string]any{}
+		if _, typed := t.Extra["type"]; !typed {
+			schema := t.Schema
+			// A tool with no schema still needs one: Anthropic rejects a
+			// null input_schema outright.
+			if len(schema) == 0 {
+				schema = json.RawMessage(`{"type":"object"}`)
+			}
+			m["name"], m["description"], m["input_schema"] = t.Name, t.Description, schema
 		}
-		out = append(out, map[string]any{
-			"name": t.Name, "description": t.Description, "input_schema": schema,
-		})
+		for k, v := range t.Extra {
+			m[k] = v
+		}
+		if _, ok := m["cache_control"]; ok && !cb.take() {
+			delete(m, "cache_control")
+			warns = append(warns, ir.Warning{
+				Field: "cache_control", Target: targetName,
+				Reason: "more than four breakpoints; the surplus marker was dropped",
+			})
+		}
+		out = append(out, m)
 	}
-	return out
+	return out, warns
 }
 
 // renderToolChoice maps the IR's four modes. disable_parallel_tool_use lives
