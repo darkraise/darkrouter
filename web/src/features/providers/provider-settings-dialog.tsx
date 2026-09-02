@@ -31,6 +31,7 @@ import type { Provider } from "../../lib/api-types"
  */
 export type SettingsDraft = {
   priority: string
+  baseUrl: string
   freeModelsOnly: boolean
   region: string | null
   project: string | null
@@ -39,6 +40,7 @@ export type SettingsDraft = {
 export function draftOf(p: Provider): SettingsDraft {
   return {
     priority: String(p.priority),
+    baseUrl: p.base_url,
     freeModelsOnly: p.free_models_only,
     region: null,
     project: null,
@@ -59,6 +61,11 @@ export function settingsPatch(draft: SettingsDraft, p: Provider): Record<string,
   if (typed !== "" && Number.isInteger(priority) && priority !== p.priority) {
     patch.priority = priority
   }
+  // An emptied box leaves the endpoint alone rather than clearing it: a
+  // provider with no base URL is unreachable, and the backend rejects the
+  // write anyway, so a slip would cost a 400 rather than mean anything.
+  const baseUrl = draft.baseUrl.trim()
+  if (baseUrl !== "" && baseUrl !== p.base_url) patch.base_url = baseUrl
   if (draft.freeModelsOnly !== p.free_models_only) patch.free_models_only = draft.freeModelsOnly
   if (draft.region !== null) patch.region = draft.region
   if (draft.project !== null) patch.project = draft.project
@@ -112,8 +119,8 @@ export function ProviderSettingsDialog({
         <DialogHeader>
           <DialogTitle>{provider.name} settings</DialogTitle>
           <DialogDescription>
-            How the router treats this provider, and what discovery imports from it.
-            Its name and its connection come from the release.
+            How the router treats this provider, what discovery imports from it, and
+            where it is reached. Its name comes from the release.
           </DialogDescription>
         </DialogHeader>
 
@@ -133,6 +140,24 @@ export function ProviderSettingsDialog({
               The order the router walks providers in when a bare model name could be
               served by more than one.
             </p>
+          </div>
+
+          {/* Editable because a local runtime's address is the operator's, not
+              the release's: the shipped presets all name localhost, which from
+              inside the container is the container. A wrong host would
+              otherwise mean deleting the provider and starting again. */}
+          <div className="flex flex-col gap-1.5 border-t pt-4">
+            <Label htmlFor="provider-base-url">Base URL</Label>
+            <Input
+              id="provider-base-url"
+              value={draft.baseUrl}
+              onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+              spellCheck={false}
+              className="font-mono"
+            />
+            <span className="text-sm text-[hsl(var(--legend))]">
+              The endpoint the gateway calls. Emptying the box leaves it unchanged.
+            </span>
           </div>
 
           {/* The wizard asks this before the first sweep; this is where an
