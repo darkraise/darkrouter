@@ -409,3 +409,26 @@ func TestAFatalProbeReleasesTheCredentialClaimWithoutResettingIt(t *testing.T) {
 	}
 }
 
+// Retry-After on a 503 or 529 is as precise an instruction as on a 429, and
+// a provider that says how long it needs deserves exactly that long.
+func TestRetryAfterOnAServerErrorCoolsWithoutTheLadder(t *testing.T) {
+	for _, code := range []int{503, 529} {
+		b, now := newTestBreaker(t)
+		b.Record(triple, Signal{
+			Outcome: adapter.OutcomeRetryableProvider, StatusCode: code,
+			RetryAfter: 5 * time.Second, HasRetryAfter: true,
+		})
+		if b.Available(triple) {
+			t.Fatalf("%d with Retry-After did not cool", code)
+		}
+		*now = now.Add(6 * time.Second)
+		if !b.Available(triple) {
+			t.Fatalf("%d cooldown outlived its Retry-After", code)
+		}
+		// No ladder was tripped, so there is no probe: a second caller is
+		// admitted as well.
+		if !b.Available(triple) {
+			t.Fatalf("%d Retry-After cooldown left a probe behind", code)
+		}
+	}
+}
