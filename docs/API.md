@@ -141,7 +141,7 @@ minutes. Starting a new flow stops the previous listener.
 | Route | Body | Response |
 |---|---|---|
 | `GET /api/models` | query `q` (substring of the model id), `surface`, `min_context`, `tools=true` | `200 {models: [{model, providers, surfaces, context_window, max_output_tokens, tools, vision, reasoning, inferred, state, pricing: {input_micros, output_micros} \| null, publisher?, merge_source}], aliases: [{name, targets}]}` |
-| `GET /api/models/{provider}/{model}/override` | — | `200 {surfaces?, capabilities?: {tools, vision, reasoning}, context_window?}` — unset fields are omitted. `404` when no override exists. |
+| `GET /api/models/{provider}/{model}/override` | — | `200 {surfaces?, capabilities?: {tools, vision, reasoning}, context_window?}` — unset fields are omitted; an empty object when no override exists (not a 404, so the console's inspection of any model stays quiet). |
 | `PUT /api/models/{provider}/{model}/override` | same shape | `200` the stored override. `404` unknown provider; `400` when a surface is not one of `llm`, `embedding`, `image`, `tts`, `stt`, `rerank`, `moderation`. |
 | `DELETE /api/models/{provider}/{model}/override` | — | `204`; `404` when there was none |
 | `GET /api/aliases` | — | `200 {"<alias>": ["provider/model", ...]}` |

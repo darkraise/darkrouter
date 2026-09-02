@@ -9,8 +9,8 @@ import {
   PasswordInput,
   PasswordInputControl,
   PasswordInputField,
-  PasswordInputVisibilityTrigger,
 } from "darkraise-ui"
+import { PasswordToggle } from "../shell/password-toggle"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
@@ -134,7 +134,7 @@ export function ChangePasswordDialog({
                   value={current}
                   onChange={(e) => setCurrent(e.target.value)}
                 />
-                <PasswordInputVisibilityTrigger />
+                <PasswordToggle />
               </PasswordInputControl>
             </PasswordInput>
           </div>
@@ -148,7 +148,7 @@ export function ChangePasswordDialog({
                   value={next}
                   onChange={(e) => setNext(e.target.value)}
                 />
-                <PasswordInputVisibilityTrigger />
+                <PasswordToggle />
               </PasswordInputControl>
             </PasswordInput>
           </div>
@@ -162,7 +162,7 @@ export function ChangePasswordDialog({
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                 />
-                <PasswordInputVisibilityTrigger />
+                <PasswordToggle />
               </PasswordInputControl>
             </PasswordInput>
           </div>

@@ -26,6 +26,15 @@ describe("the override editor", () => {
     )
   })
 
+  it("treats an empty body as no override", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })),
+    )
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByLabelText(/context window/i)).toHaveValue(""))
+  })
+
   it("treats a 404 as no override rather than as an error", async () => {
     // A model with no override is the normal case, and an error banner over
     // the normal case teaches the operator to ignore banners.

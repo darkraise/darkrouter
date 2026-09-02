@@ -165,7 +165,7 @@ export function AccountStrip({ mix, label }: { mix: AccountMix; label: string })
   return (
     <span
       className="flex items-center gap-2 whitespace-nowrap"
-      title={segments.map((s) => `${s.n} ${s.name}`).join(" · ") || "no accounts"}
+      title={segments.map((s) => `${s.n} ${s.name}`).join(" · ") || "no credentials"}
     >
       <span className="flex h-1.5 w-14 shrink-0 gap-px overflow-hidden rounded-full" aria-hidden="true">
         {total === 0 ? (

@@ -2,9 +2,9 @@ import { useState } from "react"
 import {
   Badge, Button,
   PasswordInput, PasswordInputControl, PasswordInputField,
-  PasswordInputVisibilityTrigger,
   TableCell, TableRow,
 } from "darkraise-ui"
+import { PasswordToggle } from "../shell/password-toggle"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
@@ -90,7 +90,7 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
                       }
                     }}
                   />
-                  <PasswordInputVisibilityTrigger />
+                  <PasswordToggle />
                 </PasswordInputControl>
               </PasswordInput>
               <Button
