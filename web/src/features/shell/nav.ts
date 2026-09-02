@@ -9,7 +9,24 @@ import {
   Split,
   TerminalSquare,
 } from "lucide-react"
-import type { NavGroup } from "darkraise-ui/layout"
+import type { LucideIcon } from "lucide-react"
+
+/** A destination is one of the router's own paths, so a palette or a rail
+ *  that navigates to it goes through the typed route table rather than a
+ *  string that stops matching when a route is renamed. */
+export type NavHref =
+  | "/"
+  | "/requests"
+  | "/usage"
+  | "/providers"
+  | "/models"
+  | "/routing"
+  | "/playground"
+  | "/connect"
+  | "/settings"
+
+export type NavItem = { label: string; href: NavHref; icon: LucideIcon }
+export type NavGroup = { label: string; items: NavItem[] }
 
 /**
  * §5's information architecture: eight destinations in three groups, plus
@@ -53,7 +70,7 @@ export const nav: NavGroup[] = [
 ]
 
 /** Pinned to the sidebar footer rather than joining a group. */
-export const settingsItem = {
+export const settingsItem: NavItem = {
   label: "Settings",
   href: "/settings",
   icon: Settings,

@@ -14,11 +14,15 @@ import {
 } from "darkraise-ui"
 import { useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
+import { count, money } from "../../lib/format"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
 import { EmptyState, GhostChart } from "../shell/empty-state"
+import { LoadError, LoadingRows } from "../shell/screen-state"
 import { StackedAreaChart, CostLineChart } from "./usage-charts"
 
-const DIMENSIONS: { value: UsageDimension | "day"; label: string }[] = [
+type Dimension = UsageDimension | "day"
+
+const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "day", label: "Total" },
   { value: "provider", label: "Provider" },
   { value: "model", label: "Model" },
@@ -36,14 +40,28 @@ export const RANGES = [
 ] as const
 
 // Five is the chart ramp's width (chart-scope.css). A sixth series would
-// reuse a fill and two providers would render indistinguishably.
+// reuse a hue and two providers would render indistinguishably.
 const MAX_SERIES = 5
+
+/** The one series the Total view plots. Rows on that view carry no key, so
+ *  they are given this one; the charts then have a column to stack. */
+const TOTAL = "total"
 
 // Dimension and range live in the URL rather than in component state, same
 // as every other filtered screen: this task's whole point is a click-through
 // that turns a chart into an investigation, and an investigation you cannot
 // paste to yourself is a weaker version of that.
 const FIELDS = ["dimension", "days"] as const
+
+/** A URL's dimension, or the default when it names one this screen has not
+ *  got. A pasted `?dimension=anything` used to reach the API as a group_by. */
+export function readDimension(raw: string): Dimension {
+  return DIMENSIONS.some((d) => d.value === raw) ? (raw as Dimension) : "day"
+}
+
+export function readRange(raw: string): (typeof RANGES)[number] {
+  return RANGES.find((r) => r.value === raw) ?? RANGES[1]
+}
 
 /** The busiest keys in the window, capped at the ramp's width. */
 export function topKeys(rows: UsageRow[], n: number): string[] {
@@ -56,6 +74,16 @@ export function topKeys(rows: UsageRow[], n: number): string[] {
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([k]) => k)
+}
+
+/** What the charts plot for a dimension: its top keys, or on the Total view
+ *  the rows themselves under one key, since they have none of their own. */
+export function chartSeries(
+  rows: UsageRow[],
+  dimension: Dimension,
+): { rows: UsageRow[]; keys: string[] } {
+  if (dimension !== "day") return { rows, keys: topKeys(rows, MAX_SERIES) }
+  return { rows: rows.map((r) => ({ ...r, key: TOTAL })), keys: [TOTAL] }
 }
 
 /**
@@ -133,11 +161,11 @@ export function requestsSearch(
   }
 }
 
-/** Unpriced is not zero. A day whose models had no catalog price has an
- *  unknown cost, and $0.00 would claim it was free. */
-export function formatCost(micros: number | null): string {
-  if (micros === null) return "—"
-  return `$${(micros / 1_000_000).toFixed(4)}`
+/** A cost axis tick. `money` says "free" for zero, which is a price and
+ *  reads oddly at the origin of an axis; the tick says $0 instead. */
+export function costTick(micros: number | null): string {
+  if (micros === 0) return "$0"
+  return money(micros)
 }
 
 /** Rows summed per key, so a dimension reads as totals rather than as one
@@ -173,6 +201,28 @@ export function summarise(rows: UsageRow[]): {
   return [...acc.values()].sort((a, b) => b.requests - a.requests)
 }
 
+/** What the ranking card is a ranking of. "Ranked by requests" alone left the
+ *  Total view's list of dates unexplained. */
+export function rankingHeading(dimension: Dimension): string {
+  switch (dimension) {
+    case "day":
+      return "Busiest days"
+    case "provider":
+      return "Providers ranked by requests"
+    case "model":
+      return "Models ranked by requests"
+    case "alias":
+      return "Aliases ranked by requests"
+  }
+}
+
+const COLUMN_HEADING: Record<Dimension, string> = {
+  day: "UTC day",
+  provider: "Provider",
+  model: "Model",
+  alias: "Alias",
+}
+
 function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
   const max = Math.max(...rows.map((r) => r.requests), 1)
   return (
@@ -180,23 +230,34 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
       {rows.slice(0, 10).map((r, i) => (
         <div key={r.key} className="flex items-center gap-3">
           <span className="w-40 shrink-0 truncate font-mono text-sm">{r.key}</span>
-          <div className="h-4 flex-1 rounded-sm bg-[hsl(var(--muted))]">
+          <div className="h-4 min-w-0 flex-1 rounded-sm bg-[hsl(var(--muted))]">
             <div
               className="h-full rounded-sm"
               style={{
                 width: `${(r.requests / max) * 100}%`,
                 background: `hsl(var(--chart-${(i % 5) + 1}))`,
-                // Fill, not hue, is what separates the series.
-                opacity: 1 - (i % 5) * 0.15,
               }}
             />
           </div>
-          <span className="w-16 text-right font-mono text-sm tabular-nums">
-            {r.requests}
+          <span className="w-16 shrink-0 text-right font-mono text-sm tabular-nums">
+            {count(r.requests)}
           </span>
         </div>
       ))}
     </div>
+  )
+}
+
+function ChartSkeleton() {
+  return (
+    <>
+      {["Requests", "Tokens", "Cost"].map((title) => (
+        <Card key={title} className="mb-6 p-4">
+          <h2 className="mb-2 text-sm font-medium">{title}</h2>
+          <LoadingRows rows={1} className="h-56" />
+        </Card>
+      ))}
+    </>
   )
 }
 
@@ -205,13 +266,14 @@ export function UsageScreen() {
   // "day" (Total) and 30 days are each the default, so they are dropped from
   // the URL rather than written explicitly -- the same convention every
   // other screen's useSearchFilters caller uses for its own default.
-  const dimension = (filters.dimension || "day") as UsageDimension | "day"
-  const rangeValue = (filters.days || "30") as (typeof RANGES)[number]["value"]
-  const days = RANGES.find((r) => r.value === rangeValue)?.days ?? 30
+  const dimension = readDimension(filters.dimension)
+  const range = readRange(filters.days)
+  const days = range.days
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
   const rows = summarise(usageRows)
-  const keys = topKeys(usageRows, MAX_SERIES)
+  const series = chartSeries(usageRows, dimension)
+  const legend = dimension !== "day"
   // Nothing to filter by on the day view -- there is no dimension key, only
   // the day itself, and Requests has no "day" field to filter on.
   const clickable = dimension !== "day"
@@ -224,6 +286,7 @@ export function UsageScreen() {
           then this is the honest caveat. */}
       <p className="mb-4 text-sm text-[hsl(var(--muted-foreground))]">
         Tokens spent on failed attempts before a request committed are not counted here.
+        Days are UTC days.
       </p>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -243,7 +306,7 @@ export function UsageScreen() {
 
         <ToggleGroup
           type="single"
-          value={rangeValue}
+          value={range.value}
           onValueChange={(v) => v && setFilter("days", v === "30" ? "" : v)}
           variant="outline"
           size="sm"
@@ -256,85 +319,106 @@ export function UsageScreen() {
         </ToggleGroup>
       </div>
 
-      {usageRows.length === 0 ? (
-        <EmptyState
-          title="Usage rolls up once a day, once requests start arriving"
-          hint="Every served request lands in the day's totals. Spend needs a priced model — a model nobody has priced shows an em dash rather than a zero."
-          action={
-            <Button asChild size="sm">
-              <Link to="/connect">Get a client connected</Link>
-            </Button>
-          }
-          preview={<GhostChart />}
+      {usage.isError && (
+        <LoadError
+          what="The usage"
+          error={usage.error}
+          onRetry={() => void usage.refetch()}
+          className="mb-6"
         />
+      )}
+
+      {usage.isPending ? (
+        <ChartSkeleton />
+      ) : usageRows.length === 0 ? (
+        !usage.isError && (
+          <EmptyState
+            title="Usage rolls up once a day, once requests start arriving"
+            hint="Every served request lands in the day's totals. Spend needs a priced model — a model nobody has priced shows an em dash rather than a zero."
+            action={
+              <Button asChild size="sm">
+                <Link to="/connect">Get a client connected</Link>
+              </Button>
+            }
+            preview={<GhostChart />}
+          />
+        )
       ) : (
         <>
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Requests</h2>
-            <StackedAreaChart data={stackByDay(usageRows, keys, (r) => r.requests)} keys={keys} />
+            <StackedAreaChart
+              data={stackByDay(series.rows, series.keys, (r) => r.requests)}
+              keys={series.keys}
+              legend={legend}
+            />
           </Card>
 
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Tokens</h2>
             <StackedAreaChart
-              data={stackByDay(usageRows, keys, (r) => r.tokens_in + r.tokens_out)}
-              keys={keys}
+              data={stackByDay(series.rows, series.keys, (r) => r.tokens_in + r.tokens_out)}
+              keys={series.keys}
+              legend={legend}
             />
           </Card>
 
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Cost</h2>
             <CostLineChart
-              data={stackByDay(usageRows, keys, (r) => r.cost_micros)}
-              keys={keys}
-              formatValue={formatCost}
+              data={stackByDay(series.rows, series.keys, (r) => r.cost_micros)}
+              keys={series.keys}
+              formatValue={costTick}
+              legend={legend}
             />
           </Card>
 
           <Card className="mb-6 p-4">
-            <h2 className="mb-2 text-sm font-medium">Ranked by requests</h2>
+            <h2 className="mb-2 text-sm font-medium">{rankingHeading(dimension)}</h2>
             <Bars rows={rows} />
           </Card>
 
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{dimension === "day" ? "Day" : dimension}</TableHead>
-                <TableHead>Requests</TableHead>
-                <TableHead>Attempts</TableHead>
-                <TableHead>Tokens in</TableHead>
-                <TableHead>Tokens out</TableHead>
-                <TableHead>Cost</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.key}>
-                  <TableCell className="font-mono text-sm">
-                    {clickable ? (
-                      <Link
-                        to="/requests"
-                        search={requestsSearch(dimension, r.key, days)}
-                        className="underline"
-                      >
-                        {r.key}
-                      </Link>
-                    ) : (
-                      r.key
-                    )}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{r.requests}</TableCell>
-                  {/* Attempts exceed requests exactly when something failed over,
-                      which is the column that explains a cost the request count
-                      does not. */}
-                  <TableCell className="tabular-nums">{r.attempts}</TableCell>
-                  <TableCell className="tabular-nums">{r.tokensIn}</TableCell>
-                  <TableCell className="tabular-nums">{r.tokensOut}</TableCell>
-                  <TableCell className="tabular-nums">{formatCost(r.cost)}</TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{COLUMN_HEADING[dimension]}</TableHead>
+                  <TableHead>Requests</TableHead>
+                  <TableHead>Attempts</TableHead>
+                  <TableHead>Tokens in</TableHead>
+                  <TableHead>Tokens out</TableHead>
+                  <TableHead>Cost</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={r.key}>
+                    <TableCell className="font-mono text-sm">
+                      {clickable ? (
+                        <Link
+                          to="/requests"
+                          search={requestsSearch(dimension, r.key, days)}
+                          className="underline"
+                        >
+                          {r.key}
+                        </Link>
+                      ) : (
+                        r.key
+                      )}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{count(r.requests)}</TableCell>
+                    {/* Attempts exceed requests exactly when something failed over,
+                        which is the column that explains a cost the request count
+                        does not. */}
+                    <TableCell className="tabular-nums">{count(r.attempts)}</TableCell>
+                    <TableCell className="tabular-nums">{count(r.tokensIn)}</TableCell>
+                    <TableCell className="tabular-nums">{count(r.tokensOut)}</TableCell>
+                    <TableCell className="tabular-nums">{money(r.cost)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </>
       )}
     </>

@@ -304,14 +304,6 @@
 .rf-wrap .react-flow__controls-button svg {
   fill: currentColor;
 }
-.rf-wrap .react-flow__attribution {
-  background: transparent;
-}
-.rf-wrap .react-flow__attribution a {
-  color: var(--rf-legend);
-  font-size: var(--text-sm);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .rf-wrap .react-flow__edge-path {
     animation: none;

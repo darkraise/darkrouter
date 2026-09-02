@@ -18,6 +18,21 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
       ],
+      // A feature is reached through its index or not at all. Reaching into
+      // another feature's files is how one screen's refactor breaks a second
+      // screen nobody thought was involved.
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*/*", "!@/features/*/index"],
+              message:
+                "Import another feature through its index (@/features/<name>), not from a file inside it.",
+            },
+          ],
+        },
+      ],
     },
   },
 )

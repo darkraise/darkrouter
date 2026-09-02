@@ -1,10 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "darkraise-ui"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  orderSessions,
   readOnlyGroups,
   passwordProblem,
   reloadMessage,
@@ -33,6 +35,7 @@ function mount(ui: React.ReactNode) {
   return render(
     <QueryClientProvider client={client}>
       <RouterAdapterProvider value={stubRouterAdapter}>{ui}</RouterAdapterProvider>
+      <Toaster />
     </QueryClientProvider>,
   )
 }
@@ -186,6 +189,7 @@ describe("the sync result", () => {
 function stubSettingsFetch(overrides: {
   reload?: { valid: boolean; error?: string; serving?: string }
   sync?: { synced: boolean; error?: string; serving?: string }
+  sessions?: unknown[]
 }) {
   let configFetches = 0
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
@@ -198,7 +202,10 @@ function stubSettingsFetch(overrides: {
       })
     }
     if (url === "/api/sessions" && method === "GET") {
-      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(JSON.stringify({ sessions: overrides.sessions ?? [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
     }
     if (url === "/api/config/reload" && method === "POST") {
       return new Response(JSON.stringify(overrides.reload ?? { valid: true }), {
@@ -318,6 +325,15 @@ describe("the policy write", () => {
     expect(toWrite({ ...draft, "policy.retry.max_attempts": "" }).retry).toBeUndefined()
   })
 
+  it("leaves trip_after out when it will not parse as a whole number", () => {
+    // The same rule as attempts: a count that is not a whole number is not
+    // a setting, and sending NaN or 2.5 would either be ignored silently or
+    // refused after the operator was told it saved.
+    expect("trip_after" in toWrite({ ...draft, "policy.cooldown.trip_after": "abc" }).cooldown).toBe(false)
+    expect("trip_after" in toWrite({ ...draft, "policy.cooldown.trip_after": "2.5" }).cooldown).toBe(false)
+    expect(toWrite(draft).cooldown.trip_after).toBe(3)
+  })
+
   it("leaves attempts out when it will not parse as a whole number", () => {
     // NaN serialises to null and the Go pointer stays nil, so the field is
     // ignored with no complaint. A fraction cannot reach a Go *int either.
@@ -331,9 +347,11 @@ describe("the read-only section on the page", () => {
     stubSettingsFetch({})
     mount(<SettingsScreen />)
 
-    // The humanised value, and the file's own spelling beside it.
-    expect(await screen.findByText("3 days")).toBeInTheDocument()
-    expect(screen.getByText("72h")).toBeInTheDocument()
+    // The humanised value once, with the file's own spelling on its title
+    // rather than printed as a second value.
+    const value = await screen.findByText("3 days")
+    expect(value).toHaveAttribute("title", "72h")
+    expect(screen.queryByText("72h")).not.toBeInTheDocument()
     // The dotted key, which is what the YAML file and every error message use.
     expect(screen.getByText("log.retention")).toBeInTheDocument()
     // §8.1: where the value came from, said at the point of display.
@@ -351,6 +369,53 @@ describe("the read-only section on the page", () => {
     // policy.retry.max_attempts is an input up the page; its dotted key must
     // appear once, under that field, not again as a read-only row.
     expect(screen.getAllByText("policy.retry.max_attempts")).toHaveLength(1)
+  })
+})
+
+describe("the sessions list", () => {
+  const session = (id: string, current: boolean) => ({
+    id,
+    prefix: id.slice(0, 4),
+    created_at: "2026-08-01T10:00:00Z",
+    expires_at: "2026-09-01T10:00:00Z",
+    current,
+  })
+
+  it("puts the caller's own session first", () => {
+    expect(orderSessions([session("bbbb1", false), session("aaaa1", true)]).map((s) => s.id)).toEqual([
+      "aaaa1",
+      "bbbb1",
+    ])
+  })
+
+  it("marks the current browser on the page, at the top of the list", async () => {
+    stubSettingsFetch({ sessions: [session("bbbb1", false), session("aaaa1", true)] })
+    mount(<SettingsScreen />)
+    const items = await screen.findAllByRole("listitem")
+    const rows = items.filter((li) => /since/.test(li.textContent ?? ""))
+    expect(rows[0]).toHaveTextContent("this browser")
+    expect(rows[1]).toHaveTextContent("Revoke")
+  })
+})
+
+describe("the password on the page", () => {
+  it("opens the change dialog from Settings, not only from the account menu", async () => {
+    stubSettingsFetch({})
+    mount(<SettingsScreen />)
+    await userEvent.click(await screen.findByRole("button", { name: /change password/i }))
+    expect(await screen.findByRole("dialog", { name: /change password/i })).toBeInTheDocument()
+  })
+})
+
+describe("a clean reload", () => {
+  it("announces the result in a status region", async () => {
+    stubSettingsFetch({ reload: { valid: true } })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+    await user.click(await screen.findByRole("button", { name: /reload config/i }))
+    await user.click(await screen.findByRole("button", { name: /^reload$/i }))
+    const status = await screen.findByRole("status")
+    expect(status).toHaveTextContent("Configuration reloaded.")
   })
 })
 

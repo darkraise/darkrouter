@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest"
-import { formatCost, summarise, RANGES, topKeys, stackByDay, requestsSearch } from "./usage-screen"
+import {
+  chartSeries,
+  costTick,
+  rankingHeading,
+  readDimension,
+  readRange,
+  summarise,
+  RANGES,
+  topKeys,
+  stackByDay,
+  requestsSearch,
+} from "./usage-screen"
 import type { UsageRow } from "../../lib/api-types"
 
 const row = (over: Partial<UsageRow>): UsageRow => ({
@@ -12,12 +23,52 @@ const row = (over: Partial<UsageRow>): UsageRow => ({
   ...over,
 })
 
-describe("formatCost", () => {
-  it("shows an unpriced total as unknown, not as free", () => {
+describe("the cost axis", () => {
+  it("shows an unpriced point as unknown and the origin as $0", () => {
     // A model with no catalog price has an unknown cost. $0.00 would claim it
-    // cost nothing, which is a different and false statement.
-    expect(formatCost(null)).toBe("—")
-    expect(formatCost(0)).toBe("$0.0000")
+    // cost nothing, which is a different and false statement; and "free" is
+    // a price, which the origin of an axis is not.
+    expect(costTick(null)).toBe("—")
+    expect(costTick(0)).toBe("$0")
+    expect(costTick(4_000)).toBe("$0.0040")
+  })
+})
+
+describe("the Total view's series", () => {
+  it("plots the keyless rows under one total column", () => {
+    // Rows on the day view carry no key, so topKeys found nothing and every
+    // chart on the Total view drew an empty frame.
+    const rows = [row({ requests: 3 }), row({ requests: 4, day: "2026-08-25" })]
+    const series = chartSeries(rows, "day")
+    expect(series.keys).toEqual(["total"])
+    expect(stackByDay(series.rows, series.keys, (r) => r.requests)).toEqual([
+      { day: "2026-08-25", total: 4 },
+      { day: "2026-08-26", total: 3 },
+    ])
+  })
+
+  it("keeps a dimension's own keys", () => {
+    const series = chartSeries([row({ key: "groq" }), row({ key: "nebius" })], "provider")
+    expect(series.keys).toEqual(["groq", "nebius"])
+  })
+})
+
+describe("the URL's parameters", () => {
+  it("falls back to the defaults for a value the screen has not got", () => {
+    // A pasted ?dimension=anything used to reach the API as a group_by.
+    expect(readDimension("provider")).toBe("provider")
+    expect(readDimension("anything")).toBe("day")
+    expect(readDimension("")).toBe("day")
+    expect(readRange("90").days).toBe(90)
+    expect(readRange("12").days).toBe(30)
+  })
+})
+
+describe("the ranking heading", () => {
+  it("names what is ranked", () => {
+    expect(rankingHeading("day")).toBe("Busiest days")
+    expect(rankingHeading("provider")).toBe("Providers ranked by requests")
+    expect(rankingHeading("alias")).toBe("Aliases ranked by requests")
   })
 })
 
