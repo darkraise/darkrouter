@@ -9,6 +9,7 @@ package tokenize
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/tiktoken-go/tokenizer"
 
@@ -83,16 +84,43 @@ func Count(req *ir.Request, model string) int {
 	return total
 }
 
+// getCodec is the codec constructor, a variable so a test can count calls.
+var getCodec = tokenizer.Get
+
+// codecs holds one lazily built codec per bundled encoding. Building one
+// loads a vocabulary of hundreds of thousands of entries, which is fine once
+// and ruinous per request.
+var codecs = map[Encoding]*codecOnce{
+	O200k:  {enc: tokenizer.O200kBase},
+	Cl100k: {enc: tokenizer.Cl100kBase},
+}
+
+type codecOnce struct {
+	enc   tokenizer.Encoding
+	once  sync.Once
+	codec tokenizer.Codec
+}
+
+func (c *codecOnce) get() tokenizer.Codec {
+	c.once.Do(func() { c.codec, _ = getCodec(c.enc) })
+	return c.codec
+}
+
+// resetCodecs forgets every built codec. Test-only: the cache is otherwise
+// process-wide by design.
+func resetCodecs() {
+	for k, c := range codecs {
+		codecs[k] = &codecOnce{enc: c.enc}
+	}
+}
+
 // counterFor returns a function counting one string. A tokenizer that fails to
 // load falls back to the heuristic rather than failing the request: an
 // approximate answer beats a 500 on an endpoint whose whole purpose is advisory.
 func counterFor(enc Encoding) func(string) int {
 	var codec tokenizer.Codec
-	switch enc {
-	case O200k:
-		codec, _ = tokenizer.Get(tokenizer.O200kBase)
-	case Cl100k:
-		codec, _ = tokenizer.Get(tokenizer.Cl100kBase)
+	if c, ok := codecs[enc]; ok {
+		codec = c.get()
 	}
 	if codec == nil {
 		return heuristicCount
