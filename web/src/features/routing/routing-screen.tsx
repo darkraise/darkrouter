@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react"
-import { Plus } from "lucide-react"
+import { ChevronDown, ChevronUp, Plus } from "lucide-react"
 import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
@@ -241,13 +241,12 @@ export function AliasEditor({
     setDraft((d) => ({ ...d, [name]: (d[name] ?? []).filter((r) => r.id !== id) }))
   }
 
+  function move(name: string, from: number, to: number) {
+    setDraft((d) => ({ ...d, [name]: reorderRows(d[name] ?? [], from, to) }))
+  }
+
   function drop(name: string, toIndex: number) {
-    if (dragTarget && dragTarget.name === name) {
-      setDraft((d) => ({
-        ...d,
-        [name]: reorderRows(d[name] ?? [], dragTarget.index, toIndex),
-      }))
-    }
+    if (dragTarget && dragTarget.name === name) move(name, dragTarget.index, toIndex)
     setDragTarget(null)
   }
 
@@ -388,6 +387,27 @@ export function AliasEditor({
                           candidates={candidates}
                           placeholder="provider/model, or a model name"
                         />
+                        {/* Drag is pointer-only, and the order is the whole
+                            point of a chain: the buttons are how it is changed
+                            from the keyboard. */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Move ${name} target ${index + 1} up`}
+                          disabled={index === 0}
+                          onClick={() => move(name, index, index - 1)}
+                        >
+                          <ChevronUp className="size-[var(--icon-size)]" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Move ${name} target ${index + 1} down`}
+                          disabled={index === rows.length - 1}
+                          onClick={() => move(name, index, index + 1)}
+                        >
+                          <ChevronDown className="size-[var(--icon-size)]" />
+                        </Button>
                         <Button
                           size="sm"
                           variant="ghost"
