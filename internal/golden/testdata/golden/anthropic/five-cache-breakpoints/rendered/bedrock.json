@@ -9,16 +9,41 @@
           "text": "one"
         },
         {
+          "cachePoint": {
+            "type": "default"
+          }
+        },
+        {
           "text": "two"
+        },
+        {
+          "cachePoint": {
+            "type": "default"
+          }
         },
         {
           "text": "three"
         },
         {
+          "cachePoint": {
+            "type": "default"
+          }
+        },
+        {
           "text": "four"
         },
         {
+          "cachePoint": {
+            "type": "default"
+          }
+        },
+        {
           "text": "five"
+        },
+        {
+          "cachePoint": {
+            "type": "default"
+          }
         }
       ],
       "role": "user"

@@ -7,12 +7,7 @@
       "content": [
         {
           "text": "Say nothing."
-        }
-      ],
-      "role": "user"
-    },
-    {
-      "content": [
+        },
         {
           "text": "Now say something."
         }
