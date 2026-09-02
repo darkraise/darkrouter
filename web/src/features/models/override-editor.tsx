@@ -1,6 +1,22 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Badge, Button, Input, Label, Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle, Switch } from "darkraise-ui"
+import {
+  Badge,
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  Switch,
+} from "darkraise-ui"
 import { NumberBox } from "../shell/number-box"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
@@ -38,14 +54,18 @@ const CAPABILITIES = ["tools", "vision", "reasoning"] as const
  * control keeps displaying the loaded value until it is edited.
  */
 export function OverrideEditor({
-  provider,
+  providers,
   model,
   onClose,
 }: {
-  provider: string
+  /** Every provider the row serves through, first one first: an override is
+   *  per (provider, model), so the editor opens on the first and offers the
+   *  rest when there are any. */
+  providers: string[]
   model: string
   onClose: () => void
 }) {
+  const [provider, setProvider] = useState(providers[0] ?? "")
   const query = useQuery({
     queryKey: keys.override(provider, model),
     queryFn: () => fetchOverride(provider, model),
@@ -76,6 +96,13 @@ export function OverrideEditor({
     invalidates: [keys.models, keys.override(provider, model)],
     onSuccess: resetDrafts,
   })
+
+  // Nothing may be written while the loaded row is unknown: PUT replaces
+  // the whole override, so saving over a load that has not finished or that
+  // failed would write a blank row over whatever is there.
+  const settled = query.isSuccess
+  const busy = save.isPending || remove.isPending
+  const canSave = settled && !busy
 
   const contextWindowValue =
     draftContextWindow ??
@@ -120,6 +147,37 @@ export function OverrideEditor({
           </SheetTitle>
         </SheetHeader>
 
+        {providers.length > 1 && (
+          <div className="mt-4 flex flex-col gap-1.5">
+            <Label htmlFor="override-provider">Provider</Label>
+            <Select
+              value={provider}
+              onValueChange={(next) => {
+                setProvider(next)
+                // A draft typed against one provider's override is not a
+                // draft of another's.
+                resetDrafts()
+              }}
+            >
+              <SelectTrigger id="override-provider" aria-label="Provider" className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {providers.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {query.isPending && (
+          <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">
+            Loading the current override…
+          </p>
+        )}
         {query.isError && (
           <p role="alert" className="mt-4 text-sm text-[hsl(var(--destructive))]">
             Could not load the current override.
@@ -166,7 +224,7 @@ export function OverrideEditor({
         <SheetFooter className="mt-6 flex-row justify-between">
           <ConfirmButton
             variant="destructive"
-            disabled={existing === null}
+            disabled={existing === null || busy}
             title={`Remove the override on ${model}?`}
             description="The model goes back to whatever the catalogue says about it, which is what discovery imported or what was inferred from the name."
             confirmLabel="Remove override"
@@ -175,7 +233,15 @@ export function OverrideEditor({
           >
             Remove override
           </ConfirmButton>
-          <Button onClick={() => save.mutate(buildPatch())}>Save</Button>
+          {/* Outline while it cannot act: a disabled filled Save is still
+              the loudest thing in the sheet. */}
+          <Button
+            variant={canSave ? "default" : "outline"}
+            disabled={!canSave}
+            onClick={() => save.mutate(buildPatch())}
+          >
+            Save
+          </Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>

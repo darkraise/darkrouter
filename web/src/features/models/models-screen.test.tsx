@@ -154,4 +154,13 @@ describe("the models table", () => {
     await userEvent.click(within(row).getByRole("button", { name: /1 more/ }))
     expect(within(row).getByText("groq/gpt-5")).toBeInTheDocument()
   })
+
+  it("opens the override editor with every provider the row serves through", async () => {
+    mockCatalog()
+    await renderAt("/")
+    await userEvent.click(await screen.findByRole("button", { name: "Override" }))
+    // Two providers, so the editor has to ask which one.
+    const sheet = await screen.findByRole("dialog")
+    expect(await within(sheet).findByRole("combobox", { name: /provider/i })).toHaveTextContent("openai")
+  })
 })

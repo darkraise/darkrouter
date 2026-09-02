@@ -146,7 +146,10 @@ function ServesCell({ row }: { row: Row }) {
 // same package — the two do not agree on what a ColumnDef looks like.
 type Columns = Parameters<typeof DataTable<Row, unknown>>[0]["columns"]
 
-function buildColumns(onEdit: (provider: string, model: string) => void): Columns {
+// The facet columns take string headers rather than sortable ones: a facet
+// and the column menu are both labelled from the header when it is a string
+// and from the accessor key otherwise, and "surface_list" is not a label.
+function buildColumns(onEdit: (providers: string[], model: string) => void): Columns {
   return [
     {
       accessorKey: "model",
@@ -193,7 +196,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       accessorKey: "band",
       header: "Band",
       cell: ({ row }) => (
-        <span className="tabular-nums">
+        <span className="tabular-nums whitespace-nowrap">
           {row.original.pricing
             ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
             : "—"}
@@ -256,16 +259,14 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       enableHiding: false,
       cell: ({ row }) => {
         // A model row folds every provider that serves it; an override is
-        // per (provider, model), so the editor has to pick one. The catalog
-        // order's first entry is the same provider the compressed ladder
-        // draws first.
-        const provider = row.original.providers[0]
-        if (!provider) return null
+        // per (provider, model), so the editor opens on the first — the one
+        // the chip beside it names — and offers the rest.
+        if (row.original.providers.length === 0) return null
         return (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onEdit(provider, row.original.model)}
+            onClick={() => onEdit(row.original.providers, row.original.model)}
           >
             Override
           </Button>
@@ -295,9 +296,9 @@ export function ModelsScreen() {
   // Both memoised: DataTable rebuilds its table model when either changes
   // identity, and the catalogue polls every thirty seconds.
   const rows = useMemo(() => models.map(facetRow), [models])
-  const [editing, setEditing] = useState<{ provider: string; model: string } | null>(null)
+  const [editing, setEditing] = useState<{ providers: string[]; model: string } | null>(null)
   const columns = useMemo(
-    () => buildColumns((provider, model) => setEditing({ provider, model })),
+    () => buildColumns((providers, model) => setEditing({ providers, model })),
     [],
   )
   const filtered = Object.values(filters).some((v) => v !== "")
@@ -363,7 +364,7 @@ export function ModelsScreen() {
 
       {editing && (
         <OverrideEditor
-          provider={editing.provider}
+          providers={editing.providers}
           model={editing.model}
           onClose={() => setEditing(null)}
         />
