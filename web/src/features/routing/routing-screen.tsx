@@ -5,7 +5,7 @@ import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useAliases, useModels, usePolicy, useProviders } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
-import type { Aliases, RoutePreview } from "../../lib/api-types"
+import type { Aliases, RouteCandidate, RoutePreview, RouteSkip } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { ConfirmButton } from "../shell/confirm-button"
 import { EmptyState, GhostChain } from "../shell/empty-state"
@@ -25,22 +25,57 @@ import { ModelCombobox, modelCandidates } from "../shell/model-combobox"
  * and misreport failover order.
  */
 export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
-  const candidates: LadderRow<PredictiveMark>[] = p.candidates.map((c, i) => ({
-    rank: i + 1,
-    // Hollow: nothing has been sent. This is what the router would do.
-    mark: "skipped",
-    target: `${c.provider_id}/${c.model}`,
-    reasonCode: c.inferred ? "inferred" : undefined,
-    reasonProse: c.inferred ? "capabilities were guessed" : undefined,
-  }))
-  const skipped: LadderRow<PredictiveMark>[] = p.skips.map((s, i) => ({
-    rank: candidates.length + i + 1,
-    mark: s.reason === "cooling" ? "cooling" : "skipped",
-    target: `${s.provider_id}/${s.model}`,
-    reasonCode: s.reason,
-    terminated: true,
-  }))
-  return [...candidates, ...skipped]
+  const candidates = collapse(p.candidates, (c) => `${c.provider_id}/${c.model}`).map(
+    ({ first: c, count }): Omit<LadderRow<PredictiveMark>, "rank"> => ({
+      // Hollow: nothing has been sent. This is what the router would do.
+      mark: "skipped",
+      target: `${c.provider_id}/${c.model}`,
+      reasonCode: c.inferred ? "inferred" : undefined,
+      reasonProse: prose(c.inferred ? "capabilities were guessed" : undefined, count),
+    }),
+  )
+  // Keyed on the reason as well: two cooling keys are one fact, but a
+  // cooling key and a disabled one are two, and folding them would hide the
+  // reason an operator can act on.
+  const skipped = collapse(p.skips, (s) => `${s.provider_id}/${s.model}\u0000${s.reason}`).map(
+    ({ first: s, count }): Omit<LadderRow<PredictiveMark>, "rank"> => ({
+      mark: s.reason === "cooling" ? "cooling" : "skipped",
+      target: `${s.provider_id}/${s.model}`,
+      reasonCode: s.reason,
+      reasonProse: prose(undefined, count),
+      terminated: true,
+    }),
+  )
+  return [...candidates, ...skipped].map((row, i) => ({ ...row, rank: i + 1 }))
+}
+
+/**
+ * One rung per (provider, model), however many credentials the router would
+ * walk through on it.
+ *
+ * The endpoint lists every (provider, credential, model) it would try, so
+ * three keys on one provider came back as three rows saying the same thing —
+ * which reads as three providers until the operator notices the keys differ.
+ * The first key decides where the rung sits, since that is where the router
+ * would arrive first.
+ */
+function collapse<T extends RouteCandidate | RouteSkip>(
+  items: T[],
+  keyOf: (item: T) => string,
+): { first: T; count: number }[] {
+  const groups = new Map<string, { first: T; count: number }>()
+  for (const item of items) {
+    const key = keyOf(item)
+    const group = groups.get(key)
+    if (group) group.count++
+    else groups.set(key, { first: item, count: 1 })
+  }
+  return [...groups.values()]
+}
+
+function prose(note: string | undefined, count: number): string | undefined {
+  const parts = [note, count > 1 ? `× ${count} credentials` : undefined].filter(Boolean)
+  return parts.length > 0 ? parts.join(" · ") : undefined
 }
 
 /** Reorder one target. Returns a new array: the draft is React state, and a

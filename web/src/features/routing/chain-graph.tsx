@@ -59,7 +59,11 @@ export function buildChainGraph(
       position: { x: GEOM.x + GEOM.gap * (i + 1), y: GEOM.y },
       data: {
         title: row.target,
-        note: row.reasonProse ?? (row.terminated ? "skipped" : "candidate"),
+        // The skip reason and the credential count, as the ladder shows
+        // them: "skipped" alone repeats what the dimmed node already says.
+        note:
+          [row.reasonCode, row.reasonProse].filter(Boolean).join(" · ") ||
+          (row.terminated ? "skipped" : "candidate"),
         rank: row.rank,
         kind: row.terminated ? "skip" : "candidate",
       } satisfies ChainNodeData,
