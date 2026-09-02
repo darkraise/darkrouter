@@ -165,13 +165,13 @@ describe("the spend readout", () => {
   it("prints a sub-cent day rather than rounding it to nothing", () => {
     // $0.00 is the exact string that would claim a gateway which has spent
     // something has spent nothing.
-    expect(money(4_000, true)).toBe("$0.0040")
+    expect(money(4_000)).toBe("$0.0040")
     // Past a cent it is a headline figure again, not a scientific one.
-    expect(money(3_470_000, true)).toBe("$3.47")
+    expect(money(3_470_000)).toBe("$3.47")
   })
 
   it("says unknown rather than free when nothing in scope had a price", () => {
-    expect(money(0, false)).toBe("—")
+    expect(money(null)).toBe("—")
   })
 })
 

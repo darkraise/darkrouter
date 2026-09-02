@@ -130,6 +130,11 @@ type ToolUse struct {
 	ID    string
 	Name  string
 	Input json.RawMessage
+	// Signature is an opaque token some providers attach to a tool call and
+	// require back on the next turn (Gemini's thoughtSignature on a
+	// functionCall part). It is carried untouched and re-emitted only by the
+	// dialect that produced it.
+	Signature string
 }
 
 type ToolResult struct {
@@ -187,13 +192,23 @@ type ToolChoice struct {
 }
 
 type Reasoning struct {
-	Effort string // "low" | "medium" | "high"
+	Effort string // "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 	Budget int
+	// Disabled records an explicit client request to turn thinking off
+	// (Gemini thinkingBudget: 0, Anthropic thinking.type: "disabled"). Budget
+	// zero alone means unset, so without this flag an explicit off was
+	// indistinguishable from silence.
+	Disabled bool
 }
 
 type ResponseFormat struct {
-	Type   string // "json_schema"
+	Type   string // "json_schema" | "json_object"
 	Schema json.RawMessage
+	// Name and Strict travel with a json_schema format. Strict is a pointer
+	// because OpenAI's strict mode changes what schemas are accepted, so a
+	// client that did not ask for it must not be given it.
+	Name   string
+	Strict *bool
 }
 
 type SafetySetting struct {

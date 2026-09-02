@@ -22,7 +22,8 @@
         "Name": "get_weather",
         "Input": {
           "city": "Oslo"
-        }
+        },
+        "Signature": ""
       },
       "ToolResult": null,
       "CacheControl": null,

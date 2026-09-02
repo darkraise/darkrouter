@@ -13,8 +13,9 @@
 
 // --- shared ---
 
-/** Micro-dollars. `priced` is false when no model in scope had a catalog price. */
-export type Spend = { micros: number; priced: boolean }
+/** Micro-dollars. `micros` is null and `priced` false when no model in scope
+ *  had a catalog price: the spend is unknown, not zero. */
+export type Spend = { micros: number | null; priced: boolean }
 
 export type UsageDay = {
   day: string
@@ -142,7 +143,9 @@ export type TraceAttempt = {
 
 export type TraceBody = { kind: string; content: string }
 
-export type RequestTrace = Omit<RequestRow, "attempts"> & {
+export type RequestTrace = Omit<RequestRow, "attempts" | "source"> & {
+  /** The trace handler does not emit source; the list does. */
+  source?: string
   /** Three separate lists, deliberately: attempts alone explains a failover,
    *  while candidates and skips explain the routing decision that led to it.
    *  Both are stored as formatted strings rather than structured rows. */
@@ -178,9 +181,17 @@ export type RouteCandidate = {
   inferred: boolean
 }
 
+/** A target the router considered and rejected, with the reason. */
+export type RouteSkip = {
+  provider_id: string
+  key_id?: string
+  model: string
+  reason: SkipReason | string
+}
+
 export type RoutePreview = {
   candidates: RouteCandidate[]
-  skips: string[]
+  skips: RouteSkip[]
   /** Present when nothing routed; the skips say why. */
   error?: string
 }

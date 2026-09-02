@@ -73,7 +73,8 @@
   "Stream": false,
   "Reasoning": {
     "Effort": "",
-    "Budget": 8000
+    "Budget": 8000,
+    "Disabled": false
   },
   "ResponseFormat": null,
   "Safety": null,

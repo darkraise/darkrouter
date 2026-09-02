@@ -26,7 +26,8 @@
         "Name": "lookup",
         "Input": {
           "city": "Oslo"
-        }
+        },
+        "Signature": ""
       },
       "ToolResult": null,
       "CacheControl": null,
