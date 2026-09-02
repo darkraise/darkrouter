@@ -65,7 +65,7 @@ describe("the account strip", () => {
     const { container } = render(
       <AccountStrip mix={{ usable: 0, cooling: 0, disabled: 0 }} label="0/0" />,
     )
-    expect(container.querySelector('[title="no accounts"]')).toBeInTheDocument()
+    expect(container.querySelector('[title="no credentials"]')).toBeInTheDocument()
   })
 })
 

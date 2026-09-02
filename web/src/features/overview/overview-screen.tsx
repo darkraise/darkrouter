@@ -310,7 +310,7 @@ export function OverviewScreen() {
                     ]}
                     // usage_daily has no per-day latency column, so there is
                     // no series to plot here.
-                    seriesLabel="no daily series for latency"
+                    seriesLabel="live window only"
                   />
                   <Tile
                     caption="Today's spend (UTC day)"
@@ -347,6 +347,10 @@ export function OverviewScreen() {
                   aria-hidden="true"
                 />
                 failed over from somewhere else
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="h-px w-6 rounded bg-[hsl(var(--border))]" aria-hidden="true" />
+                inbound, before routing
               </li>
               <li className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded border border-dashed" aria-hidden="true" />

@@ -29,15 +29,18 @@ function overridePath(provider: string, model: string) {
 }
 
 async function fetchOverride(provider: string, model: string): Promise<ModelOverride | null> {
+  // No override is the ordinary case for most of the catalog, and the
+  // gateway answers it with an empty body rather than a 404 so the browser
+  // console stays quiet; an empty body is "none", not an override of nothing.
+  let o: ModelOverride | undefined
   try {
-    return await api.get<ModelOverride>(overridePath(provider, model))
+    o = await api.get<ModelOverride>(overridePath(provider, model))
   } catch (err) {
-    // No override is the ordinary case for most of the catalog, not a
-    // failure — an error banner over the ordinary case teaches an operator
-    // to stop reading banners.
     if (err instanceof ApiError && err.status === 404) return null
     throw err
   }
+  const empty = !o || (o.surfaces === undefined && o.capabilities === undefined && o.context_window === undefined)
+  return empty ? null : o
 }
 
 const CAPABILITIES = ["tools", "vision", "reasoning"] as const

@@ -1,9 +1,9 @@
 import {
   Checkbox, Input, Label,
   PasswordInput, PasswordInputControl, PasswordInputField,
-  PasswordInputVisibilityTrigger,
   Textarea, ToggleGroup, ToggleGroupItem,
 } from "darkraise-ui"
+import { PasswordToggle } from "../shell/password-toggle"
 
 export type AccountDraft = {
   mode: "single" | "bulk"
@@ -193,7 +193,7 @@ export function AccountFields({
                     onChange={(e) => onChange({ ...value, secret: e.target.value })}
                     placeholder={field.placeholder}
                   />
-                  <PasswordInputVisibilityTrigger />
+                  <PasswordToggle />
                 </PasswordInputControl>
               </PasswordInput>
             )}

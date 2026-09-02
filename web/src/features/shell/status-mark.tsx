@@ -106,6 +106,6 @@ export function ProviderStateMark({ state }: { state: string }) {
     case "disabled":
       return <StatusMark icon={CircleSlash} tone="neutral" label="disabled — the router will not choose it" />
     default:
-      return <StatusMark icon={CircleMinus} tone="neutral" label="unconfigured — no accounts yet" />
+      return <StatusMark icon={CircleMinus} tone="neutral" label="unconfigured — no credentials yet" />
   }
 }

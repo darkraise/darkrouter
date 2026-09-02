@@ -5,10 +5,10 @@ import {
   PasswordInput,
   PasswordInputControl,
   PasswordInputField,
-  PasswordInputVisibilityTrigger,
 } from "darkraise-ui/components/password-input"
 import { api, ApiError, setCsrfToken } from "../lib/api"
 import { IdentityMark } from "../features/shell/identity-mark"
+import { PasswordToggle } from "../features/shell/password-toggle"
 
 /** The server's exact wording for a refused password. Naming it opts this
  *  one 401 out of the global logout, which would otherwise treat a typo as
@@ -36,8 +36,8 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
     } catch (err) {
       const refused = err instanceof ApiError && err.status === 401 && err.message === REJECTED
       setError(refused ? "Wrong password. Try again." : (err as Error).message || "login failed")
-      setPassword("")
       field.current?.focus()
+      field.current?.select()
     } finally {
       setBusy(false)
     }
@@ -65,12 +65,12 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-              <PasswordInputVisibilityTrigger />
+              <PasswordToggle />
             </PasswordInputControl>
           </PasswordInput>
-          {/* Announced, not just drawn. A refused password clears the field
-              and prints here; without a live region the only feedback a
-              screen-reader user gets is that what they typed is gone. */}
+          {/* Announced, not just drawn. A refused password stays in the
+              field, selected, so a typo can be corrected without retyping
+              the whole thing; the live region says why it was refused. */}
           {error ? (
             <p role="alert" className="text-destructive text-sm">
               {error}

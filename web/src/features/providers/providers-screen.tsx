@@ -203,6 +203,14 @@ function buildColumns(actions: RowActions): Columns {
         ),
     },
     {
+      id: "state",
+      header: "State",
+      // A mark, not the word: most of two hundred rows are unconfigured, and
+      // a column of that word repeated is text the eye reads to learn it
+      // says nothing new.
+      cell: ({ row: { original: r } }) => <ProviderStateMark state={r.row.state} />,
+    },
+    {
       id: "discovery",
       header: "Discovery",
       cell: ({ row: { original: r } }) => {
@@ -232,14 +240,6 @@ function buildColumns(actions: RowActions): Columns {
           </Tooltip>
         )
       },
-    },
-    {
-      id: "state",
-      header: "State",
-      // A mark, not the word: most of two hundred rows are unconfigured, and
-      // a column of that word repeated is text the eye reads to learn it
-      // says nothing new.
-      cell: ({ row: { original: r } }) => <ProviderStateMark state={r.row.state} />,
     },
     {
       id: "actions",

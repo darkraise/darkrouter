@@ -279,8 +279,8 @@ export function TraceDrawer({
             <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <dt className="text-[hsl(var(--legend))]">Requested</dt>
               <dd className="font-mono">
-                {trace.data.alias
-                  ? `${trace.data.alias} → ${trace.data.model}`
+                {trace.data.alias && trace.data.final_model
+                  ? `${trace.data.alias} → ${trace.data.final_model}`
                   : trace.data.model}
               </dd>
               <dt className="text-[hsl(var(--legend))]">Served by</dt>

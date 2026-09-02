@@ -133,7 +133,10 @@ func (s *Server) handleGetOverride(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeError(w, http.StatusNotFound, "no override for "+providerID+"/"+modelID)
+	// An absent override is the ordinary state of most catalog rows, so it
+	// is an empty body rather than a 404: browsers log every 404 as an
+	// error, and the console opens this for any model an operator inspects.
+	writeJSON(w, http.StatusOK, overrideBody{})
 }
 
 func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {

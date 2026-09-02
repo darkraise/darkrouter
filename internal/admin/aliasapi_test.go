@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -93,8 +94,8 @@ func TestModelOverrideWriteReadDelete(t *testing.T) {
 	if w := do(t, s, cookie, token, "DELETE", path, ""); w.Code != 204 {
 		t.Fatalf("DELETE %s = %d: %s", path, w.Code, w.Body.String())
 	}
-	if w := do(t, s, cookie, token, "GET", path, ""); w.Code != 404 {
-		t.Errorf("GET after delete = %d, want 404", w.Code)
+	if w := do(t, s, cookie, token, "GET", path, ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "{}" {
+		t.Errorf("GET after delete = %d %q, want 200 {}", w.Code, w.Body.String())
 	}
 }
 
