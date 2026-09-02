@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -160,7 +160,7 @@ func (s *Server) sweep() {
 
 func (s *Server) sweepOnce(now time.Time) {
 	if _, err := s.deps.DB.SweepSessions(context.Background()); err != nil {
-		log.Printf("admin: sweep sessions: %v", err)
+		slog.Error("sweep sessions failed", "err", err)
 	}
 	if s.deps.Flows != nil {
 		s.deps.Flows.Sweep(now)

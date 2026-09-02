@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
@@ -164,12 +164,12 @@ func RunRetention(ctx context.Context, d *DB, cfgStore *config.Store, interval t
 			n, err := d.Prune(ctx, time.Now(), cfg.Log.Retention, cfg.Capture.Retention,
 				DefaultUsageRetention, 0)
 			if err != nil {
-				log.Printf("retention: %v", err)
+				slog.Error("retention failed", "err", err)
 			} else if n > 0 {
-				log.Printf("retention: pruned %d request records", n)
+				slog.Info("retention: pruned request records", "count", n)
 			}
 			if _, err := d.SweepSessions(ctx); err != nil {
-				log.Printf("retention: %v", err)
+				slog.Error("retention failed", "err", err)
 			}
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -566,7 +566,7 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer workers.Done()
 			if err := runWorker(workerCtx, name, fn, workerRestartDelay); err != nil {
-				log.Printf("%s: %v", name, err)
+				slog.Error("worker failed", "worker", name, "err", err)
 			}
 		}()
 	}
@@ -595,7 +595,7 @@ func (s *Server) Run(ctx context.Context) error {
 				return s.db.SaveLastUsed(context.Background(), s.breaker.LastUsedSnapshot())
 			case <-t.C:
 				if err := s.db.SaveLastUsed(c, s.breaker.LastUsedSnapshot()); err != nil {
-					log.Printf("credential usage: %v", err)
+					slog.Error("saving credential usage failed", "err", err)
 				}
 			}
 		}
@@ -760,7 +760,7 @@ func runWorker(ctx context.Context, name string, fn func(context.Context) error,
 func runOnce(name string, fn func(context.Context) error, ctx context.Context) (err error, panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("%s: panic: %v\n%s", name, r, debug.Stack())
+			slog.Error("worker panicked", "worker", name, "panic", r, "stack", string(debug.Stack()))
 			panicked = true
 		}
 	}()

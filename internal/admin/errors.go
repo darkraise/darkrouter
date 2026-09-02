@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -19,7 +19,7 @@ const internalMessage = "internal error"
 
 // internalError logs the cause and answers with the fixed message.
 func internalError(w http.ResponseWriter, r *http.Request, err error) {
-	log.Printf("admin: %s %s: %v", r.Method, r.URL.Path, err)
+	slog.Error("admin request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 	writeError(w, http.StatusInternalServerError, internalMessage)
 }
 

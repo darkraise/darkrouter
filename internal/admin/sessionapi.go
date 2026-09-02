@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -62,8 +62,7 @@ func (s *Server) reconcilePasswordHash(ctx context.Context) error {
 	if err := db.DeleteSetting(ctx, settingAdminPasswordHash); err != nil {
 		return err
 	}
-	log.Printf("admin: DARKROUTER_ADMIN_PASSWORD_HASH changed since the password was last " +
-		"set in the console; the environment's hash is now in effect")
+	slog.Warn("DARKROUTER_ADMIN_PASSWORD_HASH changed since the password was last set in the console; the environment's hash is now in effect")
 	return db.PutSetting(ctx, settingPasswordEnvFingerprint, current)
 }
 

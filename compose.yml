@@ -8,6 +8,8 @@ services:
     environment:
       GROQ_KEY: ${GROQ_KEY}
       DARKROUTER_PROXY_TOKEN: ${DARKROUTER_PROXY_TOKEN:-}
+      DARKROUTER_LOG_FORMAT: ${DARKROUTER_LOG_FORMAT:-}
+      DARKROUTER_LOG_LEVEL: ${DARKROUTER_LOG_LEVEL:-}
       # Required: it unlocks the keyring the stored credentials are encrypted
       # with, so the binary refuses to start without it.
       DARKROUTER_MASTER_KEY: ${DARKROUTER_MASTER_KEY}
