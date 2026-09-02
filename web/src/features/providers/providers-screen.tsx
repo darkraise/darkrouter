@@ -37,6 +37,7 @@ import { ProviderStateMark } from "../shell/status-mark"
 import { AddAccountsDialog } from "./add-accounts-dialog"
 import { AddLocalDialog } from "./add-local-dialog"
 import { AddKeylessDialog } from "./add-keyless-dialog"
+import { isLocalPreset } from "./local-runtimes"
 import { ProviderCard } from "./provider-card"
 import { ProviderIcon } from "./provider-icon"
 import {
@@ -371,6 +372,9 @@ export function ProvidersScreen() {
   const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
   const [addLocalOpen, setAddLocalOpen] = useState(false)
+  // Which runtime the local dialog opens on. Null with the dialog open is the
+  // picker the header button means; a row's own button has already named one.
+  const [localPreset, setLocalPreset] = useState<Preset | null>(null)
   const [keylessPreset, setKeylessPreset] = useState<Preset | null>(null)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
@@ -462,7 +466,13 @@ export function ProvidersScreen() {
         setAddOpen(true)
       },
       onAddKeyless: (row) => {
-        setKeylessPreset(presetRows.find((p) => p.id === row.id) ?? null)
+        const p = presetRows.find((q) => q.id === row.id) ?? null
+        // A local runtime is keyless too, but the keyless dialog asks the one
+        // question that cannot apply to it -- which models to import by price,
+        // of a server whose models are all free -- and not the one that can,
+        // which is the address it is listening on.
+        if (p && isLocalPreset(p)) setLocalPreset(p)
+        else setKeylessPreset(p)
       },
     }),
     [probe.mutate, discover.mutate, reset.mutate, presetRows],
@@ -502,7 +512,10 @@ export function ProvidersScreen() {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => setAddLocalOpen(true)}
+          onClick={() => {
+            setLocalPreset(null)
+            setAddLocalOpen(true)
+          }}
         >
           <Plus className="size-[var(--icon-size)]" />
           Add local runtime
@@ -539,10 +552,16 @@ export function ProvidersScreen() {
       />
 
       <AddLocalDialog
-        open={addLocalOpen}
-        onOpenChange={setAddLocalOpen}
+        preset={localPreset}
+        open={addLocalOpen || localPreset !== null}
+        onOpenChange={(next) => {
+          if (next) return
+          setAddLocalOpen(false)
+          setLocalPreset(null)
+        }}
         onDone={(id) => {
           setAddLocalOpen(false)
+          setLocalPreset(null)
           void navigate({ to: "/providers/$id", params: { id } })
         }}
       />
