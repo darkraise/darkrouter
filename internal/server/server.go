@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -549,7 +550,7 @@ func (s *Server) Run(ctx context.Context) error {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			if err := fn(workerCtx); err != nil {
+			if err := runWorker(workerCtx, name, fn, workerRestartDelay); err != nil {
 				log.Printf("%s: %v", name, err)
 			}
 		}()
@@ -623,18 +624,24 @@ func (s *Server) Run(ctx context.Context) error {
 	lc, cancelLC := context.WithCancel(context.Background())
 	defer cancelLC()
 
+	readTimeout, idleTimeout := listenerTimeouts(cfg.Policy.Timeout)
 	proxy := &http.Server{
 		Addr:    cfg.Server.ProxyListen,
 		Handler: s.ProxyHandler(),
 		// No WriteTimeout: it would kill long streams at a fixed age. Slowloris
-		// protection comes from ReadHeaderTimeout instead.
-		ReadHeaderTimeout: 10 * time.Second,
+		// protection comes from ReadHeaderTimeout; ReadTimeout bounds a client
+		// that sends its body at a trickle.
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
 		BaseContext:       func(net.Listener) context.Context { return lc },
 	}
 	admin := &http.Server{
 		Addr:              cfg.Server.AdminListen,
 		Handler:           s.AdminHandler(),
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       minReadTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	// Both listeners are bound before any goroutine starts. ListenAndServe would
@@ -692,6 +699,57 @@ func (s *Server) Run(ctx context.Context) error {
 	stopWorkers()
 	workers.Wait()
 	return shutdownErr
+}
+
+// Listener bounds. minReadTimeout covers max_body_bytes at modest bandwidth;
+// a proxy whose policy.timeout.total is longer gets twice that instead, so a
+// client is never cut off sooner than the gateway would cut off a provider.
+const (
+	readHeaderTimeout  = 10 * time.Second
+	minReadTimeout     = 60 * time.Second
+	listenerIdle       = 120 * time.Second
+	workerRestartDelay = time.Second
+)
+
+func listenerTimeouts(t config.TimeoutConfig) (read, idle time.Duration) {
+	read = minReadTimeout
+	if d := 2 * t.Total; d > read {
+		read = d
+	}
+	return read, listenerIdle
+}
+
+// runWorker runs fn until it returns or ctx ends, restarting it after a panic.
+// A background job that dies with a stack trace takes its whole function —
+// log writing, health persistence, discovery — down for the rest of the
+// process lifetime, which is a worse failure than the one it panicked over.
+func runWorker(ctx context.Context, name string, fn func(context.Context) error,
+	restartDelay time.Duration) error {
+
+	for {
+		err, panicked := runOnce(name, fn, ctx)
+		if !panicked {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(restartDelay):
+		}
+	}
+}
+
+func runOnce(name string, fn func(context.Context) error, ctx context.Context) (err error, panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("%s: panic: %v\n%s", name, r, debug.Stack())
+			panicked = true
+		}
+	}()
+	return fn(ctx), false
 }
 
 func ignoreClosed(err error) error {
