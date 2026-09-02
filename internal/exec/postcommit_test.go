@@ -108,3 +108,38 @@ func TestCommittedStreamIsCutAtIdle(t *testing.T) {
 		t.Fatal("a silent committed stream was not cut at idle")
 	}
 }
+
+// A unary body that arrives slowly is bounded by idle once its headers are in,
+// not by the connect+first_byte budget that was only ever meant to cover the
+// wait for those headers.
+func TestASlowUnaryBodyIsBoundedByIdleNotFirstByte(t *testing.T) {
+	slow := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","model":"m","choices":[{"message":`))
+		w.(http.Flusher).Flush()
+		// Past the 300ms first_byte, well inside the 5s idle.
+		time.Sleep(600 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}
+	cfg := "policy:\n  timeout:\n    connect: 5ms\n    first_byte: 300ms\n    total: 5s\n    idle: 5s\n"
+	for _, tc := range []struct {
+		name string
+		post func(*testing.T, *Executor, string) *httptest.ResponseRecorder
+		body string
+	}{
+		{"passthrough", post, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`},
+		{"ir", postAnthropic, anthropicPing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := &scripted{by: map[string]http.HandlerFunc{"g1": slow}}
+			up := httptest.NewServer(sc)
+			defer up.Close()
+			e, _ := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, cfg)
+			rec := tc.post(t, e, tc.body)
+			if rec.Code != 200 || !strings.Contains(rec.Body.String(), "pong") {
+				t.Fatalf("code = %d body = %s; the body read was cut by the pre-commit deadline",
+					rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

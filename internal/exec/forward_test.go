@@ -42,11 +42,25 @@ func (fakeForwarder) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 
 func (fakeForwarder) RecognizeUsage([]byte) *ir.Usage { return nil }
 
+// noStreamError is the stream error writer for fixtures whose upstream never
+// fails after commit.
+type noStreamError struct{}
+
+func (noStreamError) WriteStreamError(http.ResponseWriter, *ir.Error) {}
+
+// recordedStreamError captures the terminal error a forwarded stream rendered.
+type recordedStreamError struct{ errs []*ir.Error }
+
+func (r *recordedStreamError) WriteStreamError(w http.ResponseWriter, e *ir.Error) {
+	r.errs = append(r.errs, e)
+	_, _ = w.Write([]byte("data: {\"error\":\"" + e.Message + "\"}\n\n"))
+}
+
 func TestForwardStreamBuffersUntilContentThenReplays(t *testing.T) {
 	body := "data: ping\n\ndata: ping\n\ndata: c-first\n\ndata: c-second\n\n"
 	cw, ac := forwardFixture(t)
 
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -61,7 +75,7 @@ func TestAScannerErrorMidStreamLeavesTheClientStreamIntact(t *testing.T) {
 	// not. An event the recognizer cannot parse is simply forwarded.
 	cw, ac := forwardFixture(t)
 	body := "data: c-first\n\ndata: {not json at all\n\ndata: c-second\n\n"
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -75,7 +89,7 @@ func TestForwardStreamFailsOverOnAPreCommitError(t *testing.T) {
 	// so the chain may still move on.
 	cw, ac := forwardFixture(t)
 	out, ierr := ac.Exec.forwardStream(cw,
-		streamResponse("data: ping\n\ndata: e-overloaded\n\n"), ac, fakeForwarder{}, false)
+		streamResponse("data: ping\n\ndata: e-overloaded\n\n"), ac, fakeForwarder{}, noStreamError{}, false)
 
 	if out != adapter.OutcomeRetryableProvider {
 		t.Errorf("outcome = %v, want retryable_provider", out)
@@ -93,7 +107,7 @@ func TestForwardStreamPassesAPostCommitErrorThrough(t *testing.T) {
 	// already has bytes and a second attempt would concatenate two halves.
 	cw, ac := forwardFixture(t)
 	body := "data: c-first\n\ndata: e-overloaded\n\n"
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
@@ -114,7 +128,7 @@ func TestForwardStreamCopiesRawAfterAPostCommitSplitterOverflow(t *testing.T) {
 	// No terminator at all, so the whole tail stays in the carry unterminated
 	// and exceeds the cap within the same read that carries the commit event.
 	body := "data: c-first\n\ndata: " + strings.Repeat("x", 40)
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -164,7 +178,7 @@ func TestForwardStreamCopiesTheUnreadRemainderAfterAPostCommitOverflow(t *testin
 		Body:       io.NopCloser(&chunkedBody{chunks: []string{first, second}}),
 	}
 
-	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -189,9 +203,8 @@ func (f *flakyBody) Read(p []byte) (int, error) {
 }
 
 func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
-	// spec §9: after commit a failure becomes an in-stream error in the
-	// general case, but here the boundary is row honesty alone — no error
-	// event synthesis reaches the client.
+	// spec §9: after commit a failure becomes an in-stream error, rendered in
+	// the inbound dialect, and the row records it too.
 	cw, ac := forwardFixture(t)
 	body := "data: c-first\n\n"
 	resp := &http.Response{
@@ -199,15 +212,22 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(&flakyBody{r: strings.NewReader(body), err: errors.New("connection reset")}),
 	}
-	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, false)
+	se := &recordedStreamError{}
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
 	if !cw.Committed() {
 		t.Fatal("the content event should have committed")
 	}
-	if got := recorderBody(cw); got != body {
-		t.Errorf("client saw %q, want %q", got, body)
+	if got := recorderBody(cw); !strings.HasPrefix(got, body) {
+		t.Errorf("client saw %q, want it to start with %q", got, body)
+	}
+	if len(se.errs) != 1 || se.errs[0].Message != msgUpstreamReadFailed {
+		t.Errorf("stream errors = %+v, want one fixed upstream-read-failed message", se.errs)
+	}
+	if strings.Contains(recorderBody(cw), "connection reset") {
+		t.Error("the transport error's detail reached the client")
 	}
 	if len(ac.Rec.Warnings) == 0 {
 		t.Error("no warning recorded for the post-commit transport failure")
@@ -217,7 +237,7 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 func TestForwardStreamStripsOnlyTheInjectedUsageChunk(t *testing.T) {
 	body := "data: c-first\n\ndata: u-usage\n\ndata: [DONE]\n\n"
 	cw, ac := forwardFixture(t)
-	if _, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, true); ierr != nil {
+	if _, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, true); ierr != nil {
 		t.Fatal(ierr)
 	}
 	if got := recorderBody(cw); got != "data: c-first\n\ndata: [DONE]\n\n" {
@@ -233,7 +253,7 @@ func TestForwardStreamStripsOnlyTheInjectedUsageChunk(t *testing.T) {
 func TestForwardStreamKeepsAUsageChunkTheClientAskedFor(t *testing.T) {
 	body := "data: c-first\n\ndata: u-usage\n\ndata: [DONE]\n\n"
 	cw, ac := forwardFixture(t)
-	if _, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false); ierr != nil {
+	if _, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false); ierr != nil {
 		t.Fatal(ierr)
 	}
 	if got := recorderBody(cw); got != body {
@@ -246,7 +266,7 @@ func TestForwardStreamCommitsAnEmptyCompletion(t *testing.T) {
 	// not a fault. Failing over would burn the whole chain on every one.
 	body := "data: ping\n\ndata: [DONE]\n\n"
 	cw, ac := forwardFixture(t)
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -263,7 +283,7 @@ func TestForwardStreamRefusesAnOversizedPreCommitBuffer(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		b.WriteString("data: ping-padding-padding\n\n")
 	}
-	out, _ := ac.Exec.forwardStream(cw, streamResponse(b.String()), ac, fakeForwarder{}, false)
+	out, _ := ac.Exec.forwardStream(cw, streamResponse(b.String()), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeRetryableProvider {
 		t.Errorf("outcome = %v, want retryable_provider", out)
 	}
@@ -272,7 +292,7 @@ func TestForwardStreamRefusesAnOversizedPreCommitBuffer(t *testing.T) {
 	}
 }
 
-func TestForwardStreamDropsHopByHopAndEncodingHeaders(t *testing.T) {
+func TestForwardStreamForwardsOnlyAllowlistedHeaders(t *testing.T) {
 	cw, ac := forwardFixture(t)
 	resp := streamResponse("data: c-first\n\n")
 	resp.Header.Set("Content-Type", "text/event-stream")
@@ -281,18 +301,26 @@ func TestForwardStreamDropsHopByHopAndEncodingHeaders(t *testing.T) {
 	resp.Header.Set("Connection", "keep-alive")
 	resp.Header.Set("Keep-Alive", "timeout=5")
 	resp.Header.Set("X-Request-Id", "upstream-id")
+	resp.Header.Set("Cache-Control", "no-store")
+	resp.Header.Set("X-RateLimit-Remaining-Tokens", "12")
+	resp.Header.Set("Set-Cookie", "session=abc")
+	resp.Header.Set("Access-Control-Allow-Origin", "*")
+	resp.Header.Set("Server", "upstream/1.0")
 
-	if _, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, false); ierr != nil {
+	if _, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, noStreamError{}, false); ierr != nil {
 		t.Fatal(ierr)
 	}
 	h := cw.Header()
-	if h.Get("Content-Type") != "text/event-stream" {
-		t.Errorf("Content-Type = %q", h.Get("Content-Type"))
+	for k, want := range map[string]string{
+		"Content-Type": "text/event-stream", "X-Request-Id": "upstream-id",
+		"Cache-Control": "no-store", "X-RateLimit-Remaining-Tokens": "12",
+	} {
+		if h.Get(k) != want {
+			t.Errorf("%s = %q, want %q", k, h.Get(k), want)
+		}
 	}
-	if h.Get("X-Request-Id") != "upstream-id" {
-		t.Error("a dialect-meaningful header was dropped")
-	}
-	for _, k := range []string{"Content-Encoding", "Content-Length", "Connection", "Keep-Alive"} {
+	for _, k := range []string{"Content-Encoding", "Content-Length", "Connection", "Keep-Alive",
+		"Set-Cookie", "Access-Control-Allow-Origin", "Server"} {
 		if h.Get(k) != "" {
 			t.Errorf("%s was forwarded: %q", k, h.Get(k))
 		}
@@ -310,7 +338,7 @@ func TestForwardStreamCommitsAPreCommitUnterminatedTail(t *testing.T) {
 	// reach the client and the content that follows it never would.
 	body := "data: ping\n\ndata: c-first\n"
 	cw, ac := forwardFixture(t)
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -327,7 +355,7 @@ func TestForwardStreamDeliversAPostCommitUnterminatedTail(t *testing.T) {
 	// A dropped flush would silently swallow it.
 	body := "data: c-first\n\ndata: c-second\n"
 	cw, ac := forwardFixture(t)
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, false)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}
@@ -541,7 +569,7 @@ func TestForwardStreamStripsAnInjectedUsageChunkOnAnEmptyCompletion(t *testing.T
 	// mutation.
 	body := "data: u-usage\n\ndata: [DONE]\n\n"
 	cw, ac := forwardFixture(t)
-	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, true)
+	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, true)
 	if out != adapter.OutcomeSuccess || ierr != nil {
 		t.Fatalf("outcome = %v err = %v", out, ierr)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -40,22 +39,19 @@ func (o *imageOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 			Type: ir.ErrDarkrouter, Message: "adapter does not serve images",
 		}
 	}
+	ac.resetIdle()
 	out, err := g.ParseImage(resp)
 	if err != nil {
 		return failedParse(ac, resp, err)
 	}
 	out.Model = ac.Cand.Model
 
-	ttft := time.Since(ac.Rec.TS).Milliseconds()
-	ac.Rec.TTFTMs = &ttft
 	// Only when the provider reported it. A dall-e call recorded as zero tokens
 	// is indistinguishable in the log from a call that genuinely cost nothing.
 	if out.UsageReported {
 		applyUsage(ac.Rec, &out.Usage)
 	}
-	ac.Rec.FinalProviderID = ac.Cand.ProviderID
-	ac.Rec.FinalModel = ac.Cand.Model
-	ac.Rec.Warnings = warningStrings(ac.Warns)
+	ac.served(ac.Warns)
 
 	ac.Rec.SurfaceMeta = map[string]any{"image_count": o.req.ImageCount()}
 	for k, v := range map[string]string{"size": o.req.Size, "quality": o.req.Quality} {

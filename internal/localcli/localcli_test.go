@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeCLI answers without spawning anything, so the transport's own behaviour
@@ -439,4 +440,49 @@ func TestTheTransportServesTheSpawnedCLIEndToEnd(t *testing.T) {
 	if !strings.Contains(string(b), `"finish_reason":"stop"`) {
 		t.Errorf("the stream did not finish cleanly: %s", b)
 	}
+}
+
+// A CLI that spawns a helper and then hangs must not leave the helper behind
+// when the run is cut off: the whole process group goes.
+func TestATimedOutRunKillsTheChildsHelpers(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads /proc")
+	}
+	bin := stubAuggie(t, `
+sleep 30 &
+echo $!
+sleep 30
+`)
+	var out strings.Builder
+	err := (&Auggie{Bin: bin, Timeout: 300 * time.Millisecond}).Run(context.Background(), "m", "hi", &out)
+	if err == nil {
+		t.Fatal("a run past its timeout must fail")
+	}
+	pid := strings.TrimSpace(out.String())
+	if pid == "" {
+		t.Fatal("the stub did not report its helper's pid")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if processGone(pid) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("helper %s survived the timeout", pid)
+}
+
+// processGone reports a pid that is unknown or a zombie awaiting reaping —
+// either way it is no longer holding anything.
+func processGone(pid string) bool {
+	b, err := os.ReadFile("/proc/" + pid + "/stat")
+	if err != nil {
+		return true
+	}
+	// The state field follows the parenthesised command name.
+	s := string(b)
+	if i := strings.LastIndexByte(s, ')'); i >= 0 && i+2 < len(s) {
+		return s[i+2] == 'Z' || s[i+2] == 'X'
+	}
+	return false
 }

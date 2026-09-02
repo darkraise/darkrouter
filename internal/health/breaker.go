@@ -89,6 +89,11 @@ type Breaker struct {
 	tripAfter int
 	max       time.Duration
 
+	// policy, when set, supplies trip_after and the maximum cooldown at the
+	// moment they are applied. policy.cooldown is hot-editable, so a value
+	// frozen at construction would hold until the next restart.
+	policy func() (tripAfter int, max time.Duration)
+
 	// now is swappable so tests can advance time without sleeping.
 	now func() time.Time
 
@@ -96,17 +101,40 @@ type Breaker struct {
 }
 
 func New(tripAfter int, max time.Duration) *Breaker {
+	tripAfter, max = clampPolicy(tripAfter, max)
+	return &Breaker{
+		m:         make(map[Key]*state),
+		lastUsed:  make(map[CredKey]time.Time),
+		tripAfter: tripAfter, max: max, now: time.Now,
+	}
+}
+
+// Configure makes the breaker read its thresholds from source on every
+// decision instead of the values New was given. The source is called under
+// the breaker's lock and must be cheap and non-blocking: an atomic read of
+// the current config snapshot, not a query.
+func (b *Breaker) Configure(source func() (tripAfter int, max time.Duration)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.policy = source
+}
+
+func clampPolicy(tripAfter int, max time.Duration) (int, time.Duration) {
 	if tripAfter < 1 {
 		tripAfter = 1
 	}
 	if max <= 0 {
 		max = 15 * time.Minute
 	}
-	return &Breaker{
-		m:         make(map[Key]*state),
-		lastUsed:  make(map[CredKey]time.Time),
-		tripAfter: tripAfter, max: max, now: time.Now,
+	return tripAfter, max
+}
+
+// policyLocked returns the thresholds in force right now.
+func (b *Breaker) policyLocked() (int, time.Duration) {
+	if b.policy == nil {
+		return b.tripAfter, b.max
 	}
+	return clampPolicy(b.policy())
 }
 
 // Available reports whether the triple may be attempted now, and performs the
@@ -153,65 +181,104 @@ func (b *Breaker) availableLocked(k Key) bool {
 
 // Record applies one outcome. It is the only place breaker state changes, so
 // the rules from spec §7.1 live here and nowhere else.
+//
+// Every outcome releases the half-open probe on both entries Available can
+// claim it on. An outcome that leaves the ladder alone still has to do this:
+// the probe is the one admitted caller, and if its attempt ends without
+// touching the entry nothing else ever will, and the entry stays shut.
 func (b *Breaker) Record(k Key, s Signal) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	now := b.now()
+	ck := Key{ProviderID: k.ProviderID, KeyID: k.KeyID}
 
 	switch s.Outcome {
 	case adapter.OutcomeClientCancelled:
 		// Never counts against any provider. Marking a provider unhealthy
 		// because someone pressed Ctrl-C is a self-inflicted outage.
+		b.releaseProbeLocked(k)
+		b.releaseProbeLocked(ck)
 		return
 
 	case adapter.OutcomeRetryableModel:
 		// The provider is reachable and the credential is fine; only this model
 		// is wrong. Phase 6 counts these per target to surface a permanently
 		// misconfigured base URL.
+		b.releaseProbeLocked(k)
+		b.releaseProbeLocked(ck)
 		return
 
-	case adapter.OutcomeSuccess, adapter.OutcomeFatal:
-		// Both prove the provider is reachable and functioning. A 400 says
-		// something about the request, not about the provider.
-		if _, ok := b.m[k]; ok {
-			delete(b.m, k)
-			b.dirty = true
-		}
+	case adapter.OutcomeSuccess:
+		// Proves the provider is reachable and the credential works, so both
+		// entries close fully.
+		b.resetLocked(k)
+		b.resetLocked(ck)
+		return
+
+	case adapter.OutcomeFatal:
+		// Proves the provider is reachable; a 400 says something about the
+		// request, not about the provider. It says nothing about the credential
+		// either way, so a cooling credential keeps its ladder and only gives
+		// back the probe.
+		b.resetLocked(k)
+		b.releaseProbeLocked(ck)
 		return
 
 	case adapter.OutcomeRetryableCredential:
 		// Cools the credential across every model it serves. This never resets
 		// any ladder: a billing-exhausted key must not be resurrected by a
 		// client's malformed request.
-		ck := Key{ProviderID: k.ProviderID, KeyID: k.KeyID}
+		b.releaseProbeLocked(k)
 		st := b.getLocked(ck)
 		b.coolLocked(st, now, st.backoffLevel)
 		return
 
 	case adapter.OutcomeRetryableProvider:
+		b.releaseProbeLocked(ck)
 		st := b.getLocked(k)
-		if s.StatusCode == 429 {
-			if s.HasRetryAfter {
-				d := s.RetryAfter
-				if d > b.max {
-					d = b.max
-				}
-				st.coolingUntil = now.Add(d)
-				st.retryAfterOnly = true
-				st.probing = false
-				b.dirty = true
-				return
+		tripAfter, max := b.policyLocked()
+		if s.HasRetryAfter {
+			// The provider said how long it needs, on a 429 or a 503 alike.
+			// That is more precise than the ladder and does not trip it.
+			d := s.RetryAfter
+			if d > max {
+				d = max
 			}
+			st.coolingUntil = now.Add(d)
+			st.retryAfterOnly = true
+			st.probing = false
+			b.dirty = true
+			return
+		}
+		if s.StatusCode == 429 {
 			b.coolLocked(st, now, st.backoffLevel)
 			return
 		}
 		// Everything else retryable: a single failure must not cool.
 		st.consecutiveFailures++
+		st.probing = false
 		b.dirty = true
-		if st.consecutiveFailures >= b.tripAfter {
+		if st.consecutiveFailures >= tripAfter {
 			b.coolLocked(st, now, st.backoffLevel)
 		}
 		return
+	}
+}
+
+// releaseProbeLocked gives back a half-open claim without changing anything
+// else, so the next caller after expiry becomes the probe instead.
+func (b *Breaker) releaseProbeLocked(k Key) {
+	if st, ok := b.m[k]; ok && st.probing {
+		st.probing = false
+		b.dirty = true
+	}
+}
+
+// resetLocked forgets the entry entirely: ladder, counters and probe.
+func (b *Breaker) resetLocked(k Key) {
+	if _, ok := b.m[k]; ok {
+		delete(b.m, k)
+		b.dirty = true
 	}
 }
 
@@ -228,7 +295,8 @@ func (b *Breaker) getLocked(k Key) *state {
 // escalates. consecutiveFailures is deliberately not reset: it is what makes a
 // probe failure re-trip immediately at the next level.
 func (b *Breaker) coolLocked(st *state, now time.Time, level int) {
-	st.coolingUntil = now.Add(cooldownFor(level, b.max))
+	_, max := b.policyLocked()
+	st.coolingUntil = now.Add(cooldownFor(level, max))
 	st.backoffLevel = level + 1
 	st.retryAfterOnly = false
 	st.probing = false

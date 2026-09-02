@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -94,6 +95,17 @@ type Executor struct {
 	deps            Deps
 }
 
+// Connection-pool settings for the shared upstream transport. Per-host matters
+// more than the total: a gateway talks to a handful of providers, and Go's
+// default of two idle connections per host would reopen a TLS session for
+// nearly every concurrent request to the same one.
+const (
+	tlsHandshakeTimeout = 10 * time.Second
+	maxIdleConns        = 100
+	maxIdleConnsPerHost = 32
+	idleConnTimeout     = 90 * time.Second
+)
+
 // New builds the executor. Transport-level timeouts (connect, first_byte) are
 // read once here because a shared Transport cannot vary them per request; both
 // are documented restart-only. The total timeout is read per request.
@@ -107,10 +119,11 @@ func New(store *config.Store, src provider.Source, adapters map[string]adapter.A
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: t.Connect}).DialContext,
 		ResponseHeaderTimeout: t.FirstByte,
-		TLSHandshakeTimeout:   10 * time.Second,
+		TLSHandshakeTimeout:   tlsHandshakeTimeout,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          maxIdleConns,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+		IdleConnTimeout:       idleConnTimeout,
 		// Spec §8: bytes must arrive as the provider sent them, so the
 		// forwarder can pass them through unchanged. Go otherwise adds
 		// Accept-Encoding: gzip and decompresses transparently, which
@@ -228,39 +241,31 @@ func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
 }
 
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
-	cfg := e.store.Current() // one snapshot for this request's whole lifetime
+	e.RunAux(w, r, d.Name(), ir.SurfaceLLM, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, pt, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
+		if err != nil {
+			return nil, err
+		}
+		return &chatOp{d: d, req: req, pt: pt}, nil
+	})
+}
 
-	if compressedBody(r) {
-		// Refused before parsing, but still logged: the client sent bytes and
-		// got a response, which is an event the operator's records must cover.
-		start := time.Now()
-		rec, done := e.newRecord(r, start, d.Name(), string(ir.SurfaceLLM))
-		defer done()
-		w.Header().Set("X-Darkrouter-Request", rec.ID)
-		w.Header().Set("X-Darkrouter-Attempts", "0")
-		rec.ErrorCode = string(ir.ErrUnsupportedMedia)
-		_ = d.WriteError(w, &ir.Error{
-			Type:    ir.ErrUnsupportedMedia,
-			Message: "content-encoding is not supported: send an uncompressed request body",
-		})
-		return
-	}
+// refuseCompressed answers a request whose body Darkrouter will not decode,
+// and reports whether it did. Refused before parsing, but still logged: the
+// client sent bytes and got a response, which is an event the operator's
+// records must cover.
+func (e *Executor) refuseCompressed(w http.ResponseWriter, r *http.Request,
+	rec *store.RequestRecord, ew errorWriter) bool {
 
-	req, pt, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
-	if err != nil {
-		// The row is opened and closed here rather than in RunSurface: a body
-		// that never parsed has no op to name the surface it was asking for,
-		// and the operator is still owed the record.
-		start := time.Now()
-		rec, done := e.newRecord(r, start, d.Name(), string(ir.SurfaceLLM))
-		defer done()
-		w.Header().Set("X-Darkrouter-Request", rec.ID)
-		w.Header().Set("X-Darkrouter-Attempts", "0")
-		rec.ErrorCode = string(ir.ErrInvalidRequest)
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
-		return
+	if !compressedBody(r) {
+		return false
 	}
-	e.RunSurface(w, r, &chatOp{d: d, req: req, pt: pt}, cfg)
+	rec.ErrorCode = string(ir.ErrUnsupportedMedia)
+	_ = ew.WriteError(w, &ir.Error{
+		Type:    ir.ErrUnsupportedMedia,
+		Message: "content-encoding is not supported: send an uncompressed request body",
+	})
+	return true
 }
 
 // runAttempts drives the chain. The ordered list is fixed at snapshot time and
@@ -324,8 +329,14 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			e.deps.Fleet.MarkUsed(health.CredKey{ProviderID: c.ProviderID, KeyID: c.KeyID}, now)
 		}
 
-		attempts++
-		res := e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, true, nil)
+		ac := &AttemptCtx{
+			Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: attempts + 1,
+			Adapter: ad, FirstModel: firstModel,
+		}
+		res := e.attempt(w, r, op, ac, byID[c.ProviderID], bud, cat, true)
+		if res.Issued {
+			attempts++
+		}
 		if res.Err != nil {
 			lastErr = res.Err
 		}
@@ -341,17 +352,23 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			res.Outcome == adapter.OutcomeFatal && res.Status == http.StatusBadRequest &&
 			attempts < maxAttempts && bud.canStartAttempt(time.Now()) {
 
-			attempts++
 			// The retry drops whatever the provider rejected, and a client told
 			// only "200" would believe its parameter took effect. Naming the
 			// field is not possible here: the edge parser unmarshals into a
 			// fixed struct, so an unmodelled top-level key is already gone.
-			retryWarn := []ir.Warning{{
-				Field: "passthrough", Target: c.ProviderID + "/" + c.Model,
-				Reason: "the provider rejected the forwarded body; it was " +
-					"translated and retried, which drops any field the IR does not model",
-			}}
-			res = e.attempt(w, r, op, cfg, c, byID[c.ProviderID], bud, rec, attempts, ad, cat, firstModel, false, retryWarn)
+			retry := &AttemptCtx{
+				Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: attempts + 1,
+				Adapter: ad, FirstModel: firstModel,
+				Warns: []ir.Warning{{
+					Field: "passthrough", Target: c.ProviderID + "/" + c.Model,
+					Reason: "the provider rejected the forwarded body; it was " +
+						"translated and retried, which drops any field the IR does not model",
+				}},
+			}
+			res = e.attempt(w, r, op, retry, byID[c.ProviderID], bud, cat, false)
+			if res.Issued {
+				attempts++
+			}
 			if res.Err != nil {
 				lastErr = res.Err
 			}
@@ -401,17 +418,45 @@ type attemptResult struct {
 	Err       *ir.Error
 	Path      string
 	Committed bool
+	// Issued reports that a request went to the provider. An attempt that
+	// failed before that point — no credential, nothing to render — consumed
+	// no upstream quota and does not count against policy.retry.max_attempts.
+	Issued bool
 }
+
+// Fixed client-facing messages for failures that happen before the provider is
+// reached. The underlying error names files, presets and token internals that
+// belong in the operator's log, not in a response to whoever holds a proxy
+// token.
+const (
+	msgCredentialUnavailable = "credential unavailable"
+	msgRenderFailed          = "request could not be rendered for this provider"
+	msgUpstreamReadFailed    = "upstream read failed"
+)
+
+// maxErrorBodyBytes bounds what is read from a non-2xx body: to classify a
+// 400, and to drain a connection before it goes back to the pool. An error
+// body is small, and reading an unbounded one from a misbehaving provider is
+// the hazard max_body_bytes exists to prevent.
+const maxErrorBodyBytes = 64 << 10
 
 // attempt performs one upstream call and records it. allowForward gates the
 // fast path: the pre-commit 400 retry (spec §9) calls back in with it false so
 // the same candidate's second try cannot loop back onto the rendering that
 // just failed.
+//
+// The breaker hears from every attempt exactly once, on the way out. The loop
+// claimed this candidate's half-open probe before calling in, so an exit that
+// bypassed the recorder would leave the entry shut with nothing ever testing
+// it again. A 2xx is not recorded here at all: the status line says nothing
+// about whether the body can be read, and the surface reports success once it
+// has.
 func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
-	cfg *config.Config, c router.Candidate, p provider.Provider,
-	bud budget, rec *store.RequestRecord, seq int, ad adapter.Adapter,
-	cat catalog.Reader, firstModel string, allowForward bool,
-	extraWarns []ir.Warning) attemptResult {
+	ac *AttemptCtx, p provider.Provider, bud budget, cat catalog.Reader,
+	allowForward bool) (res attemptResult) {
+
+	c, rec := ac.Cand, ac.Rec
+	defer func() { ac.recordHealth(res.Outcome, ac.resp) }()
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
@@ -422,6 +467,17 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		cancel(errDarkrouterTimeout)
 	})
 	defer timer.Stop()
+	ac.Timer = timer
+
+	path := PathIR
+	// failBefore is an exit that never reached the provider. It still leaves
+	// an attempt row, because the trace has to explain why the candidate the
+	// router chose was not the one that answered.
+	failBefore := func(o adapter.Outcome, err error, msg string, typ ir.ErrorType) attemptResult {
+		log.Printf("request %s: %s/%s: %s: %v", rec.ID, c.ProviderID, c.Model, msg, err)
+		e.recordAttempt(rec, c, o, 0, fmt.Errorf("%s: %w", msg, err), 0, path)
+		return attemptResult{Outcome: o, Path: path, Err: &ir.Error{Type: typ, Message: msg}}
+	}
 
 	apiKey, authorizer, credErr := e.credentialFor(ctx, p, c)
 	if credErr != nil {
@@ -430,8 +486,8 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		// fact about that credential, not about the providers further down the
 		// chain. Fatal ended the chain here, so one malformed subscription
 		// token took down every request naming a model it also served.
-		return attemptResult{Outcome: adapter.OutcomeRetryableCredential, Path: PathIR,
-			Err: &ir.Error{Type: ir.ErrAuthentication, Message: credErr.Error()}}
+		return failBefore(adapter.OutcomeRetryableCredential, credErr,
+			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
 	tgt := &adapter.Target{
 		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
@@ -440,29 +496,28 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		Region:     p.Region, Project: p.Project, Location: p.Location,
 		Publisher: c.Publisher,
 	}
-	warns := append([]ir.Warning(nil), extraWarns...)
 	if iw, ok := inferredWarningFor(c, op.Query()); ok {
-		warns = append(warns, iw)
+		ac.Warns = append(ac.Warns, iw)
 	}
 
-	path := PathIR
 	var (
 		hr        *http.Request
 		fw        adapter.Forwarder
+		pop       passthroughOp
 		strip     bool
 		streaming bool
 	)
 	if allowForward {
-		if pop, ok := op.(passthroughOp); ok {
-			pt := pop.Passthrough()
-			if f, eligible := forwardable(op.Dialect(), pt, c, p, ad); eligible {
+		if po, ok := op.(passthroughOp); ok {
+			pt := po.Passthrough()
+			if f, eligible := forwardable(op.Dialect(), pt, c, p, ac.Adapter); eligible {
 				body, injected, rerr := rewriteForward(pt, op.Query().Model, c.Model, c.Kind)
 				if rerr != nil {
 					// spec §9: the IR parser produces a proper dialect-shaped
 					// error if the body is genuinely invalid, and it can tell
 					// the difference where this cannot. Not a second attempt —
 					// nothing has reached a provider.
-					warns = append(warns, ir.Warning{
+					ac.Warns = append(ac.Warns, ir.Warning{
 						Field: "passthrough", Target: c.ProviderID + "/" + c.Model,
 						Reason: "the body could not be forwarded and was translated instead: " +
 							rerr.Error(),
@@ -473,49 +528,51 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 						Method: pt.Method, Query: pt.Query,
 					})
 					if berr != nil {
-						return attemptResult{Outcome: adapter.OutcomeFatal, Path: PathIR,
-							Err: &ir.Error{Type: ir.ErrDarkrouter, Message: berr.Error()}}
+						return failBefore(adapter.OutcomeFatal, berr, msgRenderFailed, ir.ErrDarkrouter)
 					}
-					hr, fw, strip, streaming, path = built, f, injected, pt.Stream, PathPassthrough
+					hr, fw, pop, strip, streaming, path = built, f, po, injected, pt.Stream, PathPassthrough
 				}
 			}
 		}
 	}
 	if hr == nil {
-		built, buildWarns, err := op.Build(ctx, tgt, ad)
-		warns = append(warns, buildWarns...)
+		built, buildWarns, err := op.Build(ctx, tgt, ac.Adapter)
+		ac.Warns = append(ac.Warns, buildWarns...)
 		if err != nil {
-			return attemptResult{Outcome: adapter.OutcomeFatal, Path: path,
-				Err: &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}}
+			return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
 		}
 		hr = built
 	}
 	if err := makeReplayable(hr); err != nil {
-		return attemptResult{Outcome: adapter.OutcomeFatal, Path: path,
-			Err: &ir.Error{Type: ir.ErrDarkrouter, Message: err.Error()}}
+		return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
 	}
 	if err := applyAuthorizer(ctx, hr, authorizer); err != nil {
 		// A credential that cannot be produced is a credential failure, not a
 		// provider one: an expired OAuth grant must cool the account rather
 		// than the upstream, which is serving everyone else fine.
-		return attemptResult{Outcome: adapter.OutcomeRetryableCredential, Path: path,
-			Err: &ir.Error{Type: ir.ErrAuthentication, Message: err.Error()}}
+		return failBefore(adapter.OutcomeRetryableCredential, err,
+			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
 
 	attemptStart := time.Now()
 	resp, doErr := e.client.Do(hr)
-	outcome := e.classify(ad, r.Context(), ctx, resp, doErr)
+	ac.resp = resp
+	outcome := e.classify(ac.Adapter, r.Context(), ctx, resp, doErr)
 
 	// Some OpenAI-compatible providers report an unknown model as a 400 with an
 	// identifying error code. Classifying that as Fatal would make failover die
-	// on the first provider in a chain that does not carry the model. The 64 KiB
-	// bound matters: an error body is small, and reading an unbounded one from a
-	// misbehaving provider is the hazard max_body_bytes exists to prevent.
-	if bc, ok := ad.(adapter.BodyClassifier); ok &&
+	// on the first provider in a chain that does not carry the model.
+	if bc, ok := ac.Adapter.(adapter.BodyClassifier); ok &&
 		outcome == adapter.OutcomeFatal && resp != nil && resp.StatusCode == 400 {
 
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(body))
+		if rerr != nil {
+			// A 400 whose body cannot be read is still a 400; the classifier
+			// just has less to go on.
+			doErr = rerr
+		}
 		outcome = bc.ClassifyBody(resp, body, doErr)
 	}
 
@@ -524,24 +581,23 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		statusCode = resp.StatusCode
 	}
 	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(attemptStart), path)
-	e.recordHealthFor(c, outcome, resp)
 
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {
+			// Drained so the connection can go back to the pool rather than
+			// being torn down with bytes still in flight.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyBytes))
 			resp.Body.Close()
 		}
-		return attemptResult{Outcome: outcome, Status: statusCode, Err: errorFor(outcome, doErr), Path: path}
+		return attemptResult{Outcome: outcome, Status: statusCode, Err: errorFor(outcome, doErr),
+			Path: path, Issued: true}
 	}
 
 	cw := NewCommitWriter(w)
-	ac := &AttemptCtx{
-		Exec: e, Cfg: cfg, Cand: c, Rec: rec, Seq: seq, Timer: timer,
-		Warns: warns, Adapter: ad, FirstModel: firstModel,
-	}
 	var aerr *ir.Error
 	switch {
 	case path == PathPassthrough && streaming:
-		outcome, aerr = e.forwardStream(cw, resp, ac, fw, strip)
+		outcome, aerr = e.forwardStream(cw, resp, ac, fw, pop, strip)
 	case path == PathPassthrough:
 		outcome, aerr = e.forwardUnary(cw, resp, ac, fw)
 	default:
@@ -555,10 +611,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	if cw.Committed() && outcome != adapter.OutcomeSuccess {
 		rec.ErrorCode = string(ir.ErrAPI)
 		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
-			Path: path, Committed: true}
+			Path: path, Committed: true, Issued: true}
 	}
 	return attemptResult{Outcome: outcome, Status: statusCode, Err: aerr,
-		Path: path, Committed: cw.Committed()}
+		Path: path, Committed: cw.Committed(), Issued: true}
 }
 
 // The attempt row is written from the HTTP status before the body is read,
@@ -607,18 +663,17 @@ func demoteLastAttempt(rec *store.RequestRecord, outcome adapter.Outcome, commit
 // failure invisible: the buffered events are simply discarded and the loop
 // tries the next candidate. The dialect writer is not even constructed until
 // commit, because building it mutates the response headers.
-func (e *Executor) attemptStream(d edge.Dialect,
-	cfg *config.Config, c router.Candidate, resp *http.Response,
-	rec *store.RequestRecord, seq int, timer *time.Timer,
-	warns []ir.Warning, ad adapter.Adapter, cw *CommitWriter) (adapter.Outcome, *ir.Error) {
+func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *AttemptCtx,
+	cw *CommitWriter) (adapter.Outcome, *ir.Error) {
 
 	defer resp.Body.Close()
+	cfg, rec := ac.Cfg, ac.Rec
 
 	// Warnings raised by the events themselves, as distinct from the ones the
 	// request rendering produced.
 	var streamWarns []ir.Warning
 
-	next, stop := iter.Pull2(ad.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes))
+	next, stop := iter.Pull2(ac.Adapter.ParseStream(resp.Body, cfg.Server.SSE.MaxLineBytes))
 	defer stop()
 
 	buf := newPreCommitBuffer(cfg.Server.SSE.MaxPrecommitBytes)
@@ -640,8 +695,7 @@ func (e *Executor) attemptStream(d edge.Dialect,
 			// A 2xx whose stream fails before commit is classified from the
 			// stream error, not the status line. Anthropic delivers
 			// overloaded_error as an in-stream event under a 200.
-			return adapter.OutcomeRetryableProvider,
-				e.reclassifyStream(c, resp, rec, err.Error())
+			return adapter.OutcomeRetryableProvider, ac.reclassifyStream(err.Error())
 		}
 		if ev.Usage != nil {
 			applyUsage(rec, ev.Usage)
@@ -654,32 +708,19 @@ func (e *Executor) attemptStream(d edge.Dialect,
 		if berr := buf.add(ev); berr != nil {
 			// A cap breach is an attempt failure, not a client error: the
 			// provider is misbehaving and another one may not.
-			return adapter.OutcomeRetryableProvider,
-				e.reclassifyStream(c, resp, rec, berr.Error())
+			return adapter.OutcomeRetryableProvider, ac.reclassifyStream(berr.Error())
 		}
 	}
 
 	// Phase two: committed, or the stream ended empty. Failover is impossible
 	// from here, so every later failure becomes an error event in the stream.
-	if haveCommitted {
-		ttft := time.Since(rec.TS).Milliseconds()
-		rec.TTFTMs = &ttft
-	}
-	rec.FinalProviderID = c.ProviderID
-	rec.FinalModel = c.Model
-	rec.Warnings = warningStrings(warns)
-	e.writeDiagnostics(cw, rec.ID, c, seq)
+	ac.served(ac.Warns)
+	e.writeDiagnostics(cw, rec.ID, ac.Cand, ac.Seq)
 
 	// Post-commit, policy.timeout.total stops applying and policy.timeout.idle
 	// bounds the gap between events instead: a legitimate ten-minute reasoning
 	// response must not be killed, while a provider that goes silent must be.
-	idle := cfg.Policy.Timeout.Idle
-	resetIdle := func() {
-		if idle > 0 {
-			timer.Reset(idle)
-		}
-	}
-	resetIdle()
+	ac.resetIdle()
 
 	events := func(yield func(ir.StreamEvent, error) bool) {
 		for _, buffered := range buf.events() {
@@ -696,7 +737,7 @@ func (e *Executor) attemptStream(d edge.Dialect,
 				return
 			}
 			if err == nil {
-				resetIdle()
+				ac.resetIdle()
 				if ev.Usage != nil {
 					applyUsage(rec, ev.Usage)
 				}
@@ -713,19 +754,17 @@ func (e *Executor) attemptStream(d edge.Dialect,
 		}
 	}
 	_ = d.WriteStream(cw, events)
-	rec.Warnings = warningStrings(append(warns, streamWarns...))
+	rec.Warnings = warningStrings(append(ac.Warns, streamWarns...))
 	return adapter.OutcomeSuccess, nil
 }
 
 // reclassifyStream records a pre-commit stream failure against health and the
 // attempt row, and returns the error to serve if this was the last candidate.
-func (e *Executor) reclassifyStream(c router.Candidate, resp *http.Response,
-	rec *store.RequestRecord, msg string) *ir.Error {
-
-	e.recordHealthFor(c, adapter.OutcomeRetryableProvider, resp)
-	demoteLastAttempt(rec, adapter.OutcomeRetryableProvider, false)
-	if n := len(rec.Attempts); n > 0 {
-		rec.Attempts[n-1].Error = msg
+func (ac *AttemptCtx) reclassifyStream(msg string) *ir.Error {
+	ac.recordHealth(adapter.OutcomeRetryableProvider, ac.resp)
+	demoteLastAttempt(ac.Rec, adapter.OutcomeRetryableProvider, false)
+	if n := len(ac.Rec.Attempts); n > 0 {
+		ac.Rec.Attempts[n-1].Error = msg
 	}
 	return &ir.Error{Type: ir.ErrAPI, Message: msg}
 }
@@ -1088,29 +1127,4 @@ func applyUsage(rec *store.RequestRecord, u *ir.Usage) {
 	// CostMicros stays nil here: it is priced once in priceRecord, at log
 	// time, from the model that actually served -- not from each usage event
 	// that arrived on the way.
-}
-
-// tapStream observes events on their way to the edge writer without buffering
-// them. Usage arrives on a late event and the first content delta defines TTFT,
-// so neither is visible unless the sequence is wrapped.
-func tapStream(events iter.Seq2[ir.StreamEvent, error],
-	onFirstContent func(), onUsage func(*ir.Usage)) iter.Seq2[ir.StreamEvent, error] {
-
-	return func(yield func(ir.StreamEvent, error) bool) {
-		seenContent := false
-		for ev, err := range events {
-			if err == nil {
-				if !seenContent && ev.Type == ir.EventContentDelta {
-					seenContent = true
-					onFirstContent()
-				}
-				if ev.Usage != nil {
-					onUsage(ev.Usage)
-				}
-			}
-			if !yield(ev, err) {
-				return
-			}
-		}
-	}
 }

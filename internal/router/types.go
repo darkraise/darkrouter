@@ -53,7 +53,9 @@ type Candidate struct {
 	KeyID      string
 	Model      string
 	Kind       string
-	Publisher  string // vertex only; empty in phase 3
+	// Publisher is the model's publisher for a vertex target, which routes
+	// the request to that publisher's endpoint. Empty for every other kind.
+	Publisher string
 
 	// Inferred marks a candidate admitted on guessed capability metadata.
 	// Master design §6.4 admits these rather than excluding them, and the

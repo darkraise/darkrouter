@@ -58,7 +58,7 @@ func applyDefaults(c *Config) {
 		c.Server.MaxBodyBytes = 33554432
 	}
 	if c.Server.ShutdownGrace == 0 {
-		c.Server.ShutdownGrace = 30 * time.Second
+		c.Server.ShutdownGrace = 10 * time.Second
 	}
 	if c.Server.SSE.MaxLineBytes == 0 {
 		c.Server.SSE.MaxLineBytes = 1048576
@@ -189,6 +189,26 @@ func validate(c *Config) error {
 	}
 	if c.Policy.Retry.MaxAttempts < 1 {
 		return fmt.Errorf("policy.retry.max_attempts must be at least 1")
+	}
+	if c.Server.ShutdownGrace <= 0 {
+		return fmt.Errorf("server.shutdown_grace must be positive")
+	}
+	t := c.Policy.Timeout
+	for _, d := range []struct {
+		name string
+		v    time.Duration
+	}{
+		{"connect", t.Connect}, {"first_byte", t.FirstByte}, {"total", t.Total}, {"idle", t.Idle},
+	} {
+		if d.v <= 0 {
+			return fmt.Errorf("policy.timeout.%s must be positive", d.name)
+		}
+	}
+	// The budget gate refuses to start an attempt unless the remaining total
+	// covers connect + first_byte, so a smaller total would start nothing.
+	if t.Total < t.Connect+t.FirstByte {
+		return fmt.Errorf("policy.timeout.total (%s) must be at least connect + first_byte (%s)",
+			t.Total, t.Connect+t.FirstByte)
 	}
 	if err := ValidateAliases(c.Aliases); err != nil {
 		return err

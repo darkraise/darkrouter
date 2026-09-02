@@ -3,13 +3,16 @@ package exec
 import (
 	"context"
 	"crypto/rand"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/router"
@@ -63,7 +66,8 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 	if len(cands) > 0 {
 		model = cands[0].Model
 	}
-	if tokens, ok := e.nativeCount(r.Context(), req, cands, byID, nativeKind); ok {
+	if tokens, ok := e.nativeCount(r.Context(), req, cands, byID, nativeKind,
+		newBudget(cfg.Policy.Timeout, start), cat(res)); ok {
 		rec.Status = "success"
 		rec.TokensIn = int64(tokens)
 		_ = d.WriteCount(w, tokens)
@@ -79,11 +83,23 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 	_ = d.WriteCount(w, tokens)
 }
 
+// maxCountBodyBytes bounds a counting response, which is a handful of
+// integers; anything larger is a provider fault and falls back to the estimate.
+const maxCountBodyBytes = 64 << 10
+
+func cat(res resolved) catalog.Reader { return res.Catalog }
+
 // nativeCount tries the first candidate that speaks the inbound counting
 // dialect. A failure reports false rather than an error: this endpoint is
 // advisory, and an estimate beats a 502 for a client sizing a context window.
+//
+// It is one call rather than the attempt loop, but it shares the loop's
+// discipline: the candidate's breaker is consulted and told the outcome,
+// the credential is resolved the same way, and the call runs under the same
+// per-attempt deadline. A counting endpoint that is down is the same
+// provider that is down.
 func (e *Executor) nativeCount(ctx context.Context, req *ir.Request, cands []router.Candidate,
-	byID map[string]provider.Provider, nativeKind string) (int, bool) {
+	byID map[string]provider.Provider, nativeKind string, bud budget, cat catalog.Reader) (int, bool) {
 
 	for _, c := range cands {
 		if c.Kind != nativeKind {
@@ -97,31 +113,67 @@ func (e *Executor) nativeCount(ctx context.Context, req *ir.Request, cands []rou
 		if !ok {
 			continue
 		}
-		p := byID[c.ProviderID]
-		style := p.AuthStyle
-		if style == "" {
-			style = presetStyle(p.Preset)
+		hk := health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}
+		if e.deps.Fleet != nil && !e.deps.Fleet.Available(hk) {
+			continue
 		}
-		tgt := &adapter.Target{
-			BaseURL: p.BaseURL, APIKey: secretOf(p, c.KeyID, style), Model: c.Model,
-		}
-		hr, err := tc.BuildCountRequest(ctx, tgt, req)
-		if err != nil {
-			return 0, false
-		}
-		resp, err := e.client.Do(hr)
-		if err != nil {
-			return 0, false
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			resp.Body.Close()
-			return 0, false
-		}
-		tokens, err := tc.ParseCountResponse(resp)
-		if err != nil {
-			return 0, false
-		}
-		return tokens, true
+		tokens, ok := e.countOnce(ctx, req, c, byID[c.ProviderID], tc, ad, bud, cat)
+		return tokens, ok
 	}
 	return 0, false
+}
+
+func (e *Executor) countOnce(ctx context.Context, req *ir.Request, c router.Candidate,
+	p provider.Provider, tc adapter.TokenCounter, ad adapter.Adapter, bud budget,
+	cat catalog.Reader) (tokens int, ok bool) {
+
+	ctx, cancel := context.WithDeadline(ctx, bud.attemptDeadline(time.Now()))
+	defer cancel()
+
+	outcome := adapter.OutcomeRetryableProvider
+	var resp *http.Response
+	defer func() { e.recordHealthFor(c, outcome, resp) }()
+
+	apiKey, authorizer, err := e.credentialFor(ctx, p, c)
+	if err != nil {
+		outcome = adapter.OutcomeRetryableCredential
+		return 0, false
+	}
+	tgt := &adapter.Target{
+		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
+		Info:   modelInfo(cat, c.ProviderID, c.Model),
+		Region: p.Region, Project: p.Project, Location: p.Location, Publisher: c.Publisher,
+	}
+	hr, err := tc.BuildCountRequest(ctx, tgt, req)
+	if err != nil {
+		outcome = adapter.OutcomeFatal
+		return 0, false
+	}
+	if err := makeReplayable(hr); err != nil {
+		outcome = adapter.OutcomeFatal
+		return 0, false
+	}
+	if err := applyAuthorizer(ctx, hr, authorizer); err != nil {
+		outcome = adapter.OutcomeRetryableCredential
+		return 0, false
+	}
+
+	resp, doErr := e.client.Do(hr)
+	outcome = e.classify(ad, ctx, ctx, resp, doErr)
+	if outcome != adapter.OutcomeSuccess {
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyBytes))
+			resp.Body.Close()
+		}
+		return 0, false
+	}
+	// A count response is a handful of integers; a body past the cap is a
+	// provider fault, and a 200 that cannot be read counts as one.
+	resp.Body = io.NopCloser(io.LimitReader(resp.Body, maxCountBodyBytes))
+	tokens, err = tc.ParseCountResponse(resp)
+	if err != nil {
+		outcome = adapter.OutcomeRetryableProvider
+		return 0, false
+	}
+	return tokens, true
 }

@@ -323,3 +323,142 @@ func TestParseRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+// tripAndExpire cools the triple through the ladder and moves the clock past
+// the cooldown, so the next Available call is the half-open probe claim.
+func tripAndExpire(t *testing.T, b *Breaker, now *time.Time, k Key) {
+	t.Helper()
+	for i := 0; i < 3; i++ {
+		b.Record(k, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	}
+	if b.Available(k) {
+		t.Fatal("three 5xx must cool the triple")
+	}
+	*now = now.Add(2 * time.Second)
+	if !b.Available(k) {
+		t.Fatal("the first caller after expiry must be admitted as the probe")
+	}
+	if b.Available(k) {
+		t.Fatal("a second caller must wait while the probe is out")
+	}
+}
+
+// A probe whose attempt never reached the provider must not leave the entry
+// half-open forever: every outcome the attempt can end in releases it.
+func TestProbeIsReleasedByOutcomesThatDoNotChangeTheLadder(t *testing.T) {
+	for _, o := range []adapter.Outcome{adapter.OutcomeClientCancelled, adapter.OutcomeRetryableModel} {
+		t.Run(string(o), func(t *testing.T) {
+			b, now := newTestBreaker(t)
+			tripAndExpire(t, b, now, triple)
+			b.Record(triple, Signal{Outcome: o})
+			if !b.Available(triple) {
+				t.Fatalf("%s left the probe claimed; the triple is unavailable forever", o)
+			}
+		})
+	}
+}
+
+func TestProbeIsReleasedByACredentialFailure(t *testing.T) {
+	b, now := newTestBreaker(t)
+	tripAndExpire(t, b, now, triple)
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	if b.Available(triple) {
+		t.Fatal("a 401 must cool the credential")
+	}
+	// Past the credential cooldown (level 0: 1s). The model-level entry's own
+	// cooldown expired earlier, and its probe must have been released by the
+	// credential failure rather than still being out.
+	*now = now.Add(2 * time.Second)
+	if !b.Available(triple) {
+		t.Fatal("the model-level probe was never released after the credential failure")
+	}
+}
+
+// The credential-level entry claims its own probe when a credential cooldown
+// expires. A success on the model that probed it must release that claim too,
+// or the credential stays half-open with nothing ever testing it again.
+func TestASuccessfulProbeReleasesTheCredentialLevelClaim(t *testing.T) {
+	b, now := newTestBreaker(t)
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	*now = now.Add(2 * time.Second)
+	if !b.Available(triple) {
+		t.Fatal("the first caller after the credential cooldown must be admitted")
+	}
+	b.Record(triple, Signal{Outcome: adapter.OutcomeSuccess, StatusCode: 200})
+	if !b.Available(triple) {
+		t.Fatal("a successful probe left the credential-level entry claimed")
+	}
+}
+
+func TestAFatalProbeReleasesTheCredentialClaimWithoutResettingIt(t *testing.T) {
+	b, now := newTestBreaker(t)
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 402})
+	*now = now.Add(2 * time.Second)
+	if !b.Available(triple) {
+		t.Fatal("the first caller after the credential cooldown must be admitted")
+	}
+	b.Record(triple, Signal{Outcome: adapter.OutcomeFatal, StatusCode: 400})
+	if !b.Available(triple) {
+		t.Fatal("a fatal probe left the credential-level entry claimed")
+	}
+	// The ladder was not reset: the next credential failure escalates.
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 402})
+	*now = now.Add(1500 * time.Millisecond)
+	if b.Available(triple) {
+		t.Fatal("the credential ladder was reset by a 400; level 1 is 2s")
+	}
+}
+
+// Retry-After on a 503 or 529 is as precise an instruction as on a 429, and
+// a provider that says how long it needs deserves exactly that long.
+func TestRetryAfterOnAServerErrorCoolsWithoutTheLadder(t *testing.T) {
+	for _, code := range []int{503, 529} {
+		b, now := newTestBreaker(t)
+		b.Record(triple, Signal{
+			Outcome: adapter.OutcomeRetryableProvider, StatusCode: code,
+			RetryAfter: 5 * time.Second, HasRetryAfter: true,
+		})
+		if b.Available(triple) {
+			t.Fatalf("%d with Retry-After did not cool", code)
+		}
+		*now = now.Add(6 * time.Second)
+		if !b.Available(triple) {
+			t.Fatalf("%d cooldown outlived its Retry-After", code)
+		}
+		// No ladder was tripped, so there is no probe: a second caller is
+		// admitted as well.
+		if !b.Available(triple) {
+			t.Fatalf("%d Retry-After cooldown left a probe behind", code)
+		}
+	}
+}
+
+// policy.cooldown is hot-editable, so the thresholds are read when they are
+// applied rather than frozen at construction.
+func TestPolicyIsReadLiveOnEveryRecord(t *testing.T) {
+	b, now := newTestBreaker(t)
+	tripAfter, max := 3, 15*time.Minute
+	b.Configure(func() (int, time.Duration) { return tripAfter, max })
+
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	if !b.Available(triple) {
+		t.Fatal("one 5xx cooled the triple under trip_after 3")
+	}
+	tripAfter = 1
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	if b.Available(triple) {
+		t.Fatal("trip_after 1 was not applied without a restart")
+	}
+
+	// max clamps the next cooldown at the moment it is applied.
+	max = 500 * time.Millisecond
+	*now = now.Add(2 * time.Second)
+	if !b.Available(triple) {
+		t.Fatal("expected the probe to be admitted after the level-0 cooldown")
+	}
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	*now = now.Add(600 * time.Millisecond)
+	if !b.Available(triple) {
+		t.Fatal("the escalated cooldown was not clamped to the edited max")
+	}
+}

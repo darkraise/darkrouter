@@ -1,10 +1,10 @@
 package exec
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -22,7 +22,7 @@ import (
 // stream_options produced. When the client asked for usage itself the chunk is
 // theirs and removing it would be a fourth mutation.
 func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *AttemptCtx,
-	fw adapter.Forwarder, strip bool) (adapter.Outcome, *ir.Error) {
+	fw adapter.Forwarder, se streamErrorWriter, strip bool) (adapter.Outcome, *ir.Error) {
 
 	defer resp.Body.Close()
 
@@ -37,15 +37,6 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		usage        ir.Usage
 	)
 
-	// Post-commit, policy.timeout.total stops applying and policy.timeout.idle
-	// bounds the gap between events instead — the same switch the IR stream
-	// path makes, for the same reason.
-	resetIdle := func() {
-		if d := cfg.Policy.Timeout.Idle; d > 0 {
-			ac.Timer.Reset(d)
-		}
-	}
-
 	// recordWarning notes a post-commit fault on the row. Failover is
 	// impossible once bytes are on the wire, so this is the only place left
 	// for the fault to show up.
@@ -57,11 +48,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 	commit := func() {
 		committed = true
-		ttft := time.Since(rec.TS).Milliseconds()
-		rec.TTFTMs = &ttft
-		rec.FinalProviderID = c.ProviderID
-		rec.FinalModel = c.Model
-		rec.Warnings = warningStrings(ac.Warns)
+		ac.served(ac.Warns)
 		copyResponseHeaders(cw.Header(), resp.Header)
 		e.writeDiagnostics(cw, rec.ID, c, ac.Seq)
 		cw.WriteHeader(resp.StatusCode)
@@ -70,7 +57,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		}
 		pending, pendingBytes = nil, 0
 		cw.Flush()
-		resetIdle()
+		ac.resetIdle()
 	}
 
 	// step handles one whole event. A non-nil error ends the attempt.
@@ -86,8 +73,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 		if !committed {
 			if re.ErrPayload != "" {
-				return adapter.OutcomeRetryableProvider,
-					e.reclassifyStream(c, resp, rec, re.ErrPayload)
+				return adapter.OutcomeRetryableProvider, ac.reclassifyStream(re.ErrPayload)
 			}
 			if re.Content {
 				commit()
@@ -97,7 +83,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 			}
 			if cap := cfg.Server.SSE.MaxPrecommitBytes; cap > 0 && pendingBytes+len(raw) > cap {
 				return adapter.OutcomeRetryableProvider,
-					e.reclassifyStream(c, resp, rec, ErrPreCommitBufferFull.Error())
+					ac.reclassifyStream(ErrPreCommitBufferFull.Error())
 			}
 			// Counted against the cap either way — a flood shaped like the
 			// injected summary must still trip it — but only kept for replay
@@ -117,11 +103,11 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		}
 		_, _ = cw.Write(raw)
 		cw.Flush()
-		resetIdle()
+		ac.resetIdle()
 		return adapter.OutcomeSuccess, nil
 	}
 
-	buf := make([]byte, 32<<10)
+	buf := make([]byte, copyChunkBytes)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
@@ -133,8 +119,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 			}
 			if serr != nil {
 				if !committed {
-					return adapter.OutcomeRetryableProvider,
-						e.reclassifyStream(c, resp, rec, serr.Error())
+					return adapter.OutcomeRetryableProvider, ac.reclassifyStream(serr.Error())
 				}
 				// Spec §6: past commit the recognizer's opinion no longer
 				// matters. What is already in the carry still owes the client
@@ -152,14 +137,18 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		if rerr != nil {
 			if rerr != io.EOF {
 				if !committed {
-					return adapter.OutcomeRetryableProvider,
-						e.reclassifyStream(c, resp, rec, rerr.Error())
+					return adapter.OutcomeRetryableProvider, ac.reclassifyStream(rerr.Error())
 				}
-				// Spec §9: after commit a failure becomes an in-stream error
-				// in the general case, but synthesizing a dialect-shaped one
-				// here would require a dialect writer — we hold only a Forwarder.
-				// The row records the failure; that honest accounting is the boundary.
+				// Spec §9: after commit a failure becomes an in-stream error.
+				// Whatever the splitter still holds goes out first, so the
+				// error event lands on an event boundary rather than inside a
+				// half-delivered one.
+				if tail := sp.flush(); len(tail) > 0 {
+					_, _ = cw.Write(tail)
+				}
 				recordWarning("upstream connection failed after commit: " + rerr.Error())
+				se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
+				return adapter.OutcomeSuccess, nil
 			}
 			break
 		}
@@ -181,31 +170,36 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 	return adapter.OutcomeSuccess, nil
 }
 
-// hopByHop is RFC 9110 §7.6.1's connection-specific header set.
-var hopByHop = map[string]bool{
-	"connection": true, "keep-alive": true, "proxy-authenticate": true,
-	"proxy-authorization": true, "te": true, "trailer": true,
-	"transfer-encoding": true, "upgrade": true,
+// streamErrorWriter renders a terminal in-stream error in the inbound
+// dialect's wire form. passthroughOp satisfies it; the forwarder holds only
+// this slice of it.
+type streamErrorWriter interface {
+	WriteStreamError(w http.ResponseWriter, e *ir.Error)
 }
 
-// copyResponseHeaders forwards the upstream's headers minus the ones that
-// describe the connection or the encoding.
+// forwardedResponseHeaders is the upstream header set a forwarded response may
+// carry to the client. Everything else is dropped: a provider's Set-Cookie,
+// CORS grant or server banner describes the provider's relationship with the
+// gateway, not the gateway's with the client, and forwarding it would let an
+// upstream set policy on Darkrouter's origin.
 //
-// Content-Encoding and Content-Length are dropped rather than copied. Spec §8:
-// copying them through would label bytes with an encoding or a length that the
-// forward no longer matches — and stripping a usage chunk changes the length
-// even when nothing else does. Darkrouter's own diagnostics are added after
-// this call, so an upstream echoing one cannot spoof it.
+// Content-Length is deliberately absent even though it looks harmless. Spec
+// §8: stripping a usage chunk changes the length even when nothing else does,
+// and a wrong length is worse than none.
+var forwardedResponseHeaders = map[string]bool{
+	"content-type":  true,
+	"cache-control": true,
+	"x-request-id":  true,
+}
+
+// copyResponseHeaders forwards the allowlisted upstream headers plus every
+// x-ratelimit-* header, which clients use to pace themselves against the
+// provider's quota. Darkrouter's own diagnostics are added after this call,
+// so an upstream echoing one cannot spoof it.
 func copyResponseHeaders(dst, src http.Header) {
-	skip := map[string]bool{"content-length": true, "content-encoding": true}
-	for _, v := range src.Values("Connection") {
-		for _, name := range strings.Split(v, ",") {
-			skip[strings.ToLower(strings.TrimSpace(name))] = true
-		}
-	}
 	for k, vs := range src {
 		lk := strings.ToLower(k)
-		if hopByHop[lk] || skip[lk] || strings.HasPrefix(lk, "x-darkrouter-") {
+		if !forwardedResponseHeaders[lk] && !strings.HasPrefix(lk, "x-ratelimit-") {
 			continue
 		}
 		for _, v := range vs {
@@ -232,12 +226,14 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 
 	defer resp.Body.Close()
 	rec, c := ac.Rec, ac.Cand
+	ac.resetIdle()
 
 	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxForwardedUnaryBytes+1))
 	oversize := int64(len(body)) > maxForwardedUnaryBytes
 	if rerr != nil && !oversize {
-		// Nothing has reached the client, so this is still a failover.
-		return adapter.OutcomeRetryableProvider, &ir.Error{Type: ir.ErrAPI, Message: rerr.Error()}
+		// Nothing has reached the client, so this is still a failover, and
+		// a 200 that cannot be read counts against the provider like a 5xx.
+		return failedParse(ac, resp, fmt.Errorf("%s: %w", msgUpstreamReadFailed, rerr))
 	}
 
 	warns := ac.Warns
@@ -255,12 +251,7 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 		})
 	}
 
-	ttft := time.Since(rec.TS).Milliseconds()
-	rec.TTFTMs = &ttft
-	rec.FinalProviderID = c.ProviderID
-	rec.FinalModel = c.Model
-	rec.Warnings = warningStrings(warns)
-
+	ac.served(warns)
 	copyResponseHeaders(cw.Header(), resp.Header)
 	e.writeDiagnostics(cw, rec.ID, c, ac.Seq)
 	cw.WriteHeader(resp.StatusCode)

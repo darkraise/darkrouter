@@ -2,16 +2,20 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/admin"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -396,5 +400,78 @@ func TestALoginWorksAgainstAConfiguredHash(t *testing.T) {
 	s.AdminHandler().ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// policy.cooldown is hot-editable, and the edit has to reach the breaker
+// without a restart.
+func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "darkrouter.yaml")
+	write := func(tripAfter string) {
+		body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" +
+			"policy:\n  cooldown:\n    trip_after: " + tripAfter + "\n" +
+			"providers:\n  - id: fake\n    kind: openaicompat\n" +
+			"    base_url: https://up.example/v1\n    api_key: ${K}\n    models: [m]\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("3")
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := serverBackedBy(t, cfgStore)
+
+	k := health.Key{ProviderID: "fake", KeyID: "k", Model: "m"}
+	fail := health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503}
+	s.breaker.Record(k, fail)
+	if !s.breaker.Available(k) {
+		t.Fatal("one 5xx cooled the target under trip_after 3")
+	}
+
+	write("1")
+	if err := cfgStore.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	s.breaker.Record(k, fail)
+	if s.breaker.Available(k) {
+		t.Fatal("the edited trip_after was not applied to the running breaker")
+	}
+}
+
+func TestReadyzReports503WhenTheConfigIsInvalid(t *testing.T) {
+	s := newTestServer(t, "")
+	s.store.RecordError(errors.New("bad edit"))
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "bad edit") {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+}
+
+func TestReadyzReports503WhenTheDatabaseIsGone(t *testing.T) {
+	s := newTestServer(t, "")
+	_ = s.db.Close()
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503", rec.Code)
+	}
+}
+
+func TestListenerTimeoutsAreSet(t *testing.T) {
+	cfg := config.TimeoutConfig{Total: 10 * time.Second}
+	read, idle := listenerTimeouts(cfg)
+	if read != 60*time.Second || idle != 120*time.Second {
+		t.Errorf("timeouts = %v/%v, want 60s/120s", read, idle)
+	}
+	cfg.Total = 10 * time.Minute
+	if read, _ = listenerTimeouts(cfg); read != 20*time.Minute {
+		t.Errorf("read timeout = %v, want twice a long total", read)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -40,6 +39,7 @@ func (o *rerankOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 			Type: ir.ErrDarkrouter, Message: "adapter does not serve rerank",
 		}
 	}
+	ac.resetIdle()
 	out, err := rr.ParseRerank(resp)
 	if err != nil {
 		return failedParse(ac, resp, err)
@@ -61,12 +61,8 @@ func (o *rerankOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 		}
 	}
 
-	ttft := time.Since(ac.Rec.TS).Milliseconds()
-	ac.Rec.TTFTMs = &ttft
 	applyUsage(ac.Rec, &out.Usage)
-	ac.Rec.FinalProviderID = ac.Cand.ProviderID
-	ac.Rec.FinalModel = ac.Cand.Model
-	ac.Rec.Warnings = warningStrings(ac.Warns)
+	ac.served(ac.Warns)
 
 	ac.Rec.SurfaceMeta = map[string]any{"document_count": o.req.DocumentCount()}
 	if o.req.TopN > 0 {

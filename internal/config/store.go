@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,10 @@ type Store struct {
 	cur     atomic.Pointer[Config]
 	lastErr atomic.Pointer[error]
 	overlay atomic.Pointer[func(*Config) error]
+
+	// reloadMu serialises Reload. The watcher and the admin API both call it,
+	// and two parses racing to publish could land the older one last.
+	reloadMu sync.Mutex
 }
 
 // SetOverlay installs a transform applied to every freshly-loaded Config
@@ -81,6 +86,8 @@ func (s *Store) RecordError(err error) {
 // A file that fails validation is rejected wholesale and the previous
 // configuration stays live: a broken edit must never take the gateway down.
 func (s *Store) Reload() error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
 	next, err := Load(s.path, s.lookup)
 	if err != nil {
 		s.lastErr.Store(&err)
@@ -119,7 +126,21 @@ func restartOnlyWarnings(prev, next *Config) []string {
 // Watch reloads on change until ctx is cancelled. It watches the parent
 // directory and filters by filename, because a watch on the file itself is lost
 // the first time an editor saves by rename.
+//
+// A change to where the path resolves counts as a change to the file. A
+// Kubernetes ConfigMap is projected as a symlink into a versioned directory
+// and updated by swapping that symlink, so the watched name is never written
+// and only an entry beside it moves.
 func (s *Store) Watch(ctx context.Context) error { return s.watch(ctx, nil) }
+
+// realPath resolves symlinks; a path that cannot be resolved is returned as
+// written so a transient error does not read as a change.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
 
 // watch closes ready once the directory watch is established. The kernel does
 // not replay events that predate the watch, so a caller that edits the file
@@ -131,7 +152,7 @@ func (s *Store) watch(ctx context.Context, ready chan<- struct{}) error {
 	}
 	defer w.Close()
 
-	dir, name := filepath.Split(s.path)
+	dir, _ := filepath.Split(s.path)
 	if dir == "" {
 		dir = "."
 	}
@@ -140,6 +161,23 @@ func (s *Store) watch(ctx context.Context, ready chan<- struct{}) error {
 	}
 	if ready != nil {
 		close(ready)
+	}
+	self := filepath.Clean(s.path)
+	resolved := realPath(s.path)
+	// changed reports whether an event concerns this file: its own name, or
+	// an entry whose creation or rename moved where the path resolves.
+	changed := func(ev fsnotify.Event) bool {
+		if filepath.Clean(ev.Name) == self {
+			return true
+		}
+		if ev.Op&(fsnotify.Create|fsnotify.Rename) == 0 {
+			return false
+		}
+		if now := realPath(s.path); now != resolved {
+			resolved = now
+			return true
+		}
+		return false
 	}
 
 	var timer *time.Timer
@@ -158,7 +196,7 @@ func (s *Store) watch(ctx context.Context, ready chan<- struct{}) error {
 			if !ok {
 				return nil
 			}
-			if filepath.Base(ev.Name) != name {
+			if !changed(ev) {
 				continue
 			}
 			if timer != nil {
