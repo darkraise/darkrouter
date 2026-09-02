@@ -3,12 +3,28 @@ package admin
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
+	"time"
 )
+
+// maxPasswordBytes is bcrypt's input limit. Enforced here so a longer
+// password is refused rather than silently truncated.
+const maxPasswordBytes = 72
+
+// writeRateLimited answers 429 with the wait, rounded up to whole seconds
+// because Retry-After carries an integer.
+func writeRateLimited(w http.ResponseWriter, wait time.Duration) {
+	secs := int(wait / time.Second)
+	if wait%time.Second != 0 || secs == 0 {
+		secs++
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+}
 
 // newSessionID mints an opaque id. 32 bytes of randomness, base64url: the id is
 // the bearer of the whole session, so it is not derived from anything and
@@ -56,14 +72,32 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "cross-site request refused")
 		return
 	}
+	// Refused before the body is read: a flood must cost nothing but a map
+	// lookup, and a body parse is more than that.
+	if ok, wait := s.logins.take(clientAddr(r.RemoteAddr)); !ok {
+		writeRateLimited(w, wait)
+		return
+	}
 	var body struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 4<<10, &body) {
 		return
 	}
-	if !VerifyPassword(s.currentPasswordHash(r.Context()), body.Password) {
+	if len(body.Password) > maxPasswordBytes {
+		// bcrypt reads the first 72 bytes and no more, so anything longer
+		// would silently verify against a truncation of itself.
+		writeError(w, http.StatusBadRequest, "password must be at most 72 bytes")
+		return
+	}
+	release, ok := s.logins.acquire()
+	if !ok {
+		writeRateLimited(w, time.Second)
+		return
+	}
+	verified := VerifyPassword(s.currentPasswordHash(r.Context()), body.Password)
+	release()
+	if !verified {
 		// One message for both a wrong password and an unconfigured hash: an
 		// operator reading "no password is set" learns the port is open.
 		writeError(w, http.StatusUnauthorized, "invalid password")
@@ -77,11 +111,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := newSessionID()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create a session")
+		internalError(w, r, err)
 		return
 	}
 	if err := s.deps.DB.CreateSession(r.Context(), id, sessionTTL); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create a session")
+		internalError(w, r, err)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -105,7 +139,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.DB.DeleteSession(r.Context(), sessionFrom(r.Context())); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not end the session")
+		internalError(w, r, err)
 		return
 	}
 	// Same attributes as the cookie it clears: a browser holding a Secure

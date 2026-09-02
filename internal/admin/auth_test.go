@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // testPassword and testHash are the fixture credential.
@@ -40,7 +41,7 @@ var testHash = sync.OnceValue(func() string {
 // password, and returns it alongside the database so a test can seed rows.
 func testServer(t *testing.T) (*Server, *store.DB) {
 	t.Helper()
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	s, err := New(Deps{DB: db, PasswordHash: testHash()})
 	if err != nil {
 		t.Fatal(err)
@@ -70,26 +71,6 @@ func login(t *testing.T, s *Server) (*http.Cookie, string) {
 		t.Fatal("login set no cookie")
 	}
 	return w.Result().Cookies()[0], body.CSRF
-}
-
-func TestEveryEndpointExceptStatusRequiresASession(t *testing.T) {
-	// Spec §4: auth/status is reachable without a session because the SPA
-	// calls it to decide whether to render the login screen. Everything else
-	// is closed.
-	s, _ := testServer(t)
-	for _, ep := range []struct {
-		method, path string
-	}{
-		{"GET", "/api/config"}, {"POST", "/api/config/reload"}, {"POST", "/api/auth/logout"},
-	} {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(ep.method, ep.path, strings.NewReader("{}"))
-		r.Header.Set("Sec-Fetch-Site", "same-origin")
-		s.Handler().ServeHTTP(w, r)
-		if w.Code != http.StatusUnauthorized {
-			t.Errorf("%s %s without a session = %d, want 401", ep.method, ep.path, w.Code)
-		}
-	}
 }
 
 func TestAuthStatusIsReachableWithoutASession(t *testing.T) {

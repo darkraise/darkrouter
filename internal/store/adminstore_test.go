@@ -47,7 +47,7 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 	}
 	var before int64
 	if err := db.Read.QueryRowContext(ctx,
-		`SELECT expires_at FROM sessions WHERE id = 'sess-2'`).Scan(&before); err != nil {
+		`SELECT expires_at FROM sessions WHERE id = ?`, HashSessionID("sess-2")).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.TouchSession(ctx, "sess-2", 48*time.Hour); err != nil {
@@ -55,7 +55,7 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 	}
 	var after int64
 	if err := db.Read.QueryRowContext(ctx,
-		`SELECT expires_at FROM sessions WHERE id = 'sess-2'`).Scan(&after); err != nil {
+		`SELECT expires_at FROM sessions WHERE id = ?`, HashSessionID("sess-2")).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
 	if after <= before {
@@ -719,7 +719,7 @@ func TestLatencyPercentiles(t *testing.T) {
 			TotalMs: &total,
 		}
 		w := NewLogWriter(db, LogOptions{})
-		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -747,7 +747,7 @@ func TestRecentFailoversReturnsOnlyMultiAttemptRequests(t *testing.T) {
 			})
 		}
 		w := NewLogWriter(db, LogOptions{})
-		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -779,7 +779,7 @@ func TestRecentFailoversExcludesOnesOlderThanTheWindow(t *testing.T) {
 			})
 		}
 		w := NewLogWriter(db, LogOptions{})
-		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -815,7 +815,7 @@ func TestSpendSinceCoversTheWholeDay(t *testing.T) {
 		{startOfDay.Add(20 * time.Hour), late},
 	} {
 		c := r.cost
-		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 			ID: fmt.Sprintf("s%d", i), TS: r.ts, ResolvedAlias: "fast",
 			FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
 			Attempts: []AttemptRecord{{
@@ -852,7 +852,7 @@ func TestSpendSinceExcludesRowsBeforeSince(t *testing.T) {
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	yesterday := int64(9999)
-	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 		ID: "before", TS: startOfDay.Add(-time.Hour), ResolvedAlias: "fast",
 		FinalProviderID: "groq", FinalModel: "m", CostMicros: &yesterday,
 		Attempts: []AttemptRecord{{
@@ -880,7 +880,7 @@ func TestSpendSinceIsNilWhenNothingIsPriced(t *testing.T) {
 	now := time.Now().UTC()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
-	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 		ID: "unpriced", TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
 		FinalProviderID: "groq", FinalModel: "m",
 		Attempts: []AttemptRecord{{

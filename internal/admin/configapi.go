@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -222,8 +221,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body configWrite
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 64<<10, &body) {
 		return
 	}
 	if cold := restartOnlyIn(body.Policy); len(cold) > 0 {
@@ -242,33 +240,36 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := s.deps.DB.PutAliases(ctx, body.Aliases); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	}
+	var policy *config.PolicyConfig
 	if body.Policy != nil {
-		next := s.deps.Config.Current().Policy
-		if err := applyPolicyWrite(&next, body.Policy); err != nil {
+		next, err := s.mergedPolicy(body.Policy)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := s.deps.DB.PutPolicy(ctx, next); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		policy = &next
 	}
-
-	// Republish so the next snapshot a request takes carries the write. The
-	// overlay is what pulls it back out of SQLite.
-	if err := s.deps.Config.Reload(); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": false, "error": err.Error(),
-			"serving": "the previous configuration is still serving",
-		})
+	// One transaction for both blocks: a save that wrote its aliases and
+	// then failed on its policy would leave the screen half-applied.
+	if err := s.deps.DB.PutConfig(ctx, body.Aliases, policy); err != nil {
+		internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+	s.republish(w)
+}
+
+// mergedPolicy overlays a write onto the running policy and validates the
+// result, so a partial write is judged as the whole it produces.
+func (s *Server) mergedPolicy(w *policyWrite) (config.PolicyConfig, error) {
+	next := s.deps.Config.Current().Policy
+	if err := applyPolicyWrite(&next, w); err != nil {
+		return config.PolicyConfig{}, err
+	}
+	if err := validatePolicy(next); err != nil {
+		return config.PolicyConfig{}, err
+	}
+	return next, nil
 }
 
 // aliasTargetsExist rejects a chain naming a provider that is not configured.

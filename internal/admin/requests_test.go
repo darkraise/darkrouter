@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 func seedLog(t *testing.T, db *store.DB, n int) {
@@ -20,7 +21,7 @@ func seedLog(t *testing.T, db *store.DB, n int) {
 			FinalProviderID: "groq", FinalModel: "m", Status: "success",
 		})
 	}
-	db.WriteBatchForTest(t, batch)
+	storetest.WriteBatch(t, db, batch)
 }
 
 func TestTheRequestsEndpointPagesWithACursor(t *testing.T) {
@@ -109,7 +110,7 @@ func TestTheTraceEndpointExplainsAFailover(t *testing.T) {
 	// Spec §6: three attempts must read as three labelled rows with reasons,
 	// and the candidates never tried must say why.
 	s, db := testServerFull(t)
-	db.SeedFailoverTraceForTest(t, "01FAIL")
+	storetest.SeedFailoverTrace(t, db, "01FAIL")
 	cookie, token := login(t, s)
 
 	w := do(t, s, cookie, token, "GET", "/api/requests/01FAIL", "")
@@ -153,7 +154,7 @@ func TestTraceEndpointCarriesPerAttemptUsage(t *testing.T) {
 	// total -- without per-attempt figures a failover's discarded tokens are
 	// invisible next to the try that actually served.
 	s, db := testServerFull(t)
-	db.SeedFailoverTraceForTest(t, "01FAIL")
+	storetest.SeedFailoverTrace(t, db, "01FAIL")
 	cookie, token := login(t, s)
 
 	w := do(t, s, cookie, token, "GET", "/api/requests/01FAIL", "")
@@ -185,7 +186,7 @@ func TestRequestSurfacesReportCacheReadTokens(t *testing.T) {
 	// provider invoice needs cache_read_tokens alongside it to recover the
 	// full prompt size.
 	s, db := testServerFull(t)
-	db.SeedFailoverTraceForTest(t, "01FAIL")
+	storetest.SeedFailoverTrace(t, db, "01FAIL")
 	cookie, token := login(t, s)
 
 	w := do(t, s, cookie, token, "GET", "/api/requests", "")
@@ -224,7 +225,7 @@ func TestTraceReportsReasoningTokens(t *testing.T) {
 	// names for the reasoning text, and those disagree between providers, so a
 	// client matching on them alone sees nothing for half the fleet.
 	s, db := testServerFull(t)
-	db.SeedFailoverTraceForTest(t, "01FAIL")
+	storetest.SeedFailoverTrace(t, db, "01FAIL")
 	cookie, token := login(t, s)
 
 	w := do(t, s, cookie, token, "GET", "/api/requests/01FAIL", "")
@@ -258,7 +259,7 @@ func TestTraceEndpointNamesTheAttemptPath(t *testing.T) {
 	// Spec §11's first criterion is only checkable from outside the process if
 	// the trace says which path served the request.
 	s, db := testServerFull(t)
-	db.WriteBatchForTest(t, []*store.RequestRecord{{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
 		ID: "01PATH", TS: time.UnixMilli(1700000000000),
 		Dialect: "openai", Surface: "llm", RequestedModel: "m",
 		FinalProviderID: "p", FinalModel: "m", Status: "success",
@@ -295,7 +296,7 @@ func seedRow(t *testing.T, db *store.DB, id, errorCode, path string) {
 			Seq: 0, ProviderID: "groq", Model: "m", Outcome: "success", Path: path,
 		}}
 	}
-	db.WriteBatchForTest(t, []*store.RequestRecord{rec})
+	storetest.WriteBatch(t, db, []*store.RequestRecord{rec})
 }
 
 func TestFilteringByErrorCodeReturnsOnlyMatchingRows(t *testing.T) {
@@ -376,7 +377,7 @@ func TestConsoleRequestsAreSeparableFromClientTraffic(t *testing.T) {
 	// able to tell which is which.
 	s, db := testServerFull(t)
 	now := time.Now()
-	db.WriteBatchForTest(t, []*store.RequestRecord{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{
 		{
 			ID: "01CLIENT", TS: now, Dialect: "openai", Surface: "llm",
 			RequestedModel: "m", FinalProviderID: "groq", Status: "success",
@@ -426,7 +427,7 @@ func TestARequestWithNoSourceReadsAsProxy(t *testing.T) {
 	// Every row written before the column existed came through the front door.
 	// Backfilling them as anything else would invent a fact about history.
 	s, db := testServerFull(t)
-	db.WriteBatchForTest(t, []*store.RequestRecord{{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
 		ID: "01OLD", TS: time.Now(), Dialect: "openai", Surface: "llm",
 		RequestedModel: "m", Status: "success",
 	}})

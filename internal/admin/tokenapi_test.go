@@ -27,10 +27,13 @@ func TestProxyTokenIsShownOnceAndNeverAgain(t *testing.T) {
 	if strings.Contains(list.Body.String(), created.Secret) {
 		t.Error("the listing reproduced the secret")
 	}
-	var listed []proxyTokenView
-	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
+	var env struct {
+		Tokens []proxyTokenView `json:"tokens"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
 	}
+	listed := env.Tokens
 	if len(listed) != 1 || listed[0].Prefix == "" {
 		t.Fatalf("listing = %+v", listed)
 	}

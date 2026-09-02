@@ -3,7 +3,6 @@ package admin
 import (
 	"bytes"
 	"embed"
-	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httputil"
@@ -24,6 +23,11 @@ import (
 //
 //go:embed all:dist
 var distFS embed.FS
+
+// assetPrefix is where Vite writes content-hashed files. A file under it
+// changes name when its content changes, which is what makes a year-long
+// cache safe; index.html keeps its name and must be revalidated every time.
+const assetPrefix = "/assets/"
 
 // spaHandler serves the built SPA, falling back to index.html.
 //
@@ -50,16 +54,29 @@ func (s *Server) spaHandler() http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A real file wins: assets, the favicon, anything with an extension.
+		// A directory never does — http.FileServer would list it.
 		if r.URL.Path != "/" {
-			if f, ferr := sub.Open(strings.TrimPrefix(r.URL.Path, "/")); ferr == nil {
-				_ = f.Close()
+			if isFile(sub, strings.TrimPrefix(r.URL.Path, "/")) {
+				if strings.HasPrefix(r.URL.Path, assetPrefix) {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
 				files.ServeHTTP(w, r)
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, assetPrefix) || r.URL.Path == strings.TrimSuffix(assetPrefix, "/") {
+				http.NotFound(w, r)
 				return
 			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeContent(w, r, "index.html", modTime, bytes.NewReader(index))
 	})
+}
+
+func isFile(fsys fs.FS, name string) bool {
+	info, err := fs.Stat(fsys, name)
+	return err == nil && !info.IsDir()
 }
 
 func notBuilt() http.Handler {
@@ -77,5 +94,3 @@ func devProxy(target string) (http.Handler, error) {
 	}
 	return httputil.NewSingleHostReverseProxy(u), nil
 }
-
-var _ = io.Discard

@@ -242,7 +242,7 @@ func TestRequestRowCarriesSurfaceDetail(t *testing.T) {
 		RequestedModel: "e5", Status: "success",
 		SurfaceMeta: map[string]any{"input_count": 3, "dimensions": 256},
 	}
-	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
+	if _, err := w.WriteBatch(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
@@ -268,7 +268,7 @@ func TestARecordWithNoSurfaceDetailStoresAnEmptyObject(t *testing.T) {
 		ID: "r2", TS: time.Now(), Dialect: "openai", Surface: "llm",
 		RequestedModel: "m", Status: "success",
 	}
-	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
+	if _, err := w.WriteBatch(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
@@ -291,7 +291,7 @@ func TestRequestRowCarriesResponseSizeAndType(t *testing.T) {
 		RequestedModel: "tts-1", Status: "success",
 		ResponseBytes: 204800, ResponseContentType: "audio/mpeg",
 	}
-	if _, err := w.writeBatch(context.Background(), []*RequestRecord{rec}); err != nil {
+	if _, err := w.WriteBatch(context.Background(), []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	var n int64
@@ -311,7 +311,7 @@ func TestSurfaceDetailIsQueryable(t *testing.T) {
 	// the assertion that keeps it defensible.
 	db := migrated(t)
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(context.Background(), []*RequestRecord{
+	if _, err := w.WriteBatch(context.Background(), []*RequestRecord{
 		{ID: "a", TS: time.Now(), Dialect: "openai", Surface: "image",
 			RequestedModel: "m", Status: "success",
 			SurfaceMeta: map[string]any{"image_count": 4}},
@@ -403,7 +403,7 @@ func TestAttemptUsageIsPersisted(t *testing.T) {
 		}},
 	}
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 

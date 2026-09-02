@@ -2,8 +2,12 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"log"
 	"net/http"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // breakerEntry is one credential's cooldown state. Every field comes straight
@@ -37,7 +41,7 @@ func (s *Server) handleHealthProviders(w http.ResponseWriter, r *http.Request) {
 			out = append(out, view)
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
 
 func (s *Server) handleBreakerReset(w http.ResponseWriter, r *http.Request) {
@@ -47,12 +51,14 @@ func (s *Server) handleBreakerReset(w http.ResponseWriter, r *http.Request) {
 	}
 	// Every credential, not just the provider-level key: a cooldown is tracked
 	// per credential, so resetting only the empty key would leave the entry
-	// that is actually cooling untouched.
-	creds, err := s.deps.DB.Credentials(r.Context(), s.deps.Key, id)
+	// that is actually cooling untouched. Only the ids are needed, so the
+	// keyring is not.
+	summaries, err := s.deps.DB.CredentialSummaries(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
+	creds := summaries[id]
 	// Reset means "stop cooling", not "prove it works": clearCooldowns records
 	// a success rather than spending the half-open probe, which is the
 	// difference between this endpoint and POST /api/providers/{id}/test.
@@ -78,41 +84,36 @@ func (s *Server) handleForceDiscover(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"triggered": id})
 }
 
+// handleForceCatalogSync starts a sync and answers at once. The sync fetches
+// a document from the network with its own timeout; holding the request open
+// for it made the button look broken on a slow link and tied the outcome to
+// a client that may have gone away. A failure is logged the way the
+// scheduled sync's is, and the previous metadata keeps serving.
 func (s *Server) handleForceCatalogSync(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Sync == nil {
 		writeError(w, http.StatusServiceUnavailable, "the catalog syncer is not running")
 		return
 	}
-	if err := s.deps.Sync.SyncOnce(r.Context()); err != nil {
-		// 200 with the failure rather than 500: the sync ran and its outcome is
-		// the answer, and the previous metadata is still serving.
-		writeJSON(w, http.StatusOK, map[string]any{
-			"synced": false, "error": err.Error(),
-			"serving": "the previous metadata is still serving",
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"synced": true})
+	go func() {
+		if err := s.deps.Sync.SyncOnce(context.Background()); err != nil {
+			log.Printf("admin: catalog sync: %v (serving the previous metadata)", err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"triggered": true})
 }
 
 // providerExists writes a 404 and reports false when the id names nothing.
 // Checked before acting so a typo in a path is an error rather than a silent
 // no-op on a provider that was deleted.
 func (s *Server) providerExists(ctx context.Context, w http.ResponseWriter, id string) bool {
-	if s.deps.DB == nil {
-		writeError(w, http.StatusServiceUnavailable, "no database")
-		return false
-	}
-	rows, err := s.deps.DB.ProviderRows(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return false
-	}
-	for _, p := range rows {
-		if p.ID == id {
-			return true
+	if _, err := s.deps.DB.ProviderByID(ctx, id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no provider named "+id)
+			return false
 		}
+		log.Printf("admin: read provider %q: %v", id, err)
+		writeError(w, http.StatusInternalServerError, internalMessage)
+		return false
 	}
-	writeError(w, http.StatusNotFound, "no provider named "+id)
-	return false
+	return true
 }

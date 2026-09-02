@@ -15,6 +15,10 @@ type AttemptRecord struct {
 	Seq        int
 	ProviderID string
 	KeyID      string
+	// KeyLabel is the credential's operator-facing label, filled by the trace
+	// read and never written: the attempt row keeps the id, and the label is
+	// whatever the credential is called when the trace is read.
+	KeyLabel   string
 	Model      string
 	Outcome    string
 	StatusCode int
@@ -193,7 +197,7 @@ func (w *LogWriter) flush(batch *[]*RequestRecord) {
 	// A failed flush is logged and dropped rather than retried. Retrying would
 	// grow the batch without bound while the cause persists, and the drop
 	// counter is what tells the operator the log is incomplete.
-	written, err := w.writeBatch(context.Background(), *batch)
+	written, err := w.WriteBatch(context.Background(), *batch)
 	if err != nil {
 		w.dropped.Add(int64(len(*batch)))
 		log.Printf("request log: dropped %d records: %v", len(*batch), err)
@@ -206,10 +210,10 @@ func (w *LogWriter) flush(batch *[]*RequestRecord) {
 	*batch = (*batch)[:0]
 }
 
-// writeBatch uses a background context rather than the cancelled shutdown one:
+// WriteBatch uses a background context rather than the cancelled shutdown one:
 // the drain runs after cancellation, and a cancelled context would abort the
 // very write the drain exists to perform. It returns how many records landed.
-func (w *LogWriter) writeBatch(ctx context.Context, batch []*RequestRecord) (int, error) {
+func (w *LogWriter) WriteBatch(ctx context.Context, batch []*RequestRecord) (int, error) {
 	tx, err := w.db.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
