@@ -5,7 +5,7 @@ import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button,
 } from "darkraise-ui"
 import { useRequests } from "../../lib/queries"
-import { formatLatency } from "../requests/requests-columns"
+import { duration } from "@/lib/format"
 import { relativeTime } from "../../lib/time"
 import type { RequestRow } from "../../lib/api-types"
 
@@ -14,10 +14,10 @@ export function detailRows(r: RequestRow): { label: string; value: string; mono?
   return [
     { label: "Time", value: new Date(r.ts_ms).toLocaleString(), mono: true },
     { label: "Status", value: r.error_code ? `${r.status} · ${r.error_code}` : r.status },
-    { label: "Latency", value: r.total_ms === null ? "—" : formatLatency(r.total_ms) },
+    { label: "Latency", value: r.total_ms === null ? "—" : duration(r.total_ms) },
     {
       label: "First token",
-      value: r.ttft_ms === null ? "—" : formatLatency(r.ttft_ms),
+      value: r.ttft_ms === null ? "—" : duration(r.ttft_ms),
     },
     { label: "Asked for", value: r.alias ? `${r.alias} → ${r.model}` : r.model, mono: true },
     { label: "Served", value: r.final_model ?? r.model, mono: true },
@@ -111,7 +111,7 @@ export function TestLogTab({ providerId }: { providerId: string }) {
                   {r.model}
                 </span>
                 <span className="w-16 shrink-0 text-right font-mono tabular-nums text-[hsl(var(--legend))]">
-                  {r.total_ms === null ? "—" : formatLatency(r.total_ms)}
+                  {r.total_ms === null ? "—" : duration(r.total_ms)}
                 </span>
               </AccordionTrigger>
 

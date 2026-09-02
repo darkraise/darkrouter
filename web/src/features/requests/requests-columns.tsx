@@ -40,12 +40,6 @@ export type Columns = Parameters<typeof DataTable<RequestTableRow, unknown>>[0][
 const LATENCY_FLOOR_MS = 100
 const LATENCY_CEILING_MS = 100_000
 
-/** Kept for the provider test log, which reads it. New callers should take
- *  `duration` from `lib/format` directly. */
-export function formatLatency(ms: number): string {
-  return duration(ms)
-}
-
 /** What the client asked for and what answered, when they differ. An alias
  *  with no final model is a request nothing served, and an arrow pointing at
  *  nothing would read as a rendering fault. */
