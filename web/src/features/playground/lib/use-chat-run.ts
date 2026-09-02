@@ -50,6 +50,8 @@ export type TurnThinking = {
   ms: number | null
 }
 
+const HYDRATE_CONCURRENCY = 4
+
 export type ChatRun = {
   messages: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
@@ -312,24 +314,33 @@ export function useChatRun(
    * for a run whose record is still in the log writer's batch.
    */
   async function hydrate(nextRoutes: Record<number, TurnRoute>, mine: number) {
-    const unresolved = Object.entries(nextRoutes).filter(
+    const queue = Object.entries(nextRoutes).filter(
       ([, r]) => r.requestId !== "" && r.provider === "",
     )
-    await Promise.all(
-      unresolved.map(async ([index, r]) => {
-        try {
-          const trace = await api.get<RequestTrace>(`/api/requests/${r.requestId}`)
-          if (!trace) return
-          // The transcript has been replaced since this went out, so this
-          // trace belongs to a conversation the operator has already left.
-          if (generation.current !== mine) return
-          setRoutes((prev) => ({ ...prev, [Number(index)]: routeFromTrace(trace) }))
-        } catch {
-          // Swept by log retention, or never written. The turn keeps the mark
-          // it has rather than inventing numbers for it.
-        }
-      }),
-    )
+    async function fill(index: string, r: TurnRoute) {
+      try {
+        const trace = await api.get<RequestTrace>(`/api/requests/${r.requestId}`)
+        if (!trace) return
+        // The transcript has been replaced since this went out, so this
+        // trace belongs to a conversation the operator has already left.
+        if (generation.current !== mine) return
+        setRoutes((prev) => ({ ...prev, [Number(index)]: routeFromTrace(trace) }))
+      } catch {
+        // Swept by log retention, or never written. The turn keeps the mark
+        // it has rather than inventing numbers for it.
+      }
+    }
+    // A few at a time rather than all at once: the admin server answers
+    // trace reads serially from one database handle, and a long conversation
+    // reopened would otherwise queue forty of them ahead of everything else.
+    const workers = Array.from({ length: Math.min(HYDRATE_CONCURRENCY, queue.length) }, async () => {
+      for (;;) {
+        const next = queue.shift()
+        if (next === undefined) return
+        await fill(next[0], next[1])
+      }
+    })
+    await Promise.all(workers)
   }
 
   function load(next: PlaygroundMessage[], nextRoutes: Record<number, TurnRoute>) {

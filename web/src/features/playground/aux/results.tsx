@@ -1,7 +1,9 @@
 import { Link } from "@tanstack/react-router"
 import { Badge } from "darkraise-ui"
 import { JsonTreeView } from "darkraise-ui/components/json-tree-view"
+import { count } from "../../../lib/format"
 import { relativeTime } from "../../../lib/time"
+import { useNow } from "../lib/use-now"
 import { vectorPreview, type AuxOutcome, type AuxRun } from "./surfaces"
 
 /** How many components of a vector the strip draws. Enough to show that a
@@ -102,7 +104,7 @@ function Outcome({ outcome }: { outcome: AuxOutcome }) {
     return (
       <div className="flex items-center gap-3">
         <span className="font-mono text-2xl tabular-nums">
-          {outcome.tokens.toLocaleString("en-US")} tokens
+          {count(outcome.tokens)} tokens
         </span>
         <Badge variant={outcome.estimated ? "secondary" : "green"}>
           {outcome.estimated ? "Estimated locally" : "Native count"}
@@ -189,6 +191,7 @@ function Outcome({ outcome }: { outcome: AuxOutcome }) {
  * a column are indistinguishable without the text that produced each.
  */
 export function RunCard({ run }: { run: AuxRun }) {
+  const now = useNow()
   return (
     <article className="flex flex-col gap-3 border-b pb-6 last:border-b-0 last:pb-0">
       <header className="flex items-baseline gap-3">
@@ -196,7 +199,7 @@ export function RunCard({ run }: { run: AuxRun }) {
           {run.summary}
         </h3>
         <span className="shrink-0 text-sm text-[hsl(var(--legend))]">
-          {relativeTime(run.at)}
+          {relativeTime(run.at, now)}
         </span>
       </header>
 

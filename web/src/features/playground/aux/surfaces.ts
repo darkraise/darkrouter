@@ -319,7 +319,7 @@ export function documentLines(raw: string): string[] {
  * response is still a result, and a tree of it beats an error message that
  * says the run failed when it did not.
  */
-export async function readOutcome(
+export async function outcomeOfResponse(
   surface: AuxSurface,
   res: Response,
   form: Record<string, string>,
