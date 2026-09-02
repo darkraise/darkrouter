@@ -129,7 +129,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	tokens := tokenStore{db: db, key: key}
 	authManager := auth.NewManager(auth.Deps{
 		Tokens: tokens,
-		OAuth:  presetOAuth{presets: o.presets},
+		OAuth:  presetOAuth(o),
 	})
 	refresher := auth.NewRefreshWorker(authManager, tokens, auth.RefreshOptions{})
 

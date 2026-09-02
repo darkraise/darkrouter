@@ -14,8 +14,8 @@ import (
 // distFS is the built SPA.
 //
 // The bundle lands in this package's own dist/ rather than in web/dist because
-// go:embed cannot reference a path outside its package directory; web's Vite
-// config writes here.
+// an embed directive cannot reference a path outside its package directory;
+// web's Vite config writes here.
 //
 // "all:" is required, not decorative: without it go:embed skips files beginning
 // with a dot, and dist/ holds only .gitkeep on a fresh clone — an empty pattern
