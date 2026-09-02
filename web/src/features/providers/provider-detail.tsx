@@ -44,6 +44,8 @@ import {
   totalRequests,
 } from "./provider-stats"
 import { STATE_VARIANT, breakersFor, isKeyless, providerState } from "./provider-state"
+import { isLocalPreset } from "./local-runtimes"
+import { AddLocalDialog } from "./add-local-dialog"
 
 /** The line under the name. Kind and priority only: everything else about
  *  this provider is a reading in the strip below, and repeating it here would
@@ -75,8 +77,14 @@ function Fact({ term, children }: { term: string; children: React.ReactNode }) {
  */
 function UnconfiguredProvider({ preset }: { preset: Preset }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [localOpen, setLocalOpen] = useState(false)
   const [freeOnly, setFreeOnly] = useState(false)
-  const keyless = isKeyless({ auth_style: preset.auth_kind })
+  // A local runtime is keyless too, but adding it is a different act: what it
+  // needs is the address it is listening on, and the import filter below asks
+  // which of its models are cheap enough -- of a server whose models are all
+  // free. So it takes the address form the providers list opens.
+  const local = isLocalPreset(preset)
+  const keyless = isKeyless({ auth_style: preset.auth_kind }) && !local
   // A base URL that names no host is a program on this box rather than an
   // endpoint, and what it needs from the operator is a different question
   // from "which credential": the program signs itself in.
@@ -116,7 +124,12 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
             {preset.id} · {preset.kind}
           </p>
         </div>
-        {keyless ? (
+        {local ? (
+          <Button size="sm" onClick={() => setLocalOpen(true)}>
+            <Plus className="size-[var(--icon-size)]" />
+            Add provider
+          </Button>
+        ) : keyless ? (
           <Button size="sm" disabled={add.isPending} onClick={() => add.mutate(undefined)}>
             <Plus className="size-[var(--icon-size)]" />
             Add provider
@@ -131,12 +144,23 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
 
       <AddAccountsDialog preset={preset} open={addOpen} onOpenChange={setAddOpen} />
 
+      <AddLocalDialog
+        preset={preset}
+        open={localOpen}
+        onOpenChange={setLocalOpen}
+        onDone={() => setLocalOpen(false)}
+      />
+
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className="flex min-w-0 flex-col gap-6">
           <EmptyState
             title={`${preset.name} ships with this release, unconfigured`}
             hint={
-              localProgram
+              local
+                ? "It is a model server on this machine, so what it needs is the address " +
+                  "the gateway can reach it on rather than a credential. Its models are " +
+                  "free, so there is no import filter to set."
+                : localProgram
                 ? "It runs a program on this machine, and that program holds its own login. " +
                   "Adding the provider is the whole of the setup if the program is already " +
                   "signed in; otherwise add a credential and paste its session, which the " +
@@ -150,7 +174,11 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
                   : "The router cannot choose it until it has a key to send with. The first credential creates the provider and starts discovery."
             }
             action={
-              keyless ? (
+              local ? (
+                <Button size="sm" onClick={() => setLocalOpen(true)}>
+                  Add {preset.name}
+                </Button>
+              ) : keyless ? (
                 <div className="flex flex-col items-center gap-3">
                   {/* Offered here because this is the last moment it is a
                       choice: the first sweep starts within seconds of the

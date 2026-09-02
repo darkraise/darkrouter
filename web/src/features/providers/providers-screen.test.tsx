@@ -71,6 +71,10 @@ const presets: Preset[] = [
     base_url: "https://stablehorde.net/api/v2", surfaces: ["llm"],
     auth_kind: "anonymous", website: "", free_tier: true,
   },
+  {
+    id: "ollama", name: "Ollama", kind: "openaicompat", base_url: "http://localhost:11434/v1",
+    surfaces: ["llm"], auth_kind: "none", website: "", free_tier: false,
+  },
 ]
 
 const groq: Provider = {
@@ -181,6 +185,24 @@ describe("adding a local runtime", () => {
     expect(
       await screen.findByRole("heading", { name: /add a local runtime/i }),
     ).toBeInTheDocument()
+  })
+})
+
+describe("a local runtime nobody has added", () => {
+  it("opens the address form rather than the import filter", async () => {
+    // It is keyless like AI Horde, but the keyless dialog asks the one thing
+    // that cannot apply to a server whose models are all free, and not the
+    // thing that decides whether it works at all.
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Ollama" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    await userEvent.click(within(row).getByRole("button", { name: /add provider/i }))
+
+    const dialog = within(await screen.findByRole("dialog"))
+    expect(dialog.getByLabelText("Base URL")).toHaveValue("http://localhost:11434/v1")
+    expect(dialog.queryByLabelText(/import free models only/i)).toBeNull()
   })
 })
 
