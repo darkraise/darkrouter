@@ -75,3 +75,40 @@
 .dr-search-command-shortcut {
   font-size: var(--text-sm);
 }
+
+/* The header's actions below 640px. The bar holds the page identity, the
+   theme switcher and the account menu; at phone widths the identity's
+   description was clipped mid-word to make room. The actions move into the
+   mobile drawer (app-shell.tsx carries them there) and return here at `sm`. */
+.app-header-actions {
+  display: none;
+}
+
+@media (min-width: 40rem) {
+  .app-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+}
+
+.app-drawer-account {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+/* No screen may be wider than the viewport. The content pane is a flex child
+   with the default `min-width: auto`, so one wide table pushed the whole
+   pane past the right edge and the page scrolled sideways. Tables scroll
+   inside their own frame instead. */
+.dr-sidebar-layout-main,
+.dr-sidebar-layout-content {
+  min-width: 0;
+}
+
+.dr-data-table-frame,
+.dr-table-wrapper {
+  overflow-x: auto;
+}

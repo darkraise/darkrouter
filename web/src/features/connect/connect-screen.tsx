@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Input,
+  Label,
   Table,
   TableBody,
   TableCell,
@@ -21,8 +22,10 @@ import { api } from "../../lib/api"
 import { ConfirmButton } from "../shell/confirm-button"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useConfig, useModels, useProxyTokens } from "../../lib/queries"
+import { dateOnly, dateTime, zoneLabel } from "../../lib/format"
 import type { Model, ProxyToken } from "../../lib/api-types"
 import { EmptyState } from "../shell/empty-state"
+import { LoadError, LoadingRows } from "../shell/screen-state"
 import { baseUrlFor, snippetFor, TOOLS, type Tool } from "./snippets"
 
 const DIALECTS = ["anthropic", "openai", "gemini"] as const
@@ -171,7 +174,7 @@ export function ConnectScreen() {
         <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
           {firstToken
             ? "Snippets show only the token's prefix, never the secret — the full value was shown once, at creation. Paste your own token in its place."
-            : "No client token exists yet, so snippets show a placeholder. Create one above and paste it in."}
+            : "No client token exists yet, so snippets show a placeholder. Create one under New client token, below, and paste it in."}
         </p>
         <Tabs defaultValue={TOOLS[0]}>
           <TabsList>
@@ -226,17 +229,27 @@ export function ConnectScreen() {
 
       <Card className="mb-6 p-4">
         <h2 className="mb-3 text-sm font-medium">New client token</h2>
-        <div className="flex gap-2">
-          <Input
-            placeholder="what will use it — laptop, CI, a teammate"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-96"
-          />
-          <Button size="sm" disabled={!name} onClick={() => create.mutate(name)}>
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (name) create.mutate(name)
+          }}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Label htmlFor="token-name">Name</Label>
+            <Input
+              id="token-name"
+              placeholder="what will use it — laptop, CI, a teammate"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="max-w-96"
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={!name || create.isPending}>
             Create
           </Button>
-        </div>
+        </form>
 
         {minted?.secret && (
           // A region rather than an alert: role="alert" would read the
@@ -260,25 +273,38 @@ export function ConnectScreen() {
         )}
       </Card>
 
+      {tokens.isError && (
+        <LoadError
+          what="The client tokens"
+          error={tokens.error}
+          onRetry={() => void tokens.refetch()}
+          className="mb-4"
+        />
+      )}
+
+      {tokens.isPending && <LoadingRows rows={3} />}
+
+      {tokens.data && tokens.data.length > 0 && (
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Token</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead>Last used</TableHead>
+            <TableHead>Last used ({zoneLabel()})</TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(tokens.data ?? []).map((t) => (
+          {tokens.data.map((t) => (
             <TableRow key={t.id}>
               <TableCell>{t.name}</TableCell>
               <TableCell className="font-mono text-sm">{t.prefix}…</TableCell>
-              <TableCell>{new Date(t.created_at).toLocaleDateString()}</TableCell>
-              <TableCell>
+              <TableCell className="tabular-nums">{dateOnly(t.created_at)}</TableCell>
+              <TableCell className="tabular-nums">
                 {t.last_used_at ? (
-                  new Date(t.last_used_at).toLocaleString()
+                  dateTime(t.last_used_at)
                 ) : (
                   // Never used is worth saying: it is the difference between a
                   // token to revoke and one that was never wired up.
@@ -303,16 +329,16 @@ export function ConnectScreen() {
           ))}
         </TableBody>
       </Table>
+      </div>
+      )}
 
-      {(tokens.data ?? []).length === 0 && (
-        <div className="mt-4">
-          {/* No action: the control that creates one is directly above, and a
-              second button for it would be the same offer twice. */}
-          <EmptyState
-            title="A client token names who is calling"
-            hint="Give each client its own, and a token you revoke stops that client alone. The shared server.proxy_token keeps working if one is configured."
-          />
-        </div>
+      {tokens.data?.length === 0 && (
+        // No action: the form that creates one is directly above, and a
+        // second button for it would be the same offer twice.
+        <EmptyState
+          title="A client token names who is calling"
+          hint="Give each client its own, and a token you revoke stops that client alone. Create one in the form above. The shared server.proxy_token keeps working if one is configured."
+        />
       )}
     </>
   )

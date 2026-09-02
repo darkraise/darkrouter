@@ -2,33 +2,26 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   Outlet,
   Link,
   useNavigate,
+  useRouter,
   useRouterState,
 } from "@tanstack/react-router"
-import { useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useCallback, useState } from "react"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
-import { SidebarLayout, SidebarNav } from "darkraise-ui/layout"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
-import { OverviewScreen } from "../features/overview/overview-screen"
 import { nav, settingsItem } from "../features/shell/nav"
+import { AppShell } from "../features/shell/app-shell"
 import { ChangePasswordDialog } from "../features/settings/change-password-dialog"
 import { api } from "./api"
-import { UsageScreen } from "../features/usage/usage-screen"
-import { ProvidersScreen } from "../features/providers/providers-screen"
-import { ProviderDetail } from "../features/providers/provider-detail"
-import { ModelsScreen } from "../features/models/models-screen"
-import { RoutingScreen } from "../features/routing/routing-screen"
-import { ConnectScreen } from "../features/connect/connect-screen"
-import { PlaygroundScreen } from "../features/playground/playground-screen"
 import { CommandPalette } from "../features/shell/command-palette"
+import { NotFoundScreen } from "../features/shell/not-found"
 import { PageIdentityBar } from "../features/shell/page-identity"
-import { ScreenBoundary } from "../features/shell/screen-boundary"
-import { RequestsScreen } from "../features/requests/requests-screen"
-import { SettingsScreen } from "../features/settings/settings-screen"
+import { usePageTitle } from "../features/shell/page-title"
+import { ScreenBoundary, ScreenError } from "../features/shell/screen-boundary"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -80,56 +73,57 @@ export const routerAdapter: RouterAdapter = {
   usePathname: () => useRouterState({ select: (s) => s.location.pathname }),
   useBack: () => () => window.history.back(),
   useInvalidate: () => {
-    const qc = useQueryClient()
-    // Invalidate rather than refetch: a screen the operator is not looking at
-    // should not fetch just because another one mutated.
-    return () => void qc.invalidateQueries()
+    const router = useRouter()
+    // The router's own invalidation, not the query cache's: the adapter's
+    // contract is "reload what this route shows", and wiping every cached
+    // query refetched screens the operator was not looking at.
+    return () => void router.invalidate()
   },
 }
 
-
+const footerNav = [{ label: "Settings", items: [settingsItem] }]
 
 /**
  * RootShell is the chrome every screen renders inside.
  *
  * It lives here, as the root route's component, rather than wrapping
- * RouterProvider from outside: SidebarLayout renders SidebarItem and
- * SearchCommand, both of which call darkraise-ui's useRouterAdapter, and the
- * adapter below is built on TanStack hooks. Mounted above RouterProvider it
- * would be reaching for a router context that does not exist yet.
+ * RouterProvider from outside: the rail's links and the palette are built on
+ * TanStack hooks, and mounted above RouterProvider they would be reaching for
+ * a router context that does not exist yet.
  */
 function RootShell() {
   const [passwordOpen, setPasswordOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const navigate = useNavigate()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const openPalette = useCallback(() => setPaletteOpen(true), [])
+  usePageTitle()
   return (
     <RouterAdapterProvider value={routerAdapter}>
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
-      <SidebarLayout
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <AppShell
         nav={nav}
+        footerNav={footerNav}
         // Where you are, in the chrome: the name, mark and purpose of the
         // section render here rather than at the top of each screen.
         headerSlot={<PageIdentityBar />}
-        showThemeSwitcher
+        onSearch={openPalette}
         // The password belongs to whoever is signed in rather than to the
         // gateway's configuration, so it is reached from the same menu as
         // signing out.
-        user={{ name: "Administrator", email: "" }}
-        onProfile={() => setPasswordOpen(true)}
+        onChangePassword={() => setPasswordOpen(true)}
         onSettings={() => void navigate({ to: "/settings" })}
         onLogout={() => {
           // The 401 the next request gets is what the app's global listener
           // turns into the login screen, so this only has to end the session.
           void api.post("/api/auth/logout", {}).finally(() => window.location.reload())
         }}
-        sidebarFooter={
-          <SidebarNav nav={[{ items: [settingsItem] }]} />
-        }
       >
-        <CommandPalette />
-        <ScreenBoundary>
+        <ScreenBoundary key={pathname}>
           <Outlet />
         </ScreenBoundary>
-      </SidebarLayout>
+      </AppShell>
     </RouterAdapterProvider>
   )
 }
@@ -148,6 +142,47 @@ const rootRoute = createRootRoute({
     return out
   },
 })
+
+// Each screen is its own chunk, fetched on first visit: the playground's
+// markdown renderer and the overview's flow canvas are the two heaviest
+// things in the bundle, and neither is needed to log in and read a table.
+const OverviewScreen = lazyRouteComponent(
+  () => import("../features/overview/overview-screen"),
+  "OverviewScreen",
+)
+const RequestsScreen = lazyRouteComponent(
+  () => import("../features/requests/requests-screen"),
+  "RequestsScreen",
+)
+const UsageScreen = lazyRouteComponent(() => import("../features/usage/usage-screen"), "UsageScreen")
+const ProvidersScreen = lazyRouteComponent(
+  () => import("../features/providers/providers-screen"),
+  "ProvidersScreen",
+)
+const ProviderDetail = lazyRouteComponent(
+  () => import("../features/providers/provider-detail"),
+  "ProviderDetail",
+)
+const ModelsScreen = lazyRouteComponent(
+  () => import("../features/models/models-screen"),
+  "ModelsScreen",
+)
+const RoutingScreen = lazyRouteComponent(
+  () => import("../features/routing/routing-screen"),
+  "RoutingScreen",
+)
+const PlaygroundScreen = lazyRouteComponent(
+  () => import("../features/playground/playground-screen"),
+  "PlaygroundScreen",
+)
+const ConnectScreen = lazyRouteComponent(
+  () => import("../features/connect/connect-screen"),
+  "ConnectScreen",
+)
+const SettingsScreen = lazyRouteComponent(
+  () => import("../features/settings/settings-screen"),
+  "SettingsScreen",
+)
 
 // One route per destination in §5, plus the trace deep link. Written out
 // rather than built by a helper: a helper that takes `path: string` erases the
@@ -173,7 +208,11 @@ const routes = [
   }),
 ]
 
-export const router = createRouter({ routeTree: rootRoute.addChildren(routes) })
+export const router = createRouter({
+  routeTree: rootRoute.addChildren(routes),
+  defaultErrorComponent: ({ error, reset }) => <ScreenError error={error} reset={reset} />,
+  defaultNotFoundComponent: () => <NotFoundScreen />,
+})
 
 declare module "@tanstack/react-router" {
   interface Register {

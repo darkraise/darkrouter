@@ -3,8 +3,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { ThemeProvider } from "darkraise-ui/theme"
 import { Toaster } from "darkraise-ui"
 import { themeConfig } from "./theme.config"
-import { api, onUnauthorized, setCsrfToken } from "./lib/api"
-import { ApiError } from "./lib/api"
+import { api, isTransient, onUnauthorized, setCsrfToken } from "./lib/api"
 import { RouterProvider } from "@tanstack/react-router"
 import { LoginScreen } from "./routes/login"
 import { FirstRun } from "./features/shell/first-run"
@@ -17,10 +16,10 @@ const queryClient = new QueryClient({
       // looking at should not keep a gateway busy.
       refetchOnWindowFocus: true,
       refetchIntervalInBackground: false,
-      retry: (count, err) =>
-        // A 401 is not a transient failure. Retrying it three times delays the
-        // login screen for no reason.
-        !(err instanceof ApiError && err.status === 401) && count < 2,
+      // Only a failure the next attempt might not repeat. A 401 retried
+      // three times delays the login screen; a 404 or 400 comes back the
+      // same however often it is asked.
+      retry: (count, err) => isTransient(err) && count < 2,
     },
   },
 })

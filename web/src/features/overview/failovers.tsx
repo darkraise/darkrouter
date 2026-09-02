@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router"
 import { Badge, Card } from "darkraise-ui"
 import type { FailoverRow } from "../../lib/api-types"
-import { failoverLabel } from "./overview-screen"
+import { dateTime, duration, zoneLabel } from "../../lib/format"
+import { failoverLabel } from "./failover-label"
 
 /**
  * The last handful of requests that took more than one attempt.
@@ -17,7 +18,10 @@ export function Failovers({ rows }: { rows: FailoverRow[] }) {
   if (rows.length === 0) return null
   return (
     <section className="mt-6">
-      <h2 className="mb-2 text-sm font-medium">Recent failovers</h2>
+      <h2 className="mb-2 text-sm font-medium">
+        Recent failovers{" "}
+        <span className="font-normal text-[hsl(var(--legend))]">· times in {zoneLabel()}</span>
+      </h2>
       <Card className="overflow-hidden">
         <ul className="divide-y divide-[hsl(var(--border))]">
           {rows.map((row) => (
@@ -28,7 +32,7 @@ export function Failovers({ rows }: { rows: FailoverRow[] }) {
                 className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-[hsl(var(--muted))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))] focus-visible:-outline-offset-2"
               >
                 <span className="shrink-0 whitespace-nowrap font-mono text-sm text-[hsl(var(--legend))] tabular-nums">
-                  {new Date(row.ts).toLocaleTimeString(undefined, { hour12: false })}
+                  {dateTime(row.ts)}
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-sm">
                   {failoverLabel(row)}
@@ -39,7 +43,7 @@ export function Failovers({ rows }: { rows: FailoverRow[] }) {
                   </Badge>
                 </span>
                 <span className="shrink-0 whitespace-nowrap text-right font-mono text-sm tabular-nums">
-                  {row.total_ms.toLocaleString()}ms
+                  {duration(row.total_ms)}
                 </span>
               </Link>
             </li>

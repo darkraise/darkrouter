@@ -52,4 +52,14 @@ describe("the design system's own rules", () => {
     )
     expect(offenders.map((f) => f.path)).toEqual([])
   })
+
+  it("never hands a chart a numeric font size", () => {
+    // recharts takes `fontSize={11}` and writes it as an attribute the
+    // font-size axis cannot reach. Ticks take their size from a token in the
+    // stylesheet instead, which the library then measures.
+    const offenders = FILES.filter((f) =>
+      /fontSize=\{\s*\d|fontSize:\s*\d/.test(f.text),
+    )
+    expect(offenders.map((f) => f.path)).toEqual([])
+  })
 })

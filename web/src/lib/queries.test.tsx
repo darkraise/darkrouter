@@ -1,6 +1,15 @@
-import { describe, it, expect } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
-import { keys } from "./queries"
+import { describe, it, expect, vi } from "vitest"
+import type { ReactNode } from "react"
+import { renderHook, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  keys,
+  usePlaygroundConversations,
+  usePlaygroundPresets,
+  useProviderHealth,
+  useProxyTokens,
+  useSessions,
+} from "./queries"
 import { POLL } from "./api"
 
 describe("query keys", () => {
@@ -71,8 +80,8 @@ describe("poll cadence", () => {
 })
 
 describe("the new surfaces", () => {
-  it("keys healthz, discovery and policy distinctly", () => {
-    const flat = [keys.healthz, keys.discovery, keys.policy, keys.health].map((k) =>
+  it("keys discovery and policy distinctly from health", () => {
+    const flat = [keys.discovery, keys.policy, keys.health].map((k) =>
       JSON.stringify(k),
     )
     expect(new Set(flat).size).toBe(flat.length)
@@ -98,5 +107,86 @@ describe("the new surfaces", () => {
     expect(JSON.stringify(keys.usage("alias"))).toBe(
       JSON.stringify(["usage", "alias", 0]),
     )
+  })
+})
+
+describe("the wrapped list endpoints", () => {
+  // The admin API answers `{sessions: [...]}`, `{tokens: [...]}` and so on
+  // rather than a bare array. The hook is where that wrapper comes off, so
+  // every screen keeps reading the list it asked for.
+  async function fetchThrough<T>(
+    url: string,
+    body: unknown,
+    hook: () => { data: T | undefined },
+  ): Promise<T | undefined> {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: string) =>
+        new Response(JSON.stringify(u === url ? body : {}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(hook, { wrapper })
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    vi.unstubAllGlobals()
+    return result.current.data
+  }
+
+  it("unwraps sessions", async () => {
+    const session = { id: "s1", prefix: "abc", created_at: "", expires_at: "", current: true }
+    await expect(
+      fetchThrough("/api/sessions", { sessions: [session] }, () => useSessions()),
+    ).resolves.toEqual([session])
+  })
+
+  it("unwraps proxy tokens", async () => {
+    const token = { id: "t1", name: "laptop", prefix: "dk_", created_at: "", last_used_at: null }
+    await expect(
+      fetchThrough("/api/proxy-tokens", { tokens: [token] }, () => useProxyTokens()),
+    ).resolves.toEqual([token])
+  })
+
+  it("unwraps provider health", async () => {
+    const entry = { provider_id: "groq", key_id: "k", model: "m", backoff_level: 0, consecutive_failures: 0 }
+    await expect(
+      fetchThrough("/api/health/providers", { providers: [entry] }, () => useProviderHealth()),
+    ).resolves.toEqual([entry])
+  })
+
+  it("unwraps playground presets and conversations", async () => {
+    await expect(
+      fetchThrough("/api/playground/presets", { presets: [{ id: "p" }] }, () =>
+        usePlaygroundPresets(),
+      ),
+    ).resolves.toEqual([{ id: "p" }])
+    await expect(
+      fetchThrough("/api/playground/conversations", { conversations: [{ id: "c" }] }, () =>
+        usePlaygroundConversations(),
+      ),
+    ).resolves.toEqual([{ id: "c" }])
+  })
+
+  it("hands the query's abort signal to fetch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ sessions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(() => useSessions(), { wrapper })
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
+    vi.unstubAllGlobals()
   })
 })

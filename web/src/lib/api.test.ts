@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { api, stream, onUnauthorized, ApiError, throwOnExecutorError } from "./api"
+import { api, stream, onUnauthorized, ApiError, isTransient, throwOnExecutorError } from "./api"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -220,5 +220,55 @@ describe("the expected-rejection exemption", () => {
       api.post("/api/auth/password", {}, { expectedRejection: "invalid password" }),
     ).rejects.toMatchObject({ status: 401, message: "invalid password" })
     off()
+  })
+})
+
+describe("request hygiene", () => {
+  it("never sets Sec-Fetch-Site itself", async () => {
+    // A forbidden header name: the browser drops it and logs a warning on
+    // every mutation. The server reads the real one the browser attaches.
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    await api.post("/api/x", {})
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>
+    expect(headers["Sec-Fetch-Site"]).toBeUndefined()
+    expect(headers["X-CSRF-Token"]).toBeDefined()
+  })
+
+  it("passes the caller's abort signal through", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    const controller = new AbortController()
+    await api.get("/api/x", { signal: controller.signal })
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+  })
+})
+
+describe("stream decoding", () => {
+  it("flushes a multi-byte character split across the last chunk boundary", async () => {
+    // "é" is two bytes in UTF-8. Ending the body between them leaves the
+    // first buffered in the decoder; without a final flush it is lost.
+    const bytes = new TextEncoder().encode("café")
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, 4))
+        controller.enqueue(bytes.slice(4))
+        controller.close()
+      },
+    })
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => new Response(body, { status: 200 })))
+    let text = ""
+    for await (const chunk of stream("/api/playground", {})) text += chunk
+    expect(text).toBe("café")
+  })
+})
+
+describe("isTransient", () => {
+  it("retries a network failure and a 5xx, never a 4xx", () => {
+    expect(isTransient(new TypeError("Failed to fetch"))).toBe(true)
+    expect(isTransient(new ApiError(503, "no executor"))).toBe(true)
+    expect(isTransient(new ApiError(404, "gone"))).toBe(false)
+    expect(isTransient(new ApiError(401, "not authenticated"))).toBe(false)
+    expect(isTransient(new ApiError(400, "bad"))).toBe(false)
   })
 })
