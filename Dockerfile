@@ -68,7 +68,9 @@ FROM alpine:3.22
 ARG WITH_AUGGIE
 # nodejs is here for auggie alone — the gateway itself is a static binary and
 # needs no runtime. It is the cost of a vendor who ships a CLI instead of an API.
-RUN apk add --no-cache ca-certificates wget \
+# The base tag lags Alpine's package fixes by days; upgrading here is what
+# keeps the image scan clean between base-image releases.
+RUN apk upgrade --no-cache && apk add --no-cache ca-certificates wget \
     $([ "$WITH_AUGGIE" = "1" ] && echo nodejs) \
     && adduser -D -u 10001 darkrouter
 COPY --from=build /out/darkrouter /usr/local/bin/darkrouter
