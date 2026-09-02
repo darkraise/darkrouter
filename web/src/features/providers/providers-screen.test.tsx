@@ -178,3 +178,31 @@ describe("adding a local runtime", () => {
     ).toBeInTheDocument()
   })
 })
+
+describe("adding a key to a provider that already has one", () => {
+  it("offers the action on the row, not only on the provider's own page", async () => {
+    // A second key on a working provider is ordinary. Sending the operator to
+    // the detail page for it makes the row's actions a partial set.
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Groq" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    expect(within(row).getByRole("button", { name: "Add credentials" })).toBeInTheDocument()
+  })
+
+  it("opens straight on the accounts step, with the provider already settled", async () => {
+    stub([groq])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Groq" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    await userEvent.click(within(row).getByRole("button", { name: "Add credentials" }))
+
+    expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument()
+    // Scoped to the dialog: the screen behind it has a "Search providers"
+    // filter of its own, which is not the picker this asserts is absent.
+    const dialog = within(screen.getByRole("dialog"))
+    expect(dialog.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
+  })
+})
