@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest"
 import {
+  auxBlocker,
   auxBodyFor,
   catalogSurfaceFor,
   countBodyFor,
+  countDialectFor,
   isAuxReady,
   readCount,
   vectorPreview,
@@ -91,5 +93,46 @@ describe("token count", () => {
     }))
     expect(native).toEqual({ kind: "count", tokens: 12, estimated: false })
     expect(estimated).toEqual({ kind: "count", tokens: 9, estimated: true })
+  })
+})
+
+describe("countDialectFor", () => {
+  const models = [
+    { model: "claude-3", providers: ["anthropic-main"] },
+    { model: "gemini-pro", providers: ["vertex-eu", "google"] },
+    { model: "gpt-4o", providers: ["openai-main"] },
+  ]
+  const providers = [
+    { id: "anthropic-main", kind: "anthropic" },
+    { id: "vertex-eu", kind: "vertex" },
+    { id: "google", kind: "gemini" },
+    { id: "openai-main", kind: "openaicompat" },
+  ]
+
+  it("picks the counting dialect the model's provider speaks", () => {
+    // The count endpoint has no OpenAI dialect, so the only sensible default
+    // is the one the model's own provider counts in.
+    expect(countDialectFor("claude-3", models, providers)).toBe("anthropic")
+    expect(countDialectFor("gemini-pro", models, providers)).toBe("gemini")
+  })
+
+  it("leaves the choice open when no provider of the model counts natively", () => {
+    expect(countDialectFor("gpt-4o", models, providers)).toBeNull()
+    expect(countDialectFor("unknown", models, providers)).toBeNull()
+  })
+})
+
+describe("auxBlocker", () => {
+  it("names the first thing missing before a run can go", () => {
+    expect(auxBlocker("count", {})).toMatch(/name a model/i)
+    expect(auxBlocker("count", { model: "claude-3" })).toMatch(/dialect/i)
+    expect(auxBlocker("count", { model: "claude-3", dialect: "anthropic" })).toMatch(/prompt/i)
+    expect(auxBlocker("rerank", { model: "r", documents: "a" })).toMatch(/query/i)
+    expect(auxBlocker("transcriptions", { model: "whisper" })).toMatch(/audio file/i)
+  })
+
+  it("says nothing once the run can go", () => {
+    expect(auxBlocker("count", { model: "claude-3", dialect: "anthropic", prompt: "hi" })).toBeNull()
+    expect(auxBlocker("embeddings", { model: "e5", input: "hi" })).toBeNull()
   })
 })

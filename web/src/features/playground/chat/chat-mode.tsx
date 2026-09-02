@@ -373,6 +373,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
                   model={config.model}
                   seedNote={seedNote}
                   quiet
+                  onChooseModel={amendSettings}
                 />
               </div>
 
@@ -418,17 +419,11 @@ export function ChatMode({ active = true }: { active?: boolean }) {
             <Card className="flex shrink-0 flex-col gap-4 p-4">
               <ConfigPane
                 config={config}
-                // Never edited here. Settings are set in the dialog that opens
-                // with the conversation and read here for the rest of its
-                // life; two live surfaces for one value is a disagreement
-                // waiting for whichever is a keystroke behind.
-                onChange={() => {}}
-                locked
-                lockNote={
-                  locked
-                    ? undefined
-                    : "Chosen when this conversation started. Change them from its actions menu until the first message goes."
-                }
+                // Edits until the first message and reads after it, the same
+                // seam the dialog observes. Both write the one config, so
+                // neither can be a keystroke behind the other.
+                onChange={applySettings}
+                locked={locked}
                 // The model island above owns both, so the pane showing them
                 // again would be two readings of one value.
                 showModel={false}

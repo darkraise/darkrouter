@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import { Button } from "darkraise-ui"
 import { AssistantTurn, UserTurn, type TurnRoute } from "./message"
 import type { TurnThinking } from "./lib/use-chat-run"
 import type { PlaygroundMessage } from "../../lib/api-types"
@@ -11,6 +12,7 @@ export function Transcript({
   model,
   seedNote,
   quiet = false,
+  onChooseModel,
 }: {
   messages: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
@@ -20,6 +22,9 @@ export function Transcript({
   model: string
   seedNote?: string
   quiet?: boolean
+  /** Opens wherever the model is chosen. Offered by the empty state, which is
+   *  the moment an operator is looking for it. */
+  onChooseModel?: () => void
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
   const foot = useRef<HTMLDivElement | null>(null)
@@ -38,7 +43,7 @@ export function Transcript({
       ) : null}
 
       {messages.length === 0 ? (
-        <EmptyChat model={model} />
+        <EmptyChat model={model} onChooseModel={onChooseModel} />
       ) : (
         <div className="flex flex-col gap-6">
           {messages.map((m, i) =>
@@ -90,7 +95,7 @@ export function nearBottom(el: HTMLElement): boolean {
  * one thing that has to be true before a prompt goes anywhere is that a model
  * is named. So the empty state says exactly that, and nothing else.
  */
-function EmptyChat({ model }: { model: string }) {
+function EmptyChat({ model, onChooseModel }: { model: string; onChooseModel?: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
       <p className="text-base font-medium">
@@ -98,9 +103,14 @@ function EmptyChat({ model }: { model: string }) {
       </p>
       <p className="max-w-prose text-sm text-[hsl(var(--legend))]">
         {model === ""
-          ? "Pick a model or alias in the request settings. The router resolves it the same way it resolves one from a client."
+          ? "The router resolves a model or alias the same way it resolves one from a client."
           : "Every answer records which provider served it, what it cost, and how long the first token took."}
       </p>
+      {model === "" && onChooseModel ? (
+        <Button size="sm" className="mt-2" onClick={onChooseModel}>
+          Choose a model
+        </Button>
+      ) : null}
     </div>
   )
 }

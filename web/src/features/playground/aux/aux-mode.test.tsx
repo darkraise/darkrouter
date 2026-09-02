@@ -14,17 +14,28 @@ vi.mock("../../shell/model-combobox", () => ({
     <button onClick={() => onChange("embed-model")}>Choose model</button>
   ),
 }))
-vi.mock("./tool-rail", () => ({ ToolRail: () => null }))
+vi.mock("./tool-rail", () => ({
+  ToolRail: ({ onSelect }: { onSelect: (surface: "embeddings") => void }) => (
+    <button onClick={() => onSelect("embeddings")}>Pick embeddings</button>
+  ),
+}))
 vi.mock("./tool-inputs", () => ({
-  ToolInputs: ({ onField, onRun }: {
+  ToolInputs: ({ onField, onRun, form }: {
     onField: (key: string, value: string) => void
     onRun: () => void
+    form: Record<string, string>
   }) => (
     <>
       <button onClick={() => onField("input", "hello")}>Fill input</button>
       <button onClick={onRun}>Run auxiliary</button>
+      <span data-testid="dialect">{form.dialect ?? ""}</span>
     </>
   ),
+}))
+vi.mock("../../../lib/queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../lib/queries")>()),
+  useModels: () => ({ data: { models: [{ model: "embed-model", providers: ["anthropic-main"] }], aliases: [] } }),
+  useProviders: () => ({ data: { providers: [{ id: "anthropic-main", kind: "anthropic" }] } }),
 }))
 vi.mock("./results", () => ({ RunCard: () => null }))
 vi.mock("./run-readings", () => ({ RunReadings: () => null }))
@@ -44,6 +55,7 @@ describe("Auxiliary visibility", () => {
       })
     })
     const { rerender } = render(<AuxMode active />)
+    await userEvent.click(screen.getByRole("button", { name: "Pick embeddings" }))
     await userEvent.click(screen.getByRole("button", { name: "Choose model" }))
     await userEvent.click(screen.getByRole("button", { name: "Fill input" }))
     await userEvent.click(screen.getByRole("button", { name: "Run auxiliary" }))
@@ -52,5 +64,18 @@ describe("Auxiliary visibility", () => {
     rerender(<AuxMode active={false} />)
 
     await waitFor(() => expect(signals[0]?.aborted).toBe(true))
+  })
+
+  it("opens on the first tool the rail lists", () => {
+    // The rail leads with Token Count; a screen that opened on the second
+    // entry showed a selected row that was not the top one.
+    render(<AuxMode active />)
+    expect(screen.getByText("Token Count")).toBeInTheDocument()
+  })
+
+  it("defaults the counting dialect to the model's provider", async () => {
+    render(<AuxMode active />)
+    await userEvent.click(screen.getByRole("button", { name: "Choose model" }))
+    expect(screen.getByTestId("dialect")).toHaveTextContent("anthropic")
   })
 })
