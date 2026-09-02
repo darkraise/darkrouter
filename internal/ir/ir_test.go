@@ -197,3 +197,18 @@ func TestToolBuiltInNeedsAnEmptyNameAndABody(t *testing.T) {
 		}
 	}
 }
+
+func TestExtraStringRoundTrips(t *testing.T) {
+	var b ContentBlock
+	if b.ExtraString(ExtraThoughtSignature) != "" {
+		t.Fatal("an absent extra reads as empty")
+	}
+	b.SetExtraString(ExtraThoughtSignature, "CtEB\"Adm=")
+	if got := b.ExtraString(ExtraThoughtSignature); got != "CtEB\"Adm=" {
+		t.Fatalf("got %q", got)
+	}
+	b.Extra["n"] = json.RawMessage(`7`)
+	if b.ExtraString("n") != "" {
+		t.Fatal("a non-string extra reads as empty")
+	}
+}
