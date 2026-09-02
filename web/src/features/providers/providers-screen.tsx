@@ -36,6 +36,7 @@ import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
 import { ProviderStateMark } from "../shell/status-mark"
 import { AddAccountsDialog } from "./add-accounts-dialog"
 import { AddLocalDialog } from "./add-local-dialog"
+import { AddKeylessDialog } from "./add-keyless-dialog"
 import { ProviderCard } from "./provider-card"
 import { ProviderIcon } from "./provider-icon"
 import {
@@ -136,6 +137,7 @@ type RowActions = {
   onDiscover: (id: string) => void
   onReset: (id: string) => void
   onAdd: (row: ProviderRow) => void
+  onAddKeyless: (row: ProviderRow) => void
 }
 
 // `darkraise-ui` bundles its own tanstack/react-table and does not re-export
@@ -261,6 +263,14 @@ function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
   if (row.keyless && !row.configured) {
     return (
       <span className="flex gap-2">
+        {/* Not "Add credentials": there is no credential. Adding it is still a
+            deliberate act, and one question -- what the first sweep imports --
+            has to be answered before the row exists, which is why this opens a
+            dialog rather than writing straight away. */}
+        <Button size="sm" variant="ghost" onClick={() => actions.onAddKeyless(row)}>
+          <Plus className="size-[var(--icon-size)]" />
+          Add provider
+        </Button>
         <Button
           size="icon"
           variant="ghost"
@@ -361,6 +371,7 @@ export function ProvidersScreen() {
   const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
   const [addLocalOpen, setAddLocalOpen] = useState(false)
+  const [keylessPreset, setKeylessPreset] = useState<Preset | null>(null)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
   const [addPreset, setAddPreset] = useState<Preset | null>(null)
@@ -437,22 +448,30 @@ export function ProvidersScreen() {
 
   // The mutation triggers are stable across renders, so the column set is
   // built once and DataTable is not handed a new table definition per poll.
+  const rowActions: RowActions = useMemo(
+    () => ({
+      onTest: setTesting,
+      onProbe: probe.mutate,
+      onDiscover: discover.mutate,
+      onReset: reset.mutate,
+      onAdd: (row) => {
+        // The row already names the provider. Opening the picker here would
+        // ask an operator to find, among two hundred, the one whose button
+        // they just pressed.
+        setAddPreset(presetRows.find((p) => p.id === row.id) ?? null)
+        setAddOpen(true)
+      },
+      onAddKeyless: (row) => {
+        setKeylessPreset(presetRows.find((p) => p.id === row.id) ?? null)
+      },
+    }),
+    [probe.mutate, discover.mutate, reset.mutate, presetRows],
+  )
+
   const columns = useMemo(
     () =>
-      buildColumns({
-        onTest: setTesting,
-        onProbe: probe.mutate,
-        onDiscover: discover.mutate,
-        onReset: reset.mutate,
-        onAdd: (row) => {
-          // The row already names the provider. Opening the picker here would
-          // ask an operator to find, among two hundred, the one whose button
-          // they just pressed.
-          setAddPreset(presetRows.find((p) => p.id === row.id) ?? null)
-          setAddOpen(true)
-        },
-      }),
-    [probe.mutate, discover.mutate, reset.mutate, presetRows],
+      buildColumns(rowActions),
+    [rowActions],
   )
 
   return (
@@ -511,6 +530,12 @@ export function ProvidersScreen() {
         open={addOpen}
         onOpenChange={setAddOpen}
         onDone={(id) => void navigate({ to: "/providers/$id", params: { id } })}
+      />
+
+      <AddKeylessDialog
+        preset={keylessPreset}
+        open={keylessPreset !== null}
+        onOpenChange={(next) => !next && setKeylessPreset(null)}
       />
 
       <AddLocalDialog
@@ -609,6 +634,11 @@ export function ProvidersScreen() {
               row={r.row}
               mix={r.mix}
               onTest={() => setTesting(r.row)}
+              onAdd={() =>
+                r.row.keyless && !r.row.configured
+                  ? rowActions.onAddKeyless(r.row)
+                  : rowActions.onAdd(r.row)
+              }
               share={r.share}
               onOpen={() => void navigate({ to: "/providers/$id", params: { id: r.row.id } })}
             />
