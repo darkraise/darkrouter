@@ -153,42 +153,60 @@ func (b *Breaker) availableLocked(k Key) bool {
 
 // Record applies one outcome. It is the only place breaker state changes, so
 // the rules from spec §7.1 live here and nowhere else.
+//
+// Every outcome releases the half-open probe on both entries Available can
+// claim it on. An outcome that leaves the ladder alone still has to do this:
+// the probe is the one admitted caller, and if its attempt ends without
+// touching the entry nothing else ever will, and the entry stays shut.
 func (b *Breaker) Record(k Key, s Signal) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	now := b.now()
+	ck := Key{ProviderID: k.ProviderID, KeyID: k.KeyID}
 
 	switch s.Outcome {
 	case adapter.OutcomeClientCancelled:
 		// Never counts against any provider. Marking a provider unhealthy
 		// because someone pressed Ctrl-C is a self-inflicted outage.
+		b.releaseProbeLocked(k)
+		b.releaseProbeLocked(ck)
 		return
 
 	case adapter.OutcomeRetryableModel:
 		// The provider is reachable and the credential is fine; only this model
 		// is wrong. Phase 6 counts these per target to surface a permanently
 		// misconfigured base URL.
+		b.releaseProbeLocked(k)
+		b.releaseProbeLocked(ck)
 		return
 
-	case adapter.OutcomeSuccess, adapter.OutcomeFatal:
-		// Both prove the provider is reachable and functioning. A 400 says
-		// something about the request, not about the provider.
-		if _, ok := b.m[k]; ok {
-			delete(b.m, k)
-			b.dirty = true
-		}
+	case adapter.OutcomeSuccess:
+		// Proves the provider is reachable and the credential works, so both
+		// entries close fully.
+		b.resetLocked(k)
+		b.resetLocked(ck)
+		return
+
+	case adapter.OutcomeFatal:
+		// Proves the provider is reachable; a 400 says something about the
+		// request, not about the provider. It says nothing about the credential
+		// either way, so a cooling credential keeps its ladder and only gives
+		// back the probe.
+		b.resetLocked(k)
+		b.releaseProbeLocked(ck)
 		return
 
 	case adapter.OutcomeRetryableCredential:
 		// Cools the credential across every model it serves. This never resets
 		// any ladder: a billing-exhausted key must not be resurrected by a
 		// client's malformed request.
-		ck := Key{ProviderID: k.ProviderID, KeyID: k.KeyID}
+		b.releaseProbeLocked(k)
 		st := b.getLocked(ck)
 		b.coolLocked(st, now, st.backoffLevel)
 		return
 
 	case adapter.OutcomeRetryableProvider:
+		b.releaseProbeLocked(ck)
 		st := b.getLocked(k)
 		if s.StatusCode == 429 {
 			if s.HasRetryAfter {
@@ -207,11 +225,29 @@ func (b *Breaker) Record(k Key, s Signal) {
 		}
 		// Everything else retryable: a single failure must not cool.
 		st.consecutiveFailures++
+		st.probing = false
 		b.dirty = true
 		if st.consecutiveFailures >= b.tripAfter {
 			b.coolLocked(st, now, st.backoffLevel)
 		}
 		return
+	}
+}
+
+// releaseProbeLocked gives back a half-open claim without changing anything
+// else, so the next caller after expiry becomes the probe instead.
+func (b *Breaker) releaseProbeLocked(k Key) {
+	if st, ok := b.m[k]; ok && st.probing {
+		st.probing = false
+		b.dirty = true
+	}
+}
+
+// resetLocked forgets the entry entirely: ladder, counters and probe.
+func (b *Breaker) resetLocked(k Key) {
+	if _, ok := b.m[k]; ok {
+		delete(b.m, k)
+		b.dirty = true
 	}
 }
 
