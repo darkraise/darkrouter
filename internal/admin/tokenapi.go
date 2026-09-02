@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -20,7 +19,7 @@ type proxyTokenView struct {
 func (s *Server) handleListProxyTokens(w http.ResponseWriter, r *http.Request) {
 	toks, err := s.deps.DB.ProxyTokens(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	out := []proxyTokenView{}
@@ -35,15 +34,14 @@ func (s *Server) handleListProxyTokens(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, view)
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
 }
 
 func (s *Server) handleCreateProxyToken(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 8<<10, &body) {
 		return
 	}
 	if body.Name == "" {
@@ -52,7 +50,7 @@ func (s *Server) handleCreateProxyToken(w http.ResponseWriter, r *http.Request) 
 	}
 	tok, err := s.deps.DB.CreateProxyToken(r.Context(), body.Name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	// The only response that carries the secret. It is not stored in plaintext,
@@ -67,7 +65,7 @@ func (s *Server) handleCreateProxyToken(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleDeleteProxyToken(w http.ResponseWriter, r *http.Request) {
 	removed, err := s.deps.DB.DeleteProxyToken(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !removed {
@@ -82,41 +80,44 @@ func (s *Server) handleDeleteProxyToken(w http.ResponseWriter, r *http.Request) 
 // It never echoes a secret, per phase 7 §4.1: the response says what changed,
 // not what it changed to.
 func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Key == nil {
+		writeError(w, http.StatusServiceUnavailable, "no keyring")
+		return
+	}
 	providerID, keyID := r.PathValue("id"), r.PathValue("keyId")
 	var body struct {
 		Secret  *string `json:"secret"`
 		Enabled *bool   `json:"enabled"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 16<<10, &body) {
 		return
 	}
 	if body.Secret == nil && body.Enabled == nil {
 		writeError(w, http.StatusBadRequest, "nothing to change")
 		return
 	}
+	if body.Secret != nil && *body.Secret == "" {
+		writeError(w, http.StatusBadRequest, "secret must not be empty")
+		return
+	}
 
-	changed := map[string]any{}
 	if body.Enabled != nil {
 		found, err := s.deps.DB.SetCredentialEnabled(r.Context(), providerID, keyID, *body.Enabled)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			internalError(w, r, err)
 			return
 		}
 		if !found {
 			writeError(w, http.StatusNotFound, "no credential with that id")
 			return
 		}
-		changed["enabled"] = *body.Enabled
 	}
 	if body.Secret != nil {
-		if err := s.deps.DB.ReplaceCredentialSecret(r.Context(), s.deps.Key,
-			keyID, *body.Secret, nil); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+		if err := s.deps.DB.ReplaceProviderCredentialSecret(r.Context(), s.deps.Key,
+			providerID, keyID, *body.Secret, nil); err != nil {
+			writeStoreError(w, r, err)
 			return
 		}
-		// Reported as a fact, not as a value.
-		changed["secret"] = "replaced"
 	}
 	// A changed credential invalidates whatever the breaker learned from the
 	// old one, so the provider gets a clean slate rather than inheriting a
@@ -130,6 +131,19 @@ func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
 	// Disabling a credential is the emergency revocation control and replacing
 	// one is a rotation. Both are worthless if the decrypted set the router
 	// serves from keeps the old value until an unrelated mutation reloads it.
-	s.reloadProviders(r.Context())
-	writeJSON(w, http.StatusOK, changed)
+	s.reloadProviders(afterCommit(r))
+	// The updated credential as the listing would show it: the mask, never
+	// the value.
+	creds, err := s.deps.DB.Credentials(r.Context(), s.deps.Key, providerID)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	for _, c := range creds {
+		if c.ID == keyID {
+			writeJSON(w, http.StatusOK, s.credentialView(providerID, c))
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "no credential with that id")
 }

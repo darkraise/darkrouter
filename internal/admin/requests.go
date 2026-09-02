@@ -1,13 +1,30 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-func filtersFrom(r *http.Request) RequestFilters {
+// queryInt reads one optional integer query parameter. A value that is
+// present and unparseable is an error rather than a silent zero: a client
+// that sent since_ms=yesterday would otherwise get the unfiltered log and
+// never learn why.
+func queryInt(r *http.Request, name string) (int64, bool, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return 0, false, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s must be an integer", name)
+	}
+	return n, true, nil
+}
+
+func filtersFrom(r *http.Request) (RequestFilters, error) {
 	q := r.URL.Query()
 	f := RequestFilters{
 		Provider:  q.Get("provider"),
@@ -18,9 +35,14 @@ func filtersFrom(r *http.Request) RequestFilters {
 		ErrorCode: q.Get("error_code"),
 		Source:    q.Get("source"),
 	}
-	f.SinceMs, _ = strconv.ParseInt(q.Get("since_ms"), 10, 64)
-	f.UntilMs, _ = strconv.ParseInt(q.Get("until_ms"), 10, 64)
-	return f
+	var err error
+	if f.SinceMs, _, err = queryInt(r, "since_ms"); err != nil {
+		return f, err
+	}
+	if f.UntilMs, _, err = queryInt(r, "until_ms"); err != nil {
+		return f, err
+	}
+	return f, nil
 }
 
 type requestView struct {
@@ -37,6 +59,7 @@ type requestView struct {
 	TokensIn        int64  `json:"tokens_in"`
 	TokensOut       int64  `json:"tokens_out"`
 	CacheReadTokens int64  `json:"cache_read_tokens"`
+	ReasoningTokens int64  `json:"reasoning_tokens"`
 	CostMicros      *int64 `json:"cost_micros"`
 	TTFTMs          *int64 `json:"ttft_ms"`
 	TotalMs         *int64 `json:"total_ms"`
@@ -49,15 +72,22 @@ type requestView struct {
 }
 
 func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
-	f := filtersFrom(r)
+	f, err := filtersFrom(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	q := store.RequestQuery{
 		Provider: f.Provider, Model: f.Model, Status: f.Status,
 		Alias: f.Alias, Surface: f.Surface, ErrorCode: f.ErrorCode,
 		Source: f.Source, SinceMs: f.SinceMs, UntilMs: f.UntilMs,
 	}
-	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
-		q.Limit = n
+	limit, _, err := queryInt(r, "limit")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	q.Limit = int(limit)
 	if c := r.URL.Query().Get("cursor"); c != "" {
 		ts, id, err := decodeCursor(c, f)
 		if err != nil {
@@ -71,7 +101,7 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.deps.DB.ListRequests(r.Context(), q)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 
@@ -83,8 +113,8 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 			Provider: row.FinalProviderID, FinalModel: row.FinalModel,
 			Status: row.Status, Source: row.Source,
 			TokensIn: row.TokensIn, TokensOut: row.TokensOut,
-			CacheReadTokens: row.CacheReadTokens,
-			CostMicros:      row.CostMicros, TTFTMs: row.TTFTMs, TotalMs: row.TotalMs,
+			CacheReadTokens: row.CacheReadTokens, ReasoningTokens: row.ReasoningTokens,
+			CostMicros: row.CostMicros, TTFTMs: row.TTFTMs, TotalMs: row.TotalMs,
 			ErrorCode: row.ErrorCode, Attempts: row.Attempts, Path: row.Path,
 		})
 	}
@@ -92,7 +122,10 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{"requests": out}
 	// The next cursor is minted from the last row of this page under this
 	// page's filters, which is what makes it invalid if the filters change.
-	if len(rows) > 0 {
+	// A short page is the last one, and carries no cursor: a client that
+	// followed one would fetch an empty page to learn what the length
+	// already said.
+	if len(rows) > 0 && len(rows) == store.PageSize(q.Limit) {
 		last := rows[len(rows)-1]
 		body["next_cursor"] = encodeCursor(last.TSMs, last.ID, f)
 	}
@@ -102,7 +135,7 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 	tr, ok, err := s.deps.DB.RequestTrace(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !ok {
@@ -115,8 +148,15 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 
 	attempts := make([]map[string]any, 0, len(tr.Attempts))
 	for _, a := range tr.Attempts {
+		// The label is what the operator named the credential; the id stands
+		// in only when the credential is gone and there is nothing else to
+		// show.
+		label := a.KeyLabel
+		if label == "" {
+			label = a.KeyID
+		}
 		attempts = append(attempts, map[string]any{
-			"seq": a.Seq, "provider": a.ProviderID, "key_label": a.KeyID,
+			"seq": a.Seq, "provider": a.ProviderID, "key_label": label,
 			"model": a.Model, "outcome": a.Outcome, "status_code": a.StatusCode,
 			"latency_ms": a.LatencyMs, "error": a.Error, "path": a.Path,
 			"tokens_in": a.TokensIn, "tokens_out": a.TokensOut, "cost_micros": a.CostMicros,
@@ -132,6 +172,7 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 		"model": tr.RequestedModel, "alias": tr.ResolvedAlias,
 		"provider": tr.FinalProviderID, "final_model": tr.FinalModel,
 		"status": tr.Status, "error_code": tr.ErrorCode,
+		"source": tr.Source, "path": tr.Path,
 		"tokens_in": tr.TokensIn, "tokens_out": tr.TokensOut, "cache_read_tokens": tr.CacheReadTokens,
 		// Output tokens spent reasoning rather than answering. Reported
 		// separately because they are billed inside tokens_out and are often

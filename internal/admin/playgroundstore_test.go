@@ -24,13 +24,16 @@ func TestPlaygroundPresetBlobIsOpaque(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("list = %d", w.Code)
 	}
-	var list []struct {
-		ID     string         `json:"id"`
-		Config map[string]any `json:"config"`
+	var env struct {
+		Presets []struct {
+			ID     string         `json:"id"`
+			Config map[string]any `json:"config"`
+		} `json:"presets"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
 	}
+	list := env.Presets
 	if len(list) != 1 {
 		t.Fatalf("listed %d, want 1", len(list))
 	}
@@ -211,14 +214,17 @@ func TestPlaygroundConversationRoundTripsThroughTheAPI(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("list = %d", w.Code)
 	}
-	var list []struct {
-		Title   string `json:"title"`
-		Model   string `json:"model"`
-		Preview string `json:"preview"`
+	var env struct {
+		Conversations []struct {
+			Title   string `json:"title"`
+			Model   string `json:"model"`
+			Preview string `json:"preview"`
+		} `json:"conversations"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
 	}
+	list := env.Conversations
 	if len(list) != 1 {
 		t.Fatalf("listed %d, want 1", len(list))
 	}
@@ -319,12 +325,15 @@ func TestPlaygroundConversationsListNewestFirst(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("list = %d: %s", w.Code, w.Body.String())
 		}
-		var list []struct {
-			Title string `json:"title"`
+		var env struct {
+			Conversations []struct {
+				Title string `json:"title"`
+			} `json:"conversations"`
 		}
-		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 			t.Fatal(err)
 		}
+		list := env.Conversations
 		out := []string{}
 		for _, c := range list {
 			out = append(out, c.Title)

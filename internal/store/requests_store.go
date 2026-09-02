@@ -15,6 +15,15 @@ import (
 // like a server outage.
 const maxRequestPage = 200
 
+// PageSize is the row count ListRequests actually uses for a requested
+// limit, so a caller can tell a full page from the last one.
+func PageSize(limit int) int {
+	if limit <= 0 || limit > maxRequestPage {
+		return maxRequestPage
+	}
+	return limit
+}
+
 // RequestQuery is one page request. AfterTS and AfterID together are the keyset
 // position; an empty AfterID means the first page.
 type RequestQuery struct {
@@ -72,10 +81,7 @@ type RequestSummary struct {
 // in the same millisecond still have a defined position and a page boundary
 // there neither repeats nor skips.
 func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary, error) {
-	limit := q.Limit
-	if limit <= 0 || limit > maxRequestPage {
-		limit = maxRequestPage
-	}
+	limit := PageSize(q.Limit)
 
 	where := []string{"1 = 1"}
 	args := []any{}
@@ -191,19 +197,22 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 	var traceJSON, warningsJSON, metaJSON string
 
 	err := d.Read.QueryRowContext(ctx,
-		`SELECT id, ts, dialect, surface, requested_model, resolved_alias,
-		        final_provider_id, final_model, status,
-		        tokens_in, tokens_out, cache_read_tokens, reasoning_tokens,
-		        cost_micros, ttft_ms, total_ms, error_code,
-		        candidates_json, warnings_json, surface_meta_json,
-		        response_bytes, response_content_type
-		   FROM requests WHERE id = ?`, id).Scan(
+		`SELECT r.id, r.ts, r.dialect, r.surface, r.requested_model, r.resolved_alias,
+		        r.final_provider_id, r.final_model, r.status, r.source,
+		        r.tokens_in, r.tokens_out, r.cache_read_tokens, r.reasoning_tokens,
+		        r.cost_micros, r.ttft_ms, r.total_ms, r.error_code,
+		        r.candidates_json, r.warnings_json, r.surface_meta_json,
+		        r.response_bytes, r.response_content_type,
+		        coalesce((SELECT a.path FROM request_attempts a
+		                   WHERE a.request_id = r.id
+		                   ORDER BY a.seq DESC LIMIT 1), '')
+		   FROM requests r WHERE r.id = ?`, id).Scan(
 		&tr.ID, &tr.TSMs, &tr.Dialect, &tr.Surface, &tr.RequestedModel, &tr.ResolvedAlias,
-		&tr.FinalProviderID, &tr.FinalModel, &tr.Status,
+		&tr.FinalProviderID, &tr.FinalModel, &tr.Status, &tr.Source,
 		&tr.TokensIn, &tr.TokensOut, &tr.CacheReadTokens, &tr.ReasoningTokens,
 		&tr.CostMicros, &tr.TTFTMs, &tr.TotalMs, &tr.ErrorCode,
 		&traceJSON, &warningsJSON, &metaJSON,
-		&tr.ResponseBytes, &tr.ResponseContentType)
+		&tr.ResponseBytes, &tr.ResponseContentType, &tr.Path)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
