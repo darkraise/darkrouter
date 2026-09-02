@@ -155,3 +155,26 @@ func TestAnEmbeddingRequestWithNoEmbeddingProviderIsRefused(t *testing.T) {
 		t.Errorf("attempts = %d; a surface no provider offers must attempt nothing", len(got.Attempts))
 	}
 }
+
+// The chat route refuses a compressed body before parsing it; the auxiliary
+// routes share that refusal rather than each answering a different 400.
+func TestACompressedEmbeddingBodyIsRefusedLikeChat(t *testing.T) {
+	up := unaryUpstream()
+	defer up.Close()
+	logger := &captureLogger{}
+	e := newExecutorWith(t, up.URL, Deps{Log: logger}, 0)
+
+	r := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(`{"model":"m","input":"x"}`))
+	r.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	e.HandleEmbeddings(rec, r, openaiedge.New())
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("code = %d body = %s, want 415", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "content-encoding is not supported") {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+	if r := logger.only(t); r.ErrorCode != string(ir.ErrUnsupportedMedia) {
+		t.Errorf("ErrorCode = %q; the refusal must still be logged", r.ErrorCode)
+	}
+}

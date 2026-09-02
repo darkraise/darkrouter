@@ -241,39 +241,31 @@ func (e *Executor) catalogFor(providers []provider.Provider) catalog.Reader {
 }
 
 func (e *Executor) Handle(w http.ResponseWriter, r *http.Request, d edge.Dialect) {
-	cfg := e.store.Current() // one snapshot for this request's whole lifetime
+	e.RunAux(w, r, d.Name(), ir.SurfaceLLM, d, func(cfg *config.Config) (SurfaceOp, error) {
+		req, pt, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
+		if err != nil {
+			return nil, err
+		}
+		return &chatOp{d: d, req: req, pt: pt}, nil
+	})
+}
 
-	if compressedBody(r) {
-		// Refused before parsing, but still logged: the client sent bytes and
-		// got a response, which is an event the operator's records must cover.
-		start := time.Now()
-		rec, done := e.newRecord(r, start, d.Name(), string(ir.SurfaceLLM))
-		defer done()
-		w.Header().Set("X-Darkrouter-Request", rec.ID)
-		w.Header().Set("X-Darkrouter-Attempts", "0")
-		rec.ErrorCode = string(ir.ErrUnsupportedMedia)
-		_ = d.WriteError(w, &ir.Error{
-			Type:    ir.ErrUnsupportedMedia,
-			Message: "content-encoding is not supported: send an uncompressed request body",
-		})
-		return
-	}
+// refuseCompressed answers a request whose body Darkrouter will not decode,
+// and reports whether it did. Refused before parsing, but still logged: the
+// client sent bytes and got a response, which is an event the operator's
+// records must cover.
+func (e *Executor) refuseCompressed(w http.ResponseWriter, r *http.Request,
+	rec *store.RequestRecord, ew errorWriter) bool {
 
-	req, pt, err := d.ParseRequest(r, cfg.Server.MaxBodyBytes)
-	if err != nil {
-		// The row is opened and closed here rather than in RunSurface: a body
-		// that never parsed has no op to name the surface it was asking for,
-		// and the operator is still owed the record.
-		start := time.Now()
-		rec, done := e.newRecord(r, start, d.Name(), string(ir.SurfaceLLM))
-		defer done()
-		w.Header().Set("X-Darkrouter-Request", rec.ID)
-		w.Header().Set("X-Darkrouter-Attempts", "0")
-		rec.ErrorCode = string(ir.ErrInvalidRequest)
-		_ = d.WriteError(w, &ir.Error{Type: ir.ErrInvalidRequest, Message: err.Error()})
-		return
+	if !compressedBody(r) {
+		return false
 	}
-	e.RunSurface(w, r, &chatOp{d: d, req: req, pt: pt}, cfg)
+	rec.ErrorCode = string(ir.ErrUnsupportedMedia)
+	_ = ew.WriteError(w, &ir.Error{
+		Type:    ir.ErrUnsupportedMedia,
+		Message: "content-encoding is not supported: send an uncompressed request body",
+	})
+	return true
 }
 
 // runAttempts drives the chain. The ordered list is fixed at snapshot time and

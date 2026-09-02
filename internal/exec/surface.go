@@ -225,11 +225,11 @@ func (e *Executor) RunSurface(w http.ResponseWriter, r *http.Request, op Surface
 
 // RunAux is RunSurface with the parse step moved inside the record's lifetime.
 //
-// A route that parsed first would produce no request row for a malformed body,
-// and chat does not behave that way: Handle opens its record before parsing so
-// that a 400 is a request the gateway received and refused rather than one that
-// never happened. Six routes dropping their 400s from the log would be a real
-// regression in the only place an operator can see them.
+// A route that parsed first would produce no request row for a malformed body:
+// the record is opened before parsing so that a 400 is a request the gateway
+// received and refused rather than one that never happened. Every route,
+// chat included, enters here, so a refusal the inbound read path makes — a
+// compressed body, an oversized one — is the same refusal on all of them.
 //
 // ew rather than the op writes the error, because on a parse failure there is
 // no op yet — the dialect is what knows the client's error shape.
@@ -241,6 +241,9 @@ func (e *Executor) RunAux(w http.ResponseWriter, r *http.Request,
 	rec, done := e.newRecord(r, start, dialect, string(surface))
 	defer done()
 	e.beginResponse(w, rec)
+	if e.refuseCompressed(w, r, rec, ew) {
+		return
+	}
 
 	cfg := e.store.Current() // one snapshot for this request's whole lifetime
 	op, err := build(cfg)

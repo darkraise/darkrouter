@@ -65,3 +65,26 @@ func TestAuthorizeIsANoOpWhenNil(t *testing.T) {
 		t.Fatalf("a nil authorizer must be the static path, got %v", err)
 	}
 }
+
+// Every adapter builds its request over a bytes.Reader, which already carries
+// GetBody, so materialising the body a second time would be pure waste.
+func TestMakeReplayableLeavesABytesBodyAlone(t *testing.T) {
+	hr, err := http.NewRequest("POST", "https://up.example/v1", bytes.NewReader([]byte(`{"a":1}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := hr.Body
+	if err := makeReplayable(hr); err != nil {
+		t.Fatal(err)
+	}
+	if hr.Body != before {
+		t.Error("the body was re-read and replaced although GetBody was already set")
+	}
+	rc, err := hr.GetBody()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(rc); string(b) != `{"a":1}` {
+		t.Errorf("GetBody replayed %q", b)
+	}
+}
