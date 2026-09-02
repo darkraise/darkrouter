@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // testPassword and testHash are the fixture credential.
@@ -40,7 +41,7 @@ var testHash = sync.OnceValue(func() string {
 // password, and returns it alongside the database so a test can seed rows.
 func testServer(t *testing.T) (*Server, *store.DB) {
 	t.Helper()
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	s, err := New(Deps{DB: db, PasswordHash: testHash()})
 	if err != nil {
 		t.Fatal(err)

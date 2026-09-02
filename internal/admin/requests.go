@@ -140,7 +140,7 @@ func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
 		// a passthrough reply carries the upstream's own field names, and
 		// those disagree across providers.
 		"reasoning_tokens": tr.ReasoningTokens,
-		"cost_micros": tr.CostMicros, "ttft_ms": tr.TTFTMs, "total_ms": tr.TotalMs,
+		"cost_micros":      tr.CostMicros, "ttft_ms": tr.TTFTMs, "total_ms": tr.TotalMs,
 		// Three separate lists, deliberately. Attempts alone explains a
 		// failover; candidates and skips explain the routing decision.
 		"candidates":            tr.Candidates,

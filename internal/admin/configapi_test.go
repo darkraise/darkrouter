@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // configBody is the shape GET /api/config returns: every block, each value
@@ -230,7 +231,7 @@ func TestOverviewFailoverEdgesIsAnArray(t *testing.T) {
 // seedFailover writes one request that groq refused and together served.
 func seedFailover(t *testing.T, db *store.DB) {
 	t.Helper()
-	db.WriteBatchForTest(t, []*store.RequestRecord{{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
 		ID: "01FAILOVER", TS: time.Now(), Dialect: "openai", Surface: "llm",
 		RequestedModel: "m", FinalProviderID: "together", FinalModel: "m",
 		Status: "success",

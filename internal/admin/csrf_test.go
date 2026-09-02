@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 func csrfFor(t *testing.T) (*CSRF, *store.DB) {
 	t.Helper()
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	c, err := NewCSRF(context.Background(), db)
 	if err != nil {
 		t.Fatal(err)
