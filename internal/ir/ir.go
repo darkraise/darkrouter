@@ -4,6 +4,7 @@ package ir
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -421,4 +422,40 @@ func blocksHaveImage(blocks []ContentBlock) bool {
 		}
 	}
 	return false
+}
+
+// OpenBlocks tracks the blocks a stream parser has opened so they can all be
+// closed in one deterministic pass. Every flat-delta dialect needs the same
+// bookkeeping: open a block the first time a kind appears, close everything
+// when a finish reason or the end of the stream arrives.
+type OpenBlocks struct {
+	open map[int]bool
+}
+
+// Open records a block as open. Opening an open block is a no-op.
+func (o *OpenBlocks) Open(index int) {
+	if o.open == nil {
+		o.open = map[int]bool{}
+	}
+	o.open[index] = true
+}
+
+func (o *OpenBlocks) IsOpen(index int) bool { return o.open[index] }
+
+// CloseAll yields a block stop for every open block in ascending index
+// order — map order is not deterministic and the event sequence has to be —
+// and forgets them. It reports false when the consumer stopped listening.
+func (o *OpenBlocks) CloseAll(yield func(StreamEvent, error) bool) bool {
+	idxs := make([]int, 0, len(o.open))
+	for idx := range o.open {
+		idxs = append(idxs, idx)
+	}
+	sort.Ints(idxs)
+	o.open = nil
+	for _, idx := range idxs {
+		if !yield(StreamEvent{Type: EventBlockStop, Index: idx}, nil) {
+			return false
+		}
+	}
+	return true
 }
