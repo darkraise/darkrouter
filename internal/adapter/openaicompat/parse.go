@@ -1,6 +1,7 @@
 package openaicompat
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -85,12 +86,27 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 			out.Content = append(out.Content, ir.ContentBlock{
 				Type: ir.BlockToolUse,
 				ToolUse: &ir.ToolUse{
-					ID: tc.ID, Name: tc.Function.Name, Input: tc.Function.Arguments,
+					ID: tc.ID, Name: tc.Function.Name, Input: toolArguments(tc.Function.Arguments),
 				},
 			})
 		}
 	}
 	return out, nil
+}
+
+// toolArguments unwraps the JSON-encoded string OpenAI puts a call's
+// arguments in. Some compatible upstreams send the object itself, which is
+// taken as it is; an empty value becomes an empty object so the IR never
+// carries an input no target would accept.
+func toolArguments(raw json.RawMessage) json.RawMessage {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		raw = json.RawMessage(s)
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return raw
 }
 
 type wireChunk struct {

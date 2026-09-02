@@ -6,14 +6,18 @@
           "parts": [
             {
               "functionCall": {
-                "args": "{\"city\":\"Oslo\"}",
+                "args": {
+                  "city": "Oslo"
+                },
                 "id": "call_a",
                 "name": "lookup"
               }
             },
             {
               "functionCall": {
-                "args": "{\"city\":\"Bergen\"}",
+                "args": {
+                  "city": "Bergen"
+                },
                 "id": "call_b",
                 "name": "lookup"
               }

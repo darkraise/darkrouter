@@ -3,13 +3,17 @@
     "content": [
       {
         "id": "call_a",
-        "input": "{\"city\":\"Oslo\"}",
+        "input": {
+          "city": "Oslo"
+        },
         "name": "lookup",
         "type": "tool_use"
       },
       {
         "id": "call_b",
-        "input": "{\"city\":\"Bergen\"}",
+        "input": {
+          "city": "Bergen"
+        },
         "name": "lookup",
         "type": "tool_use"
       }
