@@ -21,7 +21,7 @@ Last updated: 2026-09-02
 | 12 — Console prerequisites | ✅ | ✅ | **Complete.** `darkraise-ui` 6.5.0 published, aliases and policy moved into SQLite behind `GET`/`PUT /api/config`, and the twelve admin endpoints §8.4 lists; merged 2026-08-26. |
 | 13 — Operator console | ✅ | ✅ | **Complete.** Fifteen screens over nine destinations, the ladder and flow visuals, command palette; merged 2026-08-26. |
 | 14 — Console gap closure | ✅ | ✅ | **Complete, live gate performed 2026-09-02.** 22 tasks close every phase 10–13 gap; full suite race-clean, frontend 760/760 in 78 files. The console was run against this machine's UAT instance and a shadow of it, with Chat and Compare exercised end to end against Groq. `docs/ux/GAP-CLOSURE-DOD.md` records the static gate as it was run on 2026-08-27. |
-| 15 — Review fixes | — | ✅ | **In progress.** A whole-project review on 2026-09-02 produced `docs/superpowers/plans/2026-09-02-review-fixes.md`: eight tracks in parallel worktrees (core, two provider tracks, admin, three console tracks, engineering) merging in order, then structured logging serially. |
+| 15 — Review fixes | — | ✅ | **Complete.** A whole-project review on 2026-09-02 produced `docs/superpowers/plans/2026-09-02-review-fixes.md`: eight tracks in parallel worktrees (core, two provider tracks, admin, three console tracks, engineering). All eight merged, plus `fix/catalog-rebuild-and-passthrough-warning`, and structured logging with request ids landed serially afterwards as `552814c`. |
 
 Specs live in `docs/superpowers/specs/`; read its `README.md` first for the
 dependency graph. Plans live in `docs/superpowers/plans/`.
@@ -50,8 +50,10 @@ Compare ran end to end against Groq. Until then every claim about it rested
 on unit tests over pure functions and on reading the code;
 `docs/ux/DONE-CRITERIA.md` records criterion by criterion what backs what.
 
-`origin/master` exists at `f62db6d`. Local `master` is far ahead of it and
-has not been pushed; the review-fix branches are unpushed too.
+`origin/master` is at `44a088e`. Local `master` is nine commits ahead of it
+and has not been pushed. Pushing is the release: `.github/workflows/ci.yml`
+derives the next version from the commits since the last v-tag, compiles it
+into the binary, publishes the image and only then creates the tag.
 
 For how the system is put together — packages, the request path, breaker
 and failover semantics, config precedence, the data model, the background
@@ -1389,14 +1391,18 @@ unperformed.
 
 The same day a whole-project review — gateway core, every provider adapter,
 the admin API and store, the console, and the engineering surface — produced
-`docs/superpowers/plans/2026-09-02-review-fixes.md`. The fixes run as eight
+`docs/superpowers/plans/2026-09-02-review-fixes.md`. The fixes ran as eight
 tracks in parallel worktrees on `fix/<track>` branches, each owning a
-disjoint set of paths, and merge in order: eng, core, prov1, prov2, admin,
-web1, web2, web3. Structured logging with request ids follows serially as
-the one cross-cutting change, then a live console check, a fresh UAT
-password and a redeploy per `docs/DEPLOY.md`. The engineering track's own
-output is this document's companions: `docs/ARCHITECTURE.md`, `docs/API.md`
-and `docs/DEPLOY.md`, the CI gates, and the container hardening.
+disjoint set of paths, and merged in order: eng, core, prov1, prov2, admin,
+web1, web2, web3, with `fix/catalog-rebuild-and-passthrough-warning`
+alongside them. Structured logging with request ids followed serially as the
+one cross-cutting change (`552814c`), then the live console check and the
+redeploy per `docs/DEPLOY.md`. The engineering track's own output is this
+document's companions: `docs/ARCHITECTURE.md`, `docs/API.md` and
+`docs/DEPLOY.md`, the CI gates, and the container hardening.
+
+The `fix/*` branches were deleted after merging, so the merge commits on
+`master` are the record that the tracks ran.
 
 ## Review history
 
@@ -1406,4 +1412,4 @@ and `docs/DEPLOY.md`, the CI gates, and the container hardening.
 | Task 13 (`internal/exec`) | 1 × Fable, read-only | Concurrency core sound; 6 defects fixed in 8b0b81d |
 | Task 14 (`internal/server`) | 1 × Fable, read-only | 8 defects fixed in 8b0b81d, including a drain deadline that did nothing |
 | Phase 10 — all 18 mockup screens | 1 × Fable, read-only | 4 Important + 27 Minor, all verified against source and all fixed in 641c63d |
-| Whole project, 2026-09-02 | Fable, read-only, per area | Findings across core, providers, admin, console and engineering → `docs/superpowers/plans/2026-09-02-review-fixes.md`, in progress |
+| Whole project, 2026-09-02 | Fable, read-only, per area | Findings across core, providers, admin, console and engineering → `docs/superpowers/plans/2026-09-02-review-fixes.md`, all eight tracks merged |
