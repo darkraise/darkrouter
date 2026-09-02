@@ -118,3 +118,13 @@ func TestParseResponseCarriesServerToolBlocks(t *testing.T) {
 		t.Errorf("warnings = %+v; a carried block is not a loss", got.Warnings)
 	}
 }
+
+func TestParseResponseReadsCacheWriteTTLs(t *testing.T) {
+	got := parseBody(t, `{"id":"msg_1","model":"claude-x","stop_reason":"end_turn","content":[],
+		"usage":{"input_tokens":10,"output_tokens":4,"cache_creation_input_tokens":7,
+			"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":5}}}`)
+	u := got.Usage
+	if u.CacheWriteTokens != 7 || u.CacheWrite5mTokens != 2 || u.CacheWrite1hTokens != 5 {
+		t.Errorf("usage = %+v; the TTL split prices a 1h write at 2x and a 5m one at 1.25x", u)
+	}
+}

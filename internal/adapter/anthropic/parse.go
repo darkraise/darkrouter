@@ -13,15 +13,25 @@ type wireUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	// CacheCreation splits the write count by TTL. The two are priced
+	// differently, and the total above already includes both.
+	CacheCreation *struct {
+		Ephemeral5m int `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func (u *wireUsage) toIR() ir.Usage {
-	return ir.Usage{
+	out := ir.Usage{
 		InputTokens:      u.InputTokens,
 		OutputTokens:     u.OutputTokens,
 		CacheWriteTokens: u.CacheCreationInputTokens,
 		CacheReadTokens:  u.CacheReadInputTokens,
 	}
+	if cc := u.CacheCreation; cc != nil {
+		out.CacheWrite5mTokens, out.CacheWrite1hTokens = cc.Ephemeral5m, cc.Ephemeral1h
+	}
+	return out
 }
 
 type wireBlock struct {

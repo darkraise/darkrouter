@@ -68,19 +68,23 @@ var defaultGemini = geminiadapter.New()
 
 func (a *Adapter) Kind() string { return "vertex" }
 
-// Surfaces is llm alone for now. The vertex preset declares embedding as well,
-// but the embedding route is a third URL shape and phase 8's scope is the two
-// generative ones; claiming the surface would route embeddings to a 404.
+// Surfaces is llm and embedding. The Google publisher serves text embeddings
+// on the :predict route; the Anthropic publisher has no embedding model and
+// refuses the surface at build time.
 func (a *Adapter) Surfaces() adapter.SurfaceSet {
-	return adapter.SurfaceSet{ir.SurfaceLLM: true}
+	return adapter.SurfaceSet{ir.SurfaceLLM: true, ir.SurfaceEmbedding: true}
 }
 
 // EndpointFor builds the regional host and project path. Location appears
 // twice: once in the hostname and once in the path, which is Vertex's shape and
-// not a mistake.
+// not a mistake. The global endpoint is the exception: its host carries no
+// location prefix, and only the path names it.
 func EndpointFor(project, location string) string {
-	return fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s",
-		location, project, location)
+	host := location + "-aiplatform.googleapis.com"
+	if location == "global" {
+		host = "aiplatform.googleapis.com"
+	}
+	return fmt.Sprintf("https://%s/v1/projects/%s/locations/%s", host, project, location)
 }
 
 // baseFor is EndpointFor unless the provider row names a host of its own.
@@ -121,10 +125,10 @@ func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.R
 	return nil, nil, fmt.Errorf("vertex publisher %q is not supported", t.Publisher)
 }
 
-// ParseResponse and ParseStream dispatch on shape rather than on the publisher,
-// because neither is handed a Target. That works because the two payloads are
-// unambiguous: an Anthropic response has a top-level content array and type
-// "message"; a Gemini one has candidates.
+// ParseResponse dispatches on the publisher named by the request the response
+// answers, falling back to the payload's shape when no request is attached.
+// ParseStream is handed a bare reader and dispatches on the stream's first
+// bytes.
 func (a *Adapter) ParseResponse(resp *http.Response) (*ir.Response, error) {
 	return parseResponse(resp)
 }

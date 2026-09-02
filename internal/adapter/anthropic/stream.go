@@ -193,6 +193,12 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					if u.CacheWriteTokens > 0 {
 						usage.CacheWriteTokens = u.CacheWriteTokens
 					}
+					if u.CacheWrite5mTokens > 0 {
+						usage.CacheWrite5mTokens = u.CacheWrite5mTokens
+					}
+					if u.CacheWrite1hTokens > 0 {
+						usage.CacheWrite1hTokens = u.CacheWrite1hTokens
+					}
 				}
 				merged := usage
 				if !yield(ir.StreamEvent{Type: ir.EventMessageDelta, Usage: &merged, Warnings: warns}, nil) {

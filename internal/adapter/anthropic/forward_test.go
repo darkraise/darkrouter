@@ -122,3 +122,12 @@ func TestRecognizeUsageReadsAUnaryBody(t *testing.T) {
 		t.Errorf("usage = %+v", *u)
 	}
 }
+
+func TestRecognizeUsageReadsCacheWriteTTLs(t *testing.T) {
+	u := New().RecognizeUsage([]byte(`{"id":"m","content":[],
+		"usage":{"input_tokens":11,"cache_creation_input_tokens":7,
+			"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":5}}}`))
+	if u == nil || u.CacheWrite5mTokens != 2 || u.CacheWrite1hTokens != 5 {
+		t.Errorf("usage = %+v", u)
+	}
+}

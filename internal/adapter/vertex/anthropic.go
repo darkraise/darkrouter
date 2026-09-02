@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
@@ -73,13 +74,22 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 	return out, warns, nil
 }
 
-// parseResponse dispatches on the payload's own shape.
+// parseResponse dispatches on the publisher.
 //
-// Neither ParseResponse nor ParseStream is handed a Target, so the publisher is
-// not available. That is fine because the two shapes are unambiguous: an
-// Anthropic response carries a top-level content array and type "message", a
-// Gemini one carries candidates.
+// The parser is not handed a Target, but a response from the HTTP client
+// carries the request it answers, and that request's URL names the publisher
+// segment this adapter itself wrote. A response with no request attached — a
+// test double, or a body replayed from a trace — falls back to the payload's
+// own shape, which is unambiguous between the two: an Anthropic response
+// carries a top-level content array and type "message", a Gemini one carries
+// candidates.
 func parseResponse(resp *http.Response) (*ir.Response, error) {
+	if pub, ok := publisherOfResponse(resp); ok {
+		if pub == PublisherAnthropic {
+			return anthropicadapter.ParseResponse(resp)
+		}
+		return geminiadapter.ParseResponse(resp)
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	closeErr := resp.Body.Close()
 	if err != nil {
@@ -97,6 +107,20 @@ func parseResponse(resp *http.Response) (*ir.Response, error) {
 		return anthropicadapter.ParseResponse(restore())
 	}
 	return geminiadapter.ParseResponse(restore())
+}
+
+func publisherOfResponse(resp *http.Response) (string, bool) {
+	if resp.Request == nil || resp.Request.URL == nil {
+		return "", false
+	}
+	path := resp.Request.URL.Path
+	switch {
+	case strings.Contains(path, "/"+PublisherAnthropic+"/"):
+		return PublisherAnthropic, true
+	case strings.Contains(path, "/"+PublisherGoogle+"/"):
+		return PublisherGoogle, true
+	}
+	return "", false
 }
 
 func isAnthropicShape(raw []byte) bool {

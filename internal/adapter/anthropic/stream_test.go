@@ -172,3 +172,16 @@ func TestParseStreamCarriesServerToolBlocks(t *testing.T) {
 		t.Errorf("web_search_tool_result start = %+v", d)
 	}
 }
+
+func TestParseStreamCarriesCacheWriteTTLs(t *testing.T) {
+	body := sseEvent("message_start", `{"type":"message_start","message":{"id":"m","model":"c","usage":{"input_tokens":10,"cache_creation_input_tokens":7,"cache_creation":{"ephemeral_5m_input_tokens":2,"ephemeral_1h_input_tokens":5}}}}`) +
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`)
+	evs, err := collect(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := evs[len(evs)-1].Usage
+	if u == nil || u.CacheWrite5mTokens != 2 || u.CacheWrite1hTokens != 5 || u.CacheWriteTokens != 7 {
+		t.Errorf("usage = %+v", u)
+	}
+}
