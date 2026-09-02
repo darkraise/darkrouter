@@ -91,6 +91,9 @@ export function facetRow(m: Model): Row {
   }
 }
 
+// The facet columns take string headers rather than sortable ones: a facet
+// and the column menu are both labelled from the header when it is a string
+// and from the accessor key otherwise, and "surface_list" is not a label.
 // `darkraise-ui` bundles its own tanstack/react-table internally and does not
 // re-export its column types, so the shape is pulled from the component's own
 // signature rather than from a second, independently-versioned install of the
@@ -144,7 +147,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
       // Grouped by band rather than by exact price: a facet filters on exact
       // values, and no two models share a price down to the micro-dollar.
       accessorKey: "band",
-      header: ({ column }) => <ColumnHeader column={column} title="Price" />,
+      header: "Band",
       cell: ({ row }) => (
         <span className="tabular-nums">
           {row.original.pricing
@@ -160,7 +163,7 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     },
     {
       accessorKey: "surface_list",
-      header: ({ column }) => <ColumnHeader column={column} title="Surfaces" />,
+      header: "Surfaces",
       cell: ({ row }) => (
         <span className="font-mono text-sm">{row.original.surface_list || "—"}</span>
       ),
@@ -187,12 +190,12 @@ function buildColumns(onEdit: (provider: string, model: string) => void): Column
     },
     {
       accessorKey: "state",
-      header: ({ column }) => <ColumnHeader column={column} title="State" />,
+      header: "State",
       cell: ({ row }) => <ModelState state={row.original.state} />,
     },
     {
       accessorKey: "merge_source",
-      header: ({ column }) => <ColumnHeader column={column} title="Source" />,
+      header: "Source",
       cell: ({ row }) => (
         <Badge variant="outline" className="font-mono text-sm">
           {row.original.merge_source}
@@ -254,7 +257,7 @@ export function ModelsScreen() {
       <div className="mb-4 flex flex-wrap gap-2">
         <ModelCombobox
           label="Filter by model"
-          placeholder="model"
+          placeholder="Model"
           value={filters.model}
           onChange={(v) => setFilter("model", v)}
           candidates={modelNames}
@@ -264,7 +267,7 @@ export function ModelsScreen() {
         />
         <ModelCombobox
           label="Filter by provider"
-          placeholder="provider"
+          placeholder="Provider"
           value={filters.provider}
           onChange={(v) => setFilter("provider", v)}
           candidates={providerNames}

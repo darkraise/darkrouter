@@ -124,3 +124,18 @@ describe("the models empty state", () => {
     expect(screen.queryByText(/no models match these filters/i)).not.toBeInTheDocument()
   })
 })
+
+describe("the models table", () => {
+  it("labels its facets and filters in the reader's words", async () => {
+    // A facet is named after its column header, and a header rendered as a
+    // sort button has no string to take — so four of five facets were
+    // labelled with their accessor keys: surface_list, merge_source.
+    mockCatalog()
+    await renderAt("/")
+    for (const name of ["Surfaces", "State", "Band", "Source"]) {
+      expect(await screen.findByRole("button", { name: new RegExp(name) })).toBeInTheDocument()
+    }
+    expect(screen.getByPlaceholderText("Model")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("Provider")).toBeInTheDocument()
+  })
+})
