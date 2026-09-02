@@ -47,7 +47,7 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 	}
 	var before int64
 	if err := db.Read.QueryRowContext(ctx,
-		`SELECT expires_at FROM sessions WHERE id = 'sess-2'`).Scan(&before); err != nil {
+		`SELECT expires_at FROM sessions WHERE id = ?`, HashSessionID("sess-2")).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.TouchSession(ctx, "sess-2", 48*time.Hour); err != nil {
@@ -55,7 +55,7 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 	}
 	var after int64
 	if err := db.Read.QueryRowContext(ctx,
-		`SELECT expires_at FROM sessions WHERE id = 'sess-2'`).Scan(&after); err != nil {
+		`SELECT expires_at FROM sessions WHERE id = ?`, HashSessionID("sess-2")).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
 	if after <= before {
