@@ -2,6 +2,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   Outlet,
   Link,
   useNavigate,
@@ -17,19 +18,10 @@ import { AppShell } from "../features/shell/app-shell"
 import { ChangePasswordDialog } from "../features/settings/change-password-dialog"
 import { api } from "./api"
 import { CommandPalette } from "../features/shell/command-palette"
+import { NotFoundScreen } from "../features/shell/not-found"
 import { PageIdentityBar } from "../features/shell/page-identity"
 import { usePageTitle } from "../features/shell/page-title"
-import { ScreenBoundary } from "../features/shell/screen-boundary"
-import { OverviewScreen } from "../features/overview/overview-screen"
-import { RequestsScreen } from "../features/requests/requests-screen"
-import { UsageScreen } from "../features/usage/usage-screen"
-import { ProvidersScreen } from "../features/providers/providers-screen"
-import { ProviderDetail } from "../features/providers/provider-detail"
-import { ModelsScreen } from "../features/models/models-screen"
-import { RoutingScreen } from "../features/routing/routing-screen"
-import { PlaygroundScreen } from "../features/playground/playground-screen"
-import { ConnectScreen } from "../features/connect/connect-screen"
-import { SettingsScreen } from "../features/settings/settings-screen"
+import { ScreenBoundary, ScreenError } from "../features/shell/screen-boundary"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -103,6 +95,7 @@ function RootShell() {
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const navigate = useNavigate()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
   const openPalette = useCallback(() => setPaletteOpen(true), [])
   usePageTitle()
   return (
@@ -127,7 +120,7 @@ function RootShell() {
           void api.post("/api/auth/logout", {}).finally(() => window.location.reload())
         }}
       >
-        <ScreenBoundary>
+        <ScreenBoundary key={pathname}>
           <Outlet />
         </ScreenBoundary>
       </AppShell>
@@ -149,6 +142,47 @@ const rootRoute = createRootRoute({
     return out
   },
 })
+
+// Each screen is its own chunk, fetched on first visit: the playground's
+// markdown renderer and the overview's flow canvas are the two heaviest
+// things in the bundle, and neither is needed to log in and read a table.
+const OverviewScreen = lazyRouteComponent(
+  () => import("../features/overview/overview-screen"),
+  "OverviewScreen",
+)
+const RequestsScreen = lazyRouteComponent(
+  () => import("../features/requests/requests-screen"),
+  "RequestsScreen",
+)
+const UsageScreen = lazyRouteComponent(() => import("../features/usage/usage-screen"), "UsageScreen")
+const ProvidersScreen = lazyRouteComponent(
+  () => import("../features/providers/providers-screen"),
+  "ProvidersScreen",
+)
+const ProviderDetail = lazyRouteComponent(
+  () => import("../features/providers/provider-detail"),
+  "ProviderDetail",
+)
+const ModelsScreen = lazyRouteComponent(
+  () => import("../features/models/models-screen"),
+  "ModelsScreen",
+)
+const RoutingScreen = lazyRouteComponent(
+  () => import("../features/routing/routing-screen"),
+  "RoutingScreen",
+)
+const PlaygroundScreen = lazyRouteComponent(
+  () => import("../features/playground/playground-screen"),
+  "PlaygroundScreen",
+)
+const ConnectScreen = lazyRouteComponent(
+  () => import("../features/connect/connect-screen"),
+  "ConnectScreen",
+)
+const SettingsScreen = lazyRouteComponent(
+  () => import("../features/settings/settings-screen"),
+  "SettingsScreen",
+)
 
 // One route per destination in §5, plus the trace deep link. Written out
 // rather than built by a helper: a helper that takes `path: string` erases the
@@ -174,7 +208,11 @@ const routes = [
   }),
 ]
 
-export const router = createRouter({ routeTree: rootRoute.addChildren(routes) })
+export const router = createRouter({
+  routeTree: rootRoute.addChildren(routes),
+  defaultErrorComponent: ({ error, reset }) => <ScreenError error={error} reset={reset} />,
+  defaultNotFoundComponent: () => <NotFoundScreen />,
+})
 
 declare module "@tanstack/react-router" {
   interface Register {
