@@ -2,10 +2,10 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -32,9 +32,11 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var aliases map[string][]string
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&aliases); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 64<<10, &aliases) {
 		return
+	}
+	if aliases == nil {
+		aliases = map[string][]string{}
 	}
 	if err := config.ValidateAliases(aliases); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -45,7 +47,7 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.deps.DB.PutAliases(r.Context(), aliases); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	s.republish(w)
@@ -65,8 +67,7 @@ func (s *Server) handlePutPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body policyWrite
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 16<<10, &body) {
 		return
 	}
 	if cold := restartOnlyIn(&body); len(cold) > 0 {
@@ -74,13 +75,13 @@ func (s *Server) handlePutPolicy(w http.ResponseWriter, r *http.Request) {
 			joinFields(cold)+" takes effect on restart and cannot be written here")
 		return
 	}
-	next := s.deps.Config.Current().Policy
-	if err := applyPolicyWrite(&next, &body); err != nil {
+	next, err := s.mergedPolicy(&body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.deps.DB.PutPolicy(r.Context(), next); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	s.republish(w)
@@ -99,17 +100,28 @@ func (s *Server) republish(w http.ResponseWriter) {
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
 }
 
+// overrideBody is the wire shape both ways. Every field is omitempty: an
+// override sets only what it sets, and a null for the rest would read as
+// "cleared" rather than "not overridden".
 type overrideBody struct {
-	Surfaces      []string                 `json:"surfaces"`
-	Capabilities  *store.ModelCapabilities `json:"capabilities"`
-	ContextWindow *int                     `json:"context_window"`
+	Surfaces      []string                 `json:"surfaces,omitempty"`
+	Capabilities  *store.ModelCapabilities `json:"capabilities,omitempty"`
+	ContextWindow *int                     `json:"context_window,omitempty"`
+}
+
+// validSurfaces is the closed surface vocabulary an override may name.
+var validSurfaces = map[string]bool{
+	string(ir.SurfaceLLM): true, string(ir.SurfaceEmbedding): true,
+	string(ir.SurfaceImage): true, string(ir.SurfaceTTS): true,
+	string(ir.SurfaceSTT): true, string(ir.SurfaceRerank): true,
+	string(ir.SurfaceModeration): true,
 }
 
 func (s *Server) handleGetOverride(w http.ResponseWriter, r *http.Request) {
 	providerID, modelID := r.PathValue("provider"), r.PathValue("model")
 	rows, err := s.deps.DB.ModelOverrides(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	for _, o := range rows {
@@ -133,8 +145,17 @@ func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body overrideBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, 16<<10, &body) {
+		return
+	}
+	for _, sf := range body.Surfaces {
+		if !validSurfaces[sf] {
+			writeError(w, http.StatusBadRequest, "unknown surface "+sf)
+			return
+		}
+	}
+	if body.ContextWindow != nil && *body.ContextWindow <= 0 {
+		writeError(w, http.StatusBadRequest, "context_window must be positive")
 		return
 	}
 	if err := s.deps.DB.PutModelOverride(r.Context(), store.ModelOverride{
@@ -142,21 +163,28 @@ func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {
 		Surfaces: body.Surfaces, Capabilities: body.Capabilities,
 		ContextWindow: body.ContextWindow,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
-	s.rebuildCatalog(r.Context())
+	s.rebuildCatalog(afterCommit(r))
 	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleDeleteOverride(w http.ResponseWriter, r *http.Request) {
 	providerID, modelID := r.PathValue("provider"), r.PathValue("model")
 	if err := s.deps.DB.DeleteModelOverride(r.Context(), providerID, modelID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, r, err)
 		return
 	}
-	s.rebuildCatalog(r.Context())
+	s.rebuildCatalog(afterCommit(r))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// afterCommit is the context a post-write reload runs under. The write has
+// landed; a client that disconnects while the router is republishing must
+// not leave the gateway serving a provider set that predates a row it holds.
+func afterCommit(r *http.Request) context.Context {
+	return context.WithoutCancel(r.Context())
 }
 
 // rebuildCatalog folds the write into the merged snapshot the router reads.
