@@ -824,8 +824,11 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	}
 	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
 		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
-			rec.CostMicros = m.Pricing.CostMicros(
-				rec.TokensIn, rec.TokensOut, rec.CacheReadTokens, rec.CacheWriteTokens)
+			rec.CostMicros = m.Pricing.Cost(catalog.Tokens{
+				Input: rec.TokensIn, Output: rec.TokensOut, Reasoning: rec.ReasoningTokens,
+				CacheRead: rec.CacheReadTokens, CacheWrite: rec.CacheWriteTokens,
+				CacheWrite5m: rec.CacheWrite5mTokens, CacheWrite1h: rec.CacheWrite1hTokens,
+			})
 		}
 	}
 
@@ -1129,6 +1132,8 @@ func applyUsage(rec *store.RequestRecord, u *ir.Usage) {
 	rec.CacheReadTokens = int64(u.CacheReadTokens)
 	rec.CacheWriteTokens = int64(u.CacheWriteTokens)
 	rec.ReasoningTokens = int64(u.ReasoningTokens)
+	rec.CacheWrite5mTokens = int64(u.CacheWrite5mTokens)
+	rec.CacheWrite1hTokens = int64(u.CacheWrite1hTokens)
 	// CostMicros stays nil here: it is priced once in priceRecord, at log
 	// time, from the model that actually served -- not from each usage event
 	// that arrived on the way.

@@ -57,6 +57,11 @@ type RequestRecord struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+	// The cache write split by TTL, when the provider reported it. Priced
+	// but not stored: the request row keeps the total, and the split only
+	// matters for the rate applied to it.
+	CacheWrite5mTokens int64
+	CacheWrite1hTokens int64
 
 	// CostMicros is nil when the served model has no catalog price, when no
 	// catalog is available, or when nothing served at all. Zero would read

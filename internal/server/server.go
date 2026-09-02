@@ -211,7 +211,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	mediaFetcher := geminiadapter.NewFetcher()
 	mediaFetcher.Inline = cfg.MediaInline()
 
-	ex := exec.New(cfgStore, src, map[string]adapter.Adapter{
+	adapters := map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),
 		"gemini":       geminiadapter.NewWithFetcher(mediaFetcher),
@@ -220,7 +220,13 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		// operator's answer to "may the gateway fetch a client's image URL",
 		// and it has to mean the same thing on both.
 		"vertex": vertexadapter.NewWithFetcher(mediaFetcher),
-	}, exec.Deps{
+	}
+	kinds := make([]string, 0, len(adapters))
+	for k := range adapters {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	ex := exec.New(cfgStore, src, adapters, exec.Deps{
 		Log: met, Health: breaker, Fleet: breaker, Catalog: cat,
 		Auth:      authManager,
 		Protocols: protocols,
@@ -251,7 +257,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		DB: db, PasswordHash: passwordHash,
 		Config: cfgStore, Src: src, Key: key,
 		Catalog: cat, Disc: discTrigger, Sync: syncer, Breaker: breaker,
-		Presets: o.presets, Exec: ex,
+		Presets: o.presets, Exec: ex, Kinds: kinds,
 		Warnings: startupWarnings,
 		Flows:    flows,
 		Auth:     authManager,

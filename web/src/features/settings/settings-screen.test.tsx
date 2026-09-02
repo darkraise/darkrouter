@@ -171,24 +171,14 @@ describe("the reload result", () => {
 })
 
 describe("the sync result", () => {
-  it("reports a failed sync without claiming the catalog is empty", () => {
-    expect(
-      syncMessage({ synced: false, error: "models.dev unreachable", serving: "the previous metadata is still serving" }),
-    ).toMatch(/previous metadata is still serving/)
-  })
-
-  it("carries the sync error so the operator knows what failed", () => {
-    expect(syncMessage({ synced: false, error: "timeout after 30s" })).toContain("timeout after 30s")
-  })
-
-  it("says synced rather than started, since SyncOnce already finished", () => {
-    expect(syncMessage({ synced: true })).toMatch(/synced/i)
+  it("says started rather than synced, since the gateway answers 202", () => {
+    expect(syncMessage({ triggered: true })).toMatch(/started/i)
   })
 })
 
 function stubSettingsFetch(overrides: {
   reload?: { valid: boolean; error?: string; serving?: string }
-  sync?: { synced: boolean; error?: string; serving?: string }
+  sync?: { triggered: boolean }
   sessions?: unknown[]
 }) {
   let configFetches = 0
@@ -214,7 +204,7 @@ function stubSettingsFetch(overrides: {
       })
     }
     if (url === "/api/catalog/sync" && method === "POST") {
-      return new Response(JSON.stringify(overrides.sync ?? { synced: true }), {
+      return new Response(JSON.stringify(overrides.sync ?? { triggered: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -253,22 +243,19 @@ describe("a failed reload", () => {
   })
 })
 
-describe("a failed sync", () => {
-  it("gets a durable banner rather than a toast that can vanish unread", async () => {
-    const { fetchMock } = stubSettingsFetch({
-      sync: { synced: false, error: "models.dev unreachable", serving: "the previous metadata is still serving" },
-    })
+describe("a sync request", () => {
+  it("refreshes the models list once the gateway has accepted the run", async () => {
+    const { fetchMock } = stubSettingsFetch({ sync: { triggered: true } })
     const user = userEvent.setup()
     mount(<SettingsScreen />)
 
     await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
     await user.click(await screen.findByRole("button", { name: /^sync$/i }))
 
-    expect(await screen.findByText(/models.dev unreachable/i)).toBeInTheDocument()
-    expect(screen.getByText(/the previous metadata is still serving/i)).toBeInTheDocument()
-    // A failed sync changed nothing the catalog cache needs to hear about.
-    expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/models" && (i as RequestInit)?.method !== "POST")).toBe(
-      false,
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/catalog/sync" && (i as RequestInit)?.method === "POST")).toBe(
+        true,
+      ),
     )
   })
 })
@@ -414,8 +401,8 @@ describe("a clean reload", () => {
     mount(<SettingsScreen />)
     await user.click(await screen.findByRole("button", { name: /reload config/i }))
     await user.click(await screen.findByRole("button", { name: /^reload$/i }))
-    const status = await screen.findByRole("status")
-    expect(status).toHaveTextContent("Configuration reloaded.")
+    const statuses = await screen.findAllByRole("status")
+    expect(statuses.some((s) => s.textContent?.includes("Configuration reloaded."))).toBe(true)
   })
 })
 

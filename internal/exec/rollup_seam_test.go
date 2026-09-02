@@ -17,6 +17,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // TestRollupSeesTokensTheExecutorActuallyLogged drives a real request through
@@ -33,7 +34,7 @@ func TestRollupSeesTokensTheExecutorActuallyLogged(t *testing.T) {
 	}))
 	defer up.Close()
 
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	logWriter := store.NewLogWriter(db, store.LogOptions{BatchSize: 1})
 
 	ctx, cancel := context.WithCancel(context.Background())
