@@ -34,6 +34,12 @@ type ModelInfo struct {
 	ManualBudget bool
 	FreeSampling bool
 	TraitsKnown  bool
+
+	// The request shapes a generation refuses outright. The adapter reshapes
+	// and warns rather than forwarding a guaranteed 400.
+	NoPrefill          bool
+	ThinkingAlwaysOn   bool
+	NoForcedToolChoice bool
 }
 
 type Target struct {

@@ -453,3 +453,118 @@ func TestTheNameHeuristicIsGone(t *testing.T) {
 		}
 	}
 }
+
+func prefillConversation() []ir.Message {
+	return []ir.Message{
+		userMsg("return JSON"),
+		{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}},
+	}
+}
+
+func TestNoPrefillDropsTheTrailingAssistantTurn(t *testing.T) {
+	// The 4.6+ generations return a 400 for a trailing assistant turn whether
+	// or not thinking is on. The drop is always warned about: silently
+	// removing the client's format hint is how a JSON answer turns into prose
+	// with no trace of why.
+	_, body, warns := builtWith(t, "claude-opus-4-6",
+		adapter.ModelInfo{Adaptive: true, ManualBudget: true, FreeSampling: true, NoPrefill: true, TraitsKnown: true},
+		&ir.Request{Messages: prefillConversation()})
+	if len(body["messages"].([]any)) != 1 {
+		t.Errorf("messages = %v; this model rejects a prefill outright", body["messages"])
+	}
+	if !hasWarning(warns, "messages[last].assistant_prefill") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestAdaptiveThinkingWarnsWhenItDropsAPrefill(t *testing.T) {
+	_, body, warns := builtWith(t, "claude-opus-4-6",
+		adapter.ModelInfo{Adaptive: true, ManualBudget: true, FreeSampling: true, TraitsKnown: true},
+		&ir.Request{Messages: prefillConversation(), Reasoning: &ir.Reasoning{Effort: "low"}})
+	if len(body["messages"].([]any)) != 1 {
+		t.Errorf("messages = %v", body["messages"])
+	}
+	if !hasWarning(warns, "messages[last].assistant_prefill") {
+		t.Errorf("warnings = %+v; a drop under adaptive thinking was silent", warns)
+	}
+}
+
+func TestThinkingAlwaysOnNeverSendsDisabled(t *testing.T) {
+	info := adapter.ModelInfo{Adaptive: true, ThinkingAlwaysOn: true, TraitsKnown: true}
+	// A client that asked for thinking off gets a warning and no field: the
+	// model rejects the explicit off switch, and omitting it is the only
+	// request it accepts.
+	_, body, warns := builtWith(t, "claude-fable-5", info, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Metadata: map[string]string{"anthropic_thinking_type": "disabled"},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v; this model rejects thinking.type disabled", body["thinking"])
+	}
+	if !hasWarning(warns, "thinking") {
+		t.Errorf("warnings = %+v; the ignored off switch must be visible", warns)
+	}
+
+	// The IR's own spelling of the same instruction.
+	_, body, warns = builtWith(t, "claude-fable-5", info, &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Disabled: true},
+	})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v", body["thinking"])
+	}
+	if !hasWarning(warns, "thinking") {
+		t.Errorf("warnings = %+v", warns)
+	}
+
+	// A plain request on a model that thinks by default sends nothing and
+	// has nothing to warn about.
+	_, body, warns = builtWith(t, "claude-fable-5", info, &ir.Request{Messages: []ir.Message{userMsg("hi")}})
+	if _, ok := body["thinking"]; ok {
+		t.Errorf("thinking = %v", body["thinking"])
+	}
+	if hasWarning(warns, "thinking") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+func TestAdaptiveModelsStillSendDisabledWhenAsked(t *testing.T) {
+	_, body, _ := builtWith(t, "claude-opus-4-7", adapter.ModelInfo{Adaptive: true, TraitsKnown: true}, &ir.Request{
+		Messages:  []ir.Message{userMsg("hi")},
+		Reasoning: &ir.Reasoning{Disabled: true},
+	})
+	if th, _ := body["thinking"].(map[string]any); th["type"] != "disabled" {
+		t.Errorf("thinking = %v; an explicit off is honoured where the model has the switch", body["thinking"])
+	}
+}
+
+func TestNoForcedToolChoiceDowngradesToAuto(t *testing.T) {
+	info := adapter.ModelInfo{Adaptive: true, ThinkingAlwaysOn: true, NoForcedToolChoice: true, TraitsKnown: true}
+	for _, tc := range []*ir.ToolChoice{{Mode: "any"}, {Mode: "tool", Name: "f"}} {
+		off := false
+		_, body, warns := builtWith(t, "claude-fable-5-1", info, &ir.Request{
+			Messages:          []ir.Message{userMsg("hi")},
+			Tools:             []ir.Tool{{Name: "f"}},
+			ToolChoice:        tc,
+			ParallelToolCalls: &off,
+		})
+		choice := body["tool_choice"].(map[string]any)
+		if choice["type"] != "auto" {
+			t.Errorf("tool_choice for %s = %v; forced tool use is a 400 on this model", tc.Mode, choice)
+		}
+		if choice["disable_parallel_tool_use"] != true {
+			t.Errorf("tool_choice = %v; the parallel setting survives the downgrade", choice)
+		}
+		if !hasWarning(warns, "tool_choice") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	}
+	// none and auto are unaffected.
+	_, body, warns := builtWith(t, "claude-fable-5-1", info, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")}, Tools: []ir.Tool{{Name: "f"}},
+		ToolChoice: &ir.ToolChoice{Mode: "none"},
+	})
+	if body["tool_choice"].(map[string]any)["type"] != "none" || hasWarning(warns, "tool_choice") {
+		t.Errorf("tool_choice = %v, warnings = %+v", body["tool_choice"], warns)
+	}
+}
