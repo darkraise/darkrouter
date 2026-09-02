@@ -25,7 +25,7 @@ import {
 export { passwordProblem, revokedText } from "./change-password-dialog"
 
 type ReloadResult = { valid: boolean; error?: string; serving?: string }
-type SyncResult = { synced: boolean; error?: string; serving?: string }
+type SyncResult = { triggered: boolean }
 
 /**
  * The settings this screen shows but cannot change, grouped for reading.
@@ -59,12 +59,9 @@ export function reloadMessage(res: ReloadResult): string {
 }
 
 export function syncMessage(res: SyncResult): string {
-  // SyncOnce runs synchronously and this response is its result, not an
-  // acknowledgement — the sync is done, not started.
-  if (res.synced) return "Catalog synced."
-  return [res.error, res.serving ?? "the previous metadata is still serving"]
-    .filter(Boolean)
-    .join(" — ")
+  // The gateway answers 202 and syncs in the background; the models list
+  // refetches on its own once the run has landed.
+  return res.triggered ? "Catalog sync started." : "Catalog sync was not started."
 }
 
 type Draft = Record<string, string>
@@ -386,12 +383,8 @@ export function SettingsScreen() {
   const sync = useApiMutation({
     mutationFn: () => api.post<SyncResult>("/api/catalog/sync"),
     onSuccess: (res) => {
-      // Sync shares the reload endpoint's shape: a 200 with synced:false is
-      // an outcome, not a failed request.
-      if (res.synced) {
-        toast.success(syncMessage(res))
-        void queryClient.invalidateQueries({ queryKey: keys.models })
-      }
+      toast.success(syncMessage(res))
+      void queryClient.invalidateQueries({ queryKey: keys.models })
     },
   })
 
@@ -442,13 +435,6 @@ export function SettingsScreen() {
         <Banner variant="destructive" className="mb-4">
           <p className="text-sm font-medium">The reloaded configuration is invalid</p>
           <p className="mt-1 text-sm">{reloadMessage(reload.data)}</p>
-        </Banner>
-      )}
-
-      {sync.data && !sync.data.synced && (
-        <Banner variant="destructive" className="mb-4">
-          <p className="text-sm font-medium">The catalog sync failed</p>
-          <p className="mt-1 text-sm">{syncMessage(sync.data)}</p>
         </Banner>
       )}
 

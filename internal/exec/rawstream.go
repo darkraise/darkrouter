@@ -135,6 +135,12 @@ func mergeUsage(dst *ir.Usage, u *ir.Usage) {
 	if u.CacheWriteTokens > 0 {
 		dst.CacheWriteTokens = u.CacheWriteTokens
 	}
+	if u.CacheWrite5mTokens > 0 {
+		dst.CacheWrite5mTokens = u.CacheWrite5mTokens
+	}
+	if u.CacheWrite1hTokens > 0 {
+		dst.CacheWrite1hTokens = u.CacheWrite1hTokens
+	}
 	if u.ReasoningTokens > 0 {
 		dst.ReasoningTokens = u.ReasoningTokens
 	}
