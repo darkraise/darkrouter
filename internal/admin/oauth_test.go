@@ -18,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // fakeAuthServer is a token endpoint that records what it was asked and can be
@@ -102,7 +103,7 @@ func serverWithRedirectStyle(t *testing.T, redirect catalog.Redirect) (
 
 	t.Helper()
 	fake, srv := newFakeAuthServer(t)
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)

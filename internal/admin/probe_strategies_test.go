@@ -16,6 +16,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 type probeReply struct {
@@ -80,7 +81,7 @@ func strategyServer(t *testing.T, presets catalog.Presets, client *http.Client) 
 	*Server, *http.Cookie, string, *store.DB) {
 
 	t.Helper()
-	db := store.MigratedForTest(t)
+	db := storetest.Migrated(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)

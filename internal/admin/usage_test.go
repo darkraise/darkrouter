@@ -11,6 +11,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 type overviewBody struct {
@@ -120,7 +121,7 @@ func TestTheOverviewReportsAnErrorRate(t *testing.T) {
 	s, db := testServerFull(t)
 	cookie, token := login(t, s)
 	now := time.Now()
-	db.WriteBatchForTest(t, []*store.RequestRecord{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{
 		{ID: "01A", TS: now, Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "success"},
 		{ID: "01B", TS: now, Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "success"},
 		{ID: "01C", TS: now, Dialect: "openai", Surface: "llm", RequestedModel: "m", Status: "error"},
@@ -197,7 +198,7 @@ func TestTodaySpendAgreesWithTheUsageChartAcrossAFailover(t *testing.T) {
 	now := time.Now()
 	failedCost := int64(500)
 	servedCost := int64(1200)
-	db.WriteBatchForTest(t, []*store.RequestRecord{{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
 		ID: "01SPEND", TS: now, Dialect: "openai", Surface: "llm", RequestedModel: "m",
 		FinalProviderID: "b", FinalModel: "m", Status: "success",
 		CostMicros: &servedCost,
@@ -247,7 +248,7 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	c := int64(4200)
-	db.WriteBatchForTest(t, []*store.RequestRecord{{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
 		ID: "old", TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
 		FinalProviderID: "groq", FinalModel: "m", CostMicros: &c,
 		Attempts: []store.AttemptRecord{{
@@ -320,7 +321,7 @@ func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
 		 VALUES ('2026-08-25','groq','m',5,7,10,20)`); err != nil {
 		t.Fatal(err)
 	}
-	db.WriteBatchForTest(t, []*store.RequestRecord{{
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
 		ID: "01F", TS: time.Now(), RequestedModel: "m",
 		FinalProviderID: "groq", FinalModel: "m",
 		Attempts: []store.AttemptRecord{

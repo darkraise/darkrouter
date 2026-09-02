@@ -482,8 +482,9 @@ func TestTheFilterIndexesExist(t *testing.T) {
 		have[n] = true
 	}
 	for _, want := range []string{
-		"idx_requests_keyset", "idx_requests_provider", "idx_requests_model",
+		"idx_requests_keyset", "idx_requests_provider_keyset", "idx_requests_model",
 		"idx_requests_status", "idx_requests_surface",
+		"idx_requests_alias_keyset", "idx_requests_error_keyset",
 	} {
 		if !have[want] {
 			t.Errorf("index %s is missing; have %v", want, have)

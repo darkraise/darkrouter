@@ -42,8 +42,11 @@ func TestAProviderCanBeCreatedListedAndDeleted(t *testing.T) {
 	}
 
 	w = do(t, s, cookie, token, "DELETE", "/api/providers/p1", "")
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "DELETE", "/api/providers/p1", ""); w.Code != http.StatusNotFound {
+		t.Fatalf("second delete status = %d, want 404", w.Code)
 	}
 }
 
@@ -187,46 +190,11 @@ func TestACredentialCanBeAddedAndDeleted(t *testing.T) {
 	}
 
 	w = do(t, s, cookie, token, "DELETE", "/api/providers/p1/keys/"+created.ID, "")
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, body = %s", w.Code, w.Body.String())
 	}
-}
-
-func TestDeletingAProviderReportsTheAliasesItStrands(t *testing.T) {
-	// Master design §7: a dangling alias is a warning, not a validation error.
-	// Spec §6: treating it as an error would mean one UI delete makes every
-	// later config reload fail, leaving the operator with a reload button that
-	// keeps failing and no way out but SSH.
-	s, _ := testServerFullWithAliases(t, "  fast:\n    - p1/m\n")
-	cookie, token := login(t, s)
-	_ = do(t, s, cookie, token, "POST", "/api/providers",
-		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
-
-	w := do(t, s, cookie, token, "DELETE", "/api/providers/p1", "")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var body struct {
-		DanglingAliases []string `json:"dangling_aliases"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if len(body.DanglingAliases) != 1 || body.DanglingAliases[0] != "fast" {
-		t.Errorf("dangling = %v; the operator is not told what broke", body.DanglingAliases)
-	}
-}
-
-func TestDeletingAProviderWithNoAliasesReportsAnEmptyArray(t *testing.T) {
-	// Not null: the confirm dialog ranges over it.
-	s, _ := testServerFull(t)
-	cookie, token := login(t, s)
-	_ = do(t, s, cookie, token, "POST", "/api/providers",
-		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
-
-	w := do(t, s, cookie, token, "DELETE", "/api/providers/p1", "")
-	if !strings.Contains(w.Body.String(), `"dangling_aliases":[]`) {
-		t.Errorf("body = %s", w.Body.String())
+	if w := do(t, s, cookie, token, "DELETE", "/api/providers/p1/keys/"+created.ID, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("second delete status = %d, want 404", w.Code)
 	}
 }
 

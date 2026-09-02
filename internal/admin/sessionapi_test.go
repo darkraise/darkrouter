@@ -17,10 +17,13 @@ func TestSessionsListMarksTheCaller(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("GET /api/sessions = %d: %s", w.Code, w.Body.String())
 	}
-	var got []sessionView
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+	var env struct {
+		Sessions []sessionView `json:"sessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
 	}
+	got := env.Sessions
 	if len(got) < 2 {
 		t.Fatalf("listed %d sessions, want at least 2", len(got))
 	}
@@ -52,10 +55,13 @@ func TestSessionDeleteRevokes(t *testing.T) {
 	cookie, token := login(t, s)
 
 	w := do(t, s, cookie, token, "GET", "/api/sessions", "")
-	var listed []sessionView
-	if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil {
+	var env struct {
+		Sessions []sessionView `json:"sessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
 	}
+	listed := env.Sessions
 	var target string
 	for _, v := range listed {
 		if !v.Current {

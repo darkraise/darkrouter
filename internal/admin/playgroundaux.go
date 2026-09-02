@@ -14,6 +14,8 @@ import (
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/exec"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // countBody selects the counting dialect. There is no "openai": that wire has
@@ -77,11 +79,12 @@ func (s *Server) handlePlaygroundCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body countBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 256<<10, &body) {
 		return
 	}
-	pr, d, native, err := countRequest(r.Context(), body)
+	// Console traffic, like the chat path: the count lands in the same log
+	// as a client's requests and must be told apart there.
+	pr, d, native, err := countRequest(exec.WithSource(r.Context(), store.SourceConsole), body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -180,11 +183,10 @@ func (s *Server) handlePlaygroundAux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in auxBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&in); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 32<<20, &in) {
 		return
 	}
-	pr, err := auxRequest(r.Context(), in)
+	pr, err := auxRequest(exec.WithSource(r.Context(), store.SourceConsole), in)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

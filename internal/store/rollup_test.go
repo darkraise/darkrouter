@@ -139,7 +139,7 @@ func TestRollupAttributesAttemptTokensEvenWhenNothingServed(t *testing.T) {
 	insertRequest(t, db, "empty", now.Add(-time.Hour), "", "", 0, 0, nil)
 
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 		ID: "all-failed", TS: now.Add(-time.Hour), RequestedModel: "m",
 		Attempts: []AttemptRecord{
 			{Seq: 0, ProviderID: "groq", Model: "m", Outcome: "retryable_provider", TokensIn: 50},
@@ -185,7 +185,7 @@ func TestRollupGroupsByAlias(t *testing.T) {
 			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
 		}
 		w := NewLogWriter(db, LogOptions{})
-		if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{rec}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -228,7 +228,7 @@ func TestRollupCountsTokensFromFailedAttempts(t *testing.T) {
 		},
 	}
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{rec}); err != nil {
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{rec}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Rollup(ctx, ts); err != nil {
@@ -267,7 +267,7 @@ func TestRollupMixesAttemptBearingAndAttemptLessRequests(t *testing.T) {
 		FinalProviderID: "groq", FinalModel: "m", TokensIn: 50,
 	}
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{withAttempt, withoutAttempt}); err != nil {
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{withAttempt, withoutAttempt}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Rollup(ctx, ts); err != nil {
@@ -314,7 +314,7 @@ func TestRollupAttributesUsageToTheAttemptsOwnProvider(t *testing.T) {
 			TokensIn: 300, TokensOut: 150, CostMicros: &c900,
 		},
 	}
-	if _, err := w.writeBatch(ctx, recs); err != nil {
+	if _, err := w.WriteBatch(ctx, recs); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Rollup(ctx, now); err != nil {
@@ -398,7 +398,7 @@ func TestTheRollupWindowIsNeverPrunable(t *testing.T) {
 
 	for i := 0; i < 4; i++ {
 		ts := yStart.Add(time.Duration(i*6) * time.Hour)
-		if _, err := w.writeBatch(ctx, []*RequestRecord{{
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 			ID: fmt.Sprintf("y%d", i), TS: ts, ResolvedAlias: "fast",
 			FinalProviderID: "groq", FinalModel: "m", TokensIn: 100,
 			Attempts: []AttemptRecord{{
@@ -410,7 +410,7 @@ func TestTheRollupWindowIsNeverPrunable(t *testing.T) {
 		}
 	}
 
-	if _, err := db.Prune(ctx, now, 48*time.Hour, 72*time.Hour, 0); err != nil {
+	if _, err := db.Prune(ctx, now, 48*time.Hour, 72*time.Hour, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -438,7 +438,7 @@ func TestRollupStillRecomputesUnderTheDefaultRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 		ID: "live", TS: now, ResolvedAlias: "fast",
 		FinalProviderID: "groq", FinalModel: "m", TokensIn: 10,
 		Attempts: []AttemptRecord{{
@@ -487,7 +487,7 @@ func TestTodayIsNeverPrunedAtTheRetentionFloor(t *testing.T) {
 			}},
 		})
 	}
-	if _, err := w.writeBatch(ctx, recs); err != nil {
+	if _, err := w.WriteBatch(ctx, recs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -497,7 +497,7 @@ func TestTodayIsNeverPrunedAtTheRetentionFloor(t *testing.T) {
 	}
 
 	// 14:00: pruning at the floor retention, then another rollup.
-	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 48*time.Hour, 48*time.Hour, 0); err != nil {
+	if _, err := db.Prune(ctx, startOfToday.Add(14*time.Hour), 48*time.Hour, 48*time.Hour, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Rollup(ctx, startOfToday.Add(14*time.Hour)); err != nil {
@@ -531,7 +531,7 @@ func TestRollupClearsItsWindowBeforeReinserting(t *testing.T) {
 	}
 
 	w := NewLogWriter(db, LogOptions{})
-	if _, err := w.writeBatch(ctx, []*RequestRecord{{
+	if _, err := w.WriteBatch(ctx, []*RequestRecord{{
 		ID: "A", TS: now, ResolvedAlias: "fast",
 		FinalProviderID: "groq", FinalModel: "m1", TokensIn: 10,
 		Attempts: []AttemptRecord{{Seq: 0, ProviderID: "groq", Model: "m1", Outcome: "success", TokensIn: 10}},

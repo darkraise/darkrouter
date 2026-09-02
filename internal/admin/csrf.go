@@ -36,10 +36,11 @@ type CSRF struct {
 // is its own value rather than the credential encryption key, because reusing an
 // encryption key for authentication tags violates key separation for no gain.
 func NewCSRF(ctx context.Context, db *store.DB) (*CSRF, error) {
-	var enc string
-	err := db.Read.QueryRowContext(ctx,
-		`SELECT value FROM settings WHERE key = ?`, csrfSecretKey).Scan(&enc)
-	if err == nil {
+	enc, ok, err := db.GetSetting(ctx, csrfSecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("read csrf secret: %w", err)
+	}
+	if ok {
 		secret, derr := base64.StdEncoding.DecodeString(enc)
 		if derr != nil {
 			return nil, fmt.Errorf("csrf secret is not valid base64: %w", derr)
@@ -51,19 +52,13 @@ func NewCSRF(ctx context.Context, db *store.DB) (*CSRF, error) {
 	if _, rerr := rand.Read(secret); rerr != nil {
 		return nil, fmt.Errorf("generate csrf secret: %w", rerr)
 	}
-	// INSERT OR IGNORE rather than INSERT: two processes opening the same
-	// database concurrently must not fail, and whichever wrote first wins.
-	if _, werr := db.Write.ExecContext(ctx,
-		`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
-		csrfSecretKey, base64.StdEncoding.EncodeToString(secret)); werr != nil {
-		return nil, fmt.Errorf("store csrf secret: %w", werr)
-	}
-	// Re-read rather than trusting the local value: if the ignore fired, the
-	// other process's secret is the one in the database and the one every
+	// Insert-or-ignore and read back rather than trusting the local value:
+	// two processes opening the same database concurrently must not fail,
+	// and if the other one wrote first its secret is the one every
 	// outstanding token was minted under.
-	if rerr := db.Read.QueryRowContext(ctx,
-		`SELECT value FROM settings WHERE key = ?`, csrfSecretKey).Scan(&enc); rerr != nil {
-		return nil, fmt.Errorf("read back csrf secret: %w", rerr)
+	enc, err = db.InitSetting(ctx, csrfSecretKey, base64.StdEncoding.EncodeToString(secret))
+	if err != nil {
+		return nil, fmt.Errorf("store csrf secret: %w", err)
 	}
 	stored, derr := base64.StdEncoding.DecodeString(enc)
 	if derr != nil {

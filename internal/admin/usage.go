@@ -1,11 +1,10 @@
 package admin
 
 import (
-	"github.com/darkraise/darkrouter/internal/auth"
 	"net/http"
-	"strconv"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -36,7 +35,14 @@ type tileView struct {
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.deps.DB.ProviderRows(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
+		return
+	}
+	// Counts and states only, so the overview's poll never touches the
+	// keyring.
+	summaries, err := s.deps.DB.CredentialSummaries(r.Context())
+	if err != nil {
+		internalError(w, r, err)
 		return
 	}
 
@@ -56,18 +62,14 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	tiles := make([]tileView, 0, len(rows))
 	for _, p := range rows {
 		t := tileView{ID: p.ID, Name: p.Name, Enabled: p.Enabled, Cooling: cooling[p.ID]}
-		if s.deps.Key != nil {
-			creds, cerr := s.deps.DB.Credentials(r.Context(), s.deps.Key, p.ID)
-			if cerr == nil {
-				t.Credentials = len(creds)
-				for _, c := range creds {
-					// The one state only the operator can fix. Everything else
-					// either recovers on its own or is a provider's problem, so
-					// it is called out rather than folded into "degraded".
-					if !c.Enabled {
-						t.NeedsAuth = true
-					}
-				}
+		creds := summaries[p.ID]
+		t.Credentials = len(creds)
+		for _, c := range creds {
+			// The one state only the operator can fix. Everything else
+			// either recovers on its own or is a provider's problem, so
+			// it is called out rather than folded into "degraded".
+			if !c.Enabled {
+				t.NeedsAuth = true
 			}
 		}
 		switch {
@@ -90,7 +92,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := s.deps.DB.RecentStats(r.Context(), overviewWindow)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	var errRate float64
@@ -125,7 +127,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// as though it were the whole day.
 	spendMicros, spendPriced, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(time.Now()))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 
@@ -158,8 +160,15 @@ var usageDimensions = map[string]store.UsageDimension{
 
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	days := 30
-	if n, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil {
-		days = n
+	if n, set, err := queryInt(r, "days"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	} else if set {
+		if n < 1 || n > 365 {
+			writeError(w, http.StatusBadRequest, "days must be between 1 and 365")
+			return
+		}
+		days = int(n)
 	}
 	groupBy := r.URL.Query().Get("group_by")
 	dim, ok := usageDimensions[groupBy]
@@ -171,7 +180,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.deps.DB.UsageBy(r.Context(), days, dim)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	out := make([]map[string]any, 0, len(rows))

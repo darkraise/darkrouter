@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -53,8 +54,7 @@ var validPlaygroundDialects = map[string]bool{
 // to the console.
 func readPresetBody(w http.ResponseWriter, r *http.Request) (playgroundPresetBody, bool) {
 	var body playgroundPresetBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 256<<10, &body) {
 		return playgroundPresetBody{}, false
 	}
 	if body.Name == "" {
@@ -76,14 +76,14 @@ func readPresetBody(w http.ResponseWriter, r *http.Request) (playgroundPresetBod
 func (s *Server) handleListPlaygroundPresets(w http.ResponseWriter, r *http.Request) {
 	presets, err := s.deps.DB.PlaygroundPresets(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	out := []playgroundPresetView{}
 	for _, p := range presets {
 		out = append(out, viewOfPreset(p))
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"presets": out})
 }
 
 func (s *Server) handleCreatePlaygroundPreset(w http.ResponseWriter, r *http.Request) {
@@ -91,23 +91,19 @@ func (s *Server) handleCreatePlaygroundPreset(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	// Checked before the insert rather than caught after it: the dialog needs
-	// the clashing row's id to offer an overwrite, and the unique index would
-	// only tell it that something went wrong.
-	if existing, found, err := s.deps.DB.PlaygroundPresetByName(r.Context(), body.Name); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	} else if found {
+	made, err := s.deps.DB.CreatePlaygroundPreset(
+		r.Context(), body.Name, body.Dialect, body.Model, body.Config)
+	// The dialog needs the clashing row's id to offer an overwrite, so the
+	// conflict carries it rather than only saying something went wrong.
+	var taken *store.PresetNameConflict
+	if errors.As(err, &taken) {
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "a preset called " + body.Name + " already exists",
-			"id":    existing.ID,
+			"error": taken.Error(), "id": taken.ExistingID,
 		})
 		return
 	}
-	made, err := s.deps.DB.CreatePlaygroundPreset(
-		r.Context(), body.Name, body.Dialect, body.Model, body.Config)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, viewOfPreset(made))
@@ -122,20 +118,31 @@ func (s *Server) handleUpdatePlaygroundPreset(w http.ResponseWriter, r *http.Req
 	moved, err := s.deps.DB.UpdatePlaygroundPreset(
 		r.Context(), id, body.Name, body.Dialect, body.Model, body.Config)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, r, err)
 		return
 	}
 	if !moved {
 		writeError(w, http.StatusNotFound, "no such preset")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+	presets, err := s.deps.DB.PlaygroundPresets(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	for _, p := range presets {
+		if p.ID == id {
+			writeJSON(w, http.StatusOK, viewOfPreset(p))
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "no such preset")
 }
 
 func (s *Server) handleDeletePlaygroundPreset(w http.ResponseWriter, r *http.Request) {
 	removed, err := s.deps.DB.DeletePlaygroundPreset(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !removed {
@@ -199,8 +206,7 @@ type playgroundConversationBody struct {
 // to the console.
 func readConversationBody(w http.ResponseWriter, r *http.Request) (playgroundConversationBody, bool) {
 	var body playgroundConversationBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 256<<10, &body) {
 		return playgroundConversationBody{}, false
 	}
 	if body.Title == "" {
@@ -229,8 +235,7 @@ type playgroundTurnBody struct {
 
 func readTurnBody(w http.ResponseWriter, r *http.Request) (playgroundTurnBody, bool) {
 	var body playgroundTurnBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, 256<<10, &body) {
 		return playgroundTurnBody{}, false
 	}
 	if body.Role != "user" && body.Role != "assistant" {
@@ -264,14 +269,14 @@ func (s *Server) handleListPlaygroundConversations(w http.ResponseWriter, r *htt
 
 	conversations, err := s.deps.DB.PlaygroundConversations(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	out := []playgroundConversationView{}
 	for _, c := range conversations {
 		out = append(out, viewOfConversation(c))
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"conversations": out})
 }
 
 func (s *Server) handleCreatePlaygroundConversation(w http.ResponseWriter, r *http.Request) {
@@ -282,7 +287,7 @@ func (s *Server) handleCreatePlaygroundConversation(w http.ResponseWriter, r *ht
 	made, err := s.deps.DB.CreatePlaygroundConversation(
 		r.Context(), body.Title, body.Dialect, body.Model, body.Config)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, viewOfConversation(made))
@@ -291,7 +296,7 @@ func (s *Server) handleCreatePlaygroundConversation(w http.ResponseWriter, r *ht
 func (s *Server) handleGetPlaygroundConversation(w http.ResponseWriter, r *http.Request) {
 	c, turns, found, err := s.deps.DB.PlaygroundConversationByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !found {
@@ -320,20 +325,29 @@ func (s *Server) handleUpdatePlaygroundConversation(w http.ResponseWriter, r *ht
 	moved, err := s.deps.DB.UpdatePlaygroundConversation(
 		r.Context(), id, body.Title, body.Dialect, body.Model, body.Config)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !moved {
 		writeError(w, http.StatusNotFound, "no such conversation")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+	c, _, found, err := s.deps.DB.PlaygroundConversationByID(r.Context(), id)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "no such conversation")
+		return
+	}
+	writeJSON(w, http.StatusOK, viewOfConversation(c))
 }
 
 func (s *Server) handleDeletePlaygroundConversation(w http.ResponseWriter, r *http.Request) {
 	removed, err := s.deps.DB.DeletePlaygroundConversation(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !removed {
@@ -354,7 +368,7 @@ func (s *Server) handleAppendPlaygroundTurn(w http.ResponseWriter, r *http.Reque
 	// rather than as the missing conversation it is.
 	_, _, found, err := s.deps.DB.PlaygroundConversationByID(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	if !found {
@@ -364,7 +378,7 @@ func (s *Server) handleAppendPlaygroundTurn(w http.ResponseWriter, r *http.Reque
 	turn, err := s.deps.DB.AppendPlaygroundTurn(
 		r.Context(), id, body.Role, body.Content, body.RequestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]int{"seq": turn.Seq})
@@ -401,7 +415,7 @@ func (s *Server) requireConversationSaving(next http.HandlerFunc) http.HandlerFu
 func (s *Server) handlePurgePlaygroundConversations(w http.ResponseWriter, r *http.Request) {
 	n, err := s.deps.DB.PurgePlaygroundConversations(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
