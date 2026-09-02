@@ -119,8 +119,8 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
         state: "provider-unconfigured",
         problem:
           provider.credentials.length === 0
-            ? `${providerId} has no accounts`
-            : `every ${providerId} account is disabled`,
+            ? `${providerId} has no credentials`
+            : `every ${providerId} credential is disabled`,
       }
     }
     // Only judged against a catalogue that has loaded: an empty one means
@@ -142,7 +142,7 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
           }
     }
     if (!live(provider)) {
-      return { ...base, state: "cooling", problem: `every ${providerId} account is cooling` }
+      return { ...base, state: "cooling", problem: `every ${providerId} credential is cooling` }
     }
     return { ...base, state: "routable", problem: "" }
   }

@@ -57,9 +57,10 @@ describe("targetFacts on a pinned target", () => {
     expect(facts.problem).toBe("groq is disabled")
   })
 
-  it("names a provider with no accounts", () => {
+  it("names a provider with no credentials", () => {
     const facts = targetFacts("groq/llama", ctx({ providers: [provider("groq", { credentials: [] })] }))
     expect(facts.state).toBe("provider-unconfigured")
+    expect(facts.problem).toBe("groq has no credentials")
   })
 
   it("reports a model the provider does not offer", () => {

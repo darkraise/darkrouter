@@ -53,7 +53,7 @@ export function ProviderCard({
           <dd className="text-right tabular-nums">
             {row.priority ?? <span className="text-[hsl(var(--legend))]">—</span>}
           </dd>
-          <dt className="text-[hsl(var(--legend))]">Accounts</dt>
+          <dt className="text-[hsl(var(--legend))]">Credentials</dt>
           <dd className="flex justify-end">
             {row.accounts > 0 ? (
               <AccountStrip mix={mix} label={`${mix.usable}/${row.accounts}`} />

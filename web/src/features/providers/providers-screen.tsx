@@ -40,6 +40,7 @@ import { ProviderIcon } from "./provider-icon"
 import {
   filterProviderRows,
   filterSummary,
+  CONNECTION_DESCRIPTION,
   CONNECTION_LABEL,
   connectionCounts,
   mergeProviderRows,
@@ -554,6 +555,7 @@ export function ProvidersScreen() {
             value={type}
             disabled={counts[type] === 0}
             className={CHIP_SHAPE}
+            title={CONNECTION_DESCRIPTION[type]}
           >
             {CONNECTION_LABEL[type]}
             <span className="tabular-nums text-[hsl(var(--legend))]">{counts[type]}</span>

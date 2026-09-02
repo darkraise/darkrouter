@@ -106,7 +106,7 @@ export function phases(locked: boolean): Phase[] {
 
 const PHASE_LABEL: Record<Phase, string> = {
   provider: "Provider",
-  accounts: "Accounts",
+  accounts: "Credentials",
 }
 
 /** What the accounts are being added to. A preset and a provider disagree
@@ -200,7 +200,7 @@ function PresetRow({
       {provider && (
         <Badge variant="outline">
           {provider.credentials.length}{" "}
-          {provider.credentials.length === 1 ? "account" : "accounts"}
+          {provider.credentials.length === 1 ? "credential" : "credentials"}
         </Badge>
       )}
     </ListboxItem>
@@ -345,7 +345,7 @@ export function AddAccountsDialog({
     >
       <DialogContent className="flex max-h-[85vh] max-w-3xl flex-col overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add accounts</DialogTitle>
+          <DialogTitle>Add credentials</DialogTitle>
         </DialogHeader>
 
         {/* A one-step progress indicator is a claim that there is a sequence
