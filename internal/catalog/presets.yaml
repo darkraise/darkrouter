@@ -128,26 +128,41 @@ anthropic:
     - match: mythos-preview
       adaptive: true
       manual_budget: true
+      no_prefill: true
+      thinking_always_on: true
+      no_forced_tool_choice: true
     - match: opus-4-7
       adaptive: true
+      no_prefill: true
     - match: opus-4-8
       adaptive: true
+      no_prefill: true
     - match: opus-5
       adaptive: true
+      no_prefill: true
     - match: sonnet-5
       adaptive: true
+      no_prefill: true
     - match: fable-5
       adaptive: true
+      no_prefill: true
+      thinking_always_on: true
+      no_forced_tool_choice: true
     - match: mythos-5
       adaptive: true
+      no_prefill: true
+      thinking_always_on: true
+      no_forced_tool_choice: true
     - match: opus-4-6
       adaptive: true
       manual_budget: true
       free_sampling: true
+      no_prefill: true
     - match: sonnet-4-6
       adaptive: true
       manual_budget: true
       free_sampling: true
+      no_prefill: true
     - match: opus-4-5
       manual_budget: true
       free_sampling: true

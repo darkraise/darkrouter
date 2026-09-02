@@ -47,6 +47,10 @@ type Target struct {
 	APIKey  string
 	Model   string
 	Info    ModelInfo
+	// Preset is the catalog preset the provider was created from, empty for
+	// a provider configured by hand. Quirks are facts about the upstream, so
+	// an adapter reads them from here first and by base URL otherwise.
+	Preset string
 
 	// RerankPath is the preset-declared Cohere-v2 path, spec §3.1, resolved by
 	// the executor because the adapter is handed a target and knows nothing

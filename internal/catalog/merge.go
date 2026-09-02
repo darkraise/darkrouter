@@ -194,10 +194,13 @@ func traitsFor(preset Preset, modelID string) Traits {
 		if len(match) > best {
 			best = len(match)
 			out = Traits{
-				Adaptive:     rule.Adaptive,
-				ManualBudget: rule.ManualBudget,
-				FreeSampling: rule.FreeSampling,
-				Known:        true,
+				Adaptive:           rule.Adaptive,
+				ManualBudget:       rule.ManualBudget,
+				FreeSampling:       rule.FreeSampling,
+				Known:              true,
+				NoPrefill:          rule.NoPrefill,
+				ThinkingAlwaysOn:   rule.ThinkingAlwaysOn,
+				NoForcedToolChoice: rule.NoForcedToolChoice,
 			}
 		}
 	}

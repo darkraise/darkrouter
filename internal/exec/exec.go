@@ -212,6 +212,10 @@ func modelInfo(cat catalog.Reader, providerID, modelID string) adapter.ModelInfo
 		ManualBudget:    m.Traits.ManualBudget,
 		FreeSampling:    m.Traits.FreeSampling,
 		TraitsKnown:     m.Traits.Known,
+
+		NoPrefill:          m.Traits.NoPrefill,
+		ThinkingAlwaysOn:   m.Traits.ThinkingAlwaysOn,
+		NoForcedToolChoice: m.Traits.NoForcedToolChoice,
 	}
 }
 
@@ -492,6 +496,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	tgt := &adapter.Target{
 		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
 		Info:       modelInfo(cat, c.ProviderID, c.Model),
+		Preset:     p.Preset,
 		RerankPath: rerankPath(p.Preset),
 		Region:     p.Region, Project: p.Project, Location: p.Location,
 		Publisher: c.Publisher,

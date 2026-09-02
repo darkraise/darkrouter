@@ -63,7 +63,13 @@ func quirksOf(p catalog.Preset) quirkSet {
 // upstream, so their quirks are unioned, walked in id order so the result is
 // stable.
 func quirksForTarget(t *adapter.Target) quirkSet {
-	if t == nil || t.BaseURL == "" {
+	if t == nil {
+		return nil
+	}
+	if t.Preset != "" {
+		return QuirksFor(t.Preset)
+	}
+	if t.BaseURL == "" {
 		return nil
 	}
 	want := normalizeBase(t.BaseURL)

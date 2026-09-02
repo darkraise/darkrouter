@@ -60,6 +60,7 @@ cohere:
 mistral:
   models_dev_id: mistral
   surfaces: [llm, embedding]
+  quirks: [strict-unknown-fields, temperature-top-p-exclusive]
 
 deepseek:
   name: DeepSeek
@@ -72,6 +73,7 @@ deepseek:
   surfaces: [llm]
   models_dev_id: deepseek
   website: https://platform.deepseek.com
+  quirks: [echo-reasoning-content]
 
 cerebras:
   models_dev_id: cerebras
@@ -112,6 +114,7 @@ fireworks:
 
 openrouter:
   models_dev_id: openrouter
+  quirks: [echo-reasoning-content]
 
 vercel-ai-gateway:
   models_dev_id: vercel

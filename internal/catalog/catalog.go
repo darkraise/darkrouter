@@ -77,6 +77,11 @@ type Traits struct {
 	ManualBudget bool
 	FreeSampling bool
 	Known        bool
+
+	// Request shapes the generation refuses outright; see TraitRule.
+	NoPrefill          bool
+	ThinkingAlwaysOn   bool
+	NoForcedToolChoice bool
 }
 
 // Pricing is micro-dollars per million tokens. Known separates a free model
