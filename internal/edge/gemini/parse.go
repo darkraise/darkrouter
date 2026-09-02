@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter/xlate"
@@ -62,13 +63,10 @@ type wireContent struct {
 type wireRequest struct {
 	Contents          []wireContent `json:"contents"`
 	SystemInstruction *wireContent  `json:"systemInstruction"`
-	Tools             []struct {
-		FunctionDeclarations []struct {
-			Name        string          `json:"name"`
-			Description string          `json:"description"`
-			Parameters  json.RawMessage `json:"parameters"`
-		} `json:"functionDeclarations"`
-	} `json:"tools"`
+	// Tools is read as raw objects because an entry is either a set of
+	// function declarations or one provider built-in — googleSearch,
+	// codeExecution, urlContext — keyed by its own name.
+	Tools      []map[string]json.RawMessage `json:"tools"`
 	ToolConfig *struct {
 		FunctionCallingConfig *struct {
 			Mode                 string   `json:"mode"`
@@ -80,18 +78,29 @@ type wireRequest struct {
 		Threshold string `json:"threshold"`
 	} `json:"safetySettings"`
 	GenerationConfig *struct {
-		Temperature      *float64        `json:"temperature"`
-		TopP             *float64        `json:"topP"`
-		TopK             *int            `json:"topK"`
-		MaxOutputTokens  *int            `json:"maxOutputTokens"`
-		StopSequences    []string        `json:"stopSequences"`
-		ResponseMimeType string          `json:"responseMimeType"`
-		ResponseSchema   json.RawMessage `json:"responseSchema"`
-		ThinkingConfig   *struct {
-			ThinkingBudget  int  `json:"thinkingBudget"`
-			IncludeThoughts bool `json:"includeThoughts"`
+		Temperature        *float64        `json:"temperature"`
+		TopP               *float64        `json:"topP"`
+		TopK               *int            `json:"topK"`
+		MaxOutputTokens    *int            `json:"maxOutputTokens"`
+		StopSequences      []string        `json:"stopSequences"`
+		ResponseMimeType   string          `json:"responseMimeType"`
+		ResponseSchema     json.RawMessage `json:"responseSchema"`
+		ResponseJSONSchema json.RawMessage `json:"responseJsonSchema"`
+		ThinkingConfig     *struct {
+			// ThinkingBudget is a pointer because zero is an explicit
+			// request to turn thinking off, and absent means unset.
+			ThinkingBudget  *int   `json:"thinkingBudget"`
+			ThinkingLevel   string `json:"thinkingLevel"`
+			IncludeThoughts bool   `json:"includeThoughts"`
 		} `json:"thinkingConfig"`
 	} `json:"generationConfig"`
+	CachedContent string `json:"cachedContent"`
+}
+
+type wireFunctionDeclaration struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
@@ -134,12 +143,18 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		req.Messages = append(req.Messages, ir.Message{Role: role, Content: blocks})
 	}
 
-	for _, t := range w.Tools {
-		for _, d := range t.FunctionDeclarations {
-			req.Tools = append(req.Tools, ir.Tool{
-				Name: d.Name, Description: d.Description, Schema: d.Parameters,
-			})
+	for _, entry := range w.Tools {
+		tools, err := parseToolEntry(entry)
+		if err != nil {
+			return nil, nil, err
 		}
+		req.Tools = append(req.Tools, tools...)
+	}
+	if w.CachedContent != "" {
+		// Metadata is the one IR slot a provider-specific handle fits in.
+		// Only the Gemini adapter reads this key back; every other target
+		// warns about metadata it cannot forward.
+		req.Metadata = map[string]string{"gemini_cached_content": w.CachedContent}
 	}
 	if w.ToolConfig != nil && w.ToolConfig.FunctionCallingConfig != nil {
 		cfg := w.ToolConfig.FunctionCallingConfig
@@ -168,11 +183,23 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		req.TopK = g.TopK
 		req.MaxTokens = g.MaxOutputTokens
 		req.StopSequences = g.StopSequences
-		if len(g.ResponseSchema) > 0 {
+		switch {
+		case len(g.ResponseJSONSchema) > 0:
+			req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: g.ResponseJSONSchema}
+		case len(g.ResponseSchema) > 0:
 			req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: g.ResponseSchema}
+		case g.ResponseMimeType == "application/json":
+			req.ResponseFormat = &ir.ResponseFormat{Type: "json_object"}
 		}
-		if g.ThinkingConfig != nil && g.ThinkingConfig.ThinkingBudget > 0 {
-			req.Reasoning = &ir.Reasoning{Budget: g.ThinkingConfig.ThinkingBudget}
+		if tc := g.ThinkingConfig; tc != nil {
+			switch {
+			case tc.ThinkingBudget != nil && *tc.ThinkingBudget == 0:
+				req.Reasoning = &ir.Reasoning{Disabled: true}
+			case tc.ThinkingBudget != nil && *tc.ThinkingBudget > 0:
+				req.Reasoning = &ir.Reasoning{Budget: *tc.ThinkingBudget}
+			case tc.ThinkingLevel != "":
+				req.Reasoning = &ir.Reasoning{Effort: strings.ToLower(tc.ThinkingLevel)}
+			}
 		}
 	}
 
@@ -188,14 +215,51 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 	}, nil
 }
 
+// parseToolEntry reads one tools entry: its function declarations become
+// named tools, and any other key is a provider built-in carried whole.
+func parseToolEntry(entry map[string]json.RawMessage) ([]ir.Tool, error) {
+	var out []ir.Tool
+	keys := make([]string, 0, len(entry))
+	for k := range entry {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		raw := entry[k]
+		if k == "functionDeclarations" || k == "function_declarations" {
+			var decls []wireFunctionDeclaration
+			if err := json.Unmarshal(raw, &decls); err != nil {
+				return nil, fmt.Errorf("invalid functionDeclarations: %w", err)
+			}
+			for _, d := range decls {
+				out = append(out, ir.Tool{Name: d.Name, Description: d.Description, Schema: d.Parameters})
+			}
+			continue
+		}
+		if string(raw) == "null" {
+			continue
+		}
+		out = append(out, ir.Tool{Extra: map[string]json.RawMessage{k: raw}})
+	}
+	return out, nil
+}
+
 // parseParts converts one content entry, returning its blocks and the ids of
 // any function calls it made.
 func parseParts(turn int, parts []wirePart, pending []string) ([]ir.ContentBlock, []string) {
 	var (
-		out     []ir.ContentBlock
-		calls   []string
-		results int
+		out   []ir.ContentBlock
+		calls []string
 	)
+	// Responses naming their call claim it up front, so a positional
+	// response in the same turn answers the next call nobody named.
+	named := map[string]bool{}
+	for _, p := range parts {
+		if p.FunctionResponse != nil && p.FunctionResponse.ID != "" {
+			named[p.FunctionResponse.ID] = true
+		}
+	}
+	next := 0
 	for _, p := range parts {
 		switch {
 		case p.FunctionCall != nil:
@@ -209,15 +273,20 @@ func parseParts(turn int, parts []wirePart, pending []string) ([]ir.ContentBlock
 				args = json.RawMessage(`{}`)
 			}
 			out = append(out, ir.ContentBlock{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
-				ID: id, Name: p.FunctionCall.Name, Input: args,
+				ID: id, Name: p.FunctionCall.Name, Input: args, Signature: p.ThoughtSignature,
 			}})
 
 		case p.FunctionResponse != nil:
 			id := p.FunctionResponse.ID
-			if id == "" && results < len(pending) {
-				id = pending[results]
+			if id == "" {
+				for next < len(pending) && named[pending[next]] {
+					next++
+				}
+				if next < len(pending) {
+					id = pending[next]
+				}
+				next++
 			}
-			results++
 			out = append(out, ir.ContentBlock{Type: ir.BlockToolResult, ToolResult: &ir.ToolResult{
 				ToolUseID: id,
 				Content: []ir.ContentBlock{{
@@ -238,8 +307,12 @@ func parseParts(turn int, parts []wirePart, pending []string) ([]ir.ContentBlock
 			out = append(out, ir.ContentBlock{Type: mediaKind(p.FileData.MimeType),
 				Media: &ir.Media{MIME: p.FileData.MimeType, URL: p.FileData.FileURI}})
 
-		case p.Text != "":
-			out = append(out, ir.ContentBlock{Type: ir.BlockText, Text: p.Text})
+		case p.Text != "" || p.ThoughtSignature != "":
+			blk := ir.ContentBlock{Type: ir.BlockText, Text: p.Text}
+			if p.ThoughtSignature != "" {
+				blk.SetExtraString(ir.ExtraThoughtSignature, p.ThoughtSignature)
+			}
+			out = append(out, blk)
 		}
 	}
 	return out, calls

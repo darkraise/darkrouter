@@ -1,0 +1,11 @@
+{"contents":[
+  {"role":"user","parts":[{"text":"Weather in Oslo?"}]},
+  {"role":"model","parts":[
+    {"text":"Need a lookup.","thought":true,"thoughtSignature":"CtEBAdHtim8="},
+    {"functionCall":{"id":"call_a","name":"lookup","args":{"city":"Oslo"}},"thoughtSignature":"CtEBAdHtim9="}]},
+  {"role":"user","parts":[
+    {"functionResponse":{"id":"call_a","name":"lookup","response":{"result":"clear, 18C"}}}]},
+  {"role":"user","parts":[{"text":"And tomorrow?"}]}],
+ "tools":[{"functionDeclarations":[{"name":"lookup","description":"weather",
+   "parameters":{"type":"object","properties":{"city":{"type":"string"}}}}]}],
+ "generationConfig":{"thinkingConfig":{"thinkingBudget":8000,"includeThoughts":true}}}

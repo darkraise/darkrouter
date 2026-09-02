@@ -33,7 +33,11 @@ func responseParts(blocks []ir.ContentBlock) []any {
 	for _, b := range blocks {
 		switch b.Type {
 		case ir.BlockText:
-			out = append(out, map[string]any{"text": b.Text})
+			p := map[string]any{"text": b.Text}
+			if sig := b.ExtraString(ir.ExtraThoughtSignature); sig != "" {
+				p["thoughtSignature"] = sig
+			}
+			out = append(out, p)
 		case ir.BlockThinking:
 			if b.Thinking == nil {
 				continue
@@ -55,7 +59,11 @@ func responseParts(blocks []ir.ContentBlock) []any {
 			if b.ToolUse.ID != "" {
 				call["id"] = b.ToolUse.ID
 			}
-			out = append(out, map[string]any{"functionCall": call})
+			p := map[string]any{"functionCall": call}
+			if b.ToolUse.Signature != "" {
+				p["thoughtSignature"] = b.ToolUse.Signature
+			}
+			out = append(out, p)
 		}
 	}
 	return out

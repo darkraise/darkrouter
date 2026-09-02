@@ -1,0 +1,4 @@
+[
+  "messages[].assistant.thinking -\u003e openaicompat: the target does not accept reasoning_content on an assistant turn; the block was dropped",
+  "reasoning.budget -\u003e openaicompat: converted to the nearest reasoning_effort band"
+]
