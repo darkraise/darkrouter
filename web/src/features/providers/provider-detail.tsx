@@ -271,7 +271,7 @@ export function ProviderDetail() {
   const toggle = useApiMutation({
     mutationFn: (enabled: boolean) => api.patch(`/api/providers/${id}`, { enabled }),
     success: "Provider updated",
-    invalidates: [keys.providers, keys.overview],
+    invalidates: [keys.providers, keys.overview, keys.health, keys.discovery],
   })
   // No row is not the same as no such provider: the list holds every provider
   // the release supports, and clicking one that nobody has configured has to
