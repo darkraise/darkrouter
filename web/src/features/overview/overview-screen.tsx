@@ -1,9 +1,11 @@
-import { useState } from "react"
-import { Banner, Button, Card } from "darkraise-ui"
+import { useMemo, useState } from "react"
+import { Banner, Card } from "darkraise-ui"
 import { useConfig, useOverview, useProviders, useUsage } from "../../lib/queries"
-import type { FailoverRow, Overview, UsageRow } from "../../lib/api-types"
+import type { Overview, UsageRow } from "../../lib/api-types"
+import { durationParts, money, percent } from "../../lib/format"
 import { AddAccountsDialog } from "../providers/add-accounts-dialog"
 import { FirstRunProviders } from "../shell/first-run-providers"
+import { LoadError } from "../shell/screen-state"
 import { FlowGraph, aliasesFromUsage, type FlowProvider } from "./flow-graph"
 import { Failovers } from "./failovers"
 
@@ -15,20 +17,13 @@ import { Failovers } from "./failovers"
 const LIVE_WINDOW = "last 5 min"
 const SERIES_WINDOW = "30d"
 
-/** Micro-dollars to a readable amount.
- *
- *  Cents down to a cent, and four decimals below it: a gateway that has spent
- *  $0.004 today has not spent nothing, and `$0.00` is the exact string that
- *  would claim it had. Unpriced is not zero either — a model with no catalog
- *  price has an unknown cost. */
-import { money } from "@/lib/format"
-export { money }
-
-/** Milliseconds as a reading rather than a raw field. Seconds past the
- *  thousand, because `4100ms` makes the reader do the division. */
-export function duration(ms: number): { value: string; unit: string } {
-  if (ms >= 1000) return { value: (ms / 1000).toFixed(1), unit: "s" }
-  return { value: `${Math.round(ms)}`, unit: "ms" }
+/** Today's spend as the tile reads it. Unpriced is unknown, not free; a
+ *  priced zero is a day nothing has been spent on yet, and the tile says
+ *  that in words rather than printing a "free" that reads as a price. */
+export function spendReading(spend: Overview["today_spend"]): string {
+  if (!spend.priced || spend.micros === null) return "—"
+  if (spend.micros === 0) return "no spend yet"
+  return money(spend.micros)
 }
 
 /** Daily totals in day order, so a sparkline's x-axis is time. */
@@ -52,11 +47,6 @@ export function errorSeries(rows: UsageRow[]): number[] {
   // Attempts beyond requests are failovers. Floored, because a rollup that
   // straddles a day boundary can land one attempt short of its request.
   return byDay(rows, (r) => Math.max(0, r.attempts - r.requests))
-}
-
-export function failoverLabel(row: FailoverRow): string {
-  const asked = row.alias || row.final_model
-  return `${asked} → ${row.final_provider_id}/${row.final_model}`
 }
 
 /** A sparkline over the daily series. Decorative: the number beside it is the
@@ -126,9 +116,9 @@ function Tile({
   return (
     <Card className="flex flex-col gap-2 overflow-hidden p-4">
       {/* Two deliberate lines rather than one that wraps: at the 14px floor
-          `requests_per_min · last 5 min` does not fit a quarter-width tile,
+          the label and its window do not fit a quarter-width tile together,
           and a ragged wrap made the four readouts sit at different heights. */}
-      <p className="font-mono text-sm text-[hsl(var(--legend))]">{caption}</p>
+      <p className="text-sm font-medium text-[hsl(var(--muted-foreground))]">{caption}</p>
       <p className="-mt-1 text-sm text-[hsl(var(--legend))]">{window}</p>
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         {readings.map((r) => (
@@ -217,14 +207,34 @@ export function OverviewScreen() {
   const [addOpen, setAddOpen] = useState(false)
 
   const o = overview.data
-  const providerDays = byProvider.data?.days ?? []
+  const providerDays = byProvider.data?.days
+  const aliasDays = byAlias.data?.days
   const days = o?.series ?? []
   // Guards the array itself, not just the response object: a caller that
   // returns a response shaped differently than expected must read as "not
   // known yet" rather than crash the whole screen on a missing collection.
   const noProviders = providers.data?.providers?.length === 0
-  const p95 = o ? duration(o.latency.p95_ms) : null
-  const p50 = o ? duration(o.latency.p50_ms) : null
+  const p95 = o ? durationParts(o.latency.p95_ms) : null
+  const p50 = o ? durationParts(o.latency.p50_ms) : null
+
+  // The graph's inputs, rebuilt only when the responses that feed them
+  // change. Every three-second poll re-rendered this screen, and fresh
+  // arrays on each pass made the canvas lay itself out again for nothing.
+  const graphAliases = useMemo(() => aliasesFromUsage(aliasDays ?? []), [aliasDays])
+  const graphProviders = useMemo(
+    () => (o ? flowProviders(o, providerDays ?? []) : []),
+    [o, providerDays],
+  )
+  const failoverEdges = o?.failover_edges
+  const graphFailovers = useMemo(
+    () =>
+      (failoverEdges ?? []).map((e) => ({
+        from: e.from_provider_id,
+        to: e.to_provider_id,
+        count: e.requests,
+      })),
+    [failoverEdges],
+  )
 
   return (
     <>
@@ -239,18 +249,12 @@ export function OverviewScreen() {
       )}
 
       {overview.isError && !o && (
-        <Banner variant="destructive" className="mb-6">
-          <p className="text-sm font-medium">The overview did not load</p>
-          <p className="mt-1 text-sm">{overview.error.message}</p>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="mt-2"
-            onClick={() => void overview.refetch()}
-          >
-            Try again
-          </Button>
-        </Banner>
+        <LoadError
+          what="The overview"
+          error={overview.error}
+          onRetry={() => void overview.refetch()}
+          className="mb-6"
+        />
       )}
 
       {noProviders ? (
@@ -280,16 +284,16 @@ export function OverviewScreen() {
               ) : (
                 <>
                   <Tile
-                    caption="requests_per_min"
+                    caption="Requests / min"
                     window={LIVE_WINDOW}
                     readings={[{ value: o.requests_per_min.toFixed(1), unit: "req/min" }]}
                     points={requestSeries(days)}
                     seriesLabel={`${SERIES_WINDOW} · requests per day`}
                   />
                   <Tile
-                    caption="error_rate"
+                    caption="Error rate"
                     window={LIVE_WINDOW}
-                    readings={[{ value: (o.error_rate * 100).toFixed(1), unit: "%" }]}
+                    readings={[{ value: percent(o.error_rate) }]}
                     points={errorSeries(days)}
                     // Named for what it plots. The daily rollup has no error
                     // column, so the trend under an error rate is the closest
@@ -298,7 +302,7 @@ export function OverviewScreen() {
                     seriesLabel={`${SERIES_WINDOW} · failovers per day`}
                   />
                   <Tile
-                    caption="latency"
+                    caption="p50 latency"
                     window={LIVE_WINDOW}
                     readings={[
                       { label: "p50", value: p50!.value, unit: p50!.unit },
@@ -309,11 +313,9 @@ export function OverviewScreen() {
                     seriesLabel="no daily series for latency"
                   />
                   <Tile
-                    caption="today_spend"
+                    caption="Today's spend (UTC day)"
                     window="since 00:00 UTC"
-                    readings={[
-                      { value: money(o.today_spend.priced ? (o.today_spend.micros ?? 0) : null) },
-                    ]}
+                    readings={[{ value: spendReading(o.today_spend) }]}
                     points={spendSeries(days)}
                     seriesLabel={`${SERIES_WINDOW} · spend per day`}
                   />
@@ -333,13 +335,15 @@ export function OverviewScreen() {
                 sit above the picture and are read once; the same facts beside
                 the marks they name are read whenever the graph is. */}
             <ul className="mt-1 mb-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-[hsl(var(--muted-foreground))]">
+              {/* The swatches take the edges' own colour, --info, so the
+                  legend names what is drawn rather than a grey stand-in. */}
               <li className="flex items-center gap-1.5">
-                <span className="h-0.5 w-6 rounded bg-[hsl(var(--muted-foreground))]" aria-hidden="true" />
+                <span className="h-0.5 w-6 rounded bg-[hsl(var(--info))]" aria-hidden="true" />
                 thicker edge, larger share
               </li>
               <li className="flex items-center gap-1.5">
                 <span
-                  className="h-0.5 w-6 rounded border-t-2 border-dashed border-[hsl(var(--muted-foreground))] bg-transparent"
+                  className="h-0.5 w-6 rounded border-t-2 border-dashed border-[hsl(var(--info))] bg-transparent"
                   aria-hidden="true"
                 />
                 failed over from somewhere else
@@ -351,13 +355,9 @@ export function OverviewScreen() {
             </ul>
             {o ? (
               <FlowGraph
-                aliases={aliasesFromUsage(byAlias.data?.days ?? [])}
-                providers={flowProviders(o, providerDays)}
-                failovers={o.failover_edges.map((e) => ({
-                  from: e.from_provider_id,
-                  to: e.to_provider_id,
-                  count: e.requests,
-                }))}
+                aliases={graphAliases}
+                providers={graphProviders}
+                failovers={graphFailovers}
                 // Every return the graph draws, summed — not the five rows
                 // /api/overview caps its recent list at, which would report a
                 // busy window as five.

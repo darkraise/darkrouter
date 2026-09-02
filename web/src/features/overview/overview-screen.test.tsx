@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest"
 import {
-  duration,
   errorSeries,
-  failoverLabel,
   flowProviders,
-  money,
   requestSeries,
+  spendReading,
   spendSeries,
 } from "./overview-screen"
+import { failoverLabel } from "./failover-label"
+import { durationParts as duration, money } from "../../lib/format"
 import type { Overview, ProviderTile, UsageRow } from "../../lib/api-types"
 
 const tile = (over: Partial<ProviderTile> & { id: string }): ProviderTile => ({
@@ -172,6 +172,15 @@ describe("the spend readout", () => {
 
   it("says unknown rather than free when nothing in scope had a price", () => {
     expect(money(null)).toBe("—")
+  })
+})
+
+describe("the spend tile", () => {
+  it("says no spend yet for a priced day at zero, and unknown for unpriced", () => {
+    // "free" is a price; a day nothing has been charged to yet is not.
+    expect(spendReading({ micros: 0, priced: true })).toBe("no spend yet")
+    expect(spendReading({ micros: null, priced: false })).toBe("—")
+    expect(spendReading({ micros: 4_000, priced: true })).toBe("$0.0040")
   })
 })
 
