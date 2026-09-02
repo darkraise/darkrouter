@@ -28,14 +28,18 @@ const (
 // EffortBudget converts a reasoning effort to a token budget, clamped to the
 // model's maximum output tokens. A maxOut of 0 means the catalog does not know
 // it, which disables the clamp rather than clamping to nothing.
+//
+// The outer efforts collapse onto the nearest band: a budget-taking model has
+// no depth below low or above high, and returning 0 for them would turn
+// reasoning off for a client that asked for the most of it.
 func EffortBudget(effort string, maxOut int) int {
 	var b int
 	switch strings.ToLower(effort) {
-	case "low":
+	case "minimal", "low":
 		b = budgetLow
 	case "medium":
 		b = budgetMedium
-	case "high":
+	case "high", "xhigh", "max":
 		b = budgetHigh
 	default:
 		return 0
@@ -44,6 +48,47 @@ func EffortBudget(effort string, maxOut int) int {
 		return maxOut
 	}
 	return b
+}
+
+// AnthropicEffort maps the IR vocabulary onto output_config.effort. Anthropic
+// has no minimal; low is its floor. The rest is Anthropic's own vocabulary and
+// passes through lowercased.
+func AnthropicEffort(effort string) string {
+	e := strings.ToLower(effort)
+	if e == "minimal" {
+		return "low"
+	}
+	return e
+}
+
+// GeminiMinBudget is the smallest thinkingBudget every Gemini 2.5 model
+// accepts as "think, but barely": Flash allows 0, Pro 128, Flash-Lite 512,
+// and 0 means off rather than minimal.
+const GeminiMinBudget = 512
+
+// GeminiBudgetCap is the largest thinkingBudget a Gemini model accepts. The
+// Flash line caps lower than Pro; an unrecognized name gets Pro's cap, which
+// is also Gemini's documented default ceiling.
+func GeminiBudgetCap(model string) int {
+	if strings.Contains(strings.ToLower(model), "flash") {
+		return 24576
+	}
+	return 32768
+}
+
+// GeminiEffortBudget bands an effort onto a thinkingBudget for one model:
+// minimal is the floor, xhigh and max are the model's cap, and the three
+// middle bands come from the shared table clamped to that cap.
+func GeminiEffortBudget(effort, model string) int {
+	cap := GeminiBudgetCap(model)
+	switch strings.ToLower(effort) {
+	case "minimal":
+		return GeminiMinBudget
+	case "xhigh", "max":
+		return cap
+	default:
+		return EffortBudget(effort, cap)
+	}
 }
 
 // BudgetEffort is the inverse banding, for targets that take an effort rather

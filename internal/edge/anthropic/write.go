@@ -63,6 +63,16 @@ func responseBlocks(blocks []ir.ContentBlock) []any {
 			out = append(out, map[string]any{
 				"type": "tool_use", "id": b.ToolUse.ID, "name": b.ToolUse.Name, "input": input,
 			})
+		default:
+			// A block the Anthropic adapter carried through untouched — a
+			// server-tool block — goes back as it arrived.
+			if len(b.Extra) > 0 {
+				m := make(map[string]any, len(b.Extra))
+				for k, v := range b.Extra {
+					m[k] = v
+				}
+				out = append(out, m)
+			}
 		}
 	}
 	return out
