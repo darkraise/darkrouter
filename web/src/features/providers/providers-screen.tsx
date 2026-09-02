@@ -291,6 +291,20 @@ function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
     // completion comes back. Both, because a key can be valid on a provider
     // that serves nothing an operator asked for.
     <span className="flex gap-2">
+      {/* A second key on a working provider is ordinary, and it opens the same
+          dialog the unconfigured row does -- the preset is already settled, so
+          there is no picker to walk. Offered on a keyless provider too: its
+          endpoint can still sit behind a key, which is the case the detail
+          page's "add a credential anyway" already covers. */}
+      <Button
+        size="icon"
+        variant="ghost"
+        title={`Add credentials — add another key to ${row.name}`}
+        onClick={() => actions.onAdd(row)}
+      >
+        <Plus className="size-[var(--icon-size)]" />
+        <span className="sr-only">Add credentials</span>
+      </Button>
       <Button
         size="icon"
         variant="ghost"
