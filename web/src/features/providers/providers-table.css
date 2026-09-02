@@ -1,0 +1,21 @@
+/* The actions stay in view while the rest of the table scrolls sideways.
+   At a laptop width the table is wider than the card, and the buttons were
+   the part that went off the edge. DataTable renders its own cells, so the
+   column is reached by position rather than by class; the actions column
+   cannot be hidden, so it is always the last one. */
+.providers-table .dr-data-table-frame th:last-child,
+.providers-table .dr-data-table-frame td:last-child {
+  position: sticky;
+  right: 0;
+  background: hsl(var(--card));
+  box-shadow: -1px 0 0 hsl(var(--border));
+}
+
+/* The row's hover wash is translucent, and a sticky cell needs an opaque
+   ground to cover what scrolls under it, so the wash is laid over the card
+   colour here rather than replacing it. */
+.providers-table .dr-data-table-frame tr:hover td:last-child {
+  background:
+    linear-gradient(hsl(var(--muted) / 0.5), hsl(var(--muted) / 0.5)),
+    hsl(var(--card));
+}
