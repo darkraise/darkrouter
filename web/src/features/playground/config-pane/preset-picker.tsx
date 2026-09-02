@@ -9,6 +9,7 @@ import { useApiMutation } from "../../../lib/mutations"
 import { keys, usePlaygroundPresets } from "../../../lib/queries"
 import { mergeStoredConfig, toStoredConfig } from "../preset-config"
 import { DIALECTS, type PlaygroundConfig } from "../config"
+import { useReportNestedDialog } from "./nested-dialog"
 import type { PlaygroundPreset } from "../../../lib/api-types"
 
 /** What a save sends. model and dialect are columns; the rest is the blob. */
@@ -48,6 +49,7 @@ export function PresetPicker({
   const [open, setOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [name, setName] = useState("")
+  useReportNestedDialog(open || manageOpen)
 
   const close = () => {
     setOpen(false)
