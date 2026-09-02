@@ -56,11 +56,9 @@ func (o *transcriptionOp) Build(ctx context.Context, tgt *adapter.Target, ad ada
 // provider actually sent is the only thing that is right in every case.
 func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
 	defer resp.Body.Close()
+	ac.resetIdle()
 
 	ct := resp.Header.Get("Content-Type")
-	ac.Rec.FinalProviderID = ac.Cand.ProviderID
-	ac.Rec.FinalModel = ac.Cand.Model
-	ac.Rec.Warnings = warningStrings(ac.Warns)
 	ac.Rec.SurfaceMeta = map[string]any{"file_name": o.form.FileName("file")}
 	ac.Rec.ResponseContentType = ct
 
@@ -79,8 +77,7 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 		// verbose_json carries per-segment timings and log-probabilities that
 		// re-emitting from a narrow IR would drop.
 		applyTranscriptUsage(ac, raw)
-		ttft := time.Since(ac.Rec.TS).Milliseconds()
-		ac.Rec.TTFTMs = &ttft
+		ac.served(ac.Warns)
 		ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 		cw.Header().Set("Content-Type", ct)
 		_, _ = cw.Write(raw)
@@ -105,6 +102,7 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 	// Once bytes have gone out the chain ends whatever happened next. The loop
 	// enforces this by consulting the writer, and the byte count is what the
 	// trace has instead of an in-stream error the format cannot carry.
+	ac.served(ac.Warns)
 	return adapter.OutcomeSuccess, nil
 }
 
@@ -137,6 +135,11 @@ func applyTranscriptUsage(ac *AttemptCtx, raw []byte) {
 	})
 }
 
+// copyChunkBytes is the read size for bodies forwarded chunk by chunk. Large
+// enough that a fast provider is not throttled by syscalls, small enough that
+// an SSE event or an audio frame goes out without waiting for its neighbours.
+const copyChunkBytes = 32 << 10
+
 // copyFlushing copies src to dst, flushing after every chunk.
 //
 // io.Copy alone would let the ResponseWriter buffer, which turns an SSE
@@ -144,7 +147,7 @@ func applyTranscriptUsage(ac *AttemptCtx, raw []byte) {
 // shared with the speech surface, which has the same requirement for the same
 // reason.
 func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
-	buf := make([]byte, 32<<10)
+	buf := make([]byte, copyChunkBytes)
 	var total int64
 	for {
 		n, rerr := src.Read(buf)
