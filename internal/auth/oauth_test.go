@@ -414,3 +414,42 @@ func TestAManagerWithNoPresetsRefusesOAuth(t *testing.T) {
 		t.Fatal("an oauth provider with no preset data must be refused")
 	}
 }
+
+func TestOAuthBearerCarriesTheBetaHeader(t *testing.T) {
+	// Anthropic refuses an OAuth bearer token on /v1/messages unless the
+	// request also declares the oauth beta. The authorizer is the one place
+	// that knows the credential is an OAuth grant, so it is where the header
+	// is added — on the IR and the passthrough path alike.
+	_, srv := newAuthServer(t)
+	az := oauthAz(t, oauthManager(t, srv, newMemTokens()), expiring(t, time.Hour))
+
+	r, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Header.Get("anthropic-beta"); got != OAuthBeta {
+		t.Errorf("anthropic-beta = %q, want %q", got, OAuthBeta)
+	}
+}
+
+func TestOAuthBetaMergesWithTheClientsList(t *testing.T) {
+	// A passthrough request forwards the client's own beta list. Replacing it
+	// would strip a feature the client asked for; appending twice would send
+	// the oauth beta on every retry of an already-authorized request.
+	_, srv := newAuthServer(t)
+	az := oauthAz(t, oauthManager(t, srv, newMemTokens()), expiring(t, time.Hour))
+
+	r, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	r.Header.Add("anthropic-beta", "context-1m-2025-08-07, interleaved-thinking-2025-05-14")
+	r.Header.Add("anthropic-beta", OAuthBeta)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Header.Values("anthropic-beta"); len(got) != 1 {
+		t.Fatalf("anthropic-beta = %q, want one merged value", got)
+	}
+	want := "context-1m-2025-08-07,interleaved-thinking-2025-05-14," + OAuthBeta
+	if got := r.Header.Get("anthropic-beta"); got != want {
+		t.Errorf("anthropic-beta = %q, want %q", got, want)
+	}
+}

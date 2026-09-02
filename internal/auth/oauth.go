@@ -41,6 +41,13 @@ var ErrNeedsReconnect = errors.New("this account must be reconnected")
 
 const reconnectReason = "reconnect required: the provider refused the refresh"
 
+// OAuthBeta is the anthropic-beta value Anthropic requires alongside an OAuth
+// bearer token; without it /v1/messages answers 401 as if the grant were bad.
+// Anthropic is the only OAuth issuer the presets ship, and a vendor that does
+// not know the header ignores it, so it is set for every OAuth credential
+// rather than gated on something the authorizer cannot see.
+const OAuthBeta = "oauth-2025-04-20"
+
 type ExchangeInput struct {
 	Code        string
 	Verifier    string
@@ -220,8 +227,29 @@ func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authori
 			return err
 		}
 		r.Header.Set("Authorization", header)
+		r.Header.Set("anthropic-beta", mergeBeta(r.Header.Values("anthropic-beta"), OAuthBeta))
 		return nil
 	}, nil
+}
+
+// mergeBeta folds one beta into the header's existing comma-separated lists,
+// producing a single value with no duplicates. A passthrough request carries
+// the client's own list, and the same request is authorized again on every
+// retry, so the merge has to be idempotent.
+func mergeBeta(existing []string, beta string) string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range append(existing, beta) {
+		for _, item := range strings.Split(v, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" || seen[item] {
+				continue
+			}
+			seen[item] = true
+			out = append(out, item)
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 // accessToken returns a usable Authorization value, refreshing under the
