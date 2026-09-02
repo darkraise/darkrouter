@@ -200,3 +200,28 @@ describe("an alias added somewhere else", () => {
     expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/edited")
   })
 })
+
+describe("AliasEditor keyboard reorder", () => {
+  it("moves a target with the buttons, for whoever cannot drag", async () => {
+    // Drag and drop is pointer-only. The fallback order is the whole point
+    // of a chain, so changing it has to be reachable from the keyboard.
+    mount({ chain: ["groq/a", "groq/b", "groq/c"] })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+
+    await user.click(screen.getByRole("button", { name: "Move chain target 2 up" }))
+    expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/b")
+    expect(screen.getByLabelText("chain target 2")).toHaveValue("groq/a")
+
+    await user.click(screen.getByRole("button", { name: "Move chain target 2 down" }))
+    expect(screen.getByLabelText("chain target 3")).toHaveValue("groq/a")
+  })
+
+  it("cannot move the first target up or the last one down", async () => {
+    mount({ chain: ["groq/a", "groq/b"] })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    expect(screen.getByRole("button", { name: "Move chain target 1 up" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Move chain target 2 down" })).toBeDisabled()
+  })
+})
