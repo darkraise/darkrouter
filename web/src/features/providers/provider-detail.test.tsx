@@ -263,3 +263,15 @@ describe("switching a provider back on", () => {
     })
   })
 })
+
+describe("the page outline", () => {
+  it("leaves the one h1 to the app header", async () => {
+    // The header bar already carries the page's h1 ("Providers"). A second
+    // one here gave the page two top-level headings, and the provider's
+    // name is a section of that page rather than a page of its own.
+    stub([configured], [preset])
+    const { container } = await renderProvider("groq")
+    expect(await screen.findByRole("heading", { level: 2, name: "Groq" })).toBeInTheDocument()
+    expect(container.querySelector("h1")).toBeNull()
+  })
+})
