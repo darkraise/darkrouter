@@ -8,12 +8,25 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { ThemeProvider } from "darkraise-ui/theme"
+import { RouterAdapterProvider, type RouterAdapter } from "darkraise-ui/router"
 import { AppShell } from "./app-shell"
 import { nav, settingsItem } from "./nav"
 import { themeConfig } from "../../theme.config"
 
+// The mobile drawer renders darkraise's own SidebarNav, which reads the
+// library's router adapter; a stub satisfying the interface is enough here.
+const stubAdapter: RouterAdapter = {
+  Link: ({ children }) => <>{children}</>,
+  useNavigate: () => () => {},
+  usePathname: () => "/",
+  useBack: () => () => {},
+  useInvalidate: () => () => {},
+}
+
 function mount(ui: () => React.ReactNode) {
-  const rootRoute = createRootRoute({ component: ui })
+  const rootRoute = createRootRoute({
+    component: () => <RouterAdapterProvider value={stubAdapter}>{ui()}</RouterAdapterProvider>,
+  })
   const router = createRouter({
     routeTree: rootRoute,
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -67,6 +80,17 @@ describe("the app shell", () => {
     const user = userEvent.setup()
     await user.click(await screen.findByRole("button", { name: /search/i }))
     expect(props.onSearch).toHaveBeenCalled()
+  })
+
+  it("carries the account actions into the mobile drawer", async () => {
+    // Below 640px the header actions are hidden by the stylesheet, so the
+    // drawer is the only place a phone can reach them.
+    const props = shell()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole("button", { name: /open menu/i }))
+    const drawer = await screen.findByRole("dialog")
+    await user.click(within(drawer).getByRole("button", { name: /change password/i }))
+    expect(props.onChangePassword).toHaveBeenCalled()
   })
 
   it("keeps every rail link named once the rail is collapsed", async () => {
