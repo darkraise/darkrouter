@@ -143,7 +143,10 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list requests: %w", err)
+	}
+	return out, nil
 }
 
 // RequestTrace is one request in full: what the router produced, what it
@@ -252,7 +255,7 @@ func (d *DB) RequestTrace(ctx context.Context, id string) (*RequestTrace, bool, 
 		tr.Attempts = append(tr.Attempts, a)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("read attempts %q: %w", id, err)
 	}
 
 	// Non-nil so the drawer can range over it. Empty today: capture.bodies has

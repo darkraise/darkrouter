@@ -90,7 +90,10 @@ func (d *DB) ProxyTokens(ctx context.Context) ([]ProxyToken, error) {
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list proxy tokens: %w", err)
+	}
+	return out, nil
 }
 
 // DeleteProxyToken revokes one. It reports whether a row was removed so the
@@ -101,7 +104,10 @@ func (d *DB) DeleteProxyToken(ctx context.Context, id string) (bool, error) {
 		return false, fmt.Errorf("delete proxy token: %w", err)
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("delete proxy token: %w", err)
+	}
+	return n > 0, nil
 }
 
 // ProxyTokenValid reports whether the presented secret names a live token, and

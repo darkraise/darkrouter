@@ -77,5 +77,8 @@ func (d *DB) LoadHealth(ctx context.Context) ([]health.Entry, error) {
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load health: %w", err)
+	}
+	return out, nil
 }

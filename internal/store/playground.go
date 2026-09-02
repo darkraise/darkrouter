@@ -34,6 +34,24 @@ func newPlaygroundID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// PresetNameConflict reports a preset name that another row already holds.
+// It carries that row's id so the caller can offer to overwrite it, and it
+// matches ErrConflict under errors.Is.
+type PresetNameConflict struct {
+	Name       string
+	ExistingID string
+}
+
+func (e *PresetNameConflict) Error() string {
+	return fmt.Sprintf("a preset called %s already exists", e.Name)
+}
+
+func (e *PresetNameConflict) Is(target error) bool { return target == ErrConflict }
+
+// CreatePlaygroundPreset inserts one preset, refusing a name another row
+// holds. The name check and the insert share a transaction: two saves racing
+// on one name would otherwise both pass the check, and the second would fail
+// on the unique index with nothing to say which row it clashed with.
 func (d *DB) CreatePlaygroundPreset(
 	ctx context.Context, name, dialect, model string, config json.RawMessage,
 ) (PlaygroundPreset, error) {
@@ -41,16 +59,34 @@ func (d *DB) CreatePlaygroundPreset(
 	if err != nil {
 		return PlaygroundPreset{}, err
 	}
+	tx, err := d.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return PlaygroundPreset{}, fmt.Errorf("store playground preset: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var existing string
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM playground_presets WHERE name = ?`, name).Scan(&existing)
+	if err == nil {
+		return PlaygroundPreset{}, &PresetNameConflict{Name: name, ExistingID: existing}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return PlaygroundPreset{}, fmt.Errorf("store playground preset: %w", err)
+	}
+
 	now := time.Now().UTC()
 	p := PlaygroundPreset{
 		ID: id, Name: name, Dialect: dialect, Model: model,
 		Config: config, CreatedAt: now, UpdatedAt: now,
 	}
-	_, err = d.Write.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO playground_presets (id, name, dialect, model, config, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Dialect, p.Model, string(p.Config), now.Unix(), now.Unix())
-	if err != nil {
+		p.ID, p.Name, p.Dialect, p.Model, string(p.Config), now.Unix(), now.Unix()); err != nil {
+		return PlaygroundPreset{}, fmt.Errorf("store playground preset: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return PlaygroundPreset{}, fmt.Errorf("store playground preset: %w", err)
 	}
 	return p, nil
@@ -73,7 +109,10 @@ func (d *DB) PlaygroundPresets(ctx context.Context) ([]PlaygroundPreset, error) 
 		}
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list playground presets: %w", err)
+	}
+	return out, nil
 }
 
 // PlaygroundPresetByName finds the preset a name already belongs to, so a save
@@ -102,10 +141,16 @@ func (d *DB) UpdatePlaygroundPreset(
 		  WHERE id = ?`,
 		name, dialect, model, string(config), time.Now().UTC().Unix(), id)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return false, &PresetNameConflict{Name: name}
+		}
 		return false, fmt.Errorf("update playground preset: %w", err)
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("update playground preset: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (d *DB) DeletePlaygroundPreset(ctx context.Context, id string) (bool, error) {
@@ -114,7 +159,10 @@ func (d *DB) DeletePlaygroundPreset(ctx context.Context, id string) (bool, error
 		return false, fmt.Errorf("delete playground preset: %w", err)
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("delete playground preset: %w", err)
+	}
+	return n > 0, nil
 }
 
 // scanner is what *sql.Row and *sql.Rows have in common, so one scan serves
@@ -234,7 +282,10 @@ func (d *DB) PlaygroundConversations(ctx context.Context) ([]PlaygroundConversat
 		c.UpdatedAt = time.Unix(updated, 0).UTC()
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list playground conversations: %w", err)
+	}
+	return out, nil
 }
 
 func (d *DB) PlaygroundConversationByID(
@@ -299,7 +350,10 @@ func (d *DB) UpdatePlaygroundConversation(
 		return false, fmt.Errorf("update playground conversation: %w", err)
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("update playground conversation: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (d *DB) DeletePlaygroundConversation(ctx context.Context, id string) (bool, error) {
@@ -309,7 +363,10 @@ func (d *DB) DeletePlaygroundConversation(ctx context.Context, id string) (bool,
 		return false, fmt.Errorf("delete playground conversation: %w", err)
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("delete playground conversation: %w", err)
+	}
+	return n > 0, nil
 }
 
 // AppendPlaygroundTurn stores one message and moves its conversation to the
@@ -374,7 +431,11 @@ func (d *DB) PurgePlaygroundConversations(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("purge playground conversations: %w", err)
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("purge playground conversations: %w", err)
+	}
+	return n, nil
 }
 
 // ReapEmptyPlaygroundConversations removes conversations that never received a
@@ -397,5 +458,9 @@ func (d *DB) ReapEmptyPlaygroundConversations(
 	if err != nil {
 		return 0, fmt.Errorf("reap empty playground conversations: %w", err)
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reap empty playground conversations: %w", err)
+	}
+	return n, nil
 }

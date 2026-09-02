@@ -68,7 +68,10 @@ func (d *DB) DiscoveryStates(ctx context.Context) (map[string]DiscoveryState, er
 		}
 		out[s.ProviderID] = s
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read discovery state: %w", err)
+	}
+	return out, nil
 }
 
 // RecordDiscoverySuccess applies one successful listing.
