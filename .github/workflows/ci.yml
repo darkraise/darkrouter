@@ -131,8 +131,12 @@ jobs:
           # metadata-action's version output is the tag it derived: the semver
           # for a v-tag, the branch name otherwise. That is what the admin port's
           # /healthz reports, so a running container can be matched to a build.
+          # The Augment CLI's licence forbids redistribution, so the public
+          # image is built without it. An operator who wants it builds
+          # locally with WITH_AUGGIE=1, which is the Dockerfile's default.
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
+            WITH_AUGGIE=0
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

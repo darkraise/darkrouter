@@ -346,10 +346,12 @@ complete the interactive login. `AUGGIE_BIN` points at a different binary
 when the bundled one is not wanted.
 
 The CLI is proprietary and its licence restricts redistribution — see
-`THIRD_PARTY_NOTICES.md`. Build with `--build-arg WITH_AUGGIE=0` for an image
-that leaves it and its Node runtime out; a request routed to the preset then
-fails with an error naming the missing binary, and everything else works
-unchanged.
+`THIRD_PARTY_NOTICES.md`. For that reason the published `darkraise/darkrouter`
+image is built with `WITH_AUGGIE=0` and does not carry it: a request routed to
+the preset fails with an error naming the missing binary, and everything else
+works unchanged. A local build includes it by default (`WITH_AUGGIE=1` is the
+Dockerfile's default), which is how an operator who has accepted Augment's
+terms gets the provider.
 
 ## The model catalog
 
