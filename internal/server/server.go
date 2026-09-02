@@ -52,6 +52,7 @@ type Server struct {
 	src     *provider.SQLSource
 	ex      *exec.Executor
 	logw    *store.LogWriter
+	tokens  *tokenAuth
 	breaker *health.Breaker
 	persist *health.Persister
 
@@ -259,6 +260,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 
 	return &Server{
 		store: cfgStore, db: db, src: src, logw: logw, breaker: breaker,
+		tokens:  newTokenAuth(db),
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
 		freeSync:  freeSyncWorker,
@@ -378,14 +380,14 @@ func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		if ok, err := s.db.ProxyTokenValid(r.Context(), presented); err == nil && ok {
+		if s.tokens.accept(r.Context(), presented) {
 			h(w, r)
 			return
 		}
 		// Authentication is off only when neither mechanism is configured: a
 		// gateway with proxy tokens issued must not accept an empty header
 		// just because the shared secret is unset.
-		if shared == "" && !s.hasProxyTokens(r.Context()) {
+		if shared == "" && !s.tokens.configured(r.Context()) {
 			h(w, r)
 			return
 		}
@@ -393,20 +395,6 @@ func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 			Type: ir.ErrAuthentication, Message: "invalid proxy token",
 		})
 	}
-}
-
-// hasProxyTokens reports whether any per-client credential exists. A failure
-// to read is treated as "yes": refusing an unauthenticated request is the safe
-// answer when the store cannot say.
-func (s *Server) hasProxyTokens(ctx context.Context) bool {
-	if s.db == nil {
-		return false
-	}
-	toks, err := s.db.ProxyTokens(ctx)
-	if err != nil {
-		return true
-	}
-	return len(toks) > 0
 }
 
 // constantTimeEqual compares two secrets without leaking their lengths.
