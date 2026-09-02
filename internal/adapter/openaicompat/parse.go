@@ -1,6 +1,7 @@
 package openaicompat
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -54,6 +55,10 @@ func stopReason(s string) ir.StopReason {
 
 func ParseResponse(resp *http.Response) (*ir.Response, error) {
 	defer resp.Body.Close()
+	return decodeResponse(resp.Body)
+}
+
+func decodeResponse(r io.Reader) (*ir.Response, error) {
 	var w struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -72,7 +77,7 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 		} `json:"choices"`
 		Usage wireUsage `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+	if err := json.NewDecoder(r).Decode(&w); err != nil {
 		return nil, err
 	}
 	out := &ir.Response{ID: w.ID, Model: w.Model, Usage: w.Usage.toIR()}
@@ -152,7 +157,16 @@ const reasoningBlockBase = 2000
 // each index accumulates into its own block.
 func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 	return func(yield func(ir.StreamEvent, error) bool) {
-		reader := sse.NewReader(r, maxLine)
+		br := bufio.NewReader(r)
+		if isUnaryBody(br) {
+			// A request the no-tool-streaming quirk sent unary, or an
+			// upstream that answered a stream request with a plain
+			// completion: either way the client asked for a stream and gets
+			// one, replayed from the whole body.
+			replayResponse(br, yield)
+			return
+		}
+		reader := sse.NewReader(br, maxLine)
 		open := make(map[int]bool)
 		textIdx := -1
 		reasoningIdx := -1
@@ -274,4 +288,77 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			}
 		}
 	}
+}
+
+// isUnaryBody reports whether the body opens as a JSON object rather than an
+// SSE frame. An SSE stream begins with a field name or a comment, never with a
+// brace, so the first non-blank byte settles it without consuming anything.
+func isUnaryBody(br *bufio.Reader) bool {
+	for {
+		b, err := br.Peek(1)
+		if err != nil {
+			return false
+		}
+		switch b[0] {
+		case ' ', '\t', '\r', '\n':
+			br.ReadByte()
+		case '{':
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+// replayResponse turns one complete completion into the event sequence a
+// streamed one would have produced, block by block.
+func replayResponse(r io.Reader, yield func(ir.StreamEvent, error) bool) {
+	resp, err := decodeResponse(r)
+	if err != nil {
+		yield(ir.StreamEvent{}, err)
+		return
+	}
+	if !yield(ir.StreamEvent{Type: ir.EventMessageStart, ID: resp.ID, Model: resp.Model,
+		Warnings: resp.Warnings}, nil) {
+		return
+	}
+	tools := 0
+	for _, b := range resp.Content {
+		var idx int
+		var start, delta ir.Delta
+		switch b.Type {
+		case ir.BlockText:
+			idx = 0
+			start = ir.Delta{Type: ir.BlockText}
+			delta = ir.Delta{Type: ir.BlockText, Text: b.Text}
+		case ir.BlockThinking:
+			if b.Thinking == nil {
+				continue
+			}
+			idx = reasoningBlockBase
+			start = ir.Delta{Type: ir.BlockThinking}
+			delta = ir.Delta{Type: ir.BlockThinking, Thinking: b.Thinking.Text}
+		case ir.BlockToolUse:
+			if b.ToolUse == nil {
+				continue
+			}
+			idx = toolBlockBase + tools
+			tools++
+			start = ir.Delta{Type: ir.BlockToolUse, ToolID: b.ToolUse.ID, ToolName: b.ToolUse.Name}
+			delta = ir.Delta{Type: ir.BlockToolUse, ToolID: b.ToolUse.ID, ToolName: b.ToolUse.Name,
+				ToolInput: string(b.ToolUse.Input)}
+		default:
+			continue
+		}
+		if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: idx, Delta: &start}, nil) ||
+			!yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: &delta}, nil) ||
+			!yield(ir.StreamEvent{Type: ir.EventBlockStop, Index: idx}, nil) {
+			return
+		}
+	}
+	usage := resp.Usage
+	if !yield(ir.StreamEvent{Type: ir.EventMessageDelta, Usage: &usage}, nil) {
+		return
+	}
+	yield(ir.StreamEvent{Type: ir.EventMessageStop, StopReason: resp.StopReason}, nil)
 }

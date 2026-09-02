@@ -2,6 +2,7 @@ package openaicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -245,6 +246,63 @@ func TestAReasoningBlockIsOpenedAndClosed(t *testing.T) {
 	}
 	if !stop || stopIdx != startIdx {
 		t.Errorf("reasoning block opened at %d was not closed (stop=%v at %d)", startIdx, stop, stopIdx)
+	}
+}
+
+func TestParseStreamReplaysAUnaryBody(t *testing.T) {
+	body := `{"id":"chatcmpl-1","model":"m","choices":[{"message":{"content":"hi",
+	  "tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":1}"}}]},
+	  "finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`
+	var types []ir.EventType
+	var text, args string
+	var stop ir.StopReason
+	var usage *ir.Usage
+	for ev, err := range ParseStream(strings.NewReader(body), 1<<16) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, ev.Type)
+		if ev.Delta != nil {
+			text += ev.Delta.Text
+			args += ev.Delta.ToolInput
+		}
+		if ev.Usage != nil {
+			usage = ev.Usage
+		}
+		if ev.Type == ir.EventMessageStop {
+			stop = ev.StopReason
+		}
+	}
+	want := []ir.EventType{
+		ir.EventMessageStart,
+		ir.EventBlockStart, ir.EventContentDelta, ir.EventBlockStop,
+		ir.EventBlockStart, ir.EventContentDelta, ir.EventBlockStop,
+		ir.EventMessageDelta, ir.EventMessageStop,
+	}
+	if fmt.Sprint(types) != fmt.Sprint(want) {
+		t.Fatalf("events = %v, want %v", types, want)
+	}
+	if text != "hi" || args != `{"q":1}` || stop != ir.StopToolUse {
+		t.Fatalf("text=%q args=%q stop=%q", text, args, stop)
+	}
+	if usage == nil || usage.InputTokens != 3 || usage.OutputTokens != 2 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestParseStreamStillReadsSSEAfterLeadingBlankLines(t *testing.T) {
+	body := "\n\ndata: {\"id\":\"c\",\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+	var text string
+	for ev, err := range ParseStream(strings.NewReader(body), 1<<16) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Delta != nil {
+			text += ev.Delta.Text
+		}
+	}
+	if text != "x" {
+		t.Fatalf("text = %q", text)
 	}
 }
 

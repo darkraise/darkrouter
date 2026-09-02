@@ -1242,6 +1242,9 @@ mistral:
   models_dev_id: mistral
   free_tier: true
   website: https://mistral.ai
+  quirks:
+    - strict-unknown-fields
+    - temperature-top-p-exclusive
 mixlayer:
   name: Mixlayer
   kind: openaicompat

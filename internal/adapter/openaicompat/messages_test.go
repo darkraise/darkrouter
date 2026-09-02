@@ -11,7 +11,7 @@ import (
 // rather than against map[string]any, which is what the provider sees.
 func rendered(t *testing.T, req *ir.Request) ([]map[string]any, []ir.Warning) {
 	t.Helper()
-	msgs, warns := renderMessages(req, "openaicompat")
+	msgs, warns := renderMessages(req, "openaicompat", false)
 	b, err := json.Marshal(msgs)
 	if err != nil {
 		t.Fatal(err)
