@@ -18,13 +18,7 @@
   },
   {
     "data": {
-      "choices": [
-        {
-          "delta": {},
-          "finish_reason": null,
-          "index": 0
-        }
-      ],
+      "choices": [],
       "created": 0,
       "id": "msg_v",
       "model": "claude-sonnet-4-5",
@@ -55,13 +49,7 @@
   },
   {
     "data": {
-      "choices": [
-        {
-          "delta": {},
-          "finish_reason": null,
-          "index": 0
-        }
-      ],
+      "choices": [],
       "created": 0,
       "id": "msg_v",
       "model": "claude-sonnet-4-5",
