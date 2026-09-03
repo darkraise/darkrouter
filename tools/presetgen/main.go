@@ -245,7 +245,7 @@ var kindOf = map[string]string{"openai": "openaicompat", "claude": "anthropic", 
 // base_url is the API root the adapter appends its own path to, so the suffix
 // comes off. Longest first: "/v1/chat/completions" must not be trimmed to
 // "/v1" by the shorter rule before the longer one is tried.
-var chatSuffixes = []string{"/chat/completions", "/messages", "/responses", "/models"}
+var chatSuffixes = []string{"/chat/completions", "/embeddings", "/messages", "/responses", "/models"}
 
 func (e entry) toPreset(d displayEntry) catalog.Preset {
 	base := strings.TrimRight(e.baseURL, "/")

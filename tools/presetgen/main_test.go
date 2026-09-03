@@ -86,3 +86,18 @@ groq:
 		t.Fatalf("groq quirks = %v", got)
 	}
 }
+
+func TestEmbeddingSuffixIsTrimmed(t *testing.T) {
+	e := entry{id: "voyage", baseURL: "https://api.voyageai.com/v1/embeddings"}
+	if got := e.toPreset(displayEntry{}).BaseURL; got != "https://api.voyageai.com/v1" {
+		t.Errorf("BaseURL = %q, want the API root", got)
+	}
+}
+
+// Longest first: /v1/chat/completions must not be trimmed to /v1/chat.
+func TestLongerSuffixWinsOverShorter(t *testing.T) {
+	e := entry{id: "x", baseURL: "https://api.example.com/v1/chat/completions"}
+	if got := e.toPreset(displayEntry{}).BaseURL; got != "https://api.example.com/v1" {
+		t.Errorf("BaseURL = %q", got)
+	}
+}
