@@ -38,15 +38,37 @@ type nineNotice struct {
 }
 
 type nineTransport struct {
-	BaseURL     string `json:"baseUrl"`
-	ValidateURL string `json:"validateUrl"`
-	AuthHeader  string `json:"authHeader"`
+	BaseURL     string   `json:"baseUrl"`
+	ValidateURL string   `json:"validateUrl"`
+	Auth        nineAuth `json:"auth"`
 	// Format names the wire dialect: absent or "openai" is the only shape
 	// this phase's "openaicompat" kind can serve. Everything else ("claude",
 	// "openai-responses", "ollama", "cursor", "kiro", "gemini-cli",
 	// "commandcode", ...) is a different protocol entirely.
 	Format string          `json:"format"`
 	Quirks map[string]bool `json:"quirks"`
+}
+
+// nineAuth is the header block upstream publishes per credential kind. It
+// comes in two shapes: flat, where one header serves every kind, and nested,
+// naming a header per kind. Only the API-key half is declared, because the
+// categories whose credential is an OAuth token or a browser cookie never
+// reach a preset.
+type nineAuth struct {
+	Header string       `json:"header"`
+	APIKey nineAuthKind `json:"apiKey"`
+}
+
+type nineAuthKind struct {
+	Header string `json:"header"`
+}
+
+// apiKeyHeader resolves the two shapes to the one header an API key travels in.
+func (a nineAuth) apiKeyHeader() string {
+	if a.APIKey.Header != "" {
+		return a.APIKey.Header
+	}
+	return a.Header
 }
 
 type nineModel struct {

@@ -195,9 +195,9 @@ func (e nineEntry) toPreset() (catalog.Preset, bool) {
 		return catalog.Preset{}, false
 	}
 	// oauth and webCookie need a credential flow this phase does not
-	// generate -- carrying them through as bearer auth (authType/authHeader
-	// are usually absent on these entries, and authStyle's default is
-	// bearer) would invite an operator to paste an API key into a provider
+	// generate -- carrying them through as bearer auth (authType is usually
+	// absent on these entries, and authStyle's default is bearer) would
+	// invite an operator to paste an API key into a provider
 	// that only accepts an OAuth token or a browser session cookie.
 	switch e.Category {
 	case "oauth", "webCookie":
@@ -261,13 +261,13 @@ func (e nineEntry) surfaces() []string {
 // authStyle maps a 9router entry onto darkrouter's closed auth vocabulary,
 // reporting false where no member of it is the truth.
 //
-// The wire style is the transport's authHeader. 9router's top-level authType
-// is a category rather than a header: jina-ai is "apikey" there and "bearer"
-// on the wire. So the header is read first, and the category only decides
-// whether the headerless default is safe -- "oauth" needs an oauth block this
-// phase does not generate, and "cookie" is not a darkrouter style at all.
+// The wire header is transport.auth, which most entries omit; authType is a
+// category rather than a header (jina-ai is "apikey" there and "bearer" on the
+// wire), so it only decides whether the headerless default is safe. A header
+// upstream publishes that darkrouter has no style for -- x-goog-api-key, say
+// -- drops the entry rather than shipping it under a header it never accepts.
 func (e nineEntry) authStyle() (string, bool) {
-	switch strings.ToLower(e.Transport.AuthHeader) {
+	switch strings.ToLower(e.Transport.Auth.apiKeyHeader()) {
 	case "bearer", "authorization":
 		return "bearer", true
 	case "x-api-key":
