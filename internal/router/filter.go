@@ -42,7 +42,7 @@ func filterTarget(t target, q Query, snap Snapshot,
 	// Access the vendor has not sanctioned is a risk the operator has to accept
 	// deliberately. The model keeps its place in the catalogue either way; what
 	// the opt-in gates is production traffic being sent through it.
-	if m.FreeTier.Unsanctioned() && !p.AllowUnsanctionedFree {
+	if m.FreeTier.Vetoed() && !p.AllowUnsanctionedFree {
 		return nil, []Skip{{
 			ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipUnsanctioned,
 		}}, true

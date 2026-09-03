@@ -350,9 +350,7 @@ func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
 		if !p.AllowUnsanctionedFree {
 			rules.Unsanctioned = func(modelID string) bool {
 				tier, ok := free.Tier(key, modelID)
-				// A withdrawn tier is history rather than a live grading, so it
-				// vetoes nothing: the terms it describes no longer govern access.
-				return ok && tier.Live() && tier.Unsanctioned()
+				return ok && tier.Vetoed()
 			}
 		}
 	}
