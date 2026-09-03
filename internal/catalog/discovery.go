@@ -349,14 +349,14 @@ func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
 		}
 	}
 	if len(free.Providers[key]) > 0 {
-		allowUnsanctioned := p.AllowUnsanctionedFree
-		rules.Curated = func(modelID string) bool {
-			tier, ok := free.Tier(key, modelID)
-			if !ok || !tier.Live() {
-				return false
+		rules.Curated = func(modelID string) bool { return free.Covers(key, modelID) }
+		if !p.AllowUnsanctionedFree {
+			rules.Unsanctioned = func(modelID string) bool {
+				tier, ok := free.Tier(key, modelID)
+				// A withdrawn tier is history rather than a live grading, so it
+				// vetoes nothing: the terms it describes no longer govern access.
+				return ok && tier.Live() && tier.Unsanctioned()
 			}
-			// Catalogued either way; imported only with the operator's consent.
-			return allowUnsanctioned || !tier.Unsanctioned()
 		}
 	}
 	return rules
