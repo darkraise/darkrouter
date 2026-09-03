@@ -32,9 +32,19 @@ type Preset struct {
 	// NoModelsDev is the explicit exemption spec §10 requires. Without it an
 	// entry that merely forgot its join key is indistinguishable from one that
 	// genuinely has no models.dev counterpart.
-	NoModelsDev bool   `yaml:"no_models_dev,omitempty"`
-	FreeTier    bool   `yaml:"free_tier,omitempty"`
-	Website     string `yaml:"website,omitempty"`
+	NoModelsDev bool `yaml:"no_models_dev,omitempty"`
+
+	// LiteLLMID is the join key into the LiteLLM price index, whose records
+	// carry a litellm_provider field. It is a separate key from ModelsDevID
+	// because the two indexes name the same vendor differently: fireworks is
+	// fireworks_ai there, together is together_ai.
+	LiteLLMID string `yaml:"litellm_id,omitempty"`
+
+	// NoLiteLLM is the explicit exemption. A provider the index does not cover
+	// must say so, or a forgotten key reads as a deliberate absence.
+	NoLiteLLM bool   `yaml:"no_litellm,omitempty"`
+	FreeTier  bool   `yaml:"free_tier,omitempty"`
+	Website   string `yaml:"website,omitempty"`
 
 	// APIKeyURL is where an operator gets a key. Neither models.dev nor
 	// OmniRoute publishes it; 9router does, and an operator adding a provider

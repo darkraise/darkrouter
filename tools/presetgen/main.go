@@ -91,6 +91,10 @@ func main() {
 			// otherwise look identical to a forgotten one.
 			p.NoModelsDev = true
 		}
+		// The LiteLLM join key is hand-maintained in the overrides file: the
+		// generator has no copy of that index, so every preset is exempted
+		// here and the overrides clear the exemption where a key exists.
+		p.NoLiteLLM, p.LiteLLMID = true, ""
 		presets[id] = p
 	}
 
@@ -472,6 +476,12 @@ func applyOverrides(presets catalog.Presets, path string) (int, error) {
 		}
 		if o.NoModelsDev {
 			base.NoModelsDev, base.ModelsDevID = true, ""
+		}
+		if o.LiteLLMID != "" {
+			base.LiteLLMID, base.NoLiteLLM = o.LiteLLMID, false
+		}
+		if o.NoLiteLLM {
+			base.NoLiteLLM, base.LiteLLMID = true, ""
 		}
 		if o.Website != "" {
 			base.Website = o.Website

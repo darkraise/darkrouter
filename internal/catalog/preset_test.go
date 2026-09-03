@@ -232,3 +232,15 @@ func TestRerankPresetsDeclareAPath(t *testing.T) {
 		}
 	}
 }
+
+// A preset must declare a LiteLLM join key or an explicit exemption. Without
+// the exemption a forgotten key is indistinguishable from a provider the index
+// genuinely does not cover, which is the failure the models.dev key already
+// guards against.
+func TestEveryPresetDeclaresALiteLLMKeyOrExemption(t *testing.T) {
+	for id, p := range Embedded() {
+		if p.LiteLLMID == "" && !p.NoLiteLLM {
+			t.Errorf("%s: needs litellm_id or no_litellm", id)
+		}
+	}
+}
