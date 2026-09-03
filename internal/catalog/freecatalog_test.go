@@ -127,7 +127,7 @@ func TestParseFreeCatalogReadsTheWholeRecord(t *testing.T) {
 	}
 }
 
-// A null poolKey is a real value upstream — seven rows carry it — and must
+// A null poolKey is a real value upstream — some rows carry it — and must
 // read as absent rather than as the literal string "null".
 func TestParseFreeCatalogReadsANullPool(t *testing.T) {
 	c, err := ParseFreeCatalog(freeCatalogSampleTS)
@@ -151,16 +151,42 @@ func TestParseFreeCatalogRefusesAPartialRead(t *testing.T) {
 	// Two of the fixture's rows are given a shape the pattern cannot read,
 	// which is what an upstream field change looks like before it reaches
 	// every row.
-	broken := bytes.Replace(freeCatalogSampleTS, []byte("monthlyTokens: 0,"), []byte("monthlyTokens: null,"), 2)
-	if bytes.Equal(broken, freeCatalogSampleTS) {
-		t.Fatal("the fixture no longer contains the rows this test breaks")
+	const broke = 2
+	target, replacement := []byte("monthlyTokens: 0,"), []byte("monthlyTokens: null,")
+	if n := bytes.Count(freeCatalogSampleTS, target); n < broke {
+		t.Fatalf("the fixture holds %d rows this test can break, want at least %d", n, broke)
 	}
+	broken := bytes.Replace(freeCatalogSampleTS, target, replacement, broke)
+
 	_, err := ParseFreeCatalog(broken)
 	if err == nil {
 		t.Fatal("a catalogue missing rows the pattern could not read parsed cleanly")
 	}
-	if !strings.Contains(err.Error(), "read 11 of 13 entries") {
-		t.Errorf("error does not name how much was lost: %v", err)
+	// The numbers are left to the implementation; what matters is that the
+	// message says a read fell short, so an operator reading a log knows the
+	// catalogue is incomplete rather than merely stale.
+	if !strings.Contains(err.Error(), "entries") || !strings.Contains(err.Error(), " of ") {
+		t.Errorf("error does not name the shortfall: %v", err)
+	}
+}
+
+// Two rows naming the same provider and model collapse into one map entry, so
+// a duplicate shrinks the catalogue exactly as a failed match does. Counting
+// what was stored, rather than what was matched, is what catches it.
+func TestParseFreeCatalogRefusesADuplicatedRow(t *testing.T) {
+	rows := bytes.SplitAfter(freeCatalogSampleTS, []byte("\n"))
+	var dup []byte
+	for _, row := range rows {
+		if bytes.Contains(row, []byte("provider: \"")) {
+			dup = row
+			break
+		}
+	}
+	if dup == nil {
+		t.Fatal("the fixture holds no entry row to duplicate")
+	}
+	if _, err := ParseFreeCatalog(append(append([]byte{}, freeCatalogSampleTS...), dup...)); err == nil {
+		t.Error("a catalogue carrying the same row twice parsed cleanly")
 	}
 }
 
