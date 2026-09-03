@@ -214,10 +214,18 @@ be over-engineering.
 
 ### 6.3 Console
 
-A free model shows its budget rather than a bare badge — `free · ~24M
-tokens/day` — and `avoid` carries a visible warning wherever it appears.
-Per the project typography rule, hierarchy comes from colour and weight, never
-from a smaller size.
+On the **Models screen**, a free model shows its budget rather than a bare
+badge — `free · ~24M tokens/day` — and a tier the router is refusing carries a
+visible warning beside the model id. Per the project typography rule, hierarchy
+comes from colour and weight, never from a smaller size.
+
+The warning is keyed on the folded `opt_in_required` the API sends, not on the
+vendor's verdict alone. `avoid` on a provider the operator has already allowed
+is a model the router uses; a row warning there would be demanding a decision
+that has been taken.
+
+The three other surfaces a model appears on show neither the budget nor the
+warning — see §6.6.
 
 
 ### 6.4 Owed forward: the routing gate reads a frozen catalogue
@@ -256,6 +264,21 @@ on an existing provider.
 
 Closing this is a wizard control on the two create paths, matching the API the
 server already exposes. Deferred from B2 rather than skipped.
+
+
+### 6.6 Owed forward: three model surfaces show no free tier
+
+`freeLabel` and `tierWarning` are called from `models-screen.tsx` and nowhere
+else. The provider detail page's model table, the model combobox and the
+command palette all consume the same `Model` and render neither, so a free
+tier — its budget and the vendor's verdict alike — is invisible on three of the
+four surfaces a model appears on.
+
+Each is a different presentation problem: a table cell, a dropdown option and a
+one-line palette result have different room, and none of them can carry the
+Models screen's two-line treatment as it stands. B2 did the screen that lists
+models for their own sake and left the three that list them to be picked.
+Deferred from B2 rather than skipped.
 ## 7. Testing
 
 - `resolvePrice` is table-tested across every combination of present and absent
