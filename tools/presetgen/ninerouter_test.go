@@ -53,14 +53,12 @@ export default { id: "claude", transport: { baseUrl: BASE }, models: [] };`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var claude *nineEntry
-	for i := range got {
-		if got[i].ID == "claude" {
-			claude = &got[i]
-		}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1 (shared.js has no default export and must be skipped)", len(got))
 	}
-	if claude == nil {
-		t.Fatal("claude entry not found")
+	claude := got[0]
+	if claude.ID != "claude" {
+		t.Fatalf("ID = %q, want claude", claude.ID)
 	}
 	if claude.Transport.BaseURL != "https://api.example.com/v1/messages" {
 		t.Errorf("BaseURL = %q, want the imported constant", claude.Transport.BaseURL)
@@ -86,6 +84,12 @@ func TestScrapeNineRouterSkipsTheBarrel(t *testing.T) {
 // value alongside the absent case, not just non-chat kinds like "tts". A
 // predicate that misses "llm" silently drops 18 real providers (anthropic,
 // groq, codex, ollama-local among them) from phase A.
+//
+// Real entries are commonly mixed rather than single-kind: anthropic is
+// ["llm","imageToText"], groq is ["llm","imageToText","stt"]. The mixed
+// cases below exist to catch a predicate that requires every kind to be
+// chat-equivalent (an "all" reading), which the single-kind cases alone
+// cannot distinguish from the correct "any" reading.
 func TestNineEntryRoutable(t *testing.T) {
 	cases := []struct {
 		name string
@@ -97,6 +101,8 @@ func TestNineEntryRoutable(t *testing.T) {
 		{"embedding", nineEntry{ServiceKinds: []string{"embedding"}}, true},
 		{"tts", nineEntry{ServiceKinds: []string{"tts"}}, false},
 		{"webSearch and webFetch", nineEntry{ServiceKinds: []string{"webSearch", "webFetch"}}, false},
+		{"llm mixed with tts", nineEntry{ServiceKinds: []string{"llm", "tts"}}, true},
+		{"embedding mixed with image", nineEntry{ServiceKinds: []string{"embedding", "image"}}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

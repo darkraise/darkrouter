@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -106,5 +105,3 @@ func (e nineEntry) routable() bool {
 	}
 	return false
 }
-
-var _ = filepath.Join
