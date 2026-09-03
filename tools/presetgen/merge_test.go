@@ -1,0 +1,94 @@
+package main
+
+import (
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/catalog"
+)
+
+// OmniRoute wins a contested structural field: its transcription has been
+// reviewed across nine phases, 9router's has not.
+func TestOmniRouteWinsAContestedField(t *testing.T) {
+	omni := []entry{{id: "groq", baseURL: "https://api.groq.com/openai/v1"}}
+	nine := []nineEntry{{ID: "groq", Transport: nineTransport{BaseURL: "https://groq.example/v1"}}}
+
+	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	if got.Presets["groq"].BaseURL != "https://api.groq.com/openai/v1" {
+		t.Errorf("BaseURL = %q, want OmniRoute's", got.Presets["groq"].BaseURL)
+	}
+	if !hasOrigin(got, "groq", "base_url", "omniroute") {
+		t.Errorf("origins = %v, want base_url from omniroute", got.Origins["groq"])
+	}
+}
+
+// A field OmniRoute does not carry is taken from 9router rather than dropped.
+func TestNineRouterFillsAFieldOmniRouteLacks(t *testing.T) {
+	omni := []entry{{id: "groq", baseURL: "https://api.groq.com/openai/v1"}}
+	nine := []nineEntry{{ID: "groq", Display: nineDisplay{
+		Notice: nineNotice{APIKeyURL: "https://console.groq.com/keys"}}}}
+
+	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	if got.Presets["groq"].APIKeyURL != "https://console.groq.com/keys" {
+		t.Errorf("APIKeyURL = %q, want 9router's", got.Presets["groq"].APIKeyURL)
+	}
+	if !hasOrigin(got, "groq", "api_key_url", "9router") {
+		t.Errorf("origins = %v, want api_key_url from 9router", got.Origins["groq"])
+	}
+}
+
+// A provider only 9router knows is ingested outright.
+func TestNineRouterOnlyProviderIsAdded(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "kimchi",
+		Display:   nineDisplay{Name: "Kimchi", Website: "https://kimchi.example"},
+		AuthType:  "apikey",
+		Transport: nineTransport{BaseURL: "https://api.kimchi.example/v1/chat/completions"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	p, ok := got.Presets["kimchi"]
+	if !ok {
+		t.Fatal("kimchi absent from the merge")
+	}
+	if p.BaseURL != "https://api.kimchi.example/v1" {
+		t.Errorf("BaseURL = %q, want the trimmed root", p.BaseURL)
+	}
+	if p.Name != "Kimchi" {
+		t.Errorf("Name = %q", p.Name)
+	}
+}
+
+// Phase A ingests llm and embedding only.
+func TestNonLLMProviderIsSkipped(t *testing.T) {
+	nine := []nineEntry{{
+		ID:           "elevenlabs",
+		ServiceKinds: []string{"tts"},
+		Transport:    nineTransport{BaseURL: "https://api.elevenlabs.io/v1/text-to-speech"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["elevenlabs"]; ok {
+		t.Error("a tts-only provider was ingested; phase C owns those")
+	}
+}
+
+func TestEmbeddingProviderIsIngested(t *testing.T) {
+	nine := []nineEntry{{
+		ID:           "voyage-ai",
+		ServiceKinds: []string{"embedding"},
+		Transport:    nineTransport{BaseURL: "https://api.voyageai.com/v1/embeddings"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["voyage-ai"]; !ok {
+		t.Error("an embedding provider was skipped")
+	}
+}
+
+func hasOrigin(m merged, id, field, source string) bool {
+	for _, o := range m.Origins[id] {
+		if o.Field == field && o.Source == source {
+			return true
+		}
+	}
+	return false
+}
+
+var _ = catalog.Preset{}
