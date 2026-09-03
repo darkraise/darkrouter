@@ -13,7 +13,7 @@ import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ModelsScreen } from "./models-screen"
-import type { CatalogResponse } from "../../lib/api-types"
+import type { CatalogResponse, Model, Pricing } from "../../lib/api-types"
 
 // PageHeader calls useRouterAdapter unconditionally, and this screen never
 // navigates through it, so a stub satisfying the interface is enough — the
@@ -79,11 +79,57 @@ const catalog = (): CatalogResponse => ({
   aliases: [],
 })
 
-function mockCatalog() {
+const baseModel: Omit<Model, "model" | "pricing"> = {
+  providers: ["openai"],
+  surfaces: ["chat"],
+  context_window: 128000,
+  max_output_tokens: 4096,
+  tools: false,
+  vision: false,
+  reasoning: false,
+  inferred: false,
+  state: "live",
+  merge_source: "models_dev",
+}
+
+const pricing = (over: Partial<Pricing>): Pricing => ({
+  input_micros: 150000,
+  output_micros: 600000,
+  price_source: "models_dev",
+  price_grade: "indexed",
+  ...over,
+})
+
+/** One row per grade the Band cell treats differently, so a render test can
+ *  tell the verified mark, the caution mark and no mark apart. */
+function pricedCatalog(): CatalogResponse {
+  return {
+    models: [
+      {
+        ...baseModel,
+        model: "measured-model",
+        pricing: pricing({ price_source: "discovered", price_grade: "measured" }),
+      },
+      {
+        ...baseModel,
+        model: "indexed-model",
+        pricing: pricing({ price_source: "models_dev", price_grade: "indexed" }),
+      },
+      {
+        ...baseModel,
+        model: "guessed-model",
+        pricing: pricing({ price_source: "inferred", price_grade: "guessed" }),
+      },
+    ],
+    aliases: [],
+  }
+}
+
+function mockCatalog(data: CatalogResponse = catalog()) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
-      new Response(JSON.stringify(catalog()), {
+      new Response(JSON.stringify(data), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -162,5 +208,32 @@ describe("the models table", () => {
     // Two providers, so the editor has to ask which one.
     const sheet = await screen.findByRole("dialog")
     expect(await within(sheet).findByRole("combobox", { name: /provider/i })).toHaveTextContent("openai")
+  })
+})
+
+describe("the price marker in the Band cell", () => {
+  it("verifies a measured price, cautions a guessed one, and marks an indexed one plainly", async () => {
+    mockCatalog(pricedCatalog())
+    await renderAt("/")
+
+    const verified = await screen.findByTitle("Price quoted by the provider")
+    const caution = await screen.findByTitle("No published price; this is an estimate")
+    // Only two of the three rows should carry a mark at all — the indexed
+    // row is the majority case the spec says to leave unmarked.
+    expect(screen.getAllByTitle("Price quoted by the provider")).toHaveLength(1)
+    expect(screen.getAllByTitle("No published price; this is an estimate")).toHaveLength(1)
+
+    // The mark rides in the same cell as the price it explains, on one line.
+    const verifiedCell = verified.closest("td")
+    const cautionCell = caution.closest("td")
+    if (!verifiedCell || !cautionCell) throw new Error("expected the marker inside a table cell")
+    expect(verifiedCell).toHaveTextContent("$0.1500 / $0.6000")
+    expect(cautionCell).toHaveTextContent("$0.1500 / $0.6000")
+
+    // The indexed row's own cell has neither mark.
+    const indexedRow = (await screen.findByText("indexed-model")).closest("tr")
+    if (!indexedRow) throw new Error("expected the model name inside a table row")
+    expect(within(indexedRow).queryByTitle("Price quoted by the provider")).not.toBeInTheDocument()
+    expect(within(indexedRow).queryByTitle("No published price; this is an estimate")).not.toBeInTheDocument()
   })
 })
