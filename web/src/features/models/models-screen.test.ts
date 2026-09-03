@@ -125,8 +125,22 @@ describe("freeLabel", () => {
       credit_tokens: 200_000_000, pool_key: "", tos: "caution" }))
       .toBe("free · ~200M tokens once")
   })
+  it("carries a one-off credit grant the same way as an initial one", () => {
+    expect(freeLabel({ free_type: "recurring-credit", monthly_tokens: 0,
+      credit_tokens: 5_000_000, pool_key: "", tos: "ok" }))
+      .toBe("free · ~5M tokens once")
+  })
   it("says free without a figure when the allowance is uncapped", () => {
     expect(freeLabel({ free_type: "recurring-uncapped", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free")
+  })
+  it("says free without a figure when a live tier leaves the figure out", () => {
+    // free_models.json carries recurring-daily rows with no monthly_tokens and
+    // recurring-credit rows with no credit_tokens. A zero there is unquantified,
+    // not an allowance of nothing, so "~0 tokens/day" would be a lie.
+    expect(freeLabel({ free_type: "recurring-daily", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "groq", tos: "ok" })).toBe("free")
+    expect(freeLabel({ free_type: "recurring-credit", monthly_tokens: 0,
       credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free")
   })
   it("is absent for a withdrawn tier and for no tier at all", () => {
