@@ -97,7 +97,7 @@ Provider view, returned wherever a provider is:
 |---|---|---|
 | `GET /api/presets` | — | `200 {presets: [{id, name, kind, base_url, surfaces, auth_kind, website, free_tier}]}` sorted by id |
 | `GET /api/providers` | — | `200 {providers: [provider]}`. Credential counts and states come from a projection that never decrypts a secret. |
-| `POST /api/providers` | `{id, name?, preset?, kind?, base_url?, auth_style?, priority?, enabled?, region?, project?, location?, free_models_only?, allow_unsanctioned_free?}` | `201 provider`. `409` when the id exists. |
+| `POST /api/providers` | `{id, name?, preset?, kind?, base_url?, auth_style?, priority?, enabled?, region?, project?, location?, free_models_only?, allow_unsanctioned_free?}` | `201 {id}`. `409` when the id exists. The created resource is not echoed; read it back with `GET /api/providers`. |
 | `PATCH /api/providers/{id}` | `{name?, base_url?, priority?, enabled?, region?, project?, free_models_only?, allow_unsanctioned_free?}` | `200 provider` (the updated resource). `404` unknown id. |
 | `DELETE /api/providers/{id}` | — | `204`; `404` unknown id. Aliases whose chain named the provider keep the dangling target and are reported as invalid by `GET /api/config`. |
 | `POST /api/providers/{id}/test` | query `key` (credential id; default the first) | `200 {ok, probe, latency_ms, model_count?, error?}` — a failed probe is `ok: false` with `error`, not an error status. `probe` names what was exercised: `listing`, `completion`, `signature`, `permission`, `region`, `reachability`, `expiry`, `refresh`. `404` unknown provider or credential, `400` no credential to test. |

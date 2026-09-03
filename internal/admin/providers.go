@@ -194,8 +194,10 @@ type createProviderBody struct {
 	// before the first sweep runs, which is the only time the answer changes
 	// what the catalogue ever held.
 	FreeModelsOnly bool `json:"free_models_only"`
-	// AllowUnsanctionedFree lets this provider's `avoid`-graded free models be
-	// imported and routed to. The console explains the risk beside the control.
+	// AllowUnsanctionedFree is taken at creation rather than left to a follow-up
+	// patch because a keyless provider's first sweep is triggered below, before
+	// a second call could land: an opt-in that arrived after it would miss the
+	// import it was meant to widen.
 	AllowUnsanctionedFree bool `json:"allow_unsanctioned_free"`
 	// Location is set at creation only: changing it moves every catalogued
 	// model to a different endpoint, which is a new provider rather than an
