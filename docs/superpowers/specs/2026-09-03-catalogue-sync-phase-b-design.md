@@ -56,6 +56,15 @@ lift that to **57 presets reaching 2,352 entries**. LiteLLM carries
 `litellm_provider` as a field on each record, so this is a per-preset join key,
 not string matching — structurally identical to `models_dev_id`.
 
+**As shipped, the join prices zero rows on this deployed catalogue.** The 435
+priced rows come from discovery (424) and models.dev (11), none from LiteLLM.
+Where a provider the index covers offers a model, the discovery sweep has
+already priced it and the stored figure outranks a directory; the 24 rows still
+unpriced sit at hackclub, aihorde, ollama and uncloseai — aggregator, proxy and
+local-runtime presets the index has no `litellm_provider` for, whose model names
+appear nowhere in it either. The join is coverage for a fleet the index knows,
+and this fleet is not it.
+
 ## 4. Price resolution
 
 ### 4.1 One slot, values gated on the stamp
