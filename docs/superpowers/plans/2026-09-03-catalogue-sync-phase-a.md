@@ -1945,7 +1945,7 @@ jobs:
           labels: catalogue
 ```
 
-The workflow never auto-merges. A hostile or malformed upstream commit reaches a human, which is the whole reason structure goes through a PR while volatile data goes through the runtime path.
+The workflow never auto-merges, and the job that evaluates upstream JavaScript holds a read-only token, so a hostile or malformed upstream commit reaches a human without ever having been able to write. That is the whole reason structure goes through a PR while volatile data goes through the runtime path.
 
 - [ ] **Step 2: Validate the YAML parses**
 
