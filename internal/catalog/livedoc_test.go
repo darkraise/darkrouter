@@ -224,7 +224,7 @@ func TestASyncedLiteLLMIndexReachesTheSnapshot(t *testing.T) {
 	_, cat := liteLLMFixture(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"groq/` + unpricedModel +
-			`": {"litellm_provider": "groq", "input_cost_per_token": 5.9e-07}}`))
+			`": {"litellm_provider": "groq", "input_cost_per_token": 5.9e-07,"output_cost_per_token":5.9e-07}}`))
 	}))
 	defer srv.Close()
 

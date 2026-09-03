@@ -56,9 +56,9 @@ func TestParseLiteLLMLeavesACostlessEntryUnknown(t *testing.T) {
 // one an operator is billed against; the qualified variants are regional.
 func TestParseLiteLLMPrefersTheLeastQualifiedKey(t *testing.T) {
 	raw := []byte(`{
-		"bedrock/us-gov-east-1/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
-		"bedrock/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":3e-06},
-		"bedrock/invoke/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":7e-06}
+		"bedrock/us-gov-east-1/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":9e-06,"output_cost_per_token":9e-06},
+		"bedrock/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":3e-06,"output_cost_per_token":3e-06},
+		"bedrock/invoke/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":7e-06,"output_cost_per_token":7e-06}
 	}`)
 	doc, err := ParseLiteLLM(raw)
 	if err != nil {
@@ -77,10 +77,10 @@ func TestParseLiteLLMIsStableAcrossRepeatedParses(t *testing.T) {
 		t.Fatal(err)
 	}
 	collide := []byte(`{
-		"bedrock/us-gov-east-1/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
-		"bedrock/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":3e-06},
-		"bedrock/invoke/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":7e-06},
-		"eu/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":5e-06}
+		"bedrock/us-gov-east-1/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":9e-06,"output_cost_per_token":9e-06},
+		"bedrock/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":3e-06,"output_cost_per_token":3e-06},
+		"bedrock/invoke/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":7e-06,"output_cost_per_token":7e-06},
+		"eu/anthropic.claude-x": {"litellm_provider":"bedrock","input_cost_per_token":5e-06,"output_cost_per_token":5e-06}
 	}`)
 	for _, input := range [][]byte{raw, collide} {
 		first, err := ParseLiteLLM(input)
@@ -113,8 +113,8 @@ func TestParseLiteLLMPrefersAnUnqualifiedKeyOverARegionalOne(t *testing.T) {
 		wantKey: "bedrock/deepseek.v3.2",
 		want:    3_000_000,
 		raw: `{
-			"bedrock/ap-northeast-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
-			"bedrock/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06}
+			"bedrock/ap-northeast-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":9e-06,"output_cost_per_token":9e-06},
+			"bedrock/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06,"output_cost_per_token":3e-06}
 		}`,
 	}, {
 		// "ap-northeast-1" sorts before "invoke", so lexicographic order alone
@@ -123,16 +123,16 @@ func TestParseLiteLLMPrefersAnUnqualifiedKeyOverARegionalOne(t *testing.T) {
 		wantKey: "bedrock/invoke/deepseek.v3.2",
 		want:    3_000_000,
 		raw: `{
-			"bedrock/ap-northeast-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
-			"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06}
+			"bedrock/ap-northeast-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":9e-06,"output_cost_per_token":9e-06},
+			"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06,"output_cost_per_token":3e-06}
 		}`,
 	}, {
 		name:    "us-gov is region-shaped too",
 		wantKey: "bedrock/invoke/amazon.nova-pro-v1:0",
 		want:    3_000_000,
 		raw: `{
-			"bedrock/us-gov-east-1/amazon.nova-pro-v1:0": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
-			"bedrock/invoke/amazon.nova-pro-v1:0": {"litellm_provider":"bedrock","input_cost_per_token":3e-06}
+			"bedrock/us-gov-east-1/amazon.nova-pro-v1:0": {"litellm_provider":"bedrock","input_cost_per_token":9e-06,"output_cost_per_token":9e-06},
+			"bedrock/invoke/amazon.nova-pro-v1:0": {"litellm_provider":"bedrock","input_cost_per_token":3e-06,"output_cost_per_token":3e-06}
 		}`,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,8 +155,8 @@ func TestParseLiteLLMPrefersAnUnqualifiedKeyOverARegionalOne(t *testing.T) {
 // disagree just as materially, and are refused on the same grounds.
 func TestParseLiteLLMRefusesDisagreeingNonRegionalCandidates(t *testing.T) {
 	doc, err := ParseLiteLLM([]byte(`{
-		"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06},
-		"bedrock/converse/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":5e-06}
+		"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06,"output_cost_per_token":3e-06},
+		"bedrock/converse/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":5e-06,"output_cost_per_token":5e-06}
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -219,5 +219,35 @@ func TestParseLiteLLMPricesASingleCandidate(t *testing.T) {
 	}
 	if p := doc["bedrock"]["zai.glm-5"]; !p.Known || p.InputMicrosPerMTok != 500_000 {
 		t.Errorf("got known=%v %d, want true 500000", p.Known, p.InputMicrosPerMTok)
+	}
+}
+
+// Real entries quote one side and not the other: an embedding model is priced
+// on input alone, and a video model on output alone. Reading either as a price
+// bills the missing side at zero, which the index never said.
+func TestParseLiteLLMLeavesAOneSidedEntryUnknown(t *testing.T) {
+	for _, tc := range []struct{ name, raw string }{{
+		name: "input only, as mistral prices an embedding model",
+		raw: `{"mistral/mistral-embed": {"litellm_provider":"mistral",
+			"input_cost_per_token":1e-07,"mode":"embedding"}}`,
+	}, {
+		name: "output only, as bedrock prices a video model",
+		raw: `{"twelvelabs.pegasus-1-2-v1:0": {"litellm_provider":"bedrock",
+			"input_cost_per_video_per_second":0.00049,"output_cost_per_token":7.5e-06}}`,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := ParseLiteLLM([]byte(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for provider, models := range doc {
+				for id, p := range models {
+					if p.Known {
+						t.Errorf("%s/%s parsed as priced %+v, want no candidate at all",
+							provider, id, p)
+					}
+				}
+			}
+		})
 	}
 }
