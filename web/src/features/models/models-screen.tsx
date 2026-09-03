@@ -85,12 +85,21 @@ export function freeLabel(t: FreeTier | null): string | null {
   return `free · ~${figure} tokens${period === "once" ? " once" : `/${period}`}`
 }
 
-/** Upstream grades a free tier ok, caution, ambiguous, avoid or unknown.
- *  Only "avoid" marks access the vendor has not sanctioned, which the router
- *  refuses to use until the operator opts the provider in. */
+/**
+ * The warning an unsanctioned free tier earns, or null where it earns none.
+ *
+ * Keyed on the server's `opt_in_required` rather than on the vendor's verdict.
+ * The verdict says how the vendor regards the access; whether the router will
+ * act on it also depends on the opt-in, which lives on the provider and not on
+ * this row. Reading the verdict alone told an operator who had already allowed
+ * the tier to go and allow it — a demand nothing they could do would clear.
+ */
 export function tierWarning(t: FreeTier | null): string | null {
-  if (!t || t.tos !== "avoid") return null
-  return "free tier not sanctioned by the vendor — allow it on the provider before the router will use it"
+  if (!t || !t.opt_in_required) return null
+  return (
+    "free tier not sanctioned by the vendor — the router skips any provider " +
+    "serving it that you have not allowed"
+  )
 }
 
 export function priceBand(p: Pricing | null): string {

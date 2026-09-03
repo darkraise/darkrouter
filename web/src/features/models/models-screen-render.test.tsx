@@ -127,20 +127,28 @@ function pricedCatalog(): CatalogResponse {
   }
 }
 
-const freeTier = (tos: string): FreeTier => ({
+const freeTier = (tos: string, optInRequired = false): FreeTier => ({
   free_type: "recurring-daily",
   monthly_tokens: 24_000_000,
   credit_tokens: 0,
   pool_key: "openai",
   tos,
+  opt_in_required: optInRequired,
 })
 
-/** Two rows whose free tiers differ only in the vendor's verdict, so a render
- *  test can tell the warned row from the unwarned one. */
+/** Three rows a render test can tell apart: one the router is still refusing,
+ *  one the vendor grades the same way but the operator has allowed, and one
+ *  the vendor never objected to. */
 function tieredCatalog(): CatalogResponse {
   return {
     models: [
-      { ...baseModel, model: "avoid-model", pricing: null, free_tier: freeTier("avoid") },
+      {
+        ...baseModel,
+        model: "avoid-model",
+        pricing: null,
+        free_tier: freeTier("avoid", true),
+      },
+      { ...baseModel, model: "allowed-model", pricing: null, free_tier: freeTier("avoid") },
       { ...baseModel, model: "caution-model", pricing: null, free_tier: freeTier("caution") },
     ],
     aliases: [],
@@ -287,20 +295,25 @@ describe("the price marker in the Band cell", () => {
 })
 
 describe("the unsanctioned-tier warning", () => {
-  it("warns on the avoid row, beside the model, and leaves the caution row alone", async () => {
+  it("warns on the refused row, beside the model, and leaves the others alone", async () => {
     mockCatalog(tieredCatalog())
     await renderAt("/")
 
     const avoidRow = (await screen.findByText("avoid-model")).closest("tr")
+    const allowedRow = (await screen.findByText("allowed-model")).closest("tr")
     const cautionRow = (await screen.findByText("caution-model")).closest("tr")
-    if (!avoidRow || !cautionRow) {
+    if (!avoidRow || !allowedRow || !cautionRow) {
       throw new Error("expected each model name inside a table row")
     }
 
-    const warning = tierWarning(freeTier("avoid"))
-    if (!warning) throw new Error("expected the avoid tier to warn")
+    const warning = tierWarning(freeTier("avoid", true))
+    if (!warning) throw new Error("expected a refused tier to warn")
 
     expect(within(avoidRow).getByText(warning)).toBeInTheDocument()
+    // Allowed on its provider: the vendor's verdict has not changed, and the
+    // router uses the model anyway. Telling the operator to allow it here is
+    // an instruction they have already carried out.
+    expect(within(allowedRow).queryByText(warning)).not.toBeInTheDocument()
     expect(within(cautionRow).queryByText(warning)).not.toBeInTheDocument()
     expect(screen.getAllByText(warning)).toHaveLength(1)
 
