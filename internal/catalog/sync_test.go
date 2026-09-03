@@ -371,3 +371,41 @@ func TestSyncKeepsADiscoveredPriceNotJustItsStamp(t *testing.T) {
 			got.InputMicrosPerMTok, got.OutputMicrosPerMTok)
 	}
 }
+
+func TestSyncKeepsADiscoveredFreeModelPriced(t *testing.T) {
+	// A free model's rates are zero, so only the flag separates it from one
+	// nobody has priced. models.dev listing no cost for the same name must not
+	// be allowed to turn a runtime's "it is free" back into "unknown".
+	const noCost = `{"acme":{"id":"acme","models":{
+	  "big":{"id":"big","limit":{"context":200000,"output":64000}}
+	}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(noCost))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	ctx := context.Background()
+
+	if err := db.UpsertMetadata(ctx, []store.MetadataRow{{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 0, OutputMicrosPerMTok: 0,
+		PriceKnown: true, PriceSource: string(SourceDiscovered),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rowFor(t, rows, "p", "big")
+	if !got.PriceKnown {
+		t.Error("a discovered free model read back as unpriced after a sync")
+	}
+}
