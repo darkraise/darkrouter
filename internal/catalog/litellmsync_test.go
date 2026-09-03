@@ -76,7 +76,7 @@ func TestLiteLLMSyncerRefusesADocumentItCannotRead(t *testing.T) {
 // A 200 carrying a document that parses to nothing is the one failure the
 // transport cannot see, and the one that silently unprices everything.
 func TestLiteLLMSyncerRefusesAnEmptyDocument(t *testing.T) {
-	for _, body := range []string{`{}`, `{"gpt-4o": {"input_cost_per_token": 2.5e-06}}`} {
+	for _, body := range []string{`{}`, `{"gpt-4o": {"input_cost_per_token": 2.5e-06,"output_cost_per_token":2.5e-06}}`} {
 		func() {
 			s, stop := litellmSyncerAfterAGoodSync(t, body)
 			defer stop()

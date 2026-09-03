@@ -93,16 +93,20 @@ func resolveLiteLLMGroup(entries map[string]litellmEntry, keys []string) Pricing
 	return winner
 }
 
+// pricingOf reads an entry only when it quotes both sides.
+//
+// Half an entry is not half a price: 26 upstream entries carry one cost field
+// and not the other — an embedding model priced on input alone, an image model
+// priced per image — and taking the missing side as zero would assert that a
+// side is free when the index simply did not say. An entry with nothing to say
+// contributes no candidate at all, which leaves another source free to price
+// the model.
 func pricingOf(e litellmEntry) Pricing {
 	p := Pricing{Source: SourceLiteLLM}
-	if e.InputPerToken != nil || e.OutputPerToken != nil {
+	if e.InputPerToken != nil && e.OutputPerToken != nil {
 		p.Known = true
-		if e.InputPerToken != nil {
-			p.InputMicrosPerMTok = perMTok(*e.InputPerToken)
-		}
-		if e.OutputPerToken != nil {
-			p.OutputMicrosPerMTok = perMTok(*e.OutputPerToken)
-		}
+		p.InputMicrosPerMTok = perMTok(*e.InputPerToken)
+		p.OutputMicrosPerMTok = perMTok(*e.OutputPerToken)
 	}
 	return p
 }
