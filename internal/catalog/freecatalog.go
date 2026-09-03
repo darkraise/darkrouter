@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"sync"
 )
@@ -117,9 +116,10 @@ func (c FreeCatalog) Tier(presetID, modelID string) (FreeTier, bool) {
 	return tier, ok
 }
 
-// ModelsFor lists the models documented free for one preset, discontinued
-// tiers excluded. Nil for a provider the catalog has never covered, which is a
-// different fact from one whose free tier has been withdrawn.
+// ModelsFor lists the models documented free for one preset, in no particular
+// order and with discontinued tiers excluded. Nil for a provider the catalog
+// has never covered, which is a different fact from one whose free tier has
+// been withdrawn.
 func (c FreeCatalog) ModelsFor(presetID string) []string {
 	models := c.Providers[presetID]
 	if len(models) == 0 {
@@ -131,7 +131,6 @@ func (c FreeCatalog) ModelsFor(presetID string) []string {
 			out = append(out, id)
 		}
 	}
-	sort.Strings(out)
 	return out
 }
 
