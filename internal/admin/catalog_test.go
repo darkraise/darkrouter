@@ -150,7 +150,15 @@ func pricedCatalog() *catalog.Store {
 		{ProviderID: "groq", ModelID: "overridden-model", State: catalog.StateLive,
 			Surfaces: []ir.Surface{ir.SurfaceLLM}, Publisher: "meta",
 			Source:       catalog.SourceOverride,
-			Capabilities: catalog.Capabilities{Known: true}},
+			Capabilities: catalog.Capabilities{Known: true},
+			Pricing: catalog.Pricing{
+				// The model's own metadata was overridden by the operator, but its
+				// price still comes from live discovery — the two provenances are
+				// independent, and a row where they differ is what makes the price
+				// source distinguishable from the model's merge source.
+				InputMicrosPerMTok: 200000, OutputMicrosPerMTok: 800000, Known: true,
+				Source: catalog.SourceDiscovered,
+			}},
 		{ProviderID: "groq", ModelID: "unpriced-model", State: catalog.StateLive,
 			Surfaces:     []ir.Surface{ir.SurfaceLLM},
 			Source:       catalog.SourceInferred,
@@ -244,14 +252,31 @@ func TestModelViewCarriesPriceProvenance(t *testing.T) {
 	s, _ := testServerFull(t)
 	s.deps.Catalog = pricedCatalog()
 
-	got := modelViews(t, s)["priced-model"]
-	if got.Pricing == nil {
+	got := modelViews(t, s)
+
+	priced := got["priced-model"]
+	if priced.Pricing == nil {
 		t.Fatal("pricing view is nil")
 	}
-	if got.Pricing.Source != "models_dev" {
-		t.Errorf("price source = %q, want %q", got.Pricing.Source, "models_dev")
+	if priced.Pricing.Source != "models_dev" {
+		t.Errorf("price source = %q, want %q", priced.Pricing.Source, "models_dev")
 	}
-	if got.Pricing.Grade != "indexed" {
-		t.Errorf("price grade = %q, want %q", got.Pricing.Grade, "indexed")
+	if priced.Pricing.Grade != "indexed" {
+		t.Errorf("price grade = %q, want %q", priced.Pricing.Grade, "indexed")
+	}
+
+	// overridden-model's own metadata came from an operator override, but its
+	// price came from live discovery. A view that read the model's merge
+	// source instead of the price's own source would report "override" and
+	// "declared" here, not "discovered" and "measured".
+	overridden := got["overridden-model"]
+	if overridden.Pricing == nil {
+		t.Fatal("overridden-model pricing view is nil")
+	}
+	if overridden.Pricing.Source != "discovered" {
+		t.Errorf("price source = %q, want %q", overridden.Pricing.Source, "discovered")
+	}
+	if overridden.Pricing.Grade != "measured" {
+		t.Errorf("price grade = %q, want %q", overridden.Pricing.Grade, "measured")
 	}
 }
