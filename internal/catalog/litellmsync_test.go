@@ -62,15 +62,51 @@ func TestLiteLLMSyncerKeepsWhatItHasWhenTheFetchFails(t *testing.T) {
 }
 
 func TestLiteLLMSyncerRefusesADocumentItCannotRead(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("<html>not json</html>"))
-	}))
-	defer srv.Close()
+	s, stop := litellmSyncerAfterAGoodSync(t, "<html>not json</html>")
+	defer stop()
 
-	s := NewLiteLLMSyncer(LiteLLMSyncOptions{URL: srv.URL})
 	if err := s.SyncOnce(context.Background()); err == nil {
 		t.Error("an unparseable body was reported as a successful sync")
 	}
+	if !s.Doc()["openai"]["gpt-4o"].Known {
+		t.Error("an unparseable body emptied the index it already had")
+	}
+}
+
+// A 200 carrying a document that parses to nothing is the one failure the
+// transport cannot see, and the one that silently unprices everything.
+func TestLiteLLMSyncerRefusesAnEmptyDocument(t *testing.T) {
+	for _, body := range []string{`{}`, `{"gpt-4o": {"input_cost_per_token": 2.5e-06}}`} {
+		s, stop := litellmSyncerAfterAGoodSync(t, body)
+		if err := s.SyncOnce(context.Background()); err == nil {
+			t.Errorf("%s was reported as a successful sync", body)
+		}
+		if !s.Doc()["openai"]["gpt-4o"].Known {
+			t.Errorf("%s emptied the index it already had", body)
+		}
+		stop()
+	}
+}
+
+// litellmSyncerAfterAGoodSync returns a syncer holding a real index, whose next
+// fetch serves then. Retention is only testable against a syncer that has
+// something to lose.
+func litellmSyncerAfterAGoodSync(t *testing.T, then string) (*LiteLLMSyncer, func()) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(litellmSyncSample))
+			return
+		}
+		_, _ = w.Write([]byte(then))
+	}))
+	s := NewLiteLLMSyncer(LiteLLMSyncOptions{URL: srv.URL})
+	if err := s.SyncOnce(context.Background()); err != nil {
+		srv.Close()
+		t.Fatal(err)
+	}
+	return s, srv.Close
 }
 
 func TestLiteLLMSyncOptionsDefaultToDaily(t *testing.T) {

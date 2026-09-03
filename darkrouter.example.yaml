@@ -130,6 +130,14 @@ catalog:
   free_catalog_sync: true
   free_catalog_url: https://raw.githubusercontent.com/diegosouzapw/OmniRoute/HEAD/open-sse/config/freeModelCatalog.data.ts
   free_catalog_interval: 24h
+  # The community price index, which prices models models.dev does not cover.
+  # It is joined in memory when a model's price is resolved and never written
+  # to a row, so nothing here is stale once the refresh below is turned off --
+  # there is simply no price from this source, and another one answers. Set
+  # litellm_sync to false to make no outbound request for it.
+  litellm_sync: true
+  litellm_url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+  litellm_interval: 24h
   # On first start, add a provider for every preset that needs no credential --
   # AI Horde, OpenCode Free, OVHcloud AI, UncloseAI -- so the gateway can route
   # something before anyone opens the console. Their models are imported with
