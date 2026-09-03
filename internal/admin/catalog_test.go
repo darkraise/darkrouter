@@ -168,6 +168,19 @@ func pricedCatalog() *catalog.Store {
 				MonthlyTokens: 24000000, CreditTokens: 5000,
 				PoolKey: "groq-shared", ToS: "caution",
 			}},
+		{ProviderID: "groq", ModelID: "withdrawn-free-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier:     catalog.FreeTier{FreeType: "discontinued", ToS: "unknown"}},
+		{ProviderID: "groq", ModelID: "shapeless-free-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			// A verdict with no allowance shape. Upstream's parser cannot emit
+			// this row, so it exists to pin which field decides the record is
+			// present: only a key on ToS keeps it on the wire.
+			FreeTier: catalog.FreeTier{ToS: "avoid"}},
 		{ProviderID: "groq", ModelID: "unpriced-model", State: catalog.StateLive,
 			Surfaces:     []ir.Surface{ir.SurfaceLLM},
 			Source:       catalog.SourceInferred,
@@ -331,5 +344,37 @@ func TestAModelWithNoFreeTierRendersNullNotZero(t *testing.T) {
 	w := do(t, s, cookie, token, "GET", "/api/models", "")
 	if !strings.Contains(w.Body.String(), `"free_tier":null`) {
 		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestAWithdrawnFreeTierStillReachesTheWire(t *testing.T) {
+	// A discontinued tier is a real record, not an absent one: a reader has to
+	// be able to tell "this had a free tier and it was withdrawn" from "this
+	// never had one".
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["withdrawn-free-model"].FreeTier
+	if got == nil {
+		t.Fatal("a withdrawn free tier must still be sent")
+	}
+	if got.FreeType != "discontinued" || got.ToS != "unknown" {
+		t.Errorf("free tier = %+v", got)
+	}
+}
+
+func TestTheTermsVerdictDecidesTheRecordIsPresent(t *testing.T) {
+	// Pins the field the presence check keys on. A record whose allowance
+	// shape is missing but whose verdict is not still travels, because the
+	// verdict is the half a reader cannot safely be left to assume.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["shapeless-free-model"].FreeTier
+	if got == nil {
+		t.Fatal("a tier carrying only a terms verdict must still be sent")
+	}
+	if got.ToS != "avoid" || got.FreeType != "" {
+		t.Errorf("free tier = %+v", got)
 	}
 }
