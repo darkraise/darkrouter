@@ -139,6 +139,24 @@ type Pricing struct {
 	// Source is the authority behind these rates. Known says whether a price
 	// exists; this says whether to believe it.
 	Source Source
+
+	// Resold marks a rate the quoting provider republished rather than set.
+	// It is what keeps Source and Grade from collapsing into one another: the
+	// rate really did arrive from that provider's own endpoint, and the
+	// provider still did not set it.
+	Resold bool
+}
+
+// Grade is how far this price may be trusted. It is Source's grade, capped at
+// indexed for a rate the quoting provider only republished: a proxy in front
+// of an aggregator serves the aggregator's list prices over its own endpoint,
+// so reading them there is not the seller quoting itself. Capped rather than
+// replaced, because republishing cannot make a weaker figure stronger.
+func (p Pricing) Grade() Grade {
+	if g := p.Source.Grade(); p.Resold && g == GradeMeasured {
+		return GradeIndexed
+	}
+	return p.Source.Grade()
 }
 
 // Model is one model as offered by one provider.

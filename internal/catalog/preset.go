@@ -115,6 +115,22 @@ type Redirect struct {
 	Port  int    `yaml:"port"`
 }
 
+// ResellsPrices reports whether this provider's listing quotes prices it did
+// not set, which is what separates a rate measured at the seller from one
+// merely republished by it.
+//
+// free_tier is the signal, for want of a cleaner one in the preset data: a
+// provider that charges nothing has no prices of its own to quote, so a rate
+// on its listing came from the catalogue it fronts — hackclub serves
+// OpenRouter's listing verbatim, per-request limits and openrouter/auto row
+// included. It also catches a paid vendor that happens to run a free tier,
+// whose own rates are then graded down; that error understates confidence,
+// which is the safe direction for a figure an operator bills against.
+//
+// Derived rather than hand-declared so that a free proxy added by a preset
+// regeneration is covered without anyone remembering to flag it.
+func (p Preset) ResellsPrices() bool { return p.FreeTier }
+
 // TraitRule declares the request-shape facts for a family of model names.
 //
 // It is data rather than code because models.dev cannot express it: its

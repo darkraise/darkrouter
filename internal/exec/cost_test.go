@@ -178,18 +178,26 @@ func TestLogRecordsTheGradeBehindTheServedPrice(t *testing.T) {
 	// Both directions, so a constant cannot pass: the grade has to come from
 	// the price the model actually carries.
 	for _, tc := range []struct {
+		name   string
 		source catalog.Source
+		resold bool
 		want   string
 	}{
-		{catalog.SourceDiscovered, "measured"},
-		{catalog.SourceModelsDev, "indexed"},
+		{name: "discovered", source: catalog.SourceDiscovered, want: "measured"},
+		{name: "models_dev", source: catalog.SourceModelsDev, want: "indexed"},
+		// The spend total is marked estimated off this grade, so a reseller's
+		// republished rate has to reach the log as indexed or a proxy's prices
+		// pass for the seller's own.
+		{name: "discovered at a reseller", source: catalog.SourceDiscovered,
+			resold: true, want: "indexed"},
 	} {
-		t.Run(string(tc.source), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			cap := &captureLogger{}
 			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
 				ProviderID: "groq", ModelID: "m",
 				Pricing: catalog.Pricing{
 					InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.source,
+					Resold: tc.resold,
 				},
 			})}}
 
@@ -284,18 +292,26 @@ func TestLogCarriesTheGradeOntoTheServedAttempt(t *testing.T) {
 	//
 	// Both directions, so a constant cannot pass.
 	for _, tc := range []struct {
+		name   string
 		source catalog.Source
+		resold bool
 		want   string
 	}{
-		{catalog.SourceDiscovered, "measured"},
-		{catalog.SourceModelsDev, "indexed"},
+		{name: "discovered", source: catalog.SourceDiscovered, want: "measured"},
+		{name: "models_dev", source: catalog.SourceModelsDev, want: "indexed"},
+		// The spend total is marked estimated off this grade, so a reseller's
+		// republished rate has to reach the log as indexed or a proxy's prices
+		// pass for the seller's own.
+		{name: "discovered at a reseller", source: catalog.SourceDiscovered,
+			resold: true, want: "indexed"},
 	} {
-		t.Run(string(tc.source), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			cap := &captureLogger{}
 			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
 				ProviderID: "groq", ModelID: "m",
 				Pricing: catalog.Pricing{
 					InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.source,
+					Resold: tc.resold,
 				},
 			})}}
 
