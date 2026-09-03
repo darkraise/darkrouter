@@ -441,3 +441,39 @@ func TestLaterCredentialsDoNotResweep(t *testing.T) {
 		t.Errorf("swept %v, want exactly one sweep for three keys", spy.swept)
 	}
 }
+
+// The opt-in has to reach the operator both ways: readable on the provider and
+// settable without a second call. A field that serialized but ignored its patch
+// would look like it worked.
+func TestProviderAPICarriesTheUnsanctionedOptIn(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	_ = do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
+
+	// A patch naming only this field is a patch that names a field: the
+	// emptiness guard has to know about it or the opt-in is unsettable alone.
+	w := do(t, s, cookie, token, "PATCH", "/api/providers/p1",
+		`{"allow_unsanctioned_free":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, body = %s", w.Code, w.Body.String())
+	}
+	w = do(t, s, cookie, token, "GET", "/api/providers", "")
+	if !strings.Contains(w.Body.String(), `"allow_unsanctioned_free":true`) {
+		t.Errorf("opt-in absent from the provider response: %s", w.Body.String())
+	}
+}
+
+func TestCreatingAProviderTakesTheUnsanctionedOptIn(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1",
+		  "allow_unsanctioned_free":true}`); w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", w.Code, w.Body.String())
+	}
+	w := do(t, s, cookie, token, "GET", "/api/providers", "")
+	if !strings.Contains(w.Body.String(), `"allow_unsanctioned_free":true`) {
+		t.Errorf("opt-in not taken at creation: %s", w.Body.String())
+	}
+}
