@@ -218,21 +218,18 @@ func TestParseFreeCatalogRefusesADuplicatedRow(t *testing.T) {
 // filter silently stops working — this fails loudly instead.
 //
 // Each widened field is asserted present on at least one row rather than on
-// every row: a real snapshot legitimately holds rows with no budget, no pool
-// and no label, so a per-row assertion would fail on good data.
+// every row: a real snapshot legitimately holds rows with no budget and no
+// pool, so a per-row assertion would fail on good data.
 func TestEmbeddedFreeCatalogCarriesEveryWidenedField(t *testing.T) {
 	c := FreeModels()
 	if len(c.Providers) == 0 {
 		t.Fatal("embedded free catalogue is empty")
 	}
-	var withToS, withDisplayName, withMonthly, withCredit, withPool int
+	var withToS, withMonthly, withCredit, withPool int
 	for _, models := range c.Providers {
 		for _, tier := range models {
 			if tier.ToS != "" {
 				withToS++
-			}
-			if tier.DisplayName != "" {
-				withDisplayName++
 			}
 			if tier.MonthlyTokens > 0 {
 				withMonthly++
@@ -250,7 +247,6 @@ func TestEmbeddedFreeCatalogCarriesEveryWidenedField(t *testing.T) {
 		count int
 	}{
 		{"tos", withToS},
-		{"display_name", withDisplayName},
 		{"monthly_tokens", withMonthly},
 		{"credit_tokens", withCredit},
 		{"pool_key", withPool},

@@ -164,7 +164,7 @@ func pricedCatalog() *catalog.Store {
 			Source:       catalog.SourceModelsDev,
 			Capabilities: catalog.Capabilities{Known: true},
 			FreeTier: catalog.FreeTier{
-				FreeType: "recurring-daily", DisplayName: "Free model",
+				FreeType:      "recurring-daily",
 				MonthlyTokens: 24000000, CreditTokens: 5000,
 				PoolKey: "groq-shared", ToS: "caution",
 			}},
