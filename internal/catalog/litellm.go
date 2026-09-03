@@ -33,37 +33,78 @@ func ParseLiteLLM(raw []byte) (LiteLLMDoc, error) {
 	}
 	sort.Strings(keys)
 
-	out := LiteLLMDoc{}
-	// The key that supplied each stored price, so a later collision can be
-	// judged against it instead of overwriting blindly.
-	from := map[string]map[string]string{}
+	// Upstream keys that reduce to the same model id under one provider are
+	// competing listings for one model, so they are resolved together rather
+	// than by last-write-wins.
+	type group struct {
+		provider, id string
+		keys         []string
+	}
+	var groups []*group
+	index := map[string]*group{}
 	for _, key := range keys {
 		e := entries[key]
 		if e.Provider == "" {
 			continue
 		}
-		if out[e.Provider] == nil {
-			out[e.Provider] = map[string]Pricing{}
-			from[e.Provider] = map[string]string{}
-		}
 		id := modelIDFromKey(key)
-		if held, taken := from[e.Provider][id]; taken && !preferredKey(key, held) {
-			continue
+		g, seen := index[e.Provider+"\x00"+id]
+		if !seen {
+			g = &group{provider: e.Provider, id: id}
+			index[e.Provider+"\x00"+id] = g
+			groups = append(groups, g)
 		}
-		p := Pricing{Source: SourceLiteLLM}
-		if e.InputPerToken != nil || e.OutputPerToken != nil {
-			p.Known = true
-			if e.InputPerToken != nil {
-				p.InputMicrosPerMTok = perMTok(*e.InputPerToken)
-			}
-			if e.OutputPerToken != nil {
-				p.OutputMicrosPerMTok = perMTok(*e.OutputPerToken)
-			}
+		g.keys = append(g.keys, key)
+	}
+
+	out := LiteLLMDoc{}
+	for _, g := range groups {
+		if out[g.provider] == nil {
+			out[g.provider] = map[string]Pricing{}
 		}
-		out[e.Provider][id] = p
-		from[e.Provider][id] = key
+		out[g.provider][g.id] = resolveLiteLLMGroup(entries, g.keys)
 	}
 	return out, nil
+}
+
+// resolveLiteLLMGroup picks the price for one model from every upstream key
+// that names it. Candidates are narrowed to the most-preferred cohort, and if
+// that cohort still disagrees the model is left unpriced: with no canonical key
+// to prefer, the index has several contradictory things to say, which is the
+// same as having nothing to say. A plausible-but-wrong rate fails silently at
+// billing time, while an absent one is visible and lets another source fill it.
+func resolveLiteLLMGroup(entries map[string]litellmEntry, keys []string) Pricing {
+	best := keys[0]
+	for _, key := range keys[1:] {
+		if preferredKey(key, best) {
+			best = key
+		}
+	}
+	winner := pricingOf(entries[best])
+	for _, key := range keys {
+		// Only the rates this parser reads decide disagreement; a difference in
+		// a field it ignores is not a conflict.
+		if sameCohort(key, best) {
+			if p := pricingOf(entries[key]); p != winner {
+				return Pricing{Source: SourceLiteLLM}
+			}
+		}
+	}
+	return winner
+}
+
+func pricingOf(e litellmEntry) Pricing {
+	p := Pricing{Source: SourceLiteLLM}
+	if e.InputPerToken != nil || e.OutputPerToken != nil {
+		p.Known = true
+		if e.InputPerToken != nil {
+			p.InputMicrosPerMTok = perMTok(*e.InputPerToken)
+		}
+		if e.OutputPerToken != nil {
+			p.OutputMicrosPerMTok = perMTok(*e.OutputPerToken)
+		}
+	}
+	return p
 }
 
 // awsRegion matches an AWS region qualifier by shape — two lowercase letters,
@@ -81,6 +122,16 @@ func hasRegionSegment(key string) bool {
 		}
 	}
 	return false
+}
+
+// sameCohort reports whether two keys are equally qualified — same depth, and
+// alike in carrying a region. preferredKey is a total order because of its
+// lexicographic tiebreak, so it can never report two keys as equal; the cohort
+// is the set the tiebreak had to choose between arbitrarily, and that is the
+// set whose disagreement matters.
+func sameCohort(a, b string) bool {
+	return strings.Count(a, "/") == strings.Count(b, "/") &&
+		hasRegionSegment(a) == hasRegionSegment(b)
 }
 
 // preferredKey reports whether candidate should displace held when both reduce
