@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func newTestServer(t *testing.T, extraServer string) *Server {
@@ -473,5 +475,55 @@ func TestListenerTimeoutsAreSet(t *testing.T) {
 	cfg.Total = 10 * time.Minute
 	if read, _ = listenerTimeouts(cfg); read != 20*time.Minute {
 		t.Errorf("read timeout = %v, want twice a long total", read)
+	}
+}
+
+// The catalog layer's own tests prove a LiteLLM candidate wins where one is
+// offered; none of them prove the gateway ever offers it. Only this wiring
+// makes the synced index reach a routed model's price, so it is tested where
+// it lives.
+func TestTheSyncedLiteLLMIndexReachesTheRoutedCatalog(t *testing.T) {
+	const model = "zzz-only-the-index-knows-me"
+	idx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"groq/` + model + `": {"litellm_provider": "groq",` +
+			`"input_cost_per_token": 5.9e-07, "output_cost_per_token": 7.9e-07}}`))
+	}))
+	defer idx.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "darkrouter.yaml")
+	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" +
+		"catalog:\n  litellm_url: " + idx.URL + "\n" +
+		"providers:\n  - id: groq\n    preset: groq\n    kind: openaicompat\n" +
+		"    base_url: https://api.groq.com/openai/v1\n    api_key: ${K}\n" +
+		"    models: [" + model + "]\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := serverBackedBy(t, cfgStore)
+
+	ctx := context.Background()
+	if err := s.db.RecordDiscoverySuccess(ctx, "groq",
+		[]store.DiscoveredModel{{ModelID: model}}, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if s.litellmSync == nil {
+		t.Fatal("the price syncer is nil with the refresh left at its default")
+	}
+	if err := s.litellmSync.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok := s.cat.Snapshot().Lookup("groq", model)
+	if !ok {
+		t.Fatalf("%s is not in the served snapshot", model)
+	}
+	if m.Pricing.Source != catalog.SourceLiteLLM || m.Pricing.InputMicrosPerMTok != 590_000 {
+		t.Errorf("pricing = %+v, want the index's 590000 at source litellm: the "+
+			"synced index never reaches the catalog the router serves", m.Pricing)
 	}
 }
