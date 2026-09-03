@@ -28,10 +28,14 @@ export function spendReading(spend: Overview["today_spend"]): string {
 
 /** The note under the spend figure when part of it rests on a price no seller
  *  quoted, and null when it does not. Named on the tile rather than per row:
- *  which price a given model carries is a catalogue question. */
+ *  which price a given model carries is a catalogue question.
+ *
+ *  It names the figure it sits under, because the sparkline beside it is drawn
+ *  from usage_daily, which carries no grade — an unscoped "includes estimated
+ *  prices" would claim something about the series that nothing has checked. */
 export function spendQualifier(spend: Overview["today_spend"]): string | null {
   if (!spend.estimated || !spend.priced || spend.micros === null) return null
-  return "includes estimated prices"
+  return "this figure includes estimated prices"
 }
 
 /** Daily totals in day order, so a sparkline's x-axis is time. */

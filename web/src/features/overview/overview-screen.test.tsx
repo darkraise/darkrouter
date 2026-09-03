@@ -186,7 +186,7 @@ describe("the spend tile", () => {
 
   it("qualifies a total that counted a price nobody quoted", () => {
     expect(spendQualifier({ micros: 4_000, priced: true, estimated: true }))
-      .toBe("includes estimated prices")
+      .toBe("this figure includes estimated prices")
   })
 
   it("says nothing when every contributing price was firsthand", () => {
