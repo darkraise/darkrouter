@@ -3,6 +3,7 @@
 # set is added outright.
 
 anthropic:
+  litellm_id: anthropic
   models_dev_id: anthropic
   quirks: [requires-max-tokens]
   # models.dev lists "effort" among claude-opus-4-5's reasoning_options, but
@@ -35,15 +36,18 @@ anthropic:
     - {match: claude-3, manual_budget: true, free_sampling: true}
 
 gemini:
+  litellm_id: gemini
   models_dev_id: google
   surfaces: [llm, embedding]
 
 openai:
+  litellm_id: openai
   models_dev_id: openai
   surfaces: [llm, embedding, image, tts, stt, moderation]
   quirks: [max-completion-tokens-name]
 
 groq:
+  litellm_id: groq
   models_dev_id: groq
   free_tier: true
   # Groq serves /v1/audio/transcriptions (whisper-large-v3) and
@@ -53,16 +57,19 @@ groq:
   surfaces: [llm, stt, tts]
 
 cohere:
+  litellm_id: cohere
   models_dev_id: cohere
   surfaces: [llm, embedding, rerank]
   quirks: [rerank-path=/v2/rerank]
 
 mistral:
+  litellm_id: mistral
   models_dev_id: mistral
   surfaces: [llm, embedding]
   quirks: [strict-unknown-fields, temperature-top-p-exclusive]
 
 deepseek:
+  litellm_id: deepseek
   name: DeepSeek
   kind: openaicompat
   # OmniRoute's entry points at /responses, which Darkrouter does not speak.
@@ -76,23 +83,29 @@ deepseek:
   quirks: [echo-reasoning-content]
 
 cerebras:
+  litellm_id: cerebras
   models_dev_id: cerebras
 
 xai:
+  litellm_id: xai
   models_dev_id: xai
 
 perplexity:
+  litellm_id: perplexity
   models_dev_id: perplexity
 
 together:
+  litellm_id: together_ai
   models_dev_id: togetherai
   surfaces: [llm, embedding, image]
 
 deepinfra:
+  litellm_id: deepinfra
   models_dev_id: deepinfra
   surfaces: [llm, embedding]
 
 voyage:
+  litellm_id: voyage
   name: Voyage AI
   kind: openaicompat
   base_url: https://api.voyageai.com/v1
@@ -106,6 +119,7 @@ voyage:
   website: https://docs.voyageai.com
 
 fireworks:
+  litellm_id: fireworks_ai
   models_dev_id: fireworks-ai
   surfaces: [llm, embedding, image]
   # Fireworks prefixes every id with an account path that no other source uses.
@@ -113,19 +127,23 @@ fireworks:
     accounts/fireworks/models/llama-v3p3-70b-instruct: llama-3.3-70b
 
 openrouter:
+  litellm_id: openrouter
   models_dev_id: openrouter
   quirks: [echo-reasoning-content]
 
 vercel-ai-gateway:
+  litellm_id: vercel_ai_gateway
   models_dev_id: vercel
 
 venice:
   models_dev_id: venice
 
 nvidia:
+  litellm_id: nvidia_nim
   models_dev_id: nvidia
 
 ollama:
+  litellm_id: ollama
   name: Ollama
   kind: openaicompat
   base_url: http://localhost:11434/v1
@@ -247,6 +265,7 @@ docker-model-runner:
   quirks: []
 
 lemonade:
+  litellm_id: lemonade
   name: Lemonade
   kind: openaicompat
   base_url: http://localhost:8000/api/v1
@@ -269,6 +288,7 @@ mlx-lm:
   quirks: []
 
 bedrock:
+  litellm_id: bedrock
   name: Amazon Bedrock
   kind: bedrock
   base_url: ""
@@ -280,6 +300,7 @@ bedrock:
   quirks: []
 
 vertex:
+  litellm_id: vertex_ai-language-models
   name: Google Vertex AI
   kind: vertex
   # Selects the request builder and marks the preset seed-only: Vertex has no
@@ -306,6 +327,7 @@ vertex-anthropic:
   quirks: [requires-max-tokens]
 
 anthropic-oauth:
+  litellm_id: anthropic
   name: Anthropic (Claude subscription)
   kind: anthropic
   base_url: https://api.anthropic.com/v1
@@ -349,3 +371,102 @@ auggie:
   surfaces: [llm]
   no_models_dev: true
   website: https://augmentcode.com
+
+ai21:
+  litellm_id: ai21
+
+aimlapi:
+  litellm_id: aiml
+
+baseten:
+  litellm_id: baseten
+
+cloudflare-ai:
+  litellm_id: cloudflare
+
+codestral:
+  litellm_id: codestral
+
+databricks:
+  litellm_id: databricks
+
+featherless:
+  litellm_id: featherless_ai
+
+featherless-ai:
+  litellm_id: featherless_ai
+
+friendliai:
+  litellm_id: friendliai
+
+gigachat:
+  litellm_id: gigachat
+
+heroku:
+  litellm_id: heroku
+
+hyperbolic:
+  litellm_id: hyperbolic
+
+inception:
+  litellm_id: inception
+
+lambda-ai:
+  litellm_id: lambda_ai
+
+llamagate:
+  litellm_id: llamagate
+
+meta-llama:
+  litellm_id: meta_llama
+
+minimax:
+  litellm_id: minimax
+
+morph:
+  litellm_id: morph
+
+nebius:
+  litellm_id: nebius
+
+novita:
+  litellm_id: novita
+
+nscale:
+  litellm_id: nscale
+
+ollama-cloud:
+  litellm_id: ollama
+
+ovhcloud:
+  litellm_id: ovhcloud
+
+publicai:
+  litellm_id: publicai
+
+sambanova:
+  litellm_id: sambanova
+
+sarvam:
+  litellm_id: sarvam
+
+scaleway:
+  litellm_id: scaleway
+
+snowflake:
+  litellm_id: snowflake
+
+tencent:
+  litellm_id: tencent
+
+volcengine:
+  litellm_id: volcengine
+
+volcengine-ark:
+  litellm_id: volcengine
+
+wandb:
+  litellm_id: wandb
+
+zai:
+  litellm_id: zai

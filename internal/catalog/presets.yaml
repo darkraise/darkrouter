@@ -19,6 +19,7 @@ agentrouter:
   surfaces:
     - llm
   models_dev_id: agentrouter
+  no_litellm: true
   free_tier: true
   website: https://agentrouter.org
 agnes:
@@ -30,6 +31,7 @@ agnes:
   surfaces:
     - llm
   models_dev_id: agnes
+  no_litellm: true
   free_tier: true
   website: https://agnes-ai.com
 ai21:
@@ -41,6 +43,7 @@ ai21:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: ai21
   free_tier: true
   website: https://www.ai21.com
 aihorde:
@@ -53,6 +56,7 @@ aihorde:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://aihorde.net
   models_url: https://oai.aihorde.net/v1/models
@@ -65,6 +69,7 @@ aimlapi:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: aiml
   website: https://aimlapi.com
 ainative:
   name: AINative Studio
@@ -75,6 +80,7 @@ ainative:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://ainative.studio
   models_url: https://api.ainative.studio/api/v1/models
@@ -87,6 +93,7 @@ aion:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.aionlabs.ai
   models_url: https://api.aionlabs.ai/v1/models
@@ -99,6 +106,7 @@ alibaba:
   surfaces:
     - llm
   models_dev_id: alibaba
+  no_litellm: true
   website: https://bailian.console.alibabacloud.com/
   models_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models
 alicode:
@@ -110,6 +118,7 @@ alicode:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://bailian.console.aliyun.com
   api_key_url: https://bailian.console.aliyun.com/?apiKey=1
 alicode-intl:
@@ -121,6 +130,7 @@ alicode-intl:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://www.alibabacloud.com/product/coding
   api_key_url: https://www.alibabacloud.com/product/coding
 alims-intl:
@@ -132,6 +142,7 @@ alims-intl:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://modelstudio.console.alibabacloud.com
   api_key_url: https://modelstudio.console.alibabacloud.com/?apiKey=1
 alitp-intl:
@@ -143,6 +154,7 @@ alitp-intl:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://www.alibabacloud.com/campaign/ai-landing-page-token
   api_key_url: https://modelstudio.console.alibabacloud.com/?apiKey=1
 ant-ling:
@@ -154,6 +166,7 @@ ant-ling:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://developer.ant-ling.com/en/docs/
 anthropic:
@@ -165,6 +178,7 @@ anthropic:
   surfaces:
     - llm
   models_dev_id: anthropic
+  litellm_id: anthropic
   website: https://platform.claude.com
   api_key_url: https://console.anthropic.com/settings/keys
   quirks:
@@ -238,6 +252,7 @@ anthropic-oauth:
   surfaces:
     - llm
   models_dev_id: anthropic
+  litellm_id: anthropic
   website: https://claude.com
   quirks:
     - requires-max-tokens
@@ -261,6 +276,7 @@ anyapi:
   surfaces:
     - llm
   models_dev_id: anyapi
+  no_litellm: true
   free_tier: true
   website: https://anyapi.ai
   models_url: https://api.anyapi.ai/v1/models
@@ -273,6 +289,7 @@ api-airforce:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://api.airforce
   api_key_url: https://api.airforce
@@ -286,6 +303,7 @@ auggie:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://augmentcode.com
 auriko:
   name: Auriko
@@ -296,6 +314,7 @@ auriko:
   surfaces:
     - llm
   models_dev_id: auriko
+  no_litellm: true
   free_tier: true
   website: https://www.auriko.ai
   models_url: https://api.auriko.ai/v1/models
@@ -308,6 +327,7 @@ bai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://b.ai
   models_url: https://api.b.ai/v1/models
 baichuan:
@@ -319,6 +339,7 @@ baichuan:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.baichuan-ai.com/
 baidu:
@@ -330,6 +351,7 @@ baidu:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://ernie.baidu.com/
   api_key_url: https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application
@@ -342,6 +364,7 @@ bailian-coding-plan:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://www.alibabacloud.com/help/en/model-studio/token-plan-overview
 baseten:
   name: Baseten
@@ -352,6 +375,7 @@ baseten:
   surfaces:
     - llm
   models_dev_id: baseten
+  litellm_id: baseten
   free_tier: true
   website: https://baseten.co
 bazaarlink:
@@ -363,6 +387,7 @@ bazaarlink:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://bazaarlink.ai
   api_key_url: https://bazaarlink.ai
@@ -376,6 +401,7 @@ bedrock:
   surfaces:
     - llm
   models_dev_id: amazon-bedrock
+  litellm_id: bedrock
   website: https://aws.amazon.com/bedrock
 blackbox:
   name: Blackbox AI
@@ -386,6 +412,7 @@ blackbox:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://blackbox.ai
   api_key_url: https://www.blackbox.ai/api-management
@@ -399,6 +426,7 @@ bluesminds:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.bluesminds.com
   api_key_url: https://bluesminds.com
@@ -412,6 +440,7 @@ byteplus:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://console.byteplus.com/ark
   api_key_url: https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey
@@ -425,6 +454,7 @@ bytez:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://bytez.com
 cerebras:
@@ -436,6 +466,7 @@ cerebras:
   surfaces:
     - llm
   models_dev_id: cerebras
+  litellm_id: cerebras
   free_tier: true
   website: https://inference.cerebras.ai
   api_key_url: https://cloud.cerebras.ai/platform
@@ -448,6 +479,7 @@ charm-hyper:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://hyper.charm.land
   models_url: https://hyper.charm.land/v1/models
@@ -460,6 +492,7 @@ chat-oripe:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://api.oriper.com
   models_url: https://api.oriper.com/v1/models
@@ -472,6 +505,7 @@ chatanywhere:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://chatanywhere.tech
   models_url: https://api.chatanywhere.org/v1/models
@@ -484,6 +518,7 @@ cheaperinference:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://cheaperinference.com/?utm_source=omniroute
 chenzk:
   name: Chenzk API
@@ -494,6 +529,7 @@ chenzk:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://chenzk.top
   models_url: https://chenzk.top/v1/models
 chutes:
@@ -505,6 +541,7 @@ chutes:
   surfaces:
     - llm
   models_dev_id: chutes
+  no_litellm: true
   website: https://chutes.ai
   api_key_url: https://chutes.ai/app/api
 cloudcode-one:
@@ -516,6 +553,7 @@ cloudcode-one:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://cloudcode.one
   models_url: https://api.cloudcode.one/v1/models
@@ -528,6 +566,7 @@ cloudflare-ai:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: cloudflare
   free_tier: true
   website: https://developers.cloudflare.com/workers-ai
   api_key_url: https://dash.cloudflare.com/profile/api-tokens
@@ -540,6 +579,7 @@ clova-studio:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://api.ncloud-docs.com/docs/en/ai-naver-clovastudio-summary
 codestral:
   name: Codestral
@@ -550,6 +590,7 @@ codestral:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: codestral
   website: https://mistral.ai
 cohere:
   name: Cohere
@@ -562,6 +603,7 @@ cohere:
     - embedding
     - rerank
   models_dev_id: cohere
+  litellm_id: cohere
   free_tier: true
   website: https://cohere.com
   api_key_url: https://dashboard.cohere.com/api-keys
@@ -577,6 +619,7 @@ command-code:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://commandcode.ai/
   models_url: https://api.commandcode.ai/provider/v1/models
 coze:
@@ -588,6 +631,7 @@ coze:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://coze.com
 crof:
@@ -599,6 +643,7 @@ crof:
   surfaces:
     - llm
   models_dev_id: crof
+  no_litellm: true
   website: https://crof.ai
 dahl:
   name: Dahl
@@ -609,6 +654,7 @@ dahl:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://inference.dahl.global
 databricks:
@@ -620,6 +666,7 @@ databricks:
   surfaces:
     - llm
   models_dev_id: databricks
+  litellm_id: databricks
   website: https://www.databricks.com
 deepinfra:
   name: DeepInfra
@@ -631,6 +678,7 @@ deepinfra:
     - llm
     - embedding
   models_dev_id: deepinfra
+  litellm_id: deepinfra
   free_tier: true
   website: https://deepinfra.com
 deepseek:
@@ -642,6 +690,7 @@ deepseek:
   surfaces:
     - llm
   models_dev_id: deepseek
+  litellm_id: deepseek
   website: https://platform.deepseek.com
   api_key_url: https://platform.deepseek.com/api_keys
   quirks:
@@ -655,6 +704,7 @@ dgrid:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://dgrid.ai
   models_url: https://api.dgrid.ai/v1/models
@@ -667,6 +717,7 @@ dify:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://dify.ai
 digitalocean:
@@ -678,6 +729,7 @@ digitalocean:
   surfaces:
     - llm
   models_dev_id: digitalocean
+  no_litellm: true
   website: https://docs.digitalocean.com/products/ai-platform/
   models_url: https://inference.do-ai.run/v1/models
 dit:
@@ -689,6 +741,7 @@ dit:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://dit.ai
   models_url: https://api.dit.ai/v1/models
 docker-model-runner:
@@ -701,6 +754,7 @@ docker-model-runner:
     - llm
     - embedding
   no_models_dev: true
+  no_litellm: true
   website: https://docs.docker.com/ai/model-runner
 doubao:
   name: Doubao
@@ -711,6 +765,7 @@ doubao:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://doubao.com
 dxnt:
@@ -722,6 +777,7 @@ dxnt:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.dxnt.com
   models_url: https://www.dxnt.com/v1/models
@@ -734,6 +790,7 @@ electronhub:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.electronhub.ai
   models_url: https://api.electronhub.ai/v1/models
@@ -746,6 +803,7 @@ factory:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://factory.ai
 fastrouter:
   name: FastRouter
@@ -756,6 +814,7 @@ fastrouter:
   surfaces:
     - llm
   models_dev_id: fastrouter
+  no_litellm: true
   free_tier: true
   website: https://fastrouter.ai
   models_url: https://api.fastrouter.ai/api/v1/models
@@ -768,6 +827,7 @@ featherless:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: featherless_ai
   website: https://featherless.ai
   api_key_url: https://featherless.ai/account/api-keys
 featherless-ai:
@@ -779,6 +839,7 @@ featherless-ai:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: featherless_ai
   free_tier: true
   website: https://featherless.ai
 fireworks:
@@ -792,6 +853,7 @@ fireworks:
     - embedding
     - image
   models_dev_id: fireworks-ai
+  litellm_id: fireworks_ai
   free_tier: true
   website: https://fireworks.ai
   api_key_url: https://fireworks.ai/account/api-keys
@@ -806,6 +868,7 @@ free-ai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://free.ai
   models_url: https://api.free.ai/v1/models
@@ -818,6 +881,7 @@ freeaiapikey:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://freeaiapikey.com
   models_url: https://api.freeaiapikey.com/v1/models
 freebuff:
@@ -829,6 +893,7 @@ freebuff:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://freebuff.com
 freeinference:
@@ -840,6 +905,7 @@ freeinference:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://freeinference.org
   models_url: https://freeinference.org/v1/models
@@ -852,6 +918,7 @@ freemodel-dev:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://freemodel.dev
   models_url: https://api.freemodel.dev/v1/models
@@ -864,6 +931,7 @@ freetheai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://freetheai.xyz
   models_url: https://api.freetheai.xyz/v1/models
@@ -876,6 +944,7 @@ friendliai:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: friendliai
   free_tier: true
   website: https://friendli.ai
   models_url: https://api.friendli.ai/serverless/v1/models
@@ -888,6 +957,7 @@ galadriel:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://galadriel.com
 gemini:
   name: Gemini (Google AI Studio)
@@ -900,6 +970,7 @@ gemini:
     - llm
     - embedding
   models_dev_id: google
+  litellm_id: gemini
   free_tier: true
   website: https://aistudio.google.com
   api_key_url: https://aistudio.google.com/app/apikey
@@ -912,6 +983,7 @@ gigachat:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: gigachat
   website: https://developers.sber.ru
 gitlawb:
   name: Gitlawb Opengateway (MiMo)
@@ -922,6 +994,7 @@ gitlawb:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://opengateway.gitlawb.com
 glm:
   name: GLM Coding
@@ -932,6 +1005,7 @@ glm:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://z.ai/subscribe
   api_key_url: https://open.bigmodel.cn/usercenter/apikeys
 glm-cn:
@@ -943,6 +1017,7 @@ glm-cn:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://open.bigmodel.cn
   api_key_url: https://open.bigmodel.cn/usercenter/apikeys
 groq:
@@ -956,6 +1031,7 @@ groq:
     - stt
     - tts
   models_dev_id: groq
+  litellm_id: groq
   free_tier: true
   website: https://groq.com
   api_key_url: https://console.groq.com/keys
@@ -968,6 +1044,7 @@ hackclub:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://ai.hackclub.com
   models_url: https://ai.hackclub.com/proxy/v1/models
@@ -981,6 +1058,7 @@ haiper:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://haiper.ai
 hcnsec:
   name: Huancheng Public API
@@ -991,6 +1069,7 @@ hcnsec:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://api.hcnsec.cn
   models_url: https://api.hcnsec.cn/v1/models
@@ -1003,6 +1082,7 @@ helixmind:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://helixmind.online
   models_url: https://helixmind.online/v1/models
 helyxai:
@@ -1014,6 +1094,7 @@ helyxai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://helyxai.space
   models_url: https://helyxai.space/v1/models
@@ -1026,6 +1107,7 @@ heroku:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: heroku
   website: https://www.heroku.com
 huggingface:
   name: HuggingFace
@@ -1036,6 +1118,7 @@ huggingface:
   surfaces:
     - llm
   models_dev_id: huggingface
+  no_litellm: true
   free_tier: true
   website: https://huggingface.co
   models_url: https://router.huggingface.co/v1/models
@@ -1048,6 +1131,7 @@ hyperbolic:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: hyperbolic
   free_tier: true
   website: https://hyperbolic.xyz
   api_key_url: https://app.hyperbolic.xyz/settings
@@ -1061,6 +1145,7 @@ ideogram:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://ideogram.ai
 iflytek:
   name: iFlytek Spark
@@ -1071,6 +1156,7 @@ iflytek:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://xinghuo.xfyun.cn
 inception:
@@ -1082,6 +1168,7 @@ inception:
   surfaces:
     - llm
   models_dev_id: inception
+  litellm_id: inception
   free_tier: true
   website: https://docs.inceptionlabs.ai
 inference-net:
@@ -1093,6 +1180,7 @@ inference-net:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://inference.net
 internlm:
@@ -1104,6 +1192,7 @@ internlm:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://internlm.intern-ai.org.cn/
 kenari:
@@ -1115,6 +1204,7 @@ kenari:
   surfaces:
     - llm
   models_dev_id: kenari
+  no_litellm: true
   website: https://kenari.id
   models_url: https://kenari.id/v1/models
 kie:
@@ -1126,6 +1216,7 @@ kie:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://kie.ai
 kilo-gateway:
   name: Kilo Gateway
@@ -1136,6 +1227,7 @@ kilo-gateway:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://kilo.ai
   api_key_url: https://kilo.ai/dashboard?tab=apiKeys
   models_url: https://api.kilo.ai/api/gateway/models
@@ -1148,6 +1240,7 @@ kimchi:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://kimchi.dev
 kimi:
   name: Kimi (Legacy Moonshot API)
@@ -1158,6 +1251,7 @@ kimi:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://platform.kimi.ai?aff=omniroute
   api_key_url: https://platform.moonshot.ai/console/api-keys
 kimi-k3:
@@ -1169,6 +1263,7 @@ kimi-k3:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
 lambda-ai:
   name: Lambda AI
   kind: openaicompat
@@ -1178,6 +1273,7 @@ lambda-ai:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: lambda_ai
   website: https://lambda.ai
 lemonade:
   name: Lemonade
@@ -1188,6 +1284,7 @@ lemonade:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: lemonade
   website: https://lemonade-server.ai
 leonardo:
   name: Leonardo AI
@@ -1198,6 +1295,7 @@ leonardo:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://leonardo.ai
 liquid:
   name: Liquid AI
@@ -1208,6 +1306,7 @@ liquid:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://liquid.ai
   models_url: https://inference.liquid.ai/v1/models
@@ -1220,6 +1319,7 @@ literouter:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://literouter.com
   models_url: https://api.literouter.com/v1/models
@@ -1233,6 +1333,7 @@ llama-cpp:
     - llm
     - embedding
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/ggml-org/llama.cpp
 llamafile:
   name: llamafile
@@ -1243,6 +1344,7 @@ llamafile:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/Mozilla-Ocho/llamafile
 llamagate:
   name: LlamaGate
@@ -1253,6 +1355,7 @@ llamagate:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: llamagate
   website: https://llamagate.ai
 llm-kiwi:
   name: LLM.Kiwi
@@ -1263,6 +1366,7 @@ llm-kiwi:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://llm.kiwi
   models_url: https://api.llm.kiwi/v1/models
@@ -1275,6 +1379,7 @@ llm7:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://llm7.io
   api_key_url: https://llm7.io
@@ -1288,6 +1393,7 @@ llmgateway:
   surfaces:
     - llm
   models_dev_id: llmgateway
+  no_litellm: true
   free_tier: true
   website: https://llmgateway.io
   models_url: https://api.llmgateway.io/v1/models
@@ -1301,6 +1407,7 @@ lmstudio:
     - llm
     - embedding
   no_models_dev: true
+  no_litellm: true
   website: https://lmstudio.ai
 longcat:
   name: LongCat AI
@@ -1311,6 +1418,7 @@ longcat:
   surfaces:
     - llm
   models_dev_id: longcat
+  no_litellm: true
   free_tier: true
   website: https://longcat.chat/platform/docs
 meganova-ai:
@@ -1322,6 +1430,7 @@ meganova-ai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://meganova.ai
   models_url: https://api.meganova.ai/v1/models
@@ -1334,6 +1443,7 @@ meta-llama:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: meta_llama
   website: https://llama.developer.meta.com
 minimax:
   name: Minimax Coding
@@ -1344,6 +1454,7 @@ minimax:
   surfaces:
     - llm
   models_dev_id: minimax
+  litellm_id: minimax
   website: https://www.minimax.io
   api_key_url: https://platform.minimaxi.com/user-center/basic-information/interface-key
   models_url: https://api.minimax.io/v1/models
@@ -1357,6 +1468,7 @@ mistral:
     - llm
     - embedding
   models_dev_id: mistral
+  litellm_id: mistral
   free_tier: true
   website: https://mistral.ai
   api_key_url: https://console.mistral.ai/api-keys
@@ -1372,6 +1484,7 @@ mixlayer:
   surfaces:
     - llm
   models_dev_id: mixlayer
+  no_litellm: true
   free_tier: true
   website: https://www.mixlayer.com
   models_url: https://models.mixlayer.ai/v1/models
@@ -1384,6 +1497,7 @@ mlx-lm:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/ml-explore/mlx-lm
 mnn-ai:
   name: MNN AI
@@ -1394,6 +1508,7 @@ mnn-ai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://mnnai.ru
   models_url: https://api.mnnai.ru/v1/models
@@ -1406,6 +1521,7 @@ modal:
   surfaces:
     - llm
   models_dev_id: modal
+  no_litellm: true
   free_tier: true
   website: https://modal.com/docs
 modelscope:
@@ -1417,6 +1533,7 @@ modelscope:
   surfaces:
     - llm
   models_dev_id: modelscope
+  no_litellm: true
   free_tier: true
   website: https://modelscope.cn
   models_url: https://api-inference.modelscope.cn/v1/models
@@ -1429,6 +1546,7 @@ monsterapi:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://monsterapi.ai
 morph:
@@ -1440,6 +1558,7 @@ morph:
   surfaces:
     - llm
   models_dev_id: morph
+  litellm_id: morph
   free_tier: true
   website: https://morphllm.com
   api_key_url: https://morphllm.com
@@ -1452,6 +1571,7 @@ naga-ac:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://naga.ac
   models_url: https://api.naga.ac/v1/models
@@ -1464,6 +1584,7 @@ naga-ai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://naga.ac
   models_url: https://api.naga.ac/v1/models
@@ -1476,6 +1597,7 @@ nanogpt:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://nano-gpt.com
   models_url: https://nano-gpt.com/api/v1/models
 nara:
@@ -1487,6 +1609,7 @@ nara:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://bynara.id
 navy:
@@ -1498,6 +1621,7 @@ navy:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://api.navy
   models_url: https://api.navy/v1/models
@@ -1510,6 +1634,7 @@ nebius:
   surfaces:
     - llm
   models_dev_id: nebius
+  litellm_id: nebius
   free_tier: true
   website: https://nebius.com
   api_key_url: https://studio.nebius.com/settings/api-keys
@@ -1522,6 +1647,7 @@ nlpcloud:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://docs.nlpcloud.com
 nous-research:
@@ -1533,6 +1659,7 @@ nous-research:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://portal.nousresearch.com/help
 novita:
@@ -1544,6 +1671,7 @@ novita:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: novita
   free_tier: true
   website: https://novita.ai
   models_url: https://api.novita.ai/openai/v1/models
@@ -1556,6 +1684,7 @@ nscale:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: nscale
   free_tier: true
   website: https://nscale.com
 nube:
@@ -1567,6 +1696,7 @@ nube:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://nube.sh
   models_url: https://ai.nube.sh/api/v1/models
 nvidia:
@@ -1578,6 +1708,7 @@ nvidia:
   surfaces:
     - llm
   models_dev_id: nvidia
+  litellm_id: nvidia_nim
   free_tier: true
   website: https://build.nvidia.com
   api_key_url: https://build.nvidia.com/settings/api-keys
@@ -1590,6 +1721,7 @@ ofoxai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://ofox.ai
   models_url: https://api.ofox.ai/v1/models
@@ -1603,6 +1735,7 @@ ollama:
     - llm
     - embedding
   no_models_dev: true
+  litellm_id: ollama
   website: https://ollama.com
   quirks:
     - usage-final-chunk-only
@@ -1616,6 +1749,7 @@ ollama-cloud:
   surfaces:
     - llm
   models_dev_id: ollama-cloud
+  litellm_id: ollama
   free_tier: true
   website: https://ollama.com/settings/keys
   models_url: https://ollama.com/api/tags
@@ -1628,6 +1762,7 @@ oobabooga:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/oobabooga/text-generation-webui
 openadapter:
   name: OpenAdapter
@@ -1638,6 +1773,7 @@ openadapter:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://openadapter.dev
   models_url: https://api.openadapter.in/v1/models
@@ -1655,6 +1791,7 @@ openai:
     - stt
     - moderation
   models_dev_id: openai
+  litellm_id: openai
   website: https://platform.openai.com
   api_key_url: https://platform.openai.com/api-keys
   quirks:
@@ -1668,6 +1805,7 @@ opencode:
   surfaces:
     - llm
   models_dev_id: opencode
+  no_litellm: true
   free_tier: true
   website: https://opencode.ai
   models_url: https://opencode.ai/zen/v1/models
@@ -1680,6 +1818,7 @@ opencode-go:
   surfaces:
     - llm
   models_dev_id: opencode-go
+  no_litellm: true
   website: https://opencode.ai/auth
   api_key_url: https://opencode.ai/auth
 openference-api:
@@ -1691,6 +1830,7 @@ openference-api:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://openference.com
 openrouter:
@@ -1702,6 +1842,7 @@ openrouter:
   surfaces:
     - llm
   models_dev_id: openrouter
+  litellm_id: openrouter
   free_tier: true
   website: https://openrouter.ai
   api_key_url: https://openrouter.ai/settings/keys
@@ -1716,6 +1857,7 @@ openvecta:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://openvecta.com
 orcarouter:
@@ -1727,6 +1869,7 @@ orcarouter:
   surfaces:
     - llm
   models_dev_id: orcarouter
+  no_litellm: true
   website: https://www.orcarouter.ai
 ovhcloud:
   name: OVHcloud AI
@@ -1737,6 +1880,7 @@ ovhcloud:
   surfaces:
     - llm
   models_dev_id: ovhcloud
+  litellm_id: ovhcloud
   website: https://www.ovhcloud.com
   models_url: https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models
 perplexity:
@@ -1748,6 +1892,7 @@ perplexity:
   surfaces:
     - llm
   models_dev_id: perplexity
+  litellm_id: perplexity
   website: https://www.perplexity.ai
   api_key_url: https://www.perplexity.ai/settings/api
 pioneer:
@@ -1759,6 +1904,7 @@ pioneer:
   surfaces:
     - llm
   models_dev_id: pioneer
+  no_litellm: true
   free_tier: true
   website: https://pioneer.ai
 plamo:
@@ -1770,6 +1916,7 @@ plamo:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://plamo.preferredai.jp/api
 poixe-ai:
   name: Poixe AI
@@ -1780,6 +1927,7 @@ poixe-ai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://poixe.com
   models_url: https://api.poixe.com/v1/models
@@ -1792,6 +1940,7 @@ pollinations:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://pollinations.ai
 poolside:
@@ -1803,6 +1952,7 @@ poolside:
   surfaces:
     - llm
   models_dev_id: poolside
+  no_litellm: true
   free_tier: true
   website: https://poolside.ai
   api_key_url: https://platform.poolside.ai/api-keys
@@ -1816,6 +1966,7 @@ predibase:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://predibase.com
 publicai:
   name: PublicAI
@@ -1826,6 +1977,7 @@ publicai:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: publicai
   website: https://publicai.co
 qianfan:
   name: Baidu Qianfan
@@ -1836,6 +1988,7 @@ qianfan:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://cloud.baidu.com/product-s/qianfan_home
   models_url: https://qianfan.baidubce.com/v2/models
 qiniu:
@@ -1847,6 +2000,7 @@ qiniu:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://www.qiniu.com
   models_url: https://api.qnaigc.com/v1/models
 qoder:
@@ -1858,6 +2012,7 @@ qoder:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://qoder.com
 qwen-cloud:
@@ -1869,6 +2024,7 @@ qwen-cloud:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://www.qwencloud.com/
   models_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models
 regolo:
@@ -1880,6 +2036,7 @@ regolo:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://regolo.ai
 reka:
   name: Reka
@@ -1890,6 +2047,7 @@ reka:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://docs.reka.ai/chat/overview
 requesty:
@@ -1901,6 +2059,7 @@ requesty:
   surfaces:
     - llm
   models_dev_id: requesty
+  no_litellm: true
   free_tier: true
   website: https://requesty.ai
   models_url: https://router.requesty.ai/v1/models
@@ -1913,6 +2072,7 @@ routeway:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://routeway.ai
   models_url: https://api.routeway.ai/v1/models
@@ -1925,6 +2085,7 @@ sambanova:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: sambanova
   free_tier: true
   website: https://sambanova.ai
   api_key_url: https://cloud.sambanova.ai/apis
@@ -1937,6 +2098,7 @@ sarvam:
   surfaces:
     - llm
   models_dev_id: sarvam
+  litellm_id: sarvam
   free_tier: true
   website: https://docs.sarvam.ai
 scaleway:
@@ -1948,6 +2110,7 @@ scaleway:
   surfaces:
     - llm
   models_dev_id: scaleway
+  litellm_id: scaleway
   free_tier: true
   website: https://www.scaleway.com/en/docs/ai-data/generative-apis/
 sealion:
@@ -1959,6 +2122,7 @@ sealion:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://sea-lion.ai
 sensenova:
@@ -1970,6 +2134,7 @@ sensenova:
   surfaces:
     - llm
   models_dev_id: sensenova
+  no_litellm: true
   free_tier: true
   website: https://platform.sensenova.cn
 siliconflow:
@@ -1981,6 +2146,7 @@ siliconflow:
   surfaces:
     - llm
   models_dev_id: siliconflow
+  no_litellm: true
   free_tier: true
   website: https://cloud.siliconflow.com
   api_key_url: https://cloud.siliconflow.com/account/ak
@@ -1993,6 +2159,7 @@ snowflake:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: snowflake
   website: https://www.snowflake.com
 sparkdesk:
   name: SparkDesk
@@ -2003,6 +2170,7 @@ sparkdesk:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://xinghuo.xfyun.cn
 speka:
@@ -2014,6 +2182,7 @@ speka:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://speka.me
   models_url: https://speka.me/v1/models
@@ -2026,6 +2195,7 @@ stepfun:
   surfaces:
     - llm
   models_dev_id: stepfun
+  no_litellm: true
   free_tier: true
   website: https://stepfun.com
 sumopod:
@@ -2037,6 +2207,7 @@ sumopod:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://ai.sumopod.com
   models_url: https://ai.sumopod.com/v1/models
 synthetic:
@@ -2048,6 +2219,7 @@ synthetic:
   surfaces:
     - llm
   models_dev_id: synthetic
+  no_litellm: true
   website: https://synthetic.new
   models_url: https://api.synthetic.new/openai/v1/models
 tabitoken:
@@ -2059,6 +2231,7 @@ tabitoken:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://tabitoken.com
   models_url: https://tabitoken.com/v1/models
 tencent:
@@ -2070,6 +2243,7 @@ tencent:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: tencent
   free_tier: true
   website: https://hunyuan.tencent.com
   api_key_url: https://console.cloud.tencent.com/hunyuan/api-key
@@ -2084,6 +2258,7 @@ together:
     - embedding
     - image
   models_dev_id: togetherai
+  litellm_id: together_ai
   website: https://www.together.ai
   api_key_url: https://api.together.xyz/settings/api-keys
 token-kiosk:
@@ -2095,6 +2270,7 @@ token-kiosk:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://agent-router.gaib.ai
   models_url: https://agent-router.gaib.ai/v1/models
 tokenreply:
@@ -2106,6 +2282,7 @@ tokenreply:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.tokenreply.com
   models_url: https://api.tokenreply.com/v1/models
@@ -2118,6 +2295,7 @@ tokenrouter:
   surfaces:
     - llm
   models_dev_id: tokenrouter
+  no_litellm: true
   free_tier: true
   website: https://tokenrouter.com
   api_key_url: https://www.tokenrouter.com
@@ -2131,6 +2309,7 @@ typhoon:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://docs.opentyphoon.ai
 udio:
@@ -2143,6 +2322,7 @@ udio:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://udio.com
 uncloseai:
   name: UncloseAI
@@ -2153,6 +2333,7 @@ uncloseai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://uncloseai.com
 unorouter:
@@ -2164,6 +2345,7 @@ unorouter:
   surfaces:
     - llm
   models_dev_id: unorouter
+  no_litellm: true
   free_tier: true
   website: https://unorouter.ai
   models_url: https://api.unorouter.com/v1/models
@@ -2176,6 +2358,7 @@ upstage:
   surfaces:
     - llm
   models_dev_id: upstage
+  no_litellm: true
   website: https://www.upstage.ai
 v0-vercel:
   name: v0 (Vercel)
@@ -2186,6 +2369,7 @@ v0-vercel:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://v0.dev
 venice:
   name: Venice.ai
@@ -2196,6 +2380,7 @@ venice:
   surfaces:
     - llm
   models_dev_id: venice
+  no_litellm: true
   website: https://venice.ai
   api_key_url: https://venice.ai/settings/api
 vercel-ai-gateway:
@@ -2207,6 +2392,7 @@ vercel-ai-gateway:
   surfaces:
     - llm
   models_dev_id: vercel
+  litellm_id: vercel_ai_gateway
   website: https://vercel.com/docs/ai-gateway
   api_key_url: https://vercel.com/dashboard/~/ai-gateway
 vertex:
@@ -2219,6 +2405,7 @@ vertex:
     - llm
     - embedding
   models_dev_id: google-vertex
+  litellm_id: vertex_ai-language-models
   free_tier: true
   website: https://cloud.google.com/vertex-ai
   api_key_url: https://console.cloud.google.com/iam-admin/serviceaccounts
@@ -2232,6 +2419,7 @@ vertex-anthropic:
   surfaces:
     - llm
   models_dev_id: google-vertex-anthropic
+  no_litellm: true
   website: https://cloud.google.com/vertex-ai
   quirks:
     - requires-max-tokens
@@ -2245,6 +2433,7 @@ vllm:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://docs.vllm.ai
 void-ai:
   name: Void AI
@@ -2255,6 +2444,7 @@ void-ai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://voidai.app
   models_url: https://api.voidai.app/v1/models
@@ -2267,6 +2457,7 @@ volcengine:
   surfaces:
     - llm
   models_dev_id: volcengine
+  litellm_id: volcengine
   website: https://www.volcengine.com
 volcengine-ark:
   name: Volcengine Ark
@@ -2277,6 +2468,7 @@ volcengine-ark:
   surfaces:
     - llm
   no_models_dev: true
+  litellm_id: volcengine
   website: https://ark.cn-beijing.volces.com
   api_key_url: https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey
 voyage:
@@ -2288,6 +2480,7 @@ voyage:
   surfaces:
     - embedding
   no_models_dev: true
+  litellm_id: voyage
   website: https://docs.voyageai.com
 wafer:
   name: Wafer AI
@@ -2298,6 +2491,7 @@ wafer:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://wafer.ai
 wandb:
   name: Weights & Biases Inference
@@ -2308,6 +2502,7 @@ wandb:
   surfaces:
     - llm
   models_dev_id: wandb
+  litellm_id: wandb
   website: https://wandb.ai
 writer:
   name: Writer
@@ -2318,6 +2513,7 @@ writer:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://dev.writer.com
 x5lab:
   name: X5Lab
@@ -2328,6 +2524,7 @@ x5lab:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://x5lab.dev
   models_url: https://api.x5lab.dev/v1/models
 xai:
@@ -2339,6 +2536,7 @@ xai:
   surfaces:
     - llm
   models_dev_id: xai
+  litellm_id: xai
   website: https://x.ai
   api_key_url: https://console.x.ai
 xiaomi-mimo:
@@ -2350,6 +2548,7 @@ xiaomi-mimo:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://mimo.mi.com
   api_key_url: https://platform.xiaomimimo.com/console/api-keys
 xiaomi-mimo-token-plan:
@@ -2361,6 +2560,7 @@ xiaomi-mimo-token-plan:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://mimo.mi.com
 xiaomi-tokenplan:
   name: Xiaomi MiMo (Token Plan)
@@ -2371,6 +2571,7 @@ xiaomi-tokenplan:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://mimo.xiaomi.com
   api_key_url: https://mimo.xiaomi.com
 xinference:
@@ -2383,6 +2584,7 @@ xinference:
     - llm
     - embedding
   no_models_dev: true
+  no_litellm: true
   website: https://inference.readthedocs.io
 yi:
   name: Yi (01.AI)
@@ -2393,6 +2595,7 @@ yi:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   website: https://01.ai
 yolo-auto:
   name: Yolo-Auto
@@ -2403,6 +2606,7 @@ yolo-auto:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://yolo-auto.com
   models_url: https://yolo-auto.com/v1/models
@@ -2415,6 +2619,7 @@ zai:
   surfaces:
     - llm
   models_dev_id: zai
+  litellm_id: zai
   website: https://open.bigmodel.cn
 zenmux:
   name: ZenMux
@@ -2425,6 +2630,7 @@ zenmux:
   surfaces:
     - llm
   models_dev_id: zenmux
+  no_litellm: true
   free_tier: true
   website: https://zenmux.ai
   models_url: https://zenmux.ai/api/v1/models
@@ -2437,6 +2643,7 @@ zerolimitai:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://www.zerolimitai.com
   models_url: https://www.zerolimitai.com/api/v1/models
@@ -2449,6 +2656,7 @@ zylo-api:
   surfaces:
     - llm
   no_models_dev: true
+  no_litellm: true
   free_tier: true
   website: https://zyloai.net
   models_url: https://api.zyloai.net/v1/models
