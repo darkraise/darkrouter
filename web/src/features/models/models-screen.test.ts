@@ -162,7 +162,7 @@ describe("tierWarning", () => {
   it("warns that nothing routes to an unsanctioned tier", () => {
     const warning = tierWarning(tier("avoid"))
     expect(warning).toBe(
-      "not sanctioned by the vendor — nothing routes here until you allow it on the provider",
+      "free tier not sanctioned by the vendor — allow it on the provider before the router will use it",
     )
   })
   it("stays quiet for every other verdict and for no tier at all", () => {

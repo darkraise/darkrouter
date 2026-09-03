@@ -90,7 +90,7 @@ export function freeLabel(t: FreeTier | null): string | null {
  *  refuses to use until the operator opts the provider in. */
 export function tierWarning(t: FreeTier | null): string | null {
   if (!t || t.tos !== "avoid") return null
-  return "not sanctioned by the vendor — nothing routes here until you allow it on the provider"
+  return "free tier not sanctioned by the vendor — allow it on the provider before the router will use it"
 }
 
 export function priceBand(p: Pricing | null): string {
@@ -186,10 +186,6 @@ function ServesCell({ row }: { row: Row }) {
   )
 }
 
-// `darkraise-ui` bundles its own tanstack/react-table internally and does not
-// re-export its column types, so the shape is pulled from the component's own
-// signature rather than from a second, independently-versioned install of the
-// same package — the two do not agree on what a ColumnDef looks like.
 function ModelCell({ row }: { row: Model }) {
   const warning = tierWarning(row.free_tier)
   return (
@@ -197,7 +193,7 @@ function ModelCell({ row }: { row: Model }) {
       <span className="font-mono text-sm">{row.model}</span>
       {warning && (
         <span className="flex items-start gap-1.5 text-sm font-medium text-[hsl(var(--warning))]">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <TriangleAlert className="mt-0.5 size-[var(--icon-size)] shrink-0" aria-hidden />
           {warning}
         </span>
       )}
@@ -205,6 +201,10 @@ function ModelCell({ row }: { row: Model }) {
   )
 }
 
+// `darkraise-ui` bundles its own tanstack/react-table internally and does not
+// re-export its column types, so the shape is pulled from the component's own
+// signature rather than from a second, independently-versioned install of the
+// same package — the two do not agree on what a ColumnDef looks like.
 type Columns = Parameters<typeof DataTable<Row, unknown>>[0]["columns"]
 
 // The facet columns take string headers rather than sortable ones: a facet
@@ -215,9 +215,7 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
     {
       accessorKey: "model",
       header: ({ column }) => <ColumnHeader column={column} title="Model" />,
-      cell: ({ row }) => (
-        <ModelCell row={row.original} />
-      ),
+      cell: ({ row }) => <ModelCell row={row.original} />,
     },
     {
       id: "serves",
