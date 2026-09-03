@@ -507,36 +507,6 @@ chutes:
   models_dev_id: chutes
   website: https://chutes.ai
   api_key_url: https://chutes.ai/app/api
-claude:
-  name: Claude Code
-  kind: openaicompat
-  base_url: https://api.anthropic.com/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://claude.ai
-cline:
-  name: Cline
-  kind: openaicompat
-  base_url: https://api.cline.bot/api/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://cline.bot
-clinepass:
-  name: ClinePass
-  kind: openaicompat
-  base_url: https://api.cline.bot/api/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://cline.bot
 cloudcode-one:
   name: CloudCode.ONE
   kind: openaicompat
@@ -571,26 +541,6 @@ clova-studio:
     - llm
   no_models_dev: true
   website: https://api.ncloud-docs.com/docs/en/ai-naver-clovastudio-summary
-codebuddy-cn:
-  name: CodeBuddy CN
-  kind: openaicompat
-  base_url: https://copilot.tencent.com/v2
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://copilot.tencent.com
-codebuddy-intl:
-  name: CodeBuddy
-  kind: openaicompat
-  base_url: https://www.codebuddy.ai/v2
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://www.codebuddy.ai
 codestral:
   name: Codestral
   kind: openaicompat
@@ -601,16 +551,6 @@ codestral:
     - llm
   no_models_dev: true
   website: https://mistral.ai
-codex:
-  name: OpenAI Codex
-  kind: openaicompat
-  base_url: https://chatgpt.com/backend-api/codex
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://chatgpt.com/codex
 cohere:
   name: Cohere
   kind: openaicompat
@@ -639,17 +579,6 @@ command-code:
   no_models_dev: true
   website: https://commandcode.ai/
   models_url: https://api.commandcode.ai/provider/v1/models
-commandcode:
-  name: Command Code
-  kind: openaicompat
-  base_url: https://api.commandcode.ai/alpha/generate
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://commandcode.ai
-  api_key_url: https://commandcode.ai/studio
 coze:
   name: Coze
   kind: openaicompat
@@ -671,16 +600,6 @@ crof:
     - llm
   models_dev_id: crof
   website: https://crof.ai
-cursor:
-  name: Cursor IDE
-  kind: openaicompat
-  base_url: https://api2.cursor.sh
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://cursor.com
 dahl:
   name: Dahl
   kind: openaicompat
@@ -984,16 +903,6 @@ gemini:
   free_tier: true
   website: https://aistudio.google.com
   api_key_url: https://aistudio.google.com/app/apikey
-gemini-cli:
-  name: Gemini CLI
-  kind: openaicompat
-  base_url: https://cloudcode-pa.googleapis.com/v1internal
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://github.com/google-gemini/gemini-cli
 gigachat:
   name: GigaChat (Sber)
   kind: openaicompat
@@ -1004,27 +913,6 @@ gigachat:
     - llm
   no_models_dev: true
   website: https://developers.sber.ru
-github:
-  name: GitHub Copilot
-  kind: openaicompat
-  base_url: https://api.githubcopilot.com
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-    - embedding
-  no_models_dev: true
-  website: https://github.com/features/copilot
-gitlab:
-  name: GitLab Duo
-  kind: openaicompat
-  base_url: https://gitlab.com/api/v4
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  models_dev_id: gitlab
-  website: https://gitlab.com
 gitlawb:
   name: Gitlawb Opengateway (MiMo)
   kind: openaicompat
@@ -1057,16 +945,6 @@ glm-cn:
   no_models_dev: true
   website: https://open.bigmodel.cn
   api_key_url: https://open.bigmodel.cn/usercenter/apikeys
-grok-cli:
-  name: Grok CLI (Grok Build)
-  kind: openaicompat
-  base_url: https://cli-chat-proxy.grok.com/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://x.ai
 groq:
   name: Groq
   kind: openaicompat
@@ -1184,16 +1062,6 @@ ideogram:
     - llm
   no_models_dev: true
   website: https://ideogram.ai
-iflow:
-  name: iFlow AI
-  kind: openaicompat
-  base_url: https://apis.iflow.cn/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://iflow.cn
 iflytek:
   name: iFlytek Spark
   kind: openaicompat
@@ -1271,16 +1139,6 @@ kilo-gateway:
   website: https://kilo.ai
   api_key_url: https://kilo.ai/dashboard?tab=apiKeys
   models_url: https://api.kilo.ai/api/gateway/models
-kilocode:
-  name: Kilo Code
-  kind: openaicompat
-  base_url: https://api.kilo.ai/api/openrouter
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://kilocode.ai
 kimchi:
   name: Kimchi
   kind: openaicompat
@@ -1311,16 +1169,6 @@ kimi-k3:
   surfaces:
     - llm
   no_models_dev: true
-kiro:
-  name: Kiro AI
-  kind: openaicompat
-  base_url: https://runtime.us-east-1.kiro.dev/generateAssistantResponse
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://kiro.dev
 lambda-ai:
   name: Lambda AI
   kind: openaicompat
@@ -1487,15 +1335,6 @@ meta-llama:
     - llm
   no_models_dev: true
   website: https://llama.developer.meta.com
-mimo-free:
-  name: MiMo Code Free
-  kind: openaicompat
-  base_url: https://api.xiaomimimo.com/api/free-ai/openai/chat
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
 minimax:
   name: Minimax Coding
   kind: openaicompat
@@ -1508,17 +1347,6 @@ minimax:
   website: https://www.minimax.io
   api_key_url: https://platform.minimaxi.com/user-center/basic-information/interface-key
   models_url: https://api.minimax.io/v1/models
-minimax-cn:
-  name: Minimax (China)
-  kind: openaicompat
-  base_url: https://api.minimaxi.com/anthropic/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  models_dev_id: minimax-cn
-  website: https://www.minimaxi.com
-  api_key_url: https://platform.minimaxi.com/user-center/basic-information/interface-key
 mistral:
   name: Mistral
   kind: openaicompat
@@ -1557,15 +1385,6 @@ mlx-lm:
     - llm
   no_models_dev: true
   website: https://github.com/ml-explore/mlx-lm
-mmf:
-  name: MMF
-  kind: openaicompat
-  base_url: https://api.xiaomimimo.com/api/free-ai/openai/chat
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
 mnn-ai:
   name: MNN AI
   kind: openaicompat
@@ -1785,7 +1604,6 @@ ollama:
     - embedding
   no_models_dev: true
   website: https://ollama.com
-  api_key_url: https://ollama.com/settings/keys
   quirks:
     - usage-final-chunk-only
   capability_probe: ollama
@@ -1801,16 +1619,6 @@ ollama-cloud:
   free_tier: true
   website: https://ollama.com/settings/keys
   models_url: https://ollama.com/api/tags
-ollama-local:
-  name: Ollama Local
-  kind: openaicompat
-  base_url: http://localhost:11434/api/chat
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://ollama.com
 oobabooga:
   name: Text Generation WebUI
   kind: openaicompat
@@ -1940,17 +1748,6 @@ perplexity:
   surfaces:
     - llm
   models_dev_id: perplexity
-  website: https://www.perplexity.ai
-  api_key_url: https://www.perplexity.ai/settings/api
-perplexity-agent:
-  name: Perplexity Agent
-  kind: openaicompat
-  base_url: https://api.perplexity.ai/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  models_dev_id: perplexity-agent
   website: https://www.perplexity.ai
   api_key_url: https://www.perplexity.ai/settings/api
 pioneer:
@@ -2439,17 +2236,6 @@ vertex-anthropic:
   quirks:
     - requires-max-tokens
   publisher: publishers/anthropic
-vertex-partner:
-  name: Vertex Partner
-  kind: openaicompat
-  base_url: https://aiplatform.googleapis.com
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  website: https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-partner-models
-  api_key_url: https://console.cloud.google.com/iam-admin/serviceaccounts
 vllm:
   name: vLLM
   kind: openaicompat
