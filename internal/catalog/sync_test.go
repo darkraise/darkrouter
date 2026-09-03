@@ -320,3 +320,54 @@ func TestSyncDoesNotOverwriteDiscoveredPriceSource(t *testing.T) {
 		}
 	}
 }
+
+func rowFor(t *testing.T, rows []store.ModelRow, providerID, modelID string) store.ModelRow {
+	t.Helper()
+	for _, r := range rows {
+		if r.ProviderID == providerID && r.ModelID == modelID {
+			return r
+		}
+	}
+	t.Fatalf("no row for %s/%s", providerID, modelID)
+	return store.ModelRow{}
+}
+
+// A discovered price keeps BOTH its stamp and its numbers across a sync. The
+// capabilities half of SyncOnce has always done this; the price half did not,
+// so a row stamped discovered took models.dev's figures and kept the label —
+// the console would then render "measured" over an indexed price.
+func TestSyncKeepsADiscoveredPriceNotJustItsStamp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	ctx := context.Background()
+
+	if err := db.UpsertMetadata(ctx, []store.MetadataRow{{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 111, OutputMicrosPerMTok: 222,
+		PriceSource: string(SourceDiscovered),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rowFor(t, rows, "p", "big")
+	if got.PriceSource != string(SourceDiscovered) {
+		t.Errorf("PriceSource = %q, want discovered", got.PriceSource)
+	}
+	if got.InputMicrosPerMTok != 111 || got.OutputMicrosPerMTok != 222 {
+		t.Errorf("prices = %d/%d, want the discovered 111/222 kept",
+			got.InputMicrosPerMTok, got.OutputMicrosPerMTok)
+	}
+}
