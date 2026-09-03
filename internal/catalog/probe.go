@@ -413,7 +413,7 @@ func (r *listedRate) UnmarshalJSON(b []byte) error {
 // A negative rate is openrouter's "the auto-router decides", which is not a
 // price; one above the ceiling is not a per-token rate.
 func (r listedRate) dollars() (float64, bool) {
-	if !r.known || r.value < 0 || r.value > maxDollarsPerToken {
+	if !r.known || !(r.value >= 0 && r.value <= maxDollarsPerToken) {
 		return 0, false
 	}
 	return r.value, true
@@ -424,7 +424,10 @@ func (r listedRate) dollars() (float64, bool) {
 // it is a documented sentinel rather than a number gone wrong; everything else
 // outside the band, NaN included, is worth a line in the log.
 func (r listedRate) implausible() bool {
-	return r.known && r.value > maxDollarsPerToken
+	if !r.known || r.value < 0 {
+		return false
+	}
+	return !(r.value <= maxDollarsPerToken)
 }
 
 func (r listedRate) quotedDollars() (float64, bool) {
