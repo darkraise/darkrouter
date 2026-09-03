@@ -15,6 +15,7 @@ type MergeInput struct {
 	Providers []provider.Provider
 	Presets   Presets
 	Doc       Doc
+	LiteLLM   LiteLLMDoc
 	Rows      []store.ModelRow
 	Overrides []store.ModelOverride
 }
@@ -44,7 +45,7 @@ func Merge(in MergeInput) []Model {
 			continue
 		}
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
-		out = append(out, mergeOne(row, preset, in.Doc, overrides[[2]string{row.ProviderID, row.ModelID}]))
+		out = append(out, mergeOne(row, preset, in.Doc, in.LiteLLM, overrides[[2]string{row.ProviderID, row.ModelID}]))
 	}
 	// Deterministic order: a snapshot rebuild must not reorder the candidate
 	// list a request sees.
@@ -57,7 +58,7 @@ func Merge(in MergeInput) []Model {
 	return out
 }
 
-func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOverride) Model {
+func mergeOne(row store.ModelRow, preset Preset, doc Doc, litellm LiteLLMDoc, override store.ModelOverride) Model {
 	m := Model{
 		ProviderID: row.ProviderID,
 		ModelID:    row.ModelID,
@@ -103,10 +104,18 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 			Source:                  SourceModelsDev,
 		}
 	}
+	// The index is joined by the preset's own key, never by the provider id: a
+	// provider with no key must miss rather than match a same-named bucket.
+	var fromLiteLLM Pricing
+	if preset.LiteLLMID != "" {
+		if p, ok := litellm[preset.LiteLLMID][row.ModelID]; ok && p.Known {
+			fromLiteLLM = p
+		}
+	}
 	if stored.Source.Authoritative() {
-		m.Pricing = resolvePrice(stored, fromDoc)
+		m.Pricing = resolvePrice(stored, fromDoc, fromLiteLLM)
 	} else {
-		m.Pricing = resolvePrice(fromDoc, stored)
+		m.Pricing = resolvePrice(fromDoc, fromLiteLLM, stored)
 	}
 
 	// A runtime that reports its own capabilities outranks a directory's guess

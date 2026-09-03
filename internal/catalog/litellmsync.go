@@ -27,6 +27,10 @@ type LiteLLMSyncOptions struct {
 	URL      string
 	Interval time.Duration
 	Timeout  time.Duration
+	// OnUpdate is called after a fetch replaces the index. Prices are joined
+	// at merge time, so without it a refreshed index sits unread until
+	// something else happens to rebuild the snapshot.
+	OnUpdate func(context.Context)
 }
 
 func (o LiteLLMSyncOptions) withDefaults() LiteLLMSyncOptions {
@@ -104,6 +108,9 @@ func (s *LiteLLMSyncer) SyncOnce(ctx context.Context) error {
 	previous := s.Doc()
 	s.doc.Store(&fetched)
 	slog.Info("litellm prices synced", "providers", len(fetched), "models", fetched.count(), "was_providers", len(previous), "was_models", previous.count())
+	if s.opts.OnUpdate != nil {
+		s.opts.OnUpdate(ctx)
+	}
 	return nil
 }
 
