@@ -5,9 +5,10 @@ import {
   priceBand,
   priceMarker,
   freeLabel,
+  tierWarning,
   facetRow,
 } from "./models-screen"
-import type { Model, Pricing } from "../../lib/api-types"
+import type { FreeTier, Model, Pricing } from "../../lib/api-types"
 
 const model = (over: Partial<Model> & { model: string }): Model => ({
   providers: ["groq"],
@@ -147,5 +148,30 @@ describe("freeLabel", () => {
     expect(freeLabel({ free_type: "discontinued", monthly_tokens: 0,
       credit_tokens: 0, pool_key: "", tos: "unknown" })).toBeNull()
     expect(freeLabel(null)).toBeNull()
+  })
+})
+
+describe("tierWarning", () => {
+  const tier = (tos: string): FreeTier => ({
+    free_type: "recurring-daily",
+    monthly_tokens: 24_000_000,
+    credit_tokens: 0,
+    pool_key: "groq",
+    tos,
+  })
+  it("warns that nothing routes to an unsanctioned tier", () => {
+    const warning = tierWarning(tier("avoid"))
+    expect(warning).toBe(
+      "not sanctioned by the vendor — nothing routes here until you allow it on the provider",
+    )
+  })
+  it("stays quiet for every other verdict and for no tier at all", () => {
+    // The vocabulary is closed: upstream grades a tier ok, caution, ambiguous,
+    // avoid or unknown. Only the last one the vendor refuses earns a warning.
+    expect(tierWarning(tier("ok"))).toBeNull()
+    expect(tierWarning(tier("caution"))).toBeNull()
+    expect(tierWarning(tier("ambiguous"))).toBeNull()
+    expect(tierWarning(tier("unknown"))).toBeNull()
+    expect(tierWarning(null)).toBeNull()
   })
 })
