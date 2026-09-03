@@ -137,7 +137,7 @@ func foldTier(kept, next catalog.FreeTier) catalog.FreeTier {
 	if next.ToS == "" {
 		return kept
 	}
-	if kept.ToS == "" || (next.Unsanctioned() && !kept.Unsanctioned()) {
+	if kept.ToS == "" || (next.Vetoed() && !kept.Vetoed()) {
 		return next
 	}
 	return kept

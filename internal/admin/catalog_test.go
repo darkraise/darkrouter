@@ -475,4 +475,11 @@ func TestAWithdrawnUnsanctionedTierAsksForNothing(t *testing.T) {
 	if got.OptInRequired {
 		t.Error("a withdrawn tier asked for an opt-in the router does not want")
 	}
+	// The fold ranks on the same question the gates ask. Ranking on the raw
+	// verdict instead would let a withdrawn record outrank a live one and
+	// blank the allowance the reader is actually offered, since freeLabel
+	// renders nothing for a discontinued tier.
+	if got.FreeType == "discontinued" {
+		t.Errorf("the withdrawn record won the fold over a live one: %+v", got)
+	}
 }
