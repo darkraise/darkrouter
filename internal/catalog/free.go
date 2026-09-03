@@ -72,6 +72,13 @@ func SelectModelsForImport(
 		if rules.Price != nil {
 			meta, known = rules.Price(m.ModelID)
 		}
+		// The veto outranks every rule below it. An unsanctioned tier is access
+		// the vendor has not granted, which no price of zero and no `:free`
+		// suffix turns into access it has.
+		if rules.Unsanctioned != nil && rules.Unsanctioned(m.ModelID) {
+			dropped = append(dropped, m.ModelID)
+			continue
+		}
 		if IsFreeModel(m.ModelID, meta, known, rules.Curated) {
 			out = append(out, m)
 			continue
@@ -94,10 +101,35 @@ func SelectModelsForImport(
 	// provider whose free tier the catalogue does describe — OpenCode, whose
 	// premium models answer 401 without a key — keeps being filtered, because
 	// there the rules had something true to say.
+	//
+	// The veto is not part of that bargain. "No account to bill" is an argument
+	// about money; an unsanctioned tier is a question of whether the vendor
+	// permits the access at all, and a fallback that readmitted those would
+	// invert the operator's decision precisely when the filter matched least.
 	if len(out) == 0 && rules.Keyless && len(models) > 0 {
-		return models, nil
+		return withoutUnsanctioned(models, rules.Unsanctioned)
 	}
 	return out, dropped
+}
+
+// withoutUnsanctioned splits a list on the veto. A nil veto keeps everything,
+// which is what a provider no catalogue covers has always seen.
+func withoutUnsanctioned(
+	models []store.DiscoveredModel,
+	unsanctioned func(string) bool,
+) (kept []store.DiscoveredModel, dropped []string) {
+	if unsanctioned == nil {
+		return models, nil
+	}
+	kept = make([]store.DiscoveredModel, 0, len(models))
+	for _, m := range models {
+		if unsanctioned(m.ModelID) {
+			dropped = append(dropped, m.ModelID)
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return kept, dropped
 }
 
 // FreeRules is what one provider's free-only import decides on.
@@ -111,4 +143,12 @@ type FreeRules struct {
 	// Keyless says the provider is reached with no credential of the
 	// operator's. It decides only the empty case — see SelectModelsForImport.
 	Keyless bool
+	// Unsanctioned reports whether the vendor has not sanctioned this model's
+	// free tier. Nil when the operator has opted this provider in, or when no
+	// catalogue covers it.
+	//
+	// A veto rather than a rule: it overrides every way a model could
+	// otherwise qualify as free, because the other three rules answer "does
+	// this cost anything" and this one answers "may it be used at all".
+	Unsanctioned func(modelID string) bool
 }
