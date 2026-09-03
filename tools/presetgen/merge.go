@@ -54,6 +54,10 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 		}
 		p, ok := out.Presets[n.ID]
 		if !ok {
+			// A quirk is worth flagging whether or not this entry ends up
+			// transcribed: the review trail is about what 9router declared,
+			// not about what phase A managed to ingest.
+			out.Conflicts = append(out.Conflicts, quirkConflicts(n.ID, nil, n.Transport.Quirks)...)
 			fresh, ok := n.toPreset()
 			if !ok {
 				continue
@@ -62,7 +66,7 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 			out.Origins[n.ID] = originsOf(fresh, srcNine)
 			continue
 		}
-		out.Conflicts = append(out.Conflicts, contestedFields(n.ID, rawBaseURL(omni, n.ID), n)...)
+		out.Conflicts = append(out.Conflicts, contestedFields(n.ID, rawBaseURL(omni, n.ID), p.Quirks, n)...)
 		filled := fillGaps(&p, n)
 		out.Presets[n.ID] = p
 		out.Origins[n.ID] = append(out.Origins[n.ID], filled...)
@@ -84,7 +88,7 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 
 // contestedFields compares the two upstreams on the values they actually
 // published, not on what trimming made of them.
-func contestedFields(id, omniRaw string, n nineEntry) []conflict {
+func contestedFields(id, omniRaw string, existingQuirks []string, n nineEntry) []conflict {
 	var out []conflict
 	if omniRaw != "" && n.Transport.BaseURL != "" && omniRaw != n.Transport.BaseURL {
 		out = append(out, conflict{
@@ -93,16 +97,27 @@ func contestedFields(id, omniRaw string, n nineEntry) []conflict {
 			Loser: srcNine, LoserValue: n.Transport.BaseURL,
 		})
 	}
-	// A quirk darkrouter has no name for is reported, never applied: the
-	// vocabulary is closed and a guessed mapping silently changes request shape.
-	names := make([]string, 0, len(n.Transport.Quirks))
-	for q, on := range n.Transport.Quirks {
+	out = append(out, quirkConflicts(id, existingQuirks, n.Transport.Quirks)...)
+	return out
+}
+
+// quirkConflicts reports a quirk darkrouter has no name for, never applying
+// it: the vocabulary is closed and a guessed mapping silently changes request
+// shape. A quirk the merged preset already carries (by that same name) is not
+// a disagreement -- darkrouter already does what 9router is asking for.
+func quirkConflicts(id string, existingQuirks []string, quirks map[string]bool) []conflict {
+	var out []conflict
+	names := make([]string, 0, len(quirks))
+	for q, on := range quirks {
 		if on {
 			names = append(names, q)
 		}
 	}
 	sort.Strings(names)
 	for _, q := range names {
+		if slices.Contains(existingQuirks, q) {
+			continue
+		}
 		out = append(out, conflict{
 			ID: id, Field: "quirk:" + q,
 			Winner: srcOmni, WinnerValue: "(not applied)",
