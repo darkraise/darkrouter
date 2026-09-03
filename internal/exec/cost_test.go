@@ -274,3 +274,49 @@ func TestLogGradesADiscardedAttemptAgainstTheModelItTried(t *testing.T) {
 		})
 	}
 }
+
+func TestLogCarriesTheGradeOntoTheServedAttempt(t *testing.T) {
+	// The attempt row that served arrives with no usage of its own -- the
+	// record holds it -- so this row takes the record's cost, and must take
+	// the authority behind that cost with it. A cost with no grade beside it
+	// is spend the total cannot mark, and every request with attempt rows
+	// reaches SpendSince through this row.
+	//
+	// Both directions, so a constant cannot pass.
+	for _, tc := range []struct {
+		source catalog.Source
+		want   string
+	}{
+		{catalog.SourceDiscovered, "measured"},
+		{catalog.SourceModelsDev, "indexed"},
+	} {
+		t.Run(string(tc.source), func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+				ProviderID: "groq", ModelID: "m",
+				Pricing: catalog.Pricing{
+					InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.source,
+				},
+			})}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m", TokensIn: 1_000_000,
+				// Zero tokens on the attempt is what routes it through the
+				// record's own price rather than a second lookup.
+				Attempts: []store.AttemptRecord{
+					{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+				},
+			})
+
+			a := cap.only(t).Attempts[0]
+			if a.CostMicros == nil {
+				t.Fatal("served attempt: CostMicros is nil")
+			}
+			if a.PriceGrade != tc.want {
+				t.Fatalf("served attempt PriceGrade = %q, want %q: its cost reaches "+
+					"the spend total, so an unmarked row hides the estimate",
+					a.PriceGrade, tc.want)
+			}
+		})
+	}
+}
