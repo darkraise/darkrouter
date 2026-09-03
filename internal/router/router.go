@@ -14,6 +14,7 @@ var (
 	ErrSurfaceUnsupported    = errors.New("no provider offers this model on this surface")
 	ErrAllCooling            = errors.New("every provider offering this model is cooling")
 	ErrCapabilityUnsatisfied = errors.New("no provider offering this model has the required capabilities")
+	ErrUnsanctionedFree      = errors.New("this model is only offered on a free tier the vendor has not sanctioned; set allow_unsanctioned_free on the provider to route to it")
 )
 
 // Resolve produces the ordered candidate sequence and the skips explaining
@@ -81,7 +82,7 @@ func emptyReason(skips []Skip) error {
 		return ErrModelNotFound
 	}
 	allCooling := true
-	sawSurface, sawCapability := false, false
+	sawSurface, sawCapability, sawUnsanctioned := false, false, false
 	for _, s := range skips {
 		switch s.Reason {
 		case SkipCooling:
@@ -89,6 +90,8 @@ func emptyReason(skips []Skip) error {
 			allCooling, sawSurface = false, true
 		case SkipCapability:
 			allCooling, sawCapability = false, true
+		case SkipUnsanctioned:
+			allCooling, sawUnsanctioned = false, true
 		default:
 			allCooling = false
 		}
@@ -96,6 +99,12 @@ func emptyReason(skips []Skip) error {
 	switch {
 	case allCooling:
 		return ErrAllCooling
+	// Ahead of the two below because it is the only one naming a single switch
+	// the operator can throw. A model held back by the opt-in is one they can
+	// see offered, so reporting a gap in the catalog sends them looking for
+	// something that is not missing.
+	case sawUnsanctioned:
+		return ErrUnsanctionedFree
 	case sawSurface:
 		return ErrSurfaceUnsupported
 	case sawCapability:

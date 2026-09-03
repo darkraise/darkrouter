@@ -26,19 +26,6 @@ type MergeInput struct {
 // capabilities are discovered still takes its context window from models.dev,
 // and letting one source win a whole record would throw away three quarters of
 // what is known about it.
-// FreeCatalogKey is the catalogue entry a provider row reads.
-//
-// Keyed on the preset rather than the row's own id, because the curated
-// catalogue is a fact about the upstream vendor: a provider row an operator
-// named something else still reaches the same free tier. An uncatalogued row
-// falls back to its id, which is what a hand-added provider is named after.
-func FreeCatalogKey(p provider.Provider) string {
-	if p.Preset != "" {
-		return p.Preset
-	}
-	return p.ID
-}
-
 func Merge(in MergeInput) []Model {
 	byID := make(map[string]provider.Provider, len(in.Providers))
 	for _, p := range in.Providers {
@@ -58,7 +45,7 @@ func Merge(in MergeInput) []Model {
 			continue
 		}
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
-		out = append(out, mergeOne(row, FreeCatalogKey(p), preset, in.Doc, in.LiteLLM,
+		out = append(out, mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM,
 			overrides[[2]string{row.ProviderID, row.ModelID}]))
 	}
 	// Deterministic order: a snapshot rebuild must not reorder the candidate
@@ -70,6 +57,19 @@ func Merge(in MergeInput) []Model {
 		return out[i].ModelID < out[j].ModelID
 	})
 	return out
+}
+
+// freeCatalogKey is the catalogue entry a provider row reads.
+//
+// Keyed on the preset rather than the row's own id, because the curated
+// catalogue is a fact about the upstream vendor: a provider row an operator
+// named something else still reaches the same free tier. An uncatalogued row
+// falls back to its id, which is what a hand-added provider is named after.
+func freeCatalogKey(p provider.Provider) string {
+	if p.Preset != "" {
+		return p.Preset
+	}
+	return p.ID
 }
 
 func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
@@ -130,16 +130,16 @@ func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
 		m.Pricing = resolvePrice(fromDoc, fromLiteLLM, stored)
 	}
 
-	// Carried on the model rather than looked up per request: the router has to
-	// know how the vendor grades this access before it selects the model, and
-	// the console shows the allowance behind one that is free.
-	if tier, ok := FreeModels().Tier(presetID, row.ModelID); ok {
-		m.FreeTier = tier
-	}
-
 	// A price read from a reseller's listing is that reseller's copy of
 	// someone else's figure, whichever candidate won above.
 	m.Pricing.Resold = preset.ResellsPrices()
+
+	// Carried on the model rather than looked up per request: the router reads
+	// the vendor's grading of this access before it selects the model, and a
+	// lookup at that point would put the curated catalogue on the request path.
+	if tier, ok := FreeModels().Tier(presetID, row.ModelID); ok {
+		m.FreeTier = tier
+	}
 
 	// A runtime that reports its own capabilities outranks a directory's guess
 	// about a model of the same name — that is what makes Ollama's tool
