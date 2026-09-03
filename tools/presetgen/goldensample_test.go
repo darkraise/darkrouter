@@ -13,9 +13,11 @@ import (
 // These are byte-for-byte copies of five upstream files at 9router 699edac3,
 // chosen for the shapes that decide what darkrouter does with an entry: a
 // plain API-key provider, a non-openai wire format, an oauth category, and
-// both shapes of the transport.auth header block. shared.js sits beside the
-// registry directory exactly as upstream has it, because gemini.js imports
-// from there.
+// both shapes of the transport.auth header block. claude.js needs an import
+// target, so shared.js sits beside the registry directory as upstream places
+// it -- carrying verbatim only the exports that import resolves, because the
+// rest of upstream's file holds OAuth client secrets that a secret scanner
+// rejects on push.
 //
 // Refresh them from upstream when the schema moves; a failure here means a
 // struct tag no longer names a field the registry publishes.
@@ -101,20 +103,19 @@ func TestGoldenSampleDecodesTheRealSchema(t *testing.T) {
 	}, {
 		// The nested transport.auth shape: the API key and the OAuth token
 		// travel in different headers, and only the API-key one is ours.
-		id: "gemini",
+		id: "claude",
 		want: nineEntry{
-			ID: "gemini", Alias: "gemini", Category: "freeTier", AuthType: "apikey",
+			ID: "claude", Alias: "cc", Category: "oauth",
 			Display: nineDisplay{
-				Name: "Gemini", Color: "#4285F4", TextIcon: "GE",
-				Website: "https://ai.google.dev",
-				Notice:  nineNotice{APIKeyURL: "https://aistudio.google.com/app/apikey"},
+				Name: "Claude Code", Color: "#D97757",
+				Website: "https://claude.ai",
 			},
 			Transport: nineTransport{
-				BaseURL: "https://generativelanguage.googleapis.com/v1beta/models",
-				Format:  "gemini",
-				Auth:    nineAuth{APIKey: nineAuthKind{Header: "x-goog-api-key"}},
+				BaseURL: "https://api.anthropic.com/v1/messages",
+				Format:  "claude",
+				Auth:    nineAuth{APIKey: nineAuthKind{Header: "x-api-key"}},
+				Quirks:  map[string]bool{"cloakToolsOnOAuth": true},
 			},
-			ServiceKinds: []string{"llm", "embedding", "image", "imageToText", "webSearch", "tts", "stt"},
 		},
 	}} {
 		t.Run(tc.id, func(t *testing.T) {
@@ -140,7 +141,7 @@ func TestGoldenSampleAuthHeaderResolves(t *testing.T) {
 		"anthropic":    "",
 		"kimchi":       "Authorization",
 		"codebuddy-cn": "Authorization",
-		"gemini":       "x-goog-api-key",
+		"claude":       "x-api-key",
 	}
 	for _, e := range got {
 		if h := e.Transport.Auth.apiKeyHeader(); h != want[e.ID] {
