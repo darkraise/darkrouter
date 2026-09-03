@@ -73,6 +73,7 @@ const catalog = (): CatalogResponse => ({
       inferred: false,
       state: "live",
       pricing: null,
+      free_tier: null,
       merge_source: "models_dev",
     },
   ],
@@ -89,6 +90,7 @@ const baseModel: Omit<Model, "model" | "pricing"> = {
   reasoning: false,
   inferred: false,
   state: "live",
+  free_tier: null,
   merge_source: "models_dev",
 }
 
