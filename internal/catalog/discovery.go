@@ -349,7 +349,15 @@ func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
 		}
 	}
 	if len(free.Providers[key]) > 0 {
-		rules.Curated = func(modelID string) bool { return free.Covers(key, modelID) }
+		allowUnsanctioned := p.AllowUnsanctionedFree
+		rules.Curated = func(modelID string) bool {
+			tier, ok := free.Tier(key, modelID)
+			if !ok || !tier.Live() {
+				return false
+			}
+			// Catalogued either way; imported only with the operator's consent.
+			return allowUnsanctioned || !tier.Unsanctioned()
+		}
 	}
 	return rules
 }
