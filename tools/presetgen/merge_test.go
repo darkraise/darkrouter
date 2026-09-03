@@ -188,3 +188,56 @@ func TestSkippedEntryRecordsNoOrigin(t *testing.T) {
 		}
 	}
 }
+
+// The hazard the spec names: two sources whose base URLs differ only in the
+// endpoint path agree after trimming. Comparing trimmed values would call that
+// resolved and ship a wrong root silently.
+func TestConflictIsDetectedOnRawValues(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1/chat/completions"}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://api.example.com/v2/messages"}}}
+
+	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	if len(got.Conflicts) != 1 {
+		t.Fatalf("got %d conflicts, want 1: %v", len(got.Conflicts), got.Conflicts)
+	}
+	c := got.Conflicts[0]
+	if c.Field != "base_url" || c.Winner != "omniroute" {
+		t.Errorf("conflict = %+v", c)
+	}
+	if c.LoserValue != "https://api.example.com/v2/messages" {
+		t.Errorf("LoserValue = %q, want the raw upstream value", c.LoserValue)
+	}
+}
+
+func TestAgreeingSourcesProduceNoConflict(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1/chat/completions"}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://api.example.com/v1/chat/completions"}}}
+
+	if got := mergeSources(omni, map[string]displayEntry{}, nine); len(got.Conflicts) != 0 {
+		t.Errorf("got %v, want no conflicts", got.Conflicts)
+	}
+}
+
+// A quirk 9router declares that darkrouter's closed vocabulary has no name for
+// must reach the reviewer and never reach Preset.Quirks.
+func TestUnmappedQuirkIsReportedNotApplied(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1"}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{
+		BaseURL: "https://api.example.com/v1",
+		Quirks:  map[string]bool{"dropClientMetadata": true},
+	}}}
+
+	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	if len(got.Presets["p"].Quirks) != 0 {
+		t.Errorf("Quirks = %v, want none applied", got.Presets["p"].Quirks)
+	}
+	var found bool
+	for _, c := range got.Conflicts {
+		if c.Field == "quirk:dropClientMetadata" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("conflicts = %v, want the unmapped quirk reported", got.Conflicts)
+	}
+}
