@@ -144,14 +144,6 @@ var curatedAt = regexp.MustCompile(`FREE_CATALOG_CURATED_AT = "([^"]+)"`)
 // a catalogue that still looks populated.
 var freeEntryStart = regexp.MustCompile(`\{ provider: "`)
 
-// freeParseTolerance is how much of the file the entry pattern may fail to read
-// before the parse is treated as broken rather than merely out of date. Upstream
-// generates every row from one template, so the two counts match exactly today;
-// the slack is there so a single hand-edited or newly-shaped row is a warning
-// sign to fix at leisure, while a structural break -- which takes out rows by
-// the dozen, since they all share the shape -- fails loudly here.
-const freeParseTolerance = 0.02
-
 // ParseFreeCatalog reads the upstream catalogue's TypeScript source.
 //
 // A regex over source rather than a JSON parse because that is the form
@@ -168,8 +160,7 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 	if m := curatedAt.FindSubmatch(raw); m != nil {
 		out.CuratedAt = string(m[1])
 	}
-	matches := freeEntry.FindAllSubmatch(raw, -1)
-	for _, m := range matches {
+	for _, m := range freeEntry.FindAllSubmatch(raw, -1) {
 		provider, model := string(m[1]), string(m[2])
 		if out.Providers[provider] == nil {
 			out.Providers[provider] = map[string]FreeTier{}
@@ -185,16 +176,20 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 			ToS:           string(m[8]),
 		}
 	}
+	// Every row this file holds must survive into the catalogue, exactly. The
+	// rows are template-generated and uniform, so a stored count short of the
+	// row count is never ordinary variation: it is the entry pattern failing on
+	// a shape it no longer fits, or two rows colliding on the same provider and
+	// model. Both silently shrink the catalogue, every caller stores what it is
+	// handed, and a dropped row means a real model refused on the next import.
+	// Stopping loudly is the cheaper failure.
+	if rows := len(freeEntryStart.FindAll(raw, -1)); out.count() != rows {
+		return FreeCatalog{}, fmt.Errorf(
+			"free catalogue: read %d of %d entries; the row shape no longer matches the pattern",
+			out.count(), rows)
+	}
 	if len(out.Providers) == 0 {
 		return FreeCatalog{}, fmt.Errorf("free catalogue held no entries")
-	}
-	// A short read is as damaging as an empty one: the caller stores what it
-	// gets, so a truncated catalogue would quietly replace a good one and drop
-	// every model it failed to read from the next import.
-	if rows := len(freeEntryStart.FindAll(raw, -1)); len(matches) < rows-int(float64(rows)*freeParseTolerance) {
-		return FreeCatalog{}, fmt.Errorf(
-			"free catalogue: read %d of %d entries; the upstream row shape has changed",
-			len(matches), rows)
 	}
 	return out, nil
 }
