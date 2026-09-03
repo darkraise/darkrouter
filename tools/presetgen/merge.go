@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -105,20 +106,30 @@ func (e nineEntry) toPreset() (catalog.Preset, bool) {
 		Name:      e.Name(),
 		Kind:      "openaicompat",
 		BaseURL:   base,
-		Surfaces:  []string{"llm"},
+		Surfaces:  e.surfaces(),
 		Website:   e.Display.Website,
 		APIKeyURL: e.Display.Notice.APIKeyURL,
 		Auth:      catalog.Auth{Style: style},
-	}
-	for _, k := range e.ServiceKinds {
-		if k == "embedding" {
-			p.Surfaces = []string{"embedding"}
-		}
 	}
 	// A preset with no models.dev counterpart must say so explicitly; a
 	// missing join key and a forgotten one look identical otherwise.
 	p.NoModelsDev = true
 	return p, true
+}
+
+// surfaces accumulates rather than replaces: a provider declaring both kinds
+// serves both, and preset surfaces beat discovered rows, so dropping one here
+// would unroute a whole surface with nothing to show for it. Ordered llm
+// first so the generated file is byte-stable across runs.
+func (e nineEntry) surfaces() []string {
+	var out []string
+	if len(e.ServiceKinds) == 0 || slices.Contains(e.ServiceKinds, "llm") {
+		out = append(out, "llm")
+	}
+	if slices.Contains(e.ServiceKinds, "embedding") {
+		out = append(out, "embedding")
+	}
+	return out
 }
 
 // authStyle maps a 9router entry onto darkrouter's closed auth vocabulary,
@@ -136,7 +147,8 @@ func (e nineEntry) authStyle() (string, bool) {
 	case "x-api-key":
 		return "x-api-key", true
 	case "":
-		if e.AuthType == "" || e.AuthType == "apikey" {
+		switch strings.ToLower(e.AuthType) {
+		case "", "apikey":
 			return "bearer", true
 		}
 	}
