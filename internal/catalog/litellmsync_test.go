@@ -77,21 +77,24 @@ func TestLiteLLMSyncerRefusesADocumentItCannotRead(t *testing.T) {
 // transport cannot see, and the one that silently unprices everything.
 func TestLiteLLMSyncerRefusesAnEmptyDocument(t *testing.T) {
 	for _, body := range []string{`{}`, `{"gpt-4o": {"input_cost_per_token": 2.5e-06}}`} {
-		s, stop := litellmSyncerAfterAGoodSync(t, body)
-		if err := s.SyncOnce(context.Background()); err == nil {
-			t.Errorf("%s was reported as a successful sync", body)
-		}
-		if !s.Doc()["openai"]["gpt-4o"].Known {
-			t.Errorf("%s emptied the index it already had", body)
-		}
-		stop()
+		func() {
+			s, stop := litellmSyncerAfterAGoodSync(t, body)
+			defer stop()
+
+			if err := s.SyncOnce(context.Background()); err == nil {
+				t.Errorf("%s was reported as a successful sync", body)
+			}
+			if !s.Doc()["openai"]["gpt-4o"].Known {
+				t.Errorf("%s emptied the index it already had", body)
+			}
+		}()
 	}
 }
 
 // litellmSyncerAfterAGoodSync returns a syncer holding a real index, whose next
-// fetch serves then. Retention is only testable against a syncer that has
+// fetch serves nextBody. Retention is only testable against a syncer that has
 // something to lose.
-func litellmSyncerAfterAGoodSync(t *testing.T, then string) (*LiteLLMSyncer, func()) {
+func litellmSyncerAfterAGoodSync(t *testing.T, nextBody string) (*LiteLLMSyncer, func()) {
 	t.Helper()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +102,7 @@ func litellmSyncerAfterAGoodSync(t *testing.T, then string) (*LiteLLMSyncer, fun
 			_, _ = w.Write([]byte(litellmSyncSample))
 			return
 		}
-		_, _ = w.Write([]byte(then))
+		_, _ = w.Write([]byte(nextBody))
 	}))
 	s := NewLiteLLMSyncer(LiteLLMSyncOptions{URL: srv.URL})
 	if err := s.SyncOnce(context.Background()); err != nil {
