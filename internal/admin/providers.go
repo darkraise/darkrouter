@@ -108,6 +108,9 @@ type providerView struct {
 	// FreeModelsOnly narrows what the next discovery sweep imports. The
 	// console shows it wherever it shows what a provider can serve.
 	FreeModelsOnly bool `json:"free_models_only"`
+	// AllowUnsanctionedFree lets this provider's `avoid`-graded free models be
+	// imported and routed to. The console explains the risk beside the control.
+	AllowUnsanctionedFree bool `json:"allow_unsanctioned_free"`
 }
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +139,7 @@ func (s *Server) providerView(ctx context.Context, p store.ProviderRow) (provide
 		ID: p.ID, Name: p.Name, Preset: p.Preset, Kind: p.Kind,
 		BaseURL: p.BaseURL, Priority: p.Priority, Enabled: p.Enabled,
 		AuthStyle: p.AuthStyle, Credentials: []credentialView{},
-		FreeModelsOnly: p.FreeModelsOnly,
+		FreeModelsOnly: p.FreeModelsOnly, AllowUnsanctionedFree: p.AllowUnsanctionedFree,
 	}
 	if s.deps.Key == nil {
 		return v, nil
@@ -191,6 +194,9 @@ type createProviderBody struct {
 	// before the first sweep runs, which is the only time the answer changes
 	// what the catalogue ever held.
 	FreeModelsOnly bool `json:"free_models_only"`
+	// AllowUnsanctionedFree lets this provider's `avoid`-graded free models be
+	// imported and routed to. The console explains the risk beside the control.
+	AllowUnsanctionedFree bool `json:"allow_unsanctioned_free"`
 	// Location is set at creation only: changing it moves every catalogued
 	// model to a different endpoint, which is a new provider rather than an
 	// edit to this one.
@@ -212,8 +218,9 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		Kind: body.Kind, BaseURL: body.BaseURL, AuthStyle: body.AuthStyle,
 		Priority: body.Priority,
 		Region:   body.Region, Project: body.Project, Location: body.Location,
-		Enabled:        body.Enabled == nil || *body.Enabled,
-		FreeModelsOnly: body.FreeModelsOnly,
+		Enabled:               body.Enabled == nil || *body.Enabled,
+		FreeModelsOnly:        body.FreeModelsOnly,
+		AllowUnsanctionedFree: body.AllowUnsanctionedFree,
 	}
 	// From a preset the operator supplies an id and a key and nothing else,
 	// which is the whole reason presets ship. Explicit values still win, so a
@@ -281,7 +288,7 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Name == nil && patch.BaseURL == nil && patch.Priority == nil &&
 		patch.Enabled == nil && patch.Region == nil && patch.Project == nil &&
-		patch.FreeModelsOnly == nil {
+		patch.FreeModelsOnly == nil && patch.AllowUnsanctionedFree == nil {
 		// An empty patch is a client bug, not a no-op to absorb: it means the
 		// UI sent a form it did not fill in.
 		writeError(w, http.StatusBadRequest, "the patch names no fields")
