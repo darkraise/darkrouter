@@ -100,7 +100,7 @@ func TestSourceGrade(t *testing.T) {
 		SourceInferred:   GradeGuessed,
 	}
 	for src, want := range cases {
-		if got := src.Grade(); got != want {
+		if got := src.grade(); got != want {
 			t.Errorf("Source(%q).Grade() = %q, want %q", src, got, want)
 		}
 	}
@@ -109,7 +109,7 @@ func TestSourceGrade(t *testing.T) {
 // An unrecognised source must read as a guess rather than as a measurement:
 // defaulting the other way would badge an unknown value as vendor-confirmed.
 func TestUnknownSourceGradesAsGuessed(t *testing.T) {
-	if got := Source("something-new").Grade(); got != GradeGuessed {
+	if got := Source("something-new").grade(); got != GradeGuessed {
 		t.Errorf("unknown source graded %q, want %q", got, GradeGuessed)
 	}
 }

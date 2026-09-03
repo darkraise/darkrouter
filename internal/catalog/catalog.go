@@ -38,7 +38,11 @@ const (
 	GradeGuessed Grade = "guessed"
 )
 
-func (s Source) Grade() Grade {
+// grade is unexported on purpose. Pricing.Grade is the only correct way to
+// grade a price, because a source alone cannot see that the provider quoting
+// the rate did not set it. An exported Source.Grade is an inviting way to skip
+// that cap, which is the defect it was introduced to fix.
+func (s Source) grade() Grade {
 	switch s {
 	case SourceDiscovered:
 		return GradeMeasured
@@ -153,10 +157,11 @@ type Pricing struct {
 // so reading them there is not the seller quoting itself. Capped rather than
 // replaced, because republishing cannot make a weaker figure stronger.
 func (p Pricing) Grade() Grade {
-	if g := p.Source.Grade(); p.Resold && g == GradeMeasured {
+	g := p.Source.grade()
+	if p.Resold && g == GradeMeasured {
 		return GradeIndexed
 	}
-	return p.Source.Grade()
+	return g
 }
 
 // Model is one model as offered by one provider.
