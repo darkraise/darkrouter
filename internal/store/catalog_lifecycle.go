@@ -39,11 +39,15 @@ type DiscoveredModel struct {
 
 // ModelPricing is the four rates a listing quoted, in the catalog's unit of
 // micro-dollars per million tokens.
+// The two cache rates are pointers because most listings quote neither, and
+// migration 0016 states what a zero would claim instead: a provider that
+// publishes no cache-write rate must not read as free. Input and output are
+// bare because a price with either one missing is not recorded at all.
 type ModelPricing struct {
 	InputMicrosPerMTok      int64
 	OutputMicrosPerMTok     int64
-	CacheReadMicrosPerMTok  int64
-	CacheWriteMicrosPerMTok int64
+	CacheReadMicrosPerMTok  *int64
+	CacheWriteMicrosPerMTok *int64
 }
 
 // DiscoveryState is one provider's probe bookkeeping.
@@ -157,8 +161,11 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 		`UPDATE models
 		    SET input_price_micros_per_mtok      = ?,
 		        output_price_micros_per_mtok     = ?,
-		        cache_read_price_micros_per_mtok = ?,
-		        cache_write_price_micros_per_mtok = ?,
+		        -- An unquoted cache rate leaves the column as it was. Writing
+		        -- the NULL would discard a figure models.dev knows and this
+		        -- listing simply does not mention.
+		        cache_read_price_micros_per_mtok  = coalesce(?, cache_read_price_micros_per_mtok),
+		        cache_write_price_micros_per_mtok = coalesce(?, cache_write_price_micros_per_mtok),
 		        price_known  = 1,
 		        price_source = 'discovered'
 		  WHERE provider_id = ? AND model_id = ?`)

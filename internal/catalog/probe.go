@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -225,13 +226,49 @@ func parseDataList(body []byte) ([]Discovered, error) {
 		return nil, fmt.Errorf("parse listing: %w", err)
 	}
 	out := make([]Discovered, 0, len(doc.Data))
+	// hackclub serves every model twice. Recording the id once keeps the
+	// upsert, the price write and the omission sweep's placeholder list
+	// proportional to the models that exist rather than to the entries.
+	at := map[string]int{}
 	for _, m := range doc.Data {
 		if m.ID == "" {
 			continue // a model with no id cannot be routed to
 		}
-		out = append(out, Discovered{ModelID: m.ID, Pricing: m.Pricing.rates()})
+		price, implausible := m.Pricing.rates()
+		if implausible {
+			slog.Warn("discovery: listing quoted a rate too large to be per-token",
+				"model", m.ID)
+		}
+		if i, dup := at[m.ID]; dup {
+			// The duplicates agree today. One that stops agreeing would
+			// otherwise resolve by position with nothing to see.
+			if !samePricing(out[i].Pricing, price) {
+				slog.Warn("discovery: listing quoted one model at two prices",
+					"model", m.ID)
+			}
+			continue
+		}
+		at[m.ID] = len(out)
+		out = append(out, Discovered{ModelID: m.ID, Pricing: price})
 	}
 	return out, nil
+}
+
+func samePricing(a, b *store.ModelPricing) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.InputMicrosPerMTok == b.InputMicrosPerMTok &&
+		a.OutputMicrosPerMTok == b.OutputMicrosPerMTok &&
+		sameRate(a.CacheReadMicrosPerMTok, b.CacheReadMicrosPerMTok) &&
+		sameRate(a.CacheWriteMicrosPerMTok, b.CacheWriteMicrosPerMTok)
+}
+
+func sameRate(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // listedPricing is the price block of an OpenAI-compatible listing, in the two
@@ -254,6 +291,18 @@ type listedPricing struct {
 	PerCachedInput listedRate `json:"per_cached_input_token"`
 }
 
+// maxDollarsPerToken is the ceiling above which a rate is not a per-token
+// price at all. The most expensive model on the market is around 1e-4 dollars
+// per token ($100 per million), so 1e-3 leaves an order of magnitude of
+// headroom while sitting far below any per-million figure worth quoting.
+//
+// It is the second half of a defence the quoting rule alone cannot provide.
+// Reading a per-million rate as per-token overcharges by a factor of a
+// million and stamps the result `discovered`, the highest trust grade there
+// is; the ceiling catches that whatever encoding the publisher switches to.
+// It also stops a rate like "1e30" from overflowing int64 into a negative.
+const maxDollarsPerToken = 1e-3
+
 // rates renders the block into the catalog's unit, or nil when the listing
 // quoted nothing this parser trusts. A zero rate is a real price — free models
 // are most of what these aggregators serve — so absence has to be a nil rather
@@ -262,21 +311,39 @@ type listedPricing struct {
 // Both a prompt and a completion rate are required. A block quoting one side
 // alone, or an image or audio rate alone, prices a modality this parser does
 // not read, and filling the missing half with a zero would report it as free.
-func (l listedPricing) rates() *store.ModelPricing {
+//
+// The second return reports that some rate was refused for magnitude, which
+// the caller logs. Silence is the wrong answer for that case specifically: it
+// is indistinguishable from a provider that publishes no price, and it is the
+// case where a wrong number would have reached an invoice.
+func (l listedPricing) rates() (*store.ModelPricing, bool) {
+	implausible := l.Prompt.implausible() || l.Completion.implausible() ||
+		l.CacheRead.implausible() || l.CacheWrite.implausible() ||
+		l.PerInput.implausible() || l.PerOutput.implausible() ||
+		l.PerCachedInput.implausible()
+
 	in, inOK := firstRate(l.Prompt, l.PerInput)
 	out, outOK := firstRate(l.Completion, l.PerOutput)
 	if !inOK || !outOK {
-		return nil
+		return nil, implausible
 	}
-	cacheRead, _ := firstRate(l.CacheRead, l.PerCachedInput)
-	cacheWrite, _ := l.CacheWrite.quotedDollars()
-	return &store.ModelPricing{
-		InputMicrosPerMTok:      perMTok(in),
-		OutputMicrosPerMTok:     perMTok(out),
-		CacheReadMicrosPerMTok:  perMTok(cacheRead),
-		CacheWriteMicrosPerMTok: perMTok(cacheWrite),
+	p := &store.ModelPricing{
+		InputMicrosPerMTok:  perMTok(in),
+		OutputMicrosPerMTok: perMTok(out),
 	}
+	// An absent cache rate stays absent. Migration 0016 states the invariant:
+	// a provider that publishes no cache-write rate must not read as free, and
+	// this write outranks the models.dev figure it would otherwise flatten.
+	if v, ok := firstRate(l.CacheRead, l.PerCachedInput); ok {
+		p.CacheReadMicrosPerMTok = ptrTo(perMTok(v))
+	}
+	if v, ok := l.CacheWrite.quotedDollars(); ok {
+		p.CacheWriteMicrosPerMTok = ptrTo(perMTok(v))
+	}
+	return p, implausible
 }
+
+func ptrTo[T any](v T) *T { return &v }
 
 // firstRate takes whichever of the two shapes quoted this rate. A listing
 // speaks one of them, never both.
@@ -338,12 +405,19 @@ func (r *listedRate) UnmarshalJSON(b []byte) error {
 }
 
 // dollars reports the rate in dollars per token. A negative rate is
-// openrouter's "the auto-router decides", which is not a price.
+// openrouter's "the auto-router decides", which is not a price, and one above
+// the ceiling is not a per-token rate.
 func (r listedRate) dollars() (float64, bool) {
-	if !r.known || r.value < 0 {
+	if !r.known || r.value < 0 || r.value > maxDollarsPerToken {
 		return 0, false
 	}
 	return r.value, true
+}
+
+// implausible reports a rate the ceiling refused, which is a different fact
+// from one the listing never quoted.
+func (r listedRate) implausible() bool {
+	return r.known && r.value > maxDollarsPerToken
 }
 
 func (r listedRate) quotedDollars() (float64, bool) {
