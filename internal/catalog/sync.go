@@ -177,6 +177,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			OutputMicrosPerMTok:     meta.OutputMicrosPerMTok,
 			CacheReadMicrosPerMTok:  meta.CacheReadMicrosPerMTok,
 			CacheWriteMicrosPerMTok: meta.CacheWriteMicrosPerMTok,
+			PriceSource:             priceSourceAfterSync(r.PriceSource),
 		})
 	}
 
@@ -195,6 +196,17 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 // reported about itself are better evidence than a directory's entry for a
 // model of the same name, and the merge encodes the same order.
 func sourceAfterSync(current string) string {
+	if current == string(SourceDiscovered) || current == string(SourceOverride) {
+		return current
+	}
+	return string(SourceModelsDev)
+}
+
+// priceSourceAfterSync protects a stamp the same way sourceAfterSync protects
+// its capabilities counterpart. A price the runtime published or the operator
+// set is better evidence than a directory's figure for a model of the same
+// name, and without this the next sync would erase it.
+func priceSourceAfterSync(current string) string {
 	if current == string(SourceDiscovered) || current == string(SourceOverride) {
 		return current
 	}
