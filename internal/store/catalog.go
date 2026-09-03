@@ -33,6 +33,9 @@ type ModelRow struct {
 	// PriceKnown separates "free" from "we never found out". Both read back as
 	// zero, and the UI shows them differently.
 	PriceKnown bool
+	// PriceSource records which authority the price came from, so the console
+	// can separate a figure the seller quoted from one a directory estimated.
+	PriceSource string
 
 	State         string
 	MissingStreak int
@@ -67,12 +70,16 @@ type MetadataRow struct {
 	OutputMicrosPerMTok     int64
 	CacheReadMicrosPerMTok  int64
 	CacheWriteMicrosPerMTok int64
+	// PriceSource records which authority the price came from, so the console
+	// can separate a figure the seller quoted from one a directory estimated.
+	PriceSource string
 }
 
 const modelColumns = `provider_id, model_id, publisher, surfaces, capabilities,
 	capabilities_source, context_window, max_output_tokens,
 	input_price_micros_per_mtok, output_price_micros_per_mtok,
 	cache_read_price_micros_per_mtok, cache_write_price_micros_per_mtok,
+	price_source,
 	discovered_at, state, missing_streak, last_seen_at`
 
 // Models returns every catalogued model, including the ones discovery has
@@ -97,7 +104,7 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 		)
 		if err := rows.Scan(&r.ProviderID, &r.ModelID, &r.Publisher, &surfaces, &caps,
 			&r.CapabilitiesSource, &ctxWin, &maxOut, &inPrice, &outPrice,
-			&cacheRead, &cacheWrite,
+			&cacheRead, &cacheWrite, &r.PriceSource,
 			&discovered, &r.State, &r.MissingStreak, &lastSeen); err != nil {
 			return nil, fmt.Errorf("scan model: %w", err)
 		}
@@ -192,7 +199,8 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 		    context_window = ?, max_output_tokens = ?,
 		    input_price_micros_per_mtok = ?, output_price_micros_per_mtok = ?,
 		    cache_read_price_micros_per_mtok = ?,
-		    cache_write_price_micros_per_mtok = ?
+		    cache_write_price_micros_per_mtok = ?,
+		    price_source = ?
 		  WHERE provider_id = ? AND model_id = ?`)
 	if err != nil {
 		return fmt.Errorf("prepare metadata write: %w", err)
@@ -214,6 +222,7 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 			nullableInt64(r.InputMicrosPerMTok), nullableInt64(r.OutputMicrosPerMTok),
 			nullableInt64(r.CacheReadMicrosPerMTok),
 			nullableInt64(r.CacheWriteMicrosPerMTok),
+			priceSourceOr(r.PriceSource),
 			r.ProviderID, r.ModelID); err != nil {
 			return fmt.Errorf("write metadata for %s/%s: %w", r.ProviderID, r.ModelID, err)
 		}
@@ -226,6 +235,15 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 func nonEmptySurfaces(s []string) []string {
 	if len(s) == 0 {
 		return []string{"llm"}
+	}
+	return s
+}
+
+// priceSourceOr keeps the column's NOT NULL invariant when a caller leaves the
+// field empty, matching the migration's default rather than writing "".
+func priceSourceOr(s string) string {
+	if s == "" {
+		return "inferred"
 	}
 	return s
 }
