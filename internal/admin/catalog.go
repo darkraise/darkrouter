@@ -17,6 +17,11 @@ import (
 type pricingView struct {
 	InputMicros  int64 `json:"input_micros"`
 	OutputMicros int64 `json:"output_micros"`
+	// Source and Grade let the console mark a price the seller quoted itself,
+	// and caution one that was guessed. Grade is derived rather than stored so
+	// the console never has to know the source vocabulary.
+	Source string `json:"price_source"`
+	Grade  string `json:"price_grade"`
 }
 
 type modelView struct {
@@ -102,6 +107,8 @@ func (s *Server) collectModels(r *http.Request) []modelView {
 				v.Pricing = &pricingView{
 					InputMicros:  m.Pricing.InputMicrosPerMTok,
 					OutputMicros: m.Pricing.OutputMicrosPerMTok,
+					Source:       string(m.Pricing.Source),
+					Grade:        string(m.Pricing.Source.Grade()),
 				}
 			}
 			byModel[m.ModelID] = v
