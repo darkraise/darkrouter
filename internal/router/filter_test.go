@@ -535,3 +535,24 @@ func TestAVetoedModelReportsTheOptInRatherThanAbsence(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnsanctionedFree", err)
 	}
 }
+
+// A withdrawn free tier is history rather than a live grading: the terms it
+// describes no longer govern access, which is why the import filter lets one
+// through. The routing gate has to agree, or a model darkrouter imported is
+// refused with an error naming a free tier the catalogue already withdrew.
+func TestAWithdrawnUnsanctionedTierStillRoutes(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "withdrawn", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+		FreeTier: catalog.FreeTier{FreeType: "discontinued", ToS: "avoid"},
+	}})
+
+	cands, skips, found := filterTarget(target{"p", "withdrawn"},
+		Query{Model: "p/withdrawn", Surface: ir.SurfaceLLM}, snap, byIDOf(snap.Providers))
+	if !found {
+		t.Fatal("provider should have been found")
+	}
+	if len(cands) != 1 {
+		t.Fatalf("candidates = %+v, skips = %+v", cands, skips)
+	}
+}
