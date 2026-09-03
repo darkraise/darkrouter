@@ -288,7 +288,9 @@ Five properties:
   to node, which evaluates every file of the freshly cloned 9router registry, top-level
   module code included. That happens only in `generate`, whose token is read-only and
   which can neither push a branch nor open a pull request. `propose` holds the write
-  token and does nothing but restore an artifact and read the diff.
+  token and does nothing but restore an artifact and read the diff. `generate` is not a
+  sandbox -- `setup-go`'s cache is writable, so upstream code can still poison a build-
+  cache entry a later run restores -- but it cannot reach the repository.
 - **Tests gate the PR and it never auto-merges.** A malformed upstream commit fails the
   closed-vocabulary and preset-shape tests in `generate`, so it reaches a human as a red
   run rather than a green PR. That asymmetry is the reason structure goes through a PR
