@@ -387,4 +387,36 @@ describe("the unsanctioned-tier opt-in", () => {
       })
     })
   })
+
+  it("is on for a provider that has allowed it", async () => {
+    // A control that ignores the row and always renders unchecked would still
+    // pass the two tests above -- Radix computes the toggled-on PATCH from its
+    // own `checked` prop, not from what was on screen before the click.
+    stub([{ ...configured, allow_unsanctioned_free: true }], [preset])
+    await renderProvider("groq")
+
+    const control = await screen.findByRole("checkbox", {
+      name: /use models the vendor hasn't sanctioned/i,
+    })
+    expect(control).toBeChecked()
+  })
+
+  it("PATCHes the flag off when switched off", async () => {
+    stub([{ ...configured, allow_unsanctioned_free: true }], [preset])
+    await renderProvider("groq")
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /use models the vendor hasn't sanctioned/i }),
+    )
+
+    await waitFor(() => {
+      const patch = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([u, i]) =>
+          String(u) === "/api/providers/groq" && (i as RequestInit)?.method === "PATCH",
+      )
+      expect(JSON.parse((patch?.[1] as RequestInit).body as string)).toEqual({
+        allow_unsanctioned_free: false,
+      })
+    })
+  })
 })
