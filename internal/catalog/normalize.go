@@ -1,6 +1,9 @@
 package catalog
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // NormalizeModelID reduces the identifier forms three ecosystems use for the
 // same model to one key.
@@ -43,9 +46,18 @@ func Join(p Preset, doc Doc, modelID string) (Metadata, bool) {
 	if want == "" {
 		return Metadata{}, false
 	}
-	for id, m := range doc[p.ModelsDevID] {
+	// Sorted rather than a bare map range, as JoinLiteLLM does for the same
+	// reason: two upstream ids can normalize to the same key, and iteration
+	// order would otherwise decide which metadata the model carries from one
+	// process to the next.
+	ids := make([]string, 0, len(doc[p.ModelsDevID]))
+	for id := range doc[p.ModelsDevID] {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
 		if NormalizeModelID(id) == want {
-			return m, true
+			return doc[p.ModelsDevID][id], true
 		}
 	}
 	return Metadata{}, false

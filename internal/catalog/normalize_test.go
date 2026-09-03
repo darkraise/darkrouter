@@ -87,3 +87,25 @@ func TestJoinSkipsExemptPresets(t *testing.T) {
 		t.Error("an exempt preset joined anyway")
 	}
 }
+
+// Two upstream ids can reduce to one normalized key. Which of them answers
+// must not depend on map iteration order: the metadata carries the context
+// window a request is truncated against, and a per-process answer makes two
+// gateways on one document disagree about the same model.
+func TestJoinIsStableWhenTwoIDsNormalizeAlike(t *testing.T) {
+	doc := Doc{"acme": {
+		"Llama-3.3-70B":  Metadata{ContextWindow: 8192},
+		"llama-3.3:70b":  Metadata{ContextWindow: 131072},
+		"llama-3.3-70b-": Metadata{ContextWindow: 4096},
+	}}
+	first, ok := Join(Preset{ModelsDevID: "acme"}, doc, "llama-3.3-70b")
+	if !ok {
+		t.Fatal("no join")
+	}
+	for i := 0; i < 50; i++ {
+		got, ok := Join(Preset{ModelsDevID: "acme"}, doc, "llama-3.3-70b")
+		if !ok || got != first {
+			t.Fatalf("join %d returned %+v, want %+v every time", i, got, first)
+		}
+	}
+}

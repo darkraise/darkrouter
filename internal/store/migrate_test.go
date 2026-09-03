@@ -511,3 +511,101 @@ func TestPriceSourceDefaultsToInferred(t *testing.T) {
 		t.Errorf("price_source = %q, want %q", got, "inferred")
 	}
 }
+
+func TestPriceKnownBackfillsFromExistingPrices(t *testing.T) {
+	// Build a database that stops short of the column, so the rows under test
+	// are the ones the backfill exists for: written by an older binary, which
+	// could only record a price as a non-NULL number.
+	ctx := context.Background()
+	db := openTest(t)
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version > 18 {
+			continue
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("apply %04d: %v", m.version, err)
+		}
+	}
+
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO providers (id, kind, base_url, created_at)
+		 VALUES ('p', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id, capabilities_source,
+		    input_price_micros_per_mtok) VALUES ('p', 'priced', 'inferred', 150000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id, capabilities_source,
+		    output_price_micros_per_mtok) VALUES ('p', 'output-only', 'inferred', 600000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id, capabilities_source)
+		 VALUES ('p', 'bare', 'inferred')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("upgrade from version 18: %v", err)
+	}
+
+	want := map[string]int{"priced": 1, "output-only": 1, "bare": 0}
+	for id, known := range want {
+		var got int
+		if err := db.Read.QueryRowContext(ctx,
+			`SELECT price_known FROM models WHERE model_id = ?`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != known {
+			t.Errorf("%s: price_known = %d, want %d", id, got, known)
+		}
+	}
+	// The rows have to survive the migration with their prices intact, not
+	// merely acquire the new column.
+	var price int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT input_price_micros_per_mtok FROM models WHERE model_id = 'priced'`).
+		Scan(&price); err != nil {
+		t.Fatal(err)
+	}
+	if price != 150000 {
+		t.Errorf("input price = %d, want 150000", price)
+	}
+}
+
+func TestPriceKnownDefaultsToUnknown(t *testing.T) {
+	// A row written straight into the current schema must start out unpriced:
+	// nothing has said what it costs yet.
+	db := migrated(t)
+	if _, err := db.Write.Exec(
+		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('p', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.Exec(
+		`INSERT INTO models (provider_id, model_id, capabilities_source) VALUES ('p', 'fresh', 'inferred')`); err != nil {
+		t.Fatal(err)
+	}
+	var got int
+	if err := db.Read.QueryRow(
+		`SELECT price_known FROM models WHERE model_id = 'fresh'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("price_known = %d, want 0", got)
+	}
+}

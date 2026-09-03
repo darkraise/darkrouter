@@ -32,9 +32,25 @@ type Preset struct {
 	// NoModelsDev is the explicit exemption spec §10 requires. Without it an
 	// entry that merely forgot its join key is indistinguishable from one that
 	// genuinely has no models.dev counterpart.
-	NoModelsDev bool   `yaml:"no_models_dev,omitempty"`
-	FreeTier    bool   `yaml:"free_tier,omitempty"`
-	Website     string `yaml:"website,omitempty"`
+	NoModelsDev bool `yaml:"no_models_dev,omitempty"`
+
+	// LiteLLMID is the join key into the LiteLLM price index, whose records
+	// carry a litellm_provider field. It is a separate key from ModelsDevID
+	// because the two indexes name the same vendor differently: fireworks is
+	// fireworks_ai there, together is together_ai.
+	LiteLLMID string `yaml:"litellm_id,omitempty"`
+
+	// NoLiteLLM is the explicit exemption. A provider the index does not cover
+	// must say so, or a forgotten key reads as a deliberate absence.
+	NoLiteLLM bool   `yaml:"no_litellm,omitempty"`
+	FreeTier  bool   `yaml:"free_tier,omitempty"`
+	Website   string `yaml:"website,omitempty"`
+
+	// Resells declares that this provider's listing quotes prices set by the
+	// vendors it fronts. Hand-reviewed in presets.overrides.yaml, because a
+	// paid aggregator is indistinguishable from a paid vendor in the generated
+	// data — both charge, and both publish a rate per model.
+	Resells bool `yaml:"resells_prices,omitempty"`
 
 	// APIKeyURL is where an operator gets a key. Neither models.dev nor
 	// OmniRoute publishes it; 9router does, and an operator adding a provider
@@ -103,6 +119,34 @@ type OAuth struct {
 type Redirect struct {
 	Style string `yaml:"style"` // localhost or manual
 	Port  int    `yaml:"port"`
+}
+
+// ResellsPrices reports whether this provider's listing quotes prices it did
+// not set, which is what separates a rate measured at the seller from one
+// merely republished by it.
+//
+// Two ways to qualify, because no single signal covers both shapes an
+// aggregator comes in.
+//
+// A declared resells_prices covers the paid router — openrouter and its like
+// charge real money for other vendors' models, so nothing in the generated
+// data distinguishes them from a vendor. Only a human can.
+//
+// The derived half covers the free proxy: charges nothing, and neither price
+// directory carries it as a vendor of record. A provider with no prices of its
+// own and no vendor identity is fronting someone else's catalogue — hackclub
+// serves OpenRouter's listing verbatim, per-request limits and openrouter/auto
+// row included. Deriving it means a free proxy added by a preset regeneration
+// is covered without anyone remembering to flag it.
+//
+// free_tier alone is not the test, and using it as one was a bug. 113 of 208
+// presets carry it and 27 of those join the LiteLLM index — gemini, groq,
+// mistral, cohere, cerebras, nvidia and vertex among them. Those vendors set
+// their own prices; a free tier alongside does not make their own quote
+// third-party, and grading it down would leave the estimate marker lit for
+// traffic that is precisely measured.
+func (p Preset) ResellsPrices() bool {
+	return p.Resells || (p.FreeTier && p.NoModelsDev && p.NoLiteLLM)
 }
 
 // TraitRule declares the request-shape facts for a family of model names.

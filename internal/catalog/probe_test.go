@@ -1,11 +1,18 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func TestProbeForBuildsFromThePreset(t *testing.T) {
@@ -219,5 +226,224 @@ func TestParseListRejectsEntriesWithoutIDs(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ModelID != "a" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+// The four price tests below read listings captured verbatim from the live
+// endpoints on 2026-09-03 and decoded through the production parser.
+
+func TestParseListHarvestsStringQuotedPrices(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-hackclub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Discovered{}
+	for _, m := range got {
+		by[m.ModelID] = m
+	}
+
+	// "prompt": "0.00000075" is $0.75 per million tokens, 750000 micros.
+	priced := by["google/gemini-3.8-flash"]
+	if priced.Pricing == nil {
+		t.Fatalf("gemini-3.8-flash carried no price")
+	}
+	want := store.ModelPricing{
+		InputMicrosPerMTok:      750_000,
+		OutputMicrosPerMTok:     3_750_000,
+		CacheReadMicrosPerMTok:  ptrTo(int64(75_000)),
+		CacheWriteMicrosPerMTok: ptrTo(int64(41_667)),
+	}
+	if !samePricing(priced.Pricing, &want) {
+		t.Errorf("pricing = %s, want %s", showPricing(priced.Pricing), showPricing(&want))
+	}
+
+	// A free model's zeroes are a price, not an absence.
+	free := by["inclusionai/ling-3.0-flash-fin:free"]
+	if free.Pricing == nil {
+		t.Fatalf("a free model must carry a known price of zero")
+	}
+	if !samePricing(free.Pricing, &store.ModelPricing{}) {
+		t.Errorf("free pricing = %s, want zero rates and no cache rate",
+			showPricing(free.Pricing))
+	}
+
+	// -1 is openrouter's "the auto-router decides", not a rate.
+	if auto := by["openrouter/auto"]; auto.Pricing != nil {
+		t.Errorf("openrouter/auto priced at %s from a -1 rate", showPricing(auto.Pricing))
+	}
+}
+
+func TestParseListHarvestsNumericPerTokenPrices(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-naga.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Discovered{}
+	for _, m := range got {
+		by[m.ModelID] = m
+	}
+
+	priced := by["qwen3.8-flash"]
+	if priced.Pricing == nil {
+		t.Fatalf("qwen3.8-flash carried no price")
+	}
+	want := store.ModelPricing{
+		InputMicrosPerMTok:     75_000,
+		OutputMicrosPerMTok:    235_000,
+		CacheReadMicrosPerMTok: ptrTo(int64(8_000)),
+	}
+	if !samePricing(priced.Pricing, &want) {
+		t.Errorf("pricing = %s, want %s", showPricing(priced.Pricing), showPricing(&want))
+	}
+	// naga quotes no cache-write rate for any model, and a zero there would
+	// price cached writes as free.
+	if priced.Pricing.CacheWriteMicrosPerMTok != nil {
+		t.Errorf("cache write = %d, want absent", *priced.Pricing.CacheWriteMicrosPerMTok)
+	}
+
+	if free := by["dots-3-note-preview:free"]; free.Pricing == nil {
+		t.Errorf("a free model must carry a known price of zero")
+	}
+
+	// An image model quotes per_output_image_token alone. It has no token
+	// price, and a zeroed one would report it as free.
+	if img := by["seedream-5-lite"]; img.Pricing != nil {
+		t.Errorf("seedream-5-lite priced at %s from an image-only rate", showPricing(img.Pricing))
+	}
+}
+
+func TestParseListLeavesAnUnpricedListingNil(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-opencode.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range got {
+		if m.Pricing != nil {
+			t.Errorf("%s: pricing = %s, want nil for a listing with no price",
+				m.ModelID, showPricing(m.Pricing))
+		}
+	}
+}
+
+func TestParseListRefusesAmbiguousNumericPromptRates(t *testing.T) {
+	// chutes.ai reuses openrouter's "prompt"/"completion" names for numbers
+	// that mean dollars per million, not per token. Reading them as per-token
+	// would price every one of its models a million times over.
+	body, err := os.ReadFile("testdata/listing-chutes.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range got {
+		if m.Pricing != nil {
+			t.Errorf("%s: pricing = %s, want nil for an ambiguous unit",
+				m.ModelID, showPricing(m.Pricing))
+		}
+	}
+}
+
+func showPricing(p *store.ModelPricing) string {
+	if p == nil {
+		return "<nil>"
+	}
+	rate := func(v *int64) string {
+		if v == nil {
+			return "absent"
+		}
+		return strconv.FormatInt(*v, 10)
+	}
+	return fmt.Sprintf("in=%d out=%d cacheRead=%s cacheWrite=%s",
+		p.InputMicrosPerMTok, p.OutputMicrosPerMTok,
+		rate(p.CacheReadMicrosPerMTok), rate(p.CacheWriteMicrosPerMTok))
+}
+
+func TestParseListRefusesRatesTooLargeToBePerToken(t *testing.T) {
+	// No endpoint serves this today. It is the shape the quoting rule alone
+	// cannot catch: chutes.ai's real per-million numbers, quoted as strings.
+	// Read as dollars per token they would store $104,000 per million tokens
+	// under the `discovered` stamp, which is the highest trust grade there is.
+	// The second entry would overflow int64 into a negative rate.
+	body := []byte(`{"data": [
+		{"id": "per-million", "pricing": {"prompt": "0.104", "completion": "0.416"}},
+		{"id": "absurd", "pricing": {"per_input_token": 1e30, "per_output_token": 1e30}}
+	]}`)
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d models, want both listed despite their prices", len(got))
+	}
+	for _, m := range got {
+		if m.Pricing != nil {
+			t.Errorf("%s: pricing = %s, want nil for a rate above the ceiling",
+				m.ModelID, showPricing(m.Pricing))
+		}
+	}
+}
+
+func TestParseListRecordsADuplicatedModelOnce(t *testing.T) {
+	// hackclub serves every model twice.
+	body, err := os.ReadFile("testdata/listing-hackclub-duplicated.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, m := range got {
+		seen[m.ModelID]++
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("%s listed %d times, want once", id, n)
+		}
+	}
+	if len(got) != 3 {
+		t.Errorf("got %d models, want the 3 distinct ones", len(got))
+	}
+}
+
+func TestParseListRefusesAQuotedNaNRate(t *testing.T) {
+	// Every comparison against a NaN is false, so a rate written this way
+	// passes a ceiling test and a negative test alike, and int64(NaN) is the
+	// most negative int64 there is. It has to be refused and said out loud.
+	var log bytes.Buffer
+	prior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	t.Cleanup(func() { slog.SetDefault(prior) })
+
+	body := []byte(`{"data": [
+		{"id": "nan", "pricing": {"prompt": "NaN", "completion": "NaN"}}
+	]}`)
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d models, want the model listed despite its price", len(got))
+	}
+	if got[0].Pricing != nil {
+		t.Errorf("pricing = %s, want nil for a NaN rate", showPricing(got[0].Pricing))
+	}
+	if !strings.Contains(log.String(), "not a per-token price") {
+		t.Errorf("nothing logged for a refused rate; log = %q", log.String())
 	}
 }

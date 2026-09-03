@@ -125,7 +125,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// as the day's, so it is sourced from the day rather than from
 	// overviewWindow, or a busy gateway would report a few minutes of spend
 	// as though it were the whole day.
-	spendMicros, spendPriced, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(time.Now()))
+	spendMicros, spendPriced, spendEstimated, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(time.Now()))
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -137,8 +137,9 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"error_rate":       errRate,
 		"window_sec":       stats.WindowSec,
 		"today_spend": map[string]any{
-			"micros": spendMicros,
-			"priced": spendPriced,
+			"micros":    spendMicros,
+			"priced":    spendPriced,
+			"estimated": spendEstimated,
 		},
 		"latency":        map[string]any{"p50_ms": p50, "p95_ms": p95},
 		"series":         series,

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 )
@@ -320,5 +321,123 @@ func TestFilteredCountIsWhatTheSweepDropped(t *testing.T) {
 	}
 	if filtered != 3 {
 		t.Errorf("filtered_out = %d, want 3", filtered)
+	}
+}
+
+func TestSuccessWritesPricesOnlyForPricedModels(t *testing.T) {
+	db, ctx := lifecycleDB(t)
+
+	// "kept" already carries a models.dev price. Its listing quotes none, so
+	// the sweep must leave every one of its numbers alone.
+	if err := db.RecordDiscoverySuccess(ctx, "p",
+		[]DiscoveredModel{{ModelID: "kept"}, {ModelID: "priced"}, {ModelID: "free"}}, nil, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "kept",
+		InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000,
+		PriceKnown: true, PriceSource: "models_dev",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{
+		{ModelID: "kept"},
+		{ModelID: "priced", Pricing: &ModelPricing{
+			InputMicrosPerMTok: 750_000, OutputMicrosPerMTok: 3_750_000,
+			CacheReadMicrosPerMTok: int64Ptr(75_000), CacheWriteMicrosPerMTok: int64Ptr(41_667),
+		}},
+		{ModelID: "free", Pricing: &ModelPricing{}},
+	}, nil, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]ModelRow{}
+	for _, r := range rows {
+		by[r.ModelID] = r
+	}
+
+	if got := by["kept"]; got.InputMicrosPerMTok != 3_000_000 ||
+		got.OutputMicrosPerMTok != 15_000_000 || got.PriceSource != "models_dev" || !got.PriceKnown {
+		t.Errorf("kept = %+v, want its models.dev price untouched", got)
+	}
+
+	got := by["priced"]
+	if got.InputMicrosPerMTok != 750_000 || got.OutputMicrosPerMTok != 3_750_000 ||
+		got.CacheReadMicrosPerMTok != 75_000 || got.CacheWriteMicrosPerMTok != 41_667 {
+		t.Errorf("priced rates = %+v", got)
+	}
+	if !got.PriceKnown || got.PriceSource != "discovered" {
+		t.Errorf("priced stamp = (%v, %q), want (true, \"discovered\")", got.PriceKnown, got.PriceSource)
+	}
+
+	// A free model is priced, not unpriced: its zeroes are what the seller
+	// quoted, and price_known is what tells the two apart.
+	if free := by["free"]; !free.PriceKnown || free.PriceSource != "discovered" ||
+		free.InputMicrosPerMTok != 0 {
+		t.Errorf("free = %+v, want a known zero price stamped discovered", free)
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func cacheColumns(t *testing.T, db *DB, id string) (sql.NullInt64, sql.NullInt64) {
+	t.Helper()
+	var read, write sql.NullInt64
+	if err := db.Read.QueryRowContext(context.Background(),
+		`SELECT cache_read_price_micros_per_mtok, cache_write_price_micros_per_mtok
+		   FROM models WHERE provider_id = 'p' AND model_id = ?`, id).Scan(&read, &write); err != nil {
+		t.Fatal(err)
+	}
+	return read, write
+}
+
+func TestSuccessLeavesAnUnquotedCacheRateAlone(t *testing.T) {
+	db, ctx := lifecycleDB(t)
+	if err := db.RecordDiscoverySuccess(ctx, "p",
+		[]DiscoveredModel{{ModelID: "naga"}, {ModelID: "indexed"}}, nil, t0); err != nil {
+		t.Fatal(err)
+	}
+	// "indexed" already carries models.dev's cache-write rate; "naga" has
+	// never had one.
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "indexed",
+		InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000,
+		CacheWriteMicrosPerMTok: 3_750_000,
+		PriceKnown:              true, PriceSource: "models_dev",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// naga quotes no cache-write rate for any model.
+	quoted := &ModelPricing{
+		InputMicrosPerMTok: 75_000, OutputMicrosPerMTok: 235_000,
+		CacheReadMicrosPerMTok: int64Ptr(8_000),
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{
+		{ModelID: "naga", Pricing: quoted},
+		{ModelID: "indexed", Pricing: quoted},
+	}, nil, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	// Migration 0016: an absent price and a zero price are different facts, and
+	// a provider that publishes no cache-write rate must not read as free.
+	read, write := cacheColumns(t, db, "naga")
+	if !read.Valid || read.Int64 != 8_000 {
+		t.Errorf("naga cache read = %+v, want 8000", read)
+	}
+	if write.Valid {
+		t.Errorf("naga cache write = %d, want NULL", write.Int64)
+	}
+
+	// The index knew a cache-write rate this listing does not mention, so the
+	// listing must not flatten it.
+	if _, write = cacheColumns(t, db, "indexed"); !write.Valid || write.Int64 != 3_750_000 {
+		t.Errorf("indexed cache write = %+v, want models.dev's 3750000 kept", write)
 	}
 }

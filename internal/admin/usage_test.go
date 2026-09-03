@@ -25,8 +25,9 @@ type overviewBody struct {
 	RequestsPerMin float64 `json:"requests_per_min"`
 	ErrorRate      float64 `json:"error_rate"`
 	Spend          struct {
-		Micros int64 `json:"micros"`
-		Priced bool  `json:"priced"`
+		Micros    int64 `json:"micros"`
+		Priced    bool  `json:"priced"`
+		Estimated bool  `json:"estimated"`
 	} `json:"today_spend"`
 }
 
@@ -474,5 +475,41 @@ func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 	}
 	if len(got.Days) != 1 || got.Days[0].Requests != 10 {
 		t.Fatalf("ungrouped: want one row of 10, got %+v", got.Days)
+	}
+}
+
+func TestTodaySpendReportsWhetherAnEstimateContributed(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	now := time.Now()
+	measured, indexed := int64(1200), int64(300)
+	write := func(id, grade string, cost *int64) {
+		storetest.WriteBatch(t, db, []*store.RequestRecord{{
+			ID: id, TS: now, Dialect: "openai", Surface: "llm", RequestedModel: "m",
+			FinalProviderID: "a", FinalModel: "m", Status: "success",
+			CostMicros: cost, PriceGrade: grade,
+			Attempts: []store.AttemptRecord{
+				{Seq: 1, ProviderID: "a", Model: "m", Outcome: "success",
+					CostMicros: cost, PriceGrade: grade},
+			},
+		}})
+	}
+
+	write("01MEASURED", "measured", &measured)
+	body := getOverview(t, s, cookie, token)
+	if body.Spend.Estimated {
+		t.Fatalf("today_spend = %+v, want estimated false: every price was measured",
+			body.Spend)
+	}
+
+	write("01INDEXED", "indexed", &indexed)
+	body = getOverview(t, s, cookie, token)
+	if !body.Spend.Estimated {
+		t.Fatalf("today_spend = %+v, want estimated true once an indexed price contributed",
+			body.Spend)
+	}
+	if want := measured + indexed; body.Spend.Micros != want {
+		t.Fatalf("today_spend = %d, want %d: an estimated price still counts toward the total",
+			body.Spend.Micros, want)
 	}
 }

@@ -168,7 +168,7 @@ minutes. Starting a new flow stops the previous listener.
 ```
 {providers: [{id, name, state, cooling, credentials, enabled, needs_reauth}],
  requests_per_min, error_rate, window_sec,
- today_spend: {micros: int | null, priced},
+ today_spend: {micros: int | null, priced, estimated},
  latency: {p50_ms, p95_ms},
  series: [{day, requests, attempts, tokens_in, tokens_out, cost_micros}],
  failovers: [{id, ts, alias, final_provider_id, final_model, attempts, total_ms}],
@@ -177,7 +177,9 @@ minutes. Starting a new flow stops the previous listener.
 
 `state` is `disabled`, `unconfigured`, `degraded` or `healthy`. `series`
 covers the last 30 UTC days; `failovers` is the last five in a five-minute
-window. `today_spend.micros` is `null` when nothing priced ran today.
+window. `today_spend.micros` is `null` when nothing priced ran today, and
+`today_spend.estimated` is true when any of the total was priced from a
+third-party figure rather than the seller's own.
 
 `GET /api/usage?days=30&group_by=` returns
 `{days: [{day, requests, attempts, tokens_in, tokens_out, cost_micros, key?}], priced, group_by?}`.

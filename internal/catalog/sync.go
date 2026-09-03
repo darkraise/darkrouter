@@ -162,6 +162,19 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			}
 		}
 
+		priceSrc := priceSourceAfterSync(r.PriceSource)
+		in, out := meta.InputMicrosPerMTok, meta.OutputMicrosPerMTok
+		cacheRead, cacheWrite := meta.CacheReadMicrosPerMTok, meta.CacheWriteMicrosPerMTok
+		priceKnown := meta.PriceKnown
+		if priceSrc != string(SourceModelsDev) {
+			// The row's stamp outranks this sync, so its numbers do too. Keeping
+			// the label without the values would report a figure as measured
+			// that models.dev supplied.
+			in, out = r.InputMicrosPerMTok, r.OutputMicrosPerMTok
+			cacheRead, cacheWrite = r.CacheReadMicrosPerMTok, r.CacheWriteMicrosPerMTok
+			priceKnown = r.PriceKnown
+		}
+
 		updates = append(updates, store.MetadataRow{
 			ProviderID:      r.ProviderID,
 			ModelID:         r.ModelID,
@@ -169,15 +182,16 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			Surfaces:        r.Surfaces,
 			ContextWindow:   meta.ContextWindow,
 			MaxOutputTokens: meta.MaxOutputTokens,
-			// Limits and pricing always come from models.dev when the join
-			// succeeded: precedence is per field, not per record.
+			// Limits always come from models.dev when the join succeeded:
+			// precedence is per field, not per record.
 			Capabilities:            caps,
 			CapabilitiesSource:      source,
-			InputMicrosPerMTok:      meta.InputMicrosPerMTok,
-			OutputMicrosPerMTok:     meta.OutputMicrosPerMTok,
-			CacheReadMicrosPerMTok:  meta.CacheReadMicrosPerMTok,
-			CacheWriteMicrosPerMTok: meta.CacheWriteMicrosPerMTok,
-			PriceSource:             priceSourceAfterSync(r.PriceSource),
+			InputMicrosPerMTok:      in,
+			OutputMicrosPerMTok:     out,
+			CacheReadMicrosPerMTok:  cacheRead,
+			CacheWriteMicrosPerMTok: cacheWrite,
+			PriceKnown:              priceKnown,
+			PriceSource:             priceSrc,
 		})
 	}
 

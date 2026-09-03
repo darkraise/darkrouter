@@ -15,6 +15,7 @@ type MergeInput struct {
 	Providers []provider.Provider
 	Presets   Presets
 	Doc       Doc
+	LiteLLM   LiteLLMDoc
 	Rows      []store.ModelRow
 	Overrides []store.ModelOverride
 }
@@ -44,7 +45,7 @@ func Merge(in MergeInput) []Model {
 			continue
 		}
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
-		out = append(out, mergeOne(row, preset, in.Doc, overrides[[2]string{row.ProviderID, row.ModelID}]))
+		out = append(out, mergeOne(row, preset, in.Doc, in.LiteLLM, overrides[[2]string{row.ProviderID, row.ModelID}]))
 	}
 	// Deterministic order: a snapshot rebuild must not reorder the candidate
 	// list a request sees.
@@ -57,7 +58,7 @@ func Merge(in MergeInput) []Model {
 	return out
 }
 
-func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOverride) Model {
+func mergeOne(row store.ModelRow, preset Preset, doc Doc, litellm LiteLLMDoc, override store.ModelOverride) Model {
 	m := Model{
 		ProviderID: row.ProviderID,
 		ModelID:    row.ModelID,
@@ -74,27 +75,48 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 		m.Source = SourceModelsDev
 		m.ContextWindow = meta.ContextWindow
 		m.MaxOutputTokens = meta.MaxOutputTokens
-		m.Pricing = Pricing{
+	} else {
+		m.ContextWindow = row.ContextWindow
+		m.MaxOutputTokens = row.MaxOutputTokens
+		m.Source = SourceInferred
+	}
+
+	// Price precedence cannot be written as a fixed argument list, because the
+	// row holds a single slot whose stamp may be anything from an operator's
+	// own figure down to a guess. The stored candidate therefore leads a
+	// directory when its stamp outranks one and trails it otherwise.
+	stored := Pricing{
+		InputMicrosPerMTok:      row.InputMicrosPerMTok,
+		OutputMicrosPerMTok:     row.OutputMicrosPerMTok,
+		CacheReadMicrosPerMTok:  row.CacheReadMicrosPerMTok,
+		CacheWriteMicrosPerMTok: row.CacheWriteMicrosPerMTok,
+		Known:                   row.PriceKnown,
+		Source:                  priceSource(row.PriceSource),
+	}
+	var fromDoc Pricing
+	if joined && meta.PriceKnown {
+		fromDoc = Pricing{
 			InputMicrosPerMTok:      meta.InputMicrosPerMTok,
 			OutputMicrosPerMTok:     meta.OutputMicrosPerMTok,
 			CacheReadMicrosPerMTok:  meta.CacheReadMicrosPerMTok,
 			CacheWriteMicrosPerMTok: meta.CacheWriteMicrosPerMTok,
-			Known:                   meta.PriceKnown,
+			Known:                   true,
 			Source:                  SourceModelsDev,
 		}
-	} else {
-		m.ContextWindow = row.ContextWindow
-		m.MaxOutputTokens = row.MaxOutputTokens
-		m.Pricing = Pricing{
-			InputMicrosPerMTok:      row.InputMicrosPerMTok,
-			OutputMicrosPerMTok:     row.OutputMicrosPerMTok,
-			CacheReadMicrosPerMTok:  row.CacheReadMicrosPerMTok,
-			CacheWriteMicrosPerMTok: row.CacheWriteMicrosPerMTok,
-			Known:                   row.PriceKnown,
-			Source:                  priceSource(row.PriceSource),
-		}
-		m.Source = SourceInferred
 	}
+	var fromLiteLLM Pricing
+	if p, ok := JoinLiteLLM(preset, litellm, row.ModelID); ok && p.Known {
+		fromLiteLLM = p
+	}
+	if stored.Source.Authoritative() {
+		m.Pricing = resolvePrice(stored, fromDoc, fromLiteLLM)
+	} else {
+		m.Pricing = resolvePrice(fromDoc, fromLiteLLM, stored)
+	}
+
+	// A price read from a reseller's listing is that reseller's copy of
+	// someone else's figure, whichever candidate won above.
+	m.Pricing.Resold = preset.ResellsPrices()
 
 	// A runtime that reports its own capabilities outranks a directory's guess
 	// about a model of the same name — that is what makes Ollama's tool
@@ -135,6 +157,46 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 		}
 	}
 	return m
+}
+
+// JoinLiteLLM resolves one model's price through its provider's preset, on the
+// same alias-exact-normalized ladder Join walks for models.dev. Sharing the
+// ladder is the point: an id the metadata join reaches and the price join does
+// not is a model that reads as fully described and unpriced, for no reason a
+// reader could find.
+//
+// The index is keyed by the preset's own litellm_id, never by the provider id,
+// so a provider with no key misses rather than matching a same-named bucket.
+func JoinLiteLLM(p Preset, doc LiteLLMDoc, modelID string) (Pricing, bool) {
+	if p.NoLiteLLM || p.LiteLLMID == "" {
+		return Pricing{}, false
+	}
+	if alias, ok := p.ModelAliases[modelID]; ok {
+		if price, ok := doc[p.LiteLLMID][alias]; ok {
+			return price, true
+		}
+	}
+	if price, ok := doc[p.LiteLLMID][modelID]; ok {
+		return price, true
+	}
+	want := NormalizeModelID(modelID)
+	if want == "" {
+		return Pricing{}, false
+	}
+	// Sorted rather than a bare map range: two upstream ids can normalize to
+	// the same key, and iteration order would otherwise decide which price the
+	// model carries from one rebuild to the next.
+	ids := make([]string, 0, len(doc[p.LiteLLMID]))
+	for id := range doc[p.LiteLLMID] {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if NormalizeModelID(id) == want {
+			return doc[p.LiteLLMID][id], true
+		}
+	}
+	return Pricing{}, false
 }
 
 func state(s string) State {
@@ -218,4 +280,18 @@ func priceSource(stored string) Source {
 	default:
 		return SourceInferred
 	}
+}
+
+// resolvePrice returns the first candidate whose price is known. Callers pass
+// candidates in precedence order; a source with nothing to say passes a
+// zero-valued Pricing, whose false Known keeps it from shadowing a source that
+// did have something to say — a known price of zero is a real price and must
+// stay distinguishable from an absent one.
+func resolvePrice(candidates ...Pricing) Pricing {
+	for _, c := range candidates {
+		if c.Known {
+			return c
+		}
+	}
+	return Pricing{Source: SourceInferred}
 }

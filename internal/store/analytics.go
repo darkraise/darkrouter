@@ -118,41 +118,51 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	return s, nil
 }
 
-// SpendSince sums cost from since through now.
+// SpendSince sums cost from since through now, and reports whether any of it
+// rests on an estimate.
 //
 // Cost is sourced the same way RecentStats and the daily rollup source it:
 // from each attempt's own cost, falling back to the request's own cost_micros
 // for requests with no attempt rows. Diverging from that shape here would
 // make this figure disagree with the usage chart about what a day cost.
-func (d *DB) SpendSince(ctx context.Context, since time.Time) (*int64, bool, error) {
+//
+// An estimated price counts toward the total rather than being excluded: it is
+// nearer the truth than the zero an omission would leave, and the operator is
+// better served by a usable number carrying a marker than by a precise number
+// that is wrong. The marker is on the total because the grade of any one row
+// is already in the catalog.
+func (d *DB) SpendSince(ctx context.Context, since time.Time) (*int64, bool, bool, error) {
 	sinceMs := since.UnixMilli()
-	var pricedRows, cost int64
+	var pricedRows, cost, estimatedRows int64
 	err := d.Read.QueryRowContext(ctx,
-		`SELECT coalesce(sum(CASE WHEN c IS NOT NULL THEN 1 ELSE 0 END), 0), coalesce(sum(c), 0)
+		`SELECT coalesce(sum(CASE WHEN c IS NOT NULL THEN 1 ELSE 0 END), 0),
+		        coalesce(sum(c), 0),
+		        coalesce(sum(CASE WHEN c IS NOT NULL AND g IN ('indexed', 'guessed')
+		                          THEN 1 ELSE 0 END), 0)
 		   FROM (
-		     SELECT a.cost_micros AS c
+		     SELECT a.cost_micros AS c, a.price_grade AS g
 		       FROM requests r
 		       JOIN request_attempts a ON a.request_id = r.id
 		      WHERE r.ts >= ?
 		     UNION ALL
-		     SELECT r.cost_micros
+		     SELECT r.cost_micros, r.price_grade
 		       FROM requests r
 		      WHERE r.ts >= ?
 		        AND r.final_provider_id <> ''
 		        AND NOT EXISTS (
 		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
 		   )`, sinceMs, sinceMs).
-		Scan(&pricedRows, &cost)
+		Scan(&pricedRows, &cost, &estimatedRows)
 	if err != nil {
-		return nil, false, fmt.Errorf("spend since: %w", err)
+		return nil, false, false, fmt.Errorf("spend since: %w", err)
 	}
 	// A nil pointer here rather than a zero: an unpriced model leaves
 	// cost_micros NULL, and a summed zero is ambiguous between "no spend" and
 	// "no price data for what ran".
 	if pricedRows == 0 {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
-	return &cost, true, nil
+	return &cost, true, estimatedRows > 0, nil
 }
 
 // LatencyPercentiles returns p50 and p95 of total_ms over the window.

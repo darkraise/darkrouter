@@ -66,6 +66,11 @@ func TestSyncWritesPricesAndLimits(t *testing.T) {
 	if got := byID["cheap"].InputMicrosPerMTok; got != 140_000 {
 		t.Errorf("cheap input price = %d, want 140000", got)
 	}
+	// The flag travels with the figures. Without it a priced model reads back
+	// as unpriced, and the merge cannot tell it from one nobody has costed.
+	if !byID["cheap"].PriceKnown {
+		t.Error("cheap read back as unpriced after a sync that carried its cost")
+	}
 	if got := byID["big"].ContextWindow; got != 200_000 {
 		t.Errorf("big context = %d", got)
 	}
@@ -318,5 +323,94 @@ func TestSyncDoesNotOverwriteDiscoveredPriceSource(t *testing.T) {
 			t.Errorf("price_source = %q, want %q; the sync erased a discovered stamp",
 				r.PriceSource, SourceDiscovered)
 		}
+	}
+}
+
+func rowFor(t *testing.T, rows []store.ModelRow, providerID, modelID string) store.ModelRow {
+	t.Helper()
+	for _, r := range rows {
+		if r.ProviderID == providerID && r.ModelID == modelID {
+			return r
+		}
+	}
+	t.Fatalf("no row for %s/%s", providerID, modelID)
+	return store.ModelRow{}
+}
+
+// A discovered price keeps BOTH its stamp and its numbers across a sync. The
+// capabilities half of SyncOnce has always done this; the price half did not,
+// so a row stamped discovered took models.dev's figures and kept the label —
+// the console would then render "measured" over an indexed price.
+func TestSyncKeepsADiscoveredPriceNotJustItsStamp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	ctx := context.Background()
+
+	if err := db.UpsertMetadata(ctx, []store.MetadataRow{{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 111, OutputMicrosPerMTok: 222,
+		PriceSource: string(SourceDiscovered),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rowFor(t, rows, "p", "big")
+	if got.PriceSource != string(SourceDiscovered) {
+		t.Errorf("PriceSource = %q, want discovered", got.PriceSource)
+	}
+	if got.InputMicrosPerMTok != 111 || got.OutputMicrosPerMTok != 222 {
+		t.Errorf("prices = %d/%d, want the discovered 111/222 kept",
+			got.InputMicrosPerMTok, got.OutputMicrosPerMTok)
+	}
+}
+
+func TestSyncKeepsADiscoveredFreeModelPriced(t *testing.T) {
+	// A free model's rates are zero, so only the flag separates it from one
+	// nobody has priced. models.dev listing no cost for the same name must not
+	// be allowed to turn a runtime's "it is free" back into "unknown".
+	const noCost = `{"acme":{"id":"acme","models":{
+	  "big":{"id":"big","limit":{"context":200000,"output":64000}}
+	}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(noCost))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	ctx := context.Background()
+
+	if err := db.UpsertMetadata(ctx, []store.MetadataRow{{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 0, OutputMicrosPerMTok: 0,
+		PriceKnown: true, PriceSource: string(SourceDiscovered),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rowFor(t, rows, "p", "big")
+	if !got.PriceKnown {
+		t.Error("a discovered free model read back as unpriced after a sync")
 	}
 }

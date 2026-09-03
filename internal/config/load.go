@@ -111,6 +111,13 @@ func applyDefaults(c *Config) {
 		// which is weeks apart.
 		c.Catalog.FreeCatalogInterval = 24 * time.Hour
 	}
+	if c.Catalog.LiteLLMURL == "" {
+		c.Catalog.LiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+	}
+	if c.Catalog.LiteLLMInterval == 0 {
+		// Daily. Rate changes are announced days ahead of taking effect.
+		c.Catalog.LiteLLMInterval = 24 * time.Hour
+	}
 	if c.Catalog.Discovery.Enabled == nil {
 		on := true
 		c.Catalog.Discovery.Enabled = &on

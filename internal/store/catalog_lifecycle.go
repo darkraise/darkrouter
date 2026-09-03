@@ -27,9 +27,27 @@ type DiscoveredModel struct {
 	MaxOutputTokens int
 	Capabilities    *ModelCapabilities
 
+	// Pricing is nil unless the listing quoted a price. Nil and a zeroed
+	// struct are different claims: the second is a free model, which is most
+	// of what an aggregator serves.
+	Pricing *ModelPricing
+
 	// Publisher selects Vertex's request builder. Empty for a model that came
 	// from a listing endpoint, which is every kind but vertex.
 	Publisher string
+}
+
+// ModelPricing is the four rates a listing quoted, in the catalog's unit of
+// micro-dollars per million tokens.
+// The two cache rates are pointers because most listings quote neither, and
+// migration 0016 states what a zero would claim instead: a provider that
+// publishes no cache-write rate must not read as free. Input and output are
+// bare because a price with either one missing is not recorded at all.
+type ModelPricing struct {
+	InputMicrosPerMTok      int64
+	OutputMicrosPerMTok     int64
+	CacheReadMicrosPerMTok  *int64
+	CacheWriteMicrosPerMTok *int64
 }
 
 // DiscoveryState is one provider's probe bookkeeping.
@@ -135,6 +153,27 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 	}
 	defer caps.Close()
 
+	// A price the seller quoted about itself outranks every index, so it takes
+	// the row's stamp with it. The statement runs only for a model whose
+	// listing carried one: a probe that reported a bare id must leave the
+	// price models.dev supplied exactly where it is.
+	price, err := tx.PrepareContext(ctx,
+		`UPDATE models
+		    SET input_price_micros_per_mtok      = ?,
+		        output_price_micros_per_mtok     = ?,
+		        -- An unquoted cache rate leaves the column as it was. Writing
+		        -- the NULL would discard a figure models.dev knows and this
+		        -- listing simply does not mention.
+		        cache_read_price_micros_per_mtok  = coalesce(?, cache_read_price_micros_per_mtok),
+		        cache_write_price_micros_per_mtok = coalesce(?, cache_write_price_micros_per_mtok),
+		        price_known  = 1,
+		        price_source = 'discovered'
+		  WHERE provider_id = ? AND model_id = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare price write: %w", err)
+	}
+	defer price.Close()
+
 	ids := make([]any, 0, len(seen))
 	for _, m := range seen {
 		if m.ModelID == "" {
@@ -151,6 +190,14 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 			}
 			if _, err := caps.ExecContext(ctx, string(blob), providerID, m.ModelID); err != nil {
 				return fmt.Errorf("write capabilities for %q: %w", m.ModelID, err)
+			}
+		}
+		if m.Pricing != nil {
+			if _, err := price.ExecContext(ctx,
+				m.Pricing.InputMicrosPerMTok, m.Pricing.OutputMicrosPerMTok,
+				m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok,
+				providerID, m.ModelID); err != nil {
+				return fmt.Errorf("write price for %q: %w", m.ModelID, err)
 			}
 		}
 		ids = append(ids, m.ModelID)

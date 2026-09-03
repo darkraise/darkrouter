@@ -15,7 +15,10 @@
 
 /** Micro-dollars. `micros` is null and `priced` false when no model in scope
  *  had a catalog price: the spend is unknown, not zero. */
-export type Spend = { micros: number | null; priced: boolean }
+/** `estimated` marks a total that counted at least one price nobody sold at:
+ *  a third-party index or a guess. The figure still counts it — an estimate is
+ *  nearer the truth than the zero an omission would leave. */
+export type Spend = { micros: number | null; priced: boolean; estimated: boolean }
 
 export type UsageDay = {
   day: string
