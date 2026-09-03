@@ -1,0 +1,85 @@
+name: Refresh provider catalogue
+
+# Weekly. The upstream registries change when somebody does a research pass,
+# which is days apart at best — polling harder would be traffic that cannot
+# find news.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: catalog-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Node evaluates the 9router registry: 14 of its files import from
+      # elsewhere in that repository and cannot be read statically.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Clone the upstream registries
+        run: |
+          git clone --depth 1 https://github.com/diegosouzapw/OmniRoute /tmp/omniroute
+          git clone --depth 1 https://github.com/decolua/9router /tmp/ninerouter
+          echo "OMNI_SHA=$(git -C /tmp/omniroute rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "NINE_SHA=$(git -C /tmp/ninerouter rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Fetch the models.dev index
+        run: curl -sS --fail --max-time 60 -o /tmp/modelsdev.json https://models.dev/api.json
+
+      - name: Regenerate the catalogue
+        run: |
+          go run ./tools/presetgen \
+            -omniroute /tmp/omniroute \
+            -ninerouter /tmp/ninerouter \
+            -modelsdev /tmp/modelsdev.json \
+            -omniroute-sha "$OMNI_SHA" \
+            -ninerouter-sha "$NINE_SHA"
+
+      # The closed-vocabulary and preset-shape tests are the gate. A malformed
+      # upstream commit fails here rather than reaching a reviewer as a green PR.
+      - name: Test
+        run: go test ./internal/catalog/... ./tools/presetgen/...
+
+      - name: Summarise the change
+        id: summary
+        run: |
+          {
+            echo 'body<<PRBODY'
+            echo "OmniRoute \`$OMNI_SHA\`, 9router \`$NINE_SHA\`."
+            echo
+            echo '### Fields changed, by source'
+            git diff -U0 internal/catalog/provenance.yaml \
+              | grep -E '^\+ +[a-z_]+: ' \
+              | awk -F': ' '{print $2}' | sort | uniq -c | sort -rn \
+              | awk '{print "- " $2 ": " $1 " field(s)"}' || echo '- none'
+            echo
+            echo '### Conflicts'
+            sed -n '/^|/p' internal/catalog/presetgen-conflicts.md || echo 'None.'
+            echo PRBODY
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/catalogue-refresh
+          title: "chore(catalog): refresh the provider catalogue"
+          body: ${{ steps.summary.outputs.body }}
+          commit-message: "chore(catalog): refresh the provider catalogue"
+          labels: catalogue
