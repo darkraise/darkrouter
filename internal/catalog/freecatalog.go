@@ -160,10 +160,15 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 	if m := curatedAt.FindSubmatch(raw); m != nil {
 		out.CuratedAt = string(m[1])
 	}
-	for _, m := range freeEntry.FindAllSubmatch(raw, -1) {
+	matches := freeEntry.FindAllSubmatch(raw, -1)
+	var dupProvider, dupModel string
+	for _, m := range matches {
 		provider, model := string(m[1]), string(m[2])
 		if out.Providers[provider] == nil {
 			out.Providers[provider] = map[string]FreeTier{}
+		}
+		if _, collides := out.Providers[provider][model]; collides && dupProvider == "" {
+			dupProvider, dupModel = provider, model
 		}
 		monthly, _ := strconv.ParseInt(string(m[4]), 10, 64)
 		credit, _ := strconv.ParseInt(string(m[5]), 10, 64)
@@ -183,10 +188,15 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 	// model. Both silently shrink the catalogue, every caller stores what it is
 	// handed, and a dropped row means a real model refused on the next import.
 	// Stopping loudly is the cheaper failure.
-	if rows := len(freeEntryStart.FindAll(raw, -1)); out.count() != rows {
+	if rows := len(freeEntryStart.FindAll(raw, -1)); len(matches) != rows {
 		return FreeCatalog{}, fmt.Errorf(
 			"free catalogue: read %d of %d entries; the row shape no longer matches the pattern",
-			out.count(), rows)
+			len(matches), rows)
+	}
+	if out.count() != len(matches) {
+		return FreeCatalog{}, fmt.Errorf(
+			"free catalogue: %d rows stored as %d entries; upstream lists provider %q model %q twice",
+			len(matches), out.count(), dupProvider, dupModel)
 	}
 	if len(out.Providers) == 0 {
 		return FreeCatalog{}, fmt.Errorf("free catalogue held no entries")
