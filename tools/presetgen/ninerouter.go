@@ -38,10 +38,15 @@ type nineNotice struct {
 }
 
 type nineTransport struct {
-	BaseURL     string          `json:"baseUrl"`
-	ValidateURL string          `json:"validateUrl"`
-	AuthHeader  string          `json:"authHeader"`
-	Quirks      map[string]bool `json:"quirks"`
+	BaseURL     string `json:"baseUrl"`
+	ValidateURL string `json:"validateUrl"`
+	AuthHeader  string `json:"authHeader"`
+	// Format names the wire dialect: absent or "openai" is the only shape
+	// this phase's "openaicompat" kind can serve. Everything else ("claude",
+	// "openai-responses", "ollama", "cursor", "kiro", "gemini-cli",
+	// "commandcode", ...) is a different protocol entirely.
+	Format string          `json:"format"`
+	Quirks map[string]bool `json:"quirks"`
 }
 
 type nineModel struct {

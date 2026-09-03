@@ -343,3 +343,75 @@ func TestNineRouterNonHTTPSchemeIsSkipped(t *testing.T) {
 		t.Error("a non-http(s) scheme was ingested as a preset")
 	}
 }
+
+// The "openaicompat" kind can only serve the plain OpenAI-compatible dialect.
+// "claude" is the Anthropic Messages shape -- serving it as openaicompat
+// would send the wrong request body entirely.
+func TestNineRouterClaudeFormatIsSkipped(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "claude",
+		Category:  "apikey",
+		Transport: nineTransport{BaseURL: "https://api.anthropic.com/v1/messages", Format: "claude"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["claude"]; ok {
+		t.Error("a claude-format entry was ingested as openaicompat")
+	}
+}
+
+// "openai-responses" is OpenAI's newer Responses API, a different request
+// shape from the chat-completions dialect openaicompat speaks.
+func TestNineRouterOpenAIResponsesFormatIsSkipped(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "codex",
+		Category:  "apikey",
+		Transport: nineTransport{BaseURL: "https://chatgpt.com/backend-api/codex/responses", Format: "openai-responses"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["codex"]; ok {
+		t.Error("an openai-responses entry was ingested as openaicompat")
+	}
+}
+
+// An oauth-category entry needs a credential flow this phase does not
+// generate. Shipping it as bearer auth would invite an operator to paste an
+// API key into a provider that only accepts an OAuth token.
+func TestNineRouterOAuthCategoryIsSkipped(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "github",
+		Category:  "oauth",
+		Transport: nineTransport{BaseURL: "https://api.githubcopilot.com/chat/completions"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["github"]; ok {
+		t.Error("an oauth-category entry was ingested with bearer auth")
+	}
+}
+
+// A webCookie-category entry needs the same credential flow oauth does; it is
+// not a darkrouter auth style at all.
+func TestNineRouterWebCookieCategoryIsSkipped(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "grok-web",
+		Category:  "webCookie",
+		Transport: nineTransport{BaseURL: "https://grok.com/rest/app-chat/conversations/new"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["grok-web"]; ok {
+		t.Error("a webCookie-category entry was ingested with bearer auth")
+	}
+}
+
+// The ordinary case the filter must not reject: a plain OpenAI-compatible
+// entry with an apikey category and an explicit "openai" format.
+func TestNineRouterPlainOpenAIFormatIsKept(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "plainformat",
+		Category:  "apikey",
+		Transport: nineTransport{BaseURL: "https://api.plainformat.example/v1", Format: "openai"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["plainformat"]; !ok {
+		t.Error("an explicit openai-format apikey entry was skipped")
+	}
+}

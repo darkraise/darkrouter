@@ -159,6 +159,23 @@ func fillGaps(p *catalog.Preset, n nineEntry) []fieldOrigin {
 	return filled
 }
 
+// unservableNine names 9router ids whose transcribed preset would be wrong
+// in a way no structural rule catches, verified by hand against the
+// registry:
+//
+//	vertex-partner  baseUrl is "https://aiplatform.googleapis.com", byte for
+//	                byte the losing value the "vertex" conflict already
+//	                records for lacking the required regional host prefix.
+//	mimo-free, mmf  byte-identical entries whose baseUrl ends in "/chat",
+//	                a path chatSuffixes does not trim, so the adapter would
+//	                request .../chat/chat/completions. Upstream's own
+//	                comment marks the free channel they serve as ended.
+var unservableNine = map[string]bool{
+	"vertex-partner": true,
+	"mimo-free":      true,
+	"mmf":            true,
+}
+
 // toPreset builds a preset from a 9router entry alone, for a provider
 // OmniRoute never listed. The second result is false for an entry this phase
 // cannot transcribe faithfully.
@@ -169,6 +186,32 @@ func fillGaps(p *catalog.Preset, n nineEntry) []fieldOrigin {
 // where the operator has no way to tell a transcription error from a provider
 // that is simply down.
 func (e nineEntry) toPreset() (catalog.Preset, bool) {
+	// The "openaicompat" kind speaks one dialect: plain chat-completions.
+	// "claude" (Anthropic Messages), "openai-responses", "ollama", "cursor",
+	// "kiro", "gemini-cli" and "commandcode" are different wire protocols
+	// entirely -- transcribing them as openaicompat would ship a preset whose
+	// request body the upstream never accepts.
+	if f := strings.ToLower(e.Transport.Format); f != "" && f != "openai" {
+		return catalog.Preset{}, false
+	}
+	// oauth and webCookie need a credential flow this phase does not
+	// generate -- carrying them through as bearer auth (authType/authHeader
+	// are usually absent on these entries, and authStyle's default is
+	// bearer) would invite an operator to paste an API key into a provider
+	// that only accepts an OAuth token or a browser session cookie.
+	switch e.Category {
+	case "oauth", "webCookie":
+		return catalog.Preset{}, false
+	}
+	// A hand-verified list of ids a structural rule above cannot catch:
+	// vertex-partner ships the same regionless host the vertex conflict
+	// already rejected as the losing value, and mimo-free/mmf are
+	// byte-identical entries whose endpoint path ends in "/chat", which
+	// chatSuffixes does not trim, and whose upstream comment marks the free
+	// channel they serve as ended.
+	if unservableNine[e.ID] {
+		return catalog.Preset{}, false
+	}
 	// Some entries carry no transport block at all: their endpoint lives in a
 	// per-surface config a later phase reads. Without it there is no preset.
 	base := trimAPISuffix(e.Transport.BaseURL)
