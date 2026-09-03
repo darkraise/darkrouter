@@ -14,6 +14,7 @@
 //	go run ./tools/presetgen \
 //	  -omniroute /root/repositories-community/OmniRoute \
 //	  -modelsdev /tmp/presetgen/modelsdev.json \
+//	  -litellm /tmp/presetgen/litellm.json \
 //	  -out-presets internal/catalog/presets.yaml \
 //	  -out-snapshot internal/catalog/models_snapshot.json \
 //	  -overrides internal/catalog/presets.overrides.yaml
@@ -39,6 +40,7 @@ import (
 func main() {
 	omni := flag.String("omniroute", "", "path to the OmniRoute checkout")
 	modelsDev := flag.String("modelsdev", "", "path to a models.dev api.json snapshot")
+	liteLLM := flag.String("litellm", "", "path to a LiteLLM model_prices_and_context_window.json snapshot")
 	outPresets := flag.String("out-presets", "internal/catalog/presets.yaml", "generated preset file")
 	outSnapshot := flag.String("out-snapshot", "internal/catalog/models_snapshot.json", "generated fallback snapshot")
 	overrides := flag.String("overrides", "internal/catalog/presets.overrides.yaml", "hand-reviewed corrections")
@@ -52,11 +54,15 @@ func main() {
 	omniSHA := flag.String("omniroute-sha", "", "OmniRoute commit the registry was read from")
 	nineSHA := flag.String("ninerouter-sha", "", "9router commit the registry was read from")
 	flag.Parse()
-	if *omni == "" || *modelsDev == "" {
-		log.Fatal("-omniroute and -modelsdev are both required")
+	if *omni == "" || *modelsDev == "" || *liteLLM == "" {
+		log.Fatal("-omniroute, -modelsdev and -litellm are all required")
 	}
 
 	doc, err := readModelsDev(*modelsDev)
+	if err != nil {
+		log.Fatal(err)
+	}
+	priceIndex, err := readLiteLLMProviders(*liteLLM)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -91,12 +97,9 @@ func main() {
 			// otherwise look identical to a forgotten one.
 			p.NoModelsDev = true
 		}
-		// The LiteLLM join key is hand-maintained in the overrides file: the
-		// generator has no copy of that index, so every preset is exempted
-		// here and the overrides clear the exemption where a key exists.
-		p.NoLiteLLM, p.LiteLLMID = true, ""
 		presets[id] = p
 	}
+	priced := joinPriceIndex(presets, priceIndex)
 
 	carried, err := carryQuirks(presets, *outPresets)
 	if err != nil {
@@ -137,8 +140,8 @@ func main() {
 	if err := writeFreeCatalog(*outFree, free); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("presetgen: %d presets (%d dropped, %d joined to models.dev, %d overridden, %d kept their quirks), %d models in snapshot",
-		len(presets), dropped, joined, applied, carried, countModels(doc))
+	log.Printf("presetgen: %d presets (%d dropped, %d joined to models.dev, %d joined to litellm, %d overridden, %d kept their quirks), %d models in snapshot",
+		len(presets), dropped, joined, priced, applied, carried, countModels(doc))
 	log.Printf("presetgen: free catalog curated %s, %d models across %d providers (%d providers match no preset)",
 		free.CuratedAt, countFree(free), len(free.Providers), unmatched)
 
@@ -590,6 +593,54 @@ func readModelsDev(path string) (map[string]mdProvider, error) {
 		return nil, fmt.Errorf("models.dev snapshot is empty")
 	}
 	return doc, nil
+}
+
+// readLiteLLMProviders collects the litellm_provider values the price index
+// publishes, which is the set a preset's join key can name.
+func readLiteLLMProviders(path string) (map[string]bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read litellm snapshot: %w", err)
+	}
+	var entries map[string]struct {
+		Provider string `json:"litellm_provider"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("parse litellm snapshot: %w", err)
+	}
+	out := map[string]bool{}
+	for _, e := range entries {
+		if e.Provider != "" {
+			out[e.Provider] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("litellm snapshot names no providers")
+	}
+	return out, nil
+}
+
+// joinPriceIndex sets each preset's LiteLLM key from the index's own provider
+// set, exactly as the models.dev key is set from that document.
+//
+// Exempting every preset and letting the overrides file clear the exemption
+// would make the exemption meaningless: a preset added by a regeneration would
+// arrive already excused, and the test that demands a key or a deliberate
+// exemption could never fail. Where the two indexes spell a vendor differently
+// — fireworks is fireworks_ai there — the miss is real and the overrides file
+// supplies the key, which is a correction rather than a blanket.
+func joinPriceIndex(presets catalog.Presets, providers map[string]bool) int {
+	joined := 0
+	for id, p := range presets {
+		if providers[id] {
+			p.LiteLLMID, p.NoLiteLLM = id, false
+			joined++
+		} else {
+			p.LiteLLMID, p.NoLiteLLM = "", true
+		}
+		presets[id] = p
+	}
+	return joined
 }
 
 func countModels(doc map[string]mdProvider) int {
