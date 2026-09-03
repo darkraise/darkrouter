@@ -212,28 +212,54 @@ describe("the models table", () => {
 })
 
 describe("the price marker in the Band cell", () => {
-  it("verifies a measured price, cautions a guessed one, and marks an indexed one plainly", async () => {
+  it("puts the verified mark on the measured row and the caution mark on the guessed row, and neither on the indexed row", async () => {
     mockCatalog(pricedCatalog())
     await renderAt("/")
 
-    const verified = await screen.findByTitle("Price quoted by the provider")
-    const caution = await screen.findByTitle("No published price; this is an estimate")
-    // Only two of the three rows should carry a mark at all — the indexed
-    // row is the majority case the spec says to leave unmarked.
+    // All three fixture rows share a price, so the assertions below are
+    // scoped by row rather than by cell text — a swap between the verified
+    // and caution branches must fail here even though the price string
+    // alone could not tell the rows apart.
+    const measuredRow = (await screen.findByText("measured-model")).closest("tr")
+    const indexedRow = (await screen.findByText("indexed-model")).closest("tr")
+    const guessedRow = (await screen.findByText("guessed-model")).closest("tr")
+    if (!measuredRow || !indexedRow || !guessedRow) {
+      throw new Error("expected each model name inside a table row")
+    }
+
+    expect(
+      within(measuredRow).getByTitle("Price quoted by the provider"),
+    ).toBeInTheDocument()
+    expect(
+      within(measuredRow).queryByTitle("No published price; this is an estimate"),
+    ).not.toBeInTheDocument()
+
+    expect(
+      within(guessedRow).getByTitle("No published price; this is an estimate"),
+    ).toBeInTheDocument()
+    expect(
+      within(guessedRow).queryByTitle("Price quoted by the provider"),
+    ).not.toBeInTheDocument()
+
+    // The indexed row is the majority case the spec says to leave unmarked.
+    expect(within(indexedRow).queryByTitle("Price quoted by the provider")).not.toBeInTheDocument()
+    expect(
+      within(indexedRow).queryByTitle("No published price; this is an estimate"),
+    ).not.toBeInTheDocument()
+
+    // Exactly one row of each kind carries a mark at all.
     expect(screen.getAllByTitle("Price quoted by the provider")).toHaveLength(1)
     expect(screen.getAllByTitle("No published price; this is an estimate")).toHaveLength(1)
 
     // The mark rides in the same cell as the price it explains, on one line.
-    const verifiedCell = verified.closest("td")
-    const cautionCell = caution.closest("td")
+    const verifiedCell = within(measuredRow)
+      .getByTitle("Price quoted by the provider")
+      .closest("td")
+    const cautionCell = within(guessedRow)
+      .getByTitle("No published price; this is an estimate")
+      .closest("td")
     if (!verifiedCell || !cautionCell) throw new Error("expected the marker inside a table cell")
     expect(verifiedCell).toHaveTextContent("$0.1500 / $0.6000")
     expect(cautionCell).toHaveTextContent("$0.1500 / $0.6000")
-
-    // The indexed row's own cell has neither mark.
-    const indexedRow = (await screen.findByText("indexed-model")).closest("tr")
-    if (!indexedRow) throw new Error("expected the model name inside a table row")
-    expect(within(indexedRow).queryByTitle("Price quoted by the provider")).not.toBeInTheDocument()
-    expect(within(indexedRow).queryByTitle("No published price; this is an estimate")).not.toBeInTheDocument()
   })
 })
