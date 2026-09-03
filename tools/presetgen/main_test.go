@@ -211,3 +211,22 @@ func TestReadLiteLLMProvidersRejectsAnEmptyIndex(t *testing.T) {
 		t.Error("an index naming no providers was accepted")
 	}
 }
+
+// resells_prices is hand-declared for the paid aggregators, so it only exists
+// in the overrides file. A merge that skipped the field would drop all sixteen
+// declarations on the next regeneration and grade OpenRouter's republished
+// list prices as its own quotes again, silently.
+func TestOverridesCarryTheResaleDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overrides.yaml")
+	if err := os.WriteFile(path, []byte("openrouter:\n  resells_prices: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps := catalog.Presets{"openrouter": {Name: "OpenRouter", Kind: "openaicompat"}}
+	if _, err := applyOverrides(ps, path); err != nil {
+		t.Fatal(err)
+	}
+	if !ps["openrouter"].ResellsPrices() {
+		t.Error("the declaration did not survive the override merge")
+	}
+}
