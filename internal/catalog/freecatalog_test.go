@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	_ "embed"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/store"
@@ -35,8 +36,11 @@ func TestFreeCatalogCoversAProvidersDocumentedModels(t *testing.T) {
 func TestFreeCatalogExcludesAWithdrawnTier(t *testing.T) {
 	// A discontinued free tier is history the upstream catalogue keeps. It is
 	// not something an import filter may count on.
-	c := FreeCatalog{Providers: map[string]map[string]string{
-		"p": {"gone": "discontinued", "live": "recurring-daily"},
+	c := FreeCatalog{Providers: map[string]map[string]FreeTier{
+		"p": {
+			"gone": {FreeType: "discontinued"},
+			"live": {FreeType: "recurring-daily"},
+		},
 	}}
 	if c.Covers("p", "gone") {
 		t.Error("a withdrawn free tier still read as free")
@@ -83,4 +87,74 @@ func TestSelectModelsForImportKeepsCuratedFreeModels(t *testing.T) {
 	if len(dropped) != 1 || dropped[0] != "priced" {
 		t.Errorf("dropped %v, want [priced]", dropped)
 	}
+}
+
+//go:embed testdata/free-catalog-sample.ts
+var freeCatalogSampleTS []byte
+
+// The record is read from a verbatim upstream excerpt through the production
+// parser, so every field this phase adds is exercised against the real shape
+// rather than one assumed for it.
+func TestParseFreeCatalogReadsTheWholeRecord(t *testing.T) {
+	c, err := ParseFreeCatalog(freeCatalogSampleTS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withBudget, unsanctioned, pooled int
+	for _, models := range c.Providers {
+		for _, tier := range models {
+			if tier.MonthlyTokens > 0 || tier.CreditTokens > 0 {
+				withBudget++
+			}
+			if tier.Unsanctioned() {
+				unsanctioned++
+			}
+			if tier.PoolKey != "" {
+				pooled++
+			}
+		}
+	}
+	if withBudget == 0 {
+		t.Error("no entry carried a budget; monthlyTokens/creditTokens are being dropped")
+	}
+	if unsanctioned == 0 {
+		t.Error("no entry graded avoid; tos is being dropped")
+	}
+	if pooled == 0 {
+		t.Error("no entry carried a pool; poolKey is being dropped")
+	}
+}
+
+// A null poolKey is a real value upstream — seven rows carry it — and must
+// read as absent rather than as the literal string "null".
+func TestParseFreeCatalogReadsANullPool(t *testing.T) {
+	c, err := ParseFreeCatalog(freeCatalogSampleTS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, models := range c.Providers {
+		for id, tier := range models {
+			if tier.PoolKey == "null" {
+				t.Fatalf("%s: poolKey read as the literal string null", id)
+			}
+		}
+	}
+}
+
+// The embedded snapshot is generated. If a regeneration is skipped after the
+// record widens, FreeModels() degrades to an empty catalogue and the free
+// filter silently stops working — this fails loudly instead.
+func TestEmbeddedFreeCatalogCarriesTheFullRecord(t *testing.T) {
+	c := FreeModels()
+	if len(c.Providers) == 0 {
+		t.Fatal("embedded free catalogue is empty")
+	}
+	for _, models := range c.Providers {
+		for _, tier := range models {
+			if tier.ToS != "" {
+				return
+			}
+		}
+	}
+	t.Error("no embedded entry carries a tos; free_models.json needs regenerating")
 }

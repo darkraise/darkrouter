@@ -462,8 +462,8 @@ func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
 	// A provider that opened a free tier after this binary was built is
 	// invisible to the embedded catalogue, which is the whole reason the daily
 	// refresh exists.
-	live := FreeCatalog{Providers: map[string]map[string]string{
-		"newcomer": {"m": "recurring-daily"},
+	live := FreeCatalog{Providers: map[string]map[string]FreeTier{
+		"newcomer": {"m": {FreeType: "recurring-daily"}},
 	}}
 	d := &Discoverer{opts: DiscoveryOptions{FreeTiers: func() FreeCatalog { return live }}}
 	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{})
