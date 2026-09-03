@@ -35,17 +35,16 @@ type FreeCatalog struct {
 
 // FreeTier is one row of the upstream free-model catalogue.
 //
-// Every field upstream publishes is kept. The three darkrouter decided on
-// before — provider, model, freeType — answered "is this model free"; the rest
-// answer "free how much, on whose terms, out of which shared bucket", which is
-// what an operator actually needs before routing production traffic through it.
+// Every field upstream publishes that darkrouter has a reader for is kept. The
+// three decided on before — provider, model, freeType — answered "is this model
+// free"; the rest answer "free how much, on whose terms, out of which shared
+// bucket", which is what an operator actually needs before routing production
+// traffic through it. Upstream's displayName has no reader and is dropped.
 type FreeTier struct {
 	// FreeType is the shape of the allowance: recurring-daily,
 	// recurring-monthly, recurring-uncapped, recurring-credit, one-time-initial,
 	// keyless, or discontinued.
 	FreeType string `json:"free_type"`
-	// DisplayName is upstream's label for the model, kept for the console.
-	DisplayName string `json:"display_name,omitempty"`
 	// MonthlyTokens is the recurring allowance; CreditTokens a one-time grant.
 	// Zero in both means the allowance is uncapped or unquantified -- except on
 	// a discontinued tier, where it is the plain fact that nothing is granted.
@@ -136,11 +135,13 @@ func (c FreeCatalog) ModelsFor(presetID string) []string {
 	return out
 }
 
-// freeEntry matches one line of OmniRoute's FREE_MODEL_BUDGETS. Every field
-// upstream publishes is captured; poolKey alternates because some rows carry a
-// literal null rather than a string.
+// freeEntry matches one line of OmniRoute's FREE_MODEL_BUDGETS. Every field is
+// matched so the pattern stays positional, but displayName is only matched:
+// nothing downstream shows upstream's label, and darkrouter names a model by
+// the id it routes to. poolKey alternates because some rows carry a literal
+// null rather than a string.
 var freeEntry = regexp.MustCompile(
-	`\{ provider: "([^"]+)", modelId: "([^"]+)", displayName: "([^"]*)", ` +
+	`\{ provider: "([^"]+)", modelId: "([^"]+)", displayName: "(?:[^"]*)", ` +
 		`monthlyTokens: (\d+), creditTokens: (\d+), freeType: "([^"]+)", ` +
 		`poolKey: (?:"([^"]+)"|null), tos: "([^"]+)"`)
 
@@ -179,15 +180,14 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 		if _, collides := out.Providers[provider][model]; collides && dupProvider == "" {
 			dupProvider, dupModel = provider, model
 		}
-		monthly, _ := strconv.ParseInt(string(m[4]), 10, 64)
-		credit, _ := strconv.ParseInt(string(m[5]), 10, 64)
+		monthly, _ := strconv.ParseInt(string(m[3]), 10, 64)
+		credit, _ := strconv.ParseInt(string(m[4]), 10, 64)
 		out.Providers[provider][model] = FreeTier{
-			DisplayName:   string(m[3]),
 			MonthlyTokens: monthly,
 			CreditTokens:  credit,
-			FreeType:      string(m[6]),
-			PoolKey:       string(m[7]),
-			ToS:           string(m[8]),
+			FreeType:      string(m[5]),
+			PoolKey:       string(m[6]),
+			ToS:           string(m[7]),
 		}
 	}
 	// Every row this file holds must survive into the catalogue, exactly. The
