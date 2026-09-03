@@ -3,9 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// validPresetID bounds what may appear as a YAML mapping key in the manifest.
+// writeProvenance builds the file by string concatenation, so an id carrying
+// a YAML metacharacter would not fail loudly -- it would just produce a
+// manifest Provenance() silently misparses.
+var validPresetID = regexp.MustCompile(`^[a-z0-9._-]+$`)
 
 // manifestMeta stamps the run. Without the upstream SHAs nothing answers
 // whether a field changed because upstream moved or because a scraper did.
@@ -32,6 +39,9 @@ func writeProvenance(path string, m merged, meta manifestMeta) error {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
+		if !validPresetID.MatchString(id) {
+			return fmt.Errorf("writeProvenance: id %q contains characters outside [a-z0-9._-]", id)
+		}
 		fmt.Fprintf(&b, "  %s:\n", id)
 		origins := append([]fieldOrigin(nil), m.Origins[id]...)
 		sort.Slice(origins, func(i, j int) bool { return origins[i].Field < origins[j].Field })

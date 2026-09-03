@@ -225,16 +225,28 @@ func TestConflictDetectedWhenBothRawAndTrimmedDiffer(t *testing.T) {
 	}
 }
 
-// A 9router entry that would fail toPreset on its own (unmappable auth) still
-// contests an existing OmniRoute id: the disagreement is worth reporting
-// whether or not the entry would be ingested standalone.
+// A 9router entry that would fail toPreset on its own (unmappable auth) and
+// that OmniRoute never listed still surfaces its declared quirk: the review
+// trail is about what 9router declared, not about what phase A managed to
+// ingest. This exercises the `!ok` branch specifically -- an id already in
+// omni would record the same conflict count via contestedFields instead, and
+// would not actually prove this branch runs.
 func TestConflictRecordedEvenWhenEntryFailsToPreset(t *testing.T) {
-	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1/chat/completions"}}
-	nine := []nineEntry{{ID: "p", AuthType: "oauth", Transport: nineTransport{BaseURL: "https://api.example.com/v1/messages"}}}
+	nine := []nineEntry{{
+		ID:       "unmappable",
+		AuthType: "oauth",
+		Transport: nineTransport{
+			BaseURL: "https://api.example.com/v1/messages",
+			Quirks:  map[string]bool{"dropClientMetadata": true},
+		},
+	}}
 
-	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
 	if len(got.Conflicts) != 1 {
 		t.Fatalf("got %d conflicts, want 1: %v", len(got.Conflicts), got.Conflicts)
+	}
+	if _, ok := got.Presets["unmappable"]; ok {
+		t.Error("an entry with unmappable auth must not produce a preset")
 	}
 }
 
@@ -292,5 +304,42 @@ func TestUnmappedQuirkIsReportedNotApplied(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("conflicts = %v, want the unmapped quirk reported", got.Conflicts)
+	}
+}
+
+// For a provider OmniRoute never listed, naming OmniRoute as the winner of a
+// quirk it never saw asserts something untrue in the review table.
+func TestNineRouterOnlyQuirkWinnerIsNotOmniRoute(t *testing.T) {
+	nine := []nineEntry{{ID: "kimchi", Transport: nineTransport{
+		BaseURL: "https://api.kimchi.example/v1",
+		Quirks:  map[string]bool{"dropClientMetadata": true},
+	}}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	var found bool
+	for _, c := range got.Conflicts {
+		if c.Field == "quirk:dropClientMetadata" {
+			found = true
+			if c.Winner == srcOmni {
+				t.Errorf("Winner = %q, OmniRoute never listed kimchi", c.Winner)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected a quirk conflict for kimchi")
+	}
+}
+
+// A custom scheme must be rejected the same way OmniRoute's dropReason
+// rejects one, or an entry with otherwise-valid auth becomes an uncallable
+// preset.
+func TestNineRouterNonHTTPSchemeIsSkipped(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "devin-cli",
+		AuthType:  "apikey",
+		Transport: nineTransport{BaseURL: "devin://acp/stdio"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["devin-cli"]; ok {
+		t.Error("a non-http(s) scheme was ingested as a preset")
 	}
 }

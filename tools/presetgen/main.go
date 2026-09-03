@@ -30,6 +30,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -46,6 +47,11 @@ func main() {
 	outIcons := flag.String("out-icons", "web/public/providers", "directory the copied provider logos land in")
 	outIconManifest := flag.String("out-icon-manifest", "web/src/features/providers/provider-assets.ts", "generated logo manifest")
 	brandMarks := flag.String("brand-marks", "web/src/features/providers/brand-marks.ts", "marks already drawn from @lobehub/icons")
+	nineRouter := flag.String("ninerouter", "", "path to the 9router checkout")
+	outConflicts := flag.String("out-conflicts", "internal/catalog/presetgen-conflicts.md", "generated review table")
+	outProvenance := flag.String("out-provenance", "internal/catalog/provenance.yaml", "generated field-origin manifest")
+	omniSHA := flag.String("omniroute-sha", "", "OmniRoute commit the registry was read from")
+	nineSHA := flag.String("ninerouter-sha", "", "9router commit the registry was read from")
 	flag.Parse()
 	if *omni == "" || *modelsDev == "" {
 		log.Fatal("-omniroute and -modelsdev are both required")
@@ -65,12 +71,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	presets := make(catalog.Presets, len(entries))
+	var nine []nineEntry
+	if *nineRouter != "" {
+		nine, err = scrapeNineRouter(filepath.Join(*nineRouter, "open-sse/providers/registry"))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	m := mergeSources(entries, display, nine)
+	presets := m.Presets
+
 	joined := 0
-	for _, e := range entries {
-		p := e.toPreset(display[e.id])
-		if _, ok := doc[e.id]; ok {
-			p.ModelsDevID, p.NoModelsDev = e.id, false
+	for id, p := range presets {
+		if _, ok := doc[id]; ok {
+			p.ModelsDevID, p.NoModelsDev = id, false
 			joined++
 		} else {
 			// An unjoined entry is exempted rather than left silent: spec §10
@@ -78,7 +92,7 @@ func main() {
 			// otherwise look identical to a forgotten one.
 			p.NoModelsDev = true
 		}
-		presets[e.id] = p
+		presets[id] = p
 	}
 
 	carried, err := carryQuirks(presets, *outPresets)
@@ -89,9 +103,22 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	markOverridden(&m, *overrides)
 	if err := writePresets(*outPresets, presets); err != nil {
 		log.Fatal(err)
 	}
+	if err := writeConflicts(*outConflicts, m.Conflicts); err != nil {
+		log.Fatal(err)
+	}
+	if err := writeProvenance(*outProvenance, m, manifestMeta{
+		OmniRouteSHA:  *omniSHA,
+		NineRouterSHA: *nineSHA,
+		GeneratedAt:   time.Now().UTC().Format("2006-01-02"),
+	}); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("presetgen: %d presets from 9router only, %d conflicts recorded",
+		len(nine), len(m.Conflicts))
 	if err := writeSnapshot(*outSnapshot, doc); err != nil {
 		log.Fatal(err)
 	}

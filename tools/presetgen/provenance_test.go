@@ -88,3 +88,19 @@ func TestProvenanceSortsFieldsWithinAPreset(t *testing.T) {
 		t.Errorf("fields not emitted in ascending order; want block:\n%s\ngot file:\n%s", want, got)
 	}
 }
+
+// writeProvenance emits YAML by string concatenation, so an id carrying a
+// YAML metacharacter would silently corrupt the manifest instead of erroring.
+func TestWriteProvenanceRejectsInvalidID(t *testing.T) {
+	m := merged{Origins: map[string][]fieldOrigin{
+		"bad: id": {{Field: "base_url", Source: "omniroute"}},
+	}}
+	path := filepath.Join(t.TempDir(), "provenance.yaml")
+	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y", GeneratedAt: "2026-09-03"}
+	if err := writeProvenance(path, m, meta); err == nil {
+		t.Fatal("want an error for an id outside [a-z0-9._-]")
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("a corrupt manifest must not be written")
+	}
+}
