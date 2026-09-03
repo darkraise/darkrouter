@@ -145,6 +145,7 @@ func pricedCatalog() *catalog.Store {
 			Capabilities: catalog.Capabilities{Known: true},
 			Pricing: catalog.Pricing{
 				InputMicrosPerMTok: 150000, OutputMicrosPerMTok: 600000, Known: true,
+				Source: catalog.SourceModelsDev,
 			}},
 		{ProviderID: "groq", ModelID: "overridden-model", State: catalog.StateLive,
 			Surfaces: []ir.Surface{ir.SurfaceLLM}, Publisher: "meta",
@@ -166,8 +167,10 @@ type modelSummary struct {
 	Publisher   string `json:"publisher"`
 	MergeSource string `json:"merge_source"`
 	Pricing     *struct {
-		InputMicros  int64 `json:"input_micros"`
-		OutputMicros int64 `json:"output_micros"`
+		InputMicros  int64  `json:"input_micros"`
+		OutputMicros int64  `json:"output_micros"`
+		Source       string `json:"price_source"`
+		Grade        string `json:"price_grade"`
 	} `json:"pricing"`
 }
 
@@ -234,5 +237,21 @@ func TestAModelViewNamesItsSource(t *testing.T) {
 	}
 	if got["unpriced-model"].MergeSource != "inferred" {
 		t.Errorf("merge_source = %q", got["unpriced-model"].MergeSource)
+	}
+}
+
+func TestModelViewCarriesPriceProvenance(t *testing.T) {
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["priced-model"]
+	if got.Pricing == nil {
+		t.Fatal("pricing view is nil")
+	}
+	if got.Pricing.Source != "models_dev" {
+		t.Errorf("price source = %q, want %q", got.Pricing.Source, "models_dev")
+	}
+	if got.Pricing.Grade != "indexed" {
+		t.Errorf("price grade = %q, want %q", got.Pricing.Grade, "indexed")
 	}
 }
