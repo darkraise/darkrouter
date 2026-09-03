@@ -43,8 +43,12 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 		}
 		p, ok := out.Presets[n.ID]
 		if !ok {
-			out.Presets[n.ID] = n.toPreset()
-			out.Origins[n.ID] = originsOf(out.Presets[n.ID], srcNine)
+			fresh, ok := n.toPreset()
+			if !ok {
+				continue
+			}
+			out.Presets[n.ID] = fresh
+			out.Origins[n.ID] = originsOf(fresh, srcNine)
 			continue
 		}
 		filled := fillGaps(&p, n)
@@ -78,16 +82,33 @@ func fillGaps(p *catalog.Preset, n nineEntry) []fieldOrigin {
 }
 
 // toPreset builds a preset from a 9router entry alone, for a provider
-// OmniRoute never listed.
-func (e nineEntry) toPreset() catalog.Preset {
+// OmniRoute never listed. The second result is false for an entry this phase
+// cannot transcribe faithfully.
+//
+// Skipping beats guessing. A provider that is absent is obviously absent; one
+// shipped with an empty base URL, or with a plausible-but-wrong auth style,
+// passes every check the preset file makes and then fails at request time,
+// where the operator has no way to tell a transcription error from a provider
+// that is simply down.
+func (e nineEntry) toPreset() (catalog.Preset, bool) {
+	// Some entries carry no transport block at all: their endpoint lives in a
+	// per-surface config a later phase reads. Without it there is no preset.
+	base := trimAPISuffix(e.Transport.BaseURL)
+	if base == "" {
+		return catalog.Preset{}, false
+	}
+	style, ok := e.authStyle()
+	if !ok {
+		return catalog.Preset{}, false
+	}
 	p := catalog.Preset{
 		Name:      e.Name(),
 		Kind:      "openaicompat",
-		BaseURL:   trimAPISuffix(e.Transport.BaseURL),
+		BaseURL:   base,
 		Surfaces:  []string{"llm"},
 		Website:   e.Display.Website,
 		APIKeyURL: e.Display.Notice.APIKeyURL,
-		Auth:      catalog.Auth{Style: "bearer"},
+		Auth:      catalog.Auth{Style: style},
 	}
 	for _, k := range e.ServiceKinds {
 		if k == "embedding" {
@@ -97,7 +118,29 @@ func (e nineEntry) toPreset() catalog.Preset {
 	// A preset with no models.dev counterpart must say so explicitly; a
 	// missing join key and a forgotten one look identical otherwise.
 	p.NoModelsDev = true
-	return p
+	return p, true
+}
+
+// authStyle maps a 9router entry onto darkrouter's closed auth vocabulary,
+// reporting false where no member of it is the truth.
+//
+// The wire style is the transport's authHeader. 9router's top-level authType
+// is a category rather than a header: jina-ai is "apikey" there and "bearer"
+// on the wire. So the header is read first, and the category only decides
+// whether the headerless default is safe -- "oauth" needs an oauth block this
+// phase does not generate, and "cookie" is not a darkrouter style at all.
+func (e nineEntry) authStyle() (string, bool) {
+	switch strings.ToLower(e.Transport.AuthHeader) {
+	case "bearer", "authorization":
+		return "bearer", true
+	case "x-api-key":
+		return "x-api-key", true
+	case "":
+		if e.AuthType == "" || e.AuthType == "apikey" {
+			return "bearer", true
+		}
+	}
+	return "", false
 }
 
 // Name falls back to the id when upstream carries no display name, so a preset
