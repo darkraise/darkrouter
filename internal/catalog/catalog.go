@@ -51,6 +51,19 @@ func (s Source) Grade() Grade {
 	}
 }
 
+// Authoritative reports whether a stored stamp outranks a third-party index.
+// It is a different question from Grade: an operator's own correction is the
+// least "official" grade and still the most authoritative value, because they
+// entered it deliberately to replace what a directory said.
+func (s Source) Authoritative() bool {
+	switch s {
+	case SourceOverride, SourceDiscovered, SourceModelsDev:
+		return true
+	default:
+		return false
+	}
+}
+
 // Capabilities is what a model can do. Known distinguishes "we checked and it
 // cannot" from "we never found out".
 type Capabilities struct {

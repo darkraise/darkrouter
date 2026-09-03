@@ -113,3 +113,27 @@ func TestUnknownSourceGradesAsGuessed(t *testing.T) {
 		t.Errorf("unknown source graded %q, want %q", got, GradeGuessed)
 	}
 }
+
+func TestSourceAuthoritative(t *testing.T) {
+	cases := map[Source]bool{
+		SourceOverride:   true,
+		SourceDiscovered: true,
+		SourceModelsDev:  true,
+		SourceLiteLLM:    false,
+		SourceRegistry:   false,
+		SourceInferred:   false,
+	}
+	for src, want := range cases {
+		if got := src.Authoritative(); got != want {
+			t.Errorf("Source(%q).Authoritative() = %v, want %v", src, got, want)
+		}
+	}
+}
+
+// An unrecognised source is not authoritative: a stored stamp we cannot read
+// must not displace a directory price we can.
+func TestUnknownSourceIsNotAuthoritative(t *testing.T) {
+	if Source("something-new").Authoritative() {
+		t.Error("unknown source reported authoritative")
+	}
+}
