@@ -16,10 +16,9 @@ import (
 // published.
 const LiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
-// maxLiteLLMBytes bounds the fetch. The index is around 2 MB; the cap is three
-// orders above that, for the same reason the models.dev fetch has one — a
-// compromised or broken CDN must not exhaust memory on a worker nobody is
-// watching.
+// maxLiteLLMBytes bounds the fetch. The index is around 2 MB; the cap is eight
+// times that, for the same reason the models.dev fetch has one — a compromised
+// or broken CDN must not exhaust memory on a worker nobody is watching.
 const maxLiteLLMBytes = 16 << 20
 
 // LiteLLMSyncOptions configures the worker. The zero value is the shipped
@@ -131,6 +130,13 @@ func (s *LiteLLMSyncer) fetch(ctx context.Context) (LiteLLMDoc, error) {
 	doc, err := ParseLiteLLM(body)
 	if err != nil {
 		return nil, fmt.Errorf("litellm price sync: parse: %w", err)
+	}
+	// An index that parses to nothing is indistinguishable from a fetch that
+	// failed — a truncated body, a moved repository, a renamed provider field
+	// all produce it — so it takes the failure path and the previous document
+	// survives. Storing it would discard prices that are still good.
+	if len(doc) == 0 {
+		return nil, fmt.Errorf("litellm price sync: parsed index priced no provider")
 	}
 	return doc, nil
 }
