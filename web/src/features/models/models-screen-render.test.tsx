@@ -12,8 +12,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { ModelsScreen } from "./models-screen"
-import type { CatalogResponse, Model, Pricing } from "../../lib/api-types"
+import { ModelsScreen, tierWarning } from "./models-screen"
+import type { CatalogResponse, FreeTier, Model, Pricing } from "../../lib/api-types"
 
 // PageHeader calls useRouterAdapter unconditionally, and this screen never
 // navigates through it, so a stub satisfying the interface is enough — the
@@ -122,6 +122,26 @@ function pricedCatalog(): CatalogResponse {
         model: "guessed-model",
         pricing: pricing({ price_source: "inferred", price_grade: "guessed" }),
       },
+    ],
+    aliases: [],
+  }
+}
+
+const freeTier = (tos: string): FreeTier => ({
+  free_type: "recurring-daily",
+  monthly_tokens: 24_000_000,
+  credit_tokens: 0,
+  pool_key: "openai",
+  tos,
+})
+
+/** Two rows whose free tiers differ only in the vendor's verdict, so a render
+ *  test can tell the warned row from the unwarned one. */
+function tieredCatalog(): CatalogResponse {
+  return {
+    models: [
+      { ...baseModel, model: "avoid-model", pricing: null, free_tier: freeTier("avoid") },
+      { ...baseModel, model: "caution-model", pricing: null, free_tier: freeTier("caution") },
     ],
     aliases: [],
   }
@@ -263,5 +283,31 @@ describe("the price marker in the Band cell", () => {
     if (!verifiedCell || !cautionCell) throw new Error("expected the marker inside a table cell")
     expect(verifiedCell).toHaveTextContent("$0.1500 / $0.6000")
     expect(cautionCell).toHaveTextContent("$0.1500 / $0.6000")
+  })
+})
+
+describe("the unsanctioned-tier warning", () => {
+  it("warns on the avoid row, beside the model, and leaves the caution row alone", async () => {
+    mockCatalog(tieredCatalog())
+    await renderAt("/")
+
+    const avoidRow = (await screen.findByText("avoid-model")).closest("tr")
+    const cautionRow = (await screen.findByText("caution-model")).closest("tr")
+    if (!avoidRow || !cautionRow) {
+      throw new Error("expected each model name inside a table row")
+    }
+
+    const warning = tierWarning(freeTier("avoid"))
+    if (!warning) throw new Error("expected the avoid tier to warn")
+
+    expect(within(avoidRow).getByText(warning)).toBeInTheDocument()
+    expect(within(cautionRow).queryByText(warning)).not.toBeInTheDocument()
+    expect(screen.getAllByText(warning)).toHaveLength(1)
+
+    // Beside the model id, not in the Band cell: Band can be switched off
+    // through the column-visibility menu and the warning would go with it.
+    expect(within(avoidRow).getByText(warning).closest("td")).toBe(
+      within(avoidRow).getByText("avoid-model").closest("td"),
+    )
   })
 })
