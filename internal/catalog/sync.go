@@ -165,12 +165,14 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		priceSrc := priceSourceAfterSync(r.PriceSource)
 		in, out := meta.InputMicrosPerMTok, meta.OutputMicrosPerMTok
 		cacheRead, cacheWrite := meta.CacheReadMicrosPerMTok, meta.CacheWriteMicrosPerMTok
+		priceKnown := meta.PriceKnown
 		if priceSrc != string(SourceModelsDev) {
 			// The row's stamp outranks this sync, so its numbers do too. Keeping
 			// the label without the values would report a figure as measured
 			// that models.dev supplied.
 			in, out = r.InputMicrosPerMTok, r.OutputMicrosPerMTok
 			cacheRead, cacheWrite = r.CacheReadMicrosPerMTok, r.CacheWriteMicrosPerMTok
+			priceKnown = r.PriceKnown
 		}
 
 		updates = append(updates, store.MetadataRow{
@@ -188,6 +190,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			OutputMicrosPerMTok:     out,
 			CacheReadMicrosPerMTok:  cacheRead,
 			CacheWriteMicrosPerMTok: cacheWrite,
+			PriceKnown:              priceKnown,
 			PriceSource:             priceSrc,
 		})
 	}
