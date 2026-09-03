@@ -448,8 +448,10 @@ func TestLaterCredentialsDoNotResweep(t *testing.T) {
 func TestProviderAPICarriesTheUnsanctionedOptIn(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)
-	_ = do(t, s, cookie, token, "POST", "/api/providers",
-		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("seed status = %d, body = %s", w.Code, w.Body.String())
+	}
 
 	// A patch naming only this field is a patch that names a field: the
 	// emptiness guard has to know about it or the opt-in is unsettable alone.
