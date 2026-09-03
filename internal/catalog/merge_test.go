@@ -262,7 +262,7 @@ func TestMergeStampsModelsDevPriceSource(t *testing.T) {
 	doc := Doc{"p": {"big": Metadata{
 		InputMicrosPerMTok: 500, OutputMicrosPerMTok: 1500, PriceKnown: true,
 	}}}
-	m := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	m := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
 	if m.Pricing.Source != SourceModelsDev {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceModelsDev)
 	}
@@ -277,7 +277,7 @@ func TestMergeStampsRowPriceSourceWhenModelsDevMisses(t *testing.T) {
 		InputMicrosPerMTok: 100, PriceKnown: true,
 		PriceSource: string(SourceDiscovered),
 	}
-	m := mergeOne(row, Preset{}, Doc{}, store.ModelOverride{})
+	m := mergeOne(row, Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
 	if m.Pricing.Source != SourceDiscovered {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceDiscovered)
 	}
@@ -285,7 +285,7 @@ func TestMergeStampsRowPriceSourceWhenModelsDevMisses(t *testing.T) {
 
 // An empty stored source is a guess, not a measurement.
 func TestMergeDefaultsAbsentPriceSourceToInferred(t *testing.T) {
-	m := mergeOne(store.ModelRow{ProviderID: "p", ModelID: "x"}, Preset{}, Doc{}, store.ModelOverride{})
+	m := mergeOne(store.ModelRow{ProviderID: "p", ModelID: "x"}, Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
 	if m.Pricing.Source != SourceInferred {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceInferred)
 	}
@@ -336,7 +336,7 @@ func TestAStoredDiscoveredPriceBeatsModelsDev(t *testing.T) {
 		PriceSource: string(SourceDiscovered),
 	}
 	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
-	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
 	if got.Pricing.Source != SourceDiscovered || got.Pricing.InputMicrosPerMTok != 100 {
 		t.Errorf("got %+v, want the stored discovered price of 100", got.Pricing)
 	}
@@ -350,7 +350,7 @@ func TestAStoredInferredPriceLosesToModelsDev(t *testing.T) {
 		PriceSource: string(SourceInferred),
 	}
 	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
-	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
 	if got.Pricing.Source != SourceModelsDev || got.Pricing.InputMicrosPerMTok != 500 {
 		t.Errorf("got %+v, want models.dev's 500", got.Pricing)
 	}
@@ -364,8 +364,46 @@ func TestAPricelessJoinKeepsTheStoredPrice(t *testing.T) {
 		PriceSource: string(SourceInferred),
 	}
 	doc := Doc{"p": {"big": Metadata{ContextWindow: 200_000}}}
-	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
 	if got.Pricing.Source != SourceInferred || got.Pricing.InputMicrosPerMTok != 100 {
 		t.Errorf("got %+v, want the stored 100 kept", got.Pricing)
+	}
+}
+
+// A model models.dev has never heard of takes the LiteLLM price rather than
+// reading as unpriced, which is the whole point of the phase.
+func TestLiteLLMPricesAModelModelsDevMisses(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "llama-3.3-70b"}
+	ll := LiteLLMDoc{"groq": {"llama-3.3-70b": {
+		InputMicrosPerMTok: 590, OutputMicrosPerMTok: 790,
+		Known: true, Source: SourceLiteLLM,
+	}}}
+	got := mergeOne(row, Preset{LiteLLMID: "groq"}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceLiteLLM || got.Pricing.InputMicrosPerMTok != 590 {
+		t.Errorf("got %+v, want the litellm price", got.Pricing)
+	}
+	if got.Pricing.Source.Grade() != GradeIndexed {
+		t.Errorf("grade = %q, want indexed", got.Pricing.Source.Grade())
+	}
+}
+
+// models.dev outranks the index where both know the model.
+func TestModelsDevBeatsLiteLLM(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "big"}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	ll := LiteLLMDoc{"groq": {"big": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p", LiteLLMID: "groq"}, doc, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceModelsDev {
+		t.Errorf("got %+v, want models.dev", got.Pricing)
+	}
+}
+
+// A preset with no LiteLLM key joins nothing rather than matching by accident.
+func TestNoLiteLLMKeyJoinsNothing(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "m"}
+	ll := LiteLLMDoc{"groq": {"m": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{NoLiteLLM: true}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Known {
+		t.Errorf("got %+v, want no price", got.Pricing)
 	}
 }
