@@ -364,7 +364,8 @@ git commit -m "feat(catalog): read the whole free-tier record"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `store.Provider.AllowUnsanctionedFree bool`; `store.ProviderPatch.AllowUnsanctionedFree *bool`. Column `providers.allow_unsanctioned_free INTEGER NOT NULL DEFAULT 0`.
+- Produces: `store.ProviderRow.AllowUnsanctionedFree bool`; `store.ProviderPatch.AllowUnsanctionedFree *bool`; `provider.Provider.AllowUnsanctionedFree bool` (hydrated in `internal/provider/sqlsource.go`). Column `providers.allow_unsanctioned_free INTEGER NOT NULL DEFAULT 0`.
+- **Two provider structs.** `store.ProviderRow` is the database row; `provider.Provider` is what the discovery sweep and the router read. Both carry the field. Accessors are `db.ProviderByID`, `db.ProviderRows`, `db.CreateProvider`, `db.UpdateProvider` — there is no `db.Provider` or `db.PatchProvider`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
 **Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
@@ -391,11 +392,11 @@ In `internal/store/providers_store_test.go`:
 // back as its default after being set would silently un-opt the operator.
 func TestUnsanctionedOptInDefaultsOffAndPatches(t *testing.T) {
 	db := migrated(t)
-	p := Provider{ID: "p", Name: "p", Preset: "groq", Kind: "openaicompat", Enabled: true}
+	p := ProviderRow{ID: "p", Name: "p", Preset: "groq", Kind: "openaicompat", Enabled: true}
 	if err := db.CreateProvider(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
-	got, err := db.Provider(context.Background(), "p")
+	got, err := db.ProviderByID(context.Background(), "p")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,11 +404,11 @@ func TestUnsanctionedOptInDefaultsOffAndPatches(t *testing.T) {
 		t.Error("the opt-in defaulted on; it is the operator's to grant")
 	}
 	yes := true
-	if err := db.PatchProvider(context.Background(), "p",
+	if err := db.UpdateProvider(context.Background(), "p",
 		ProviderPatch{AllowUnsanctionedFree: &yes}); err != nil {
 		t.Fatal(err)
 	}
-	got, err = db.Provider(context.Background(), "p")
+	got, err = db.ProviderByID(context.Background(), "p")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +477,7 @@ git commit -m "feat(store): store the unsanctioned-tier opt-in"
 - Test: `internal/admin/providers_test.go`
 
 **Interfaces:**
-- Consumes: `store.Provider.AllowUnsanctionedFree`, `store.ProviderPatch.AllowUnsanctionedFree`.
+- Consumes: `store.ProviderRow.AllowUnsanctionedFree`, `store.ProviderPatch.AllowUnsanctionedFree`.
 - Produces: `allow_unsanctioned_free` boolean on the provider GET response, the create body and the patch body.
 
 **Implementer:** dcc-superpower-companions:impl-opus-low
@@ -553,7 +554,7 @@ git commit -m "feat(admin): expose the unsanctioned-tier opt-in"
 - Test: `internal/catalog/discovery_test.go`
 
 **Interfaces:**
-- Consumes: `FreeCatalog.Tier`, `FreeTier.Unsanctioned`, `store.Provider.AllowUnsanctionedFree`.
+- Consumes: `FreeCatalog.Tier`, `FreeTier.Unsanctioned`, `provider.Provider.AllowUnsanctionedFree`.
 - Produces: `FreeRules.Curated` returns false for an unsanctioned tier when the provider has not opted in.
 
 **Implementer:** dcc-superpower-companions:impl-opus-medium
@@ -653,7 +654,7 @@ git commit -m "feat(catalog): skip unsanctioned tiers on import"
 - Test: `internal/router/filter_test.go`
 
 **Interfaces:**
-- Consumes: `store.Provider.AllowUnsanctionedFree`, the catalogue's per-model tier.
+- Consumes: `provider.Provider.AllowUnsanctionedFree`, the catalogue's per-model tier. `catalog.Model` does **not** carry a free tier today — Task 5 adds it.
 - Produces: `router.SkipUnsanctioned SkipReason = "unsanctioned"`.
 
 **Implementer:** dcc-superpower-companions:impl-opus-medium
