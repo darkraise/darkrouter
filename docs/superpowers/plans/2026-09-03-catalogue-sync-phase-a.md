@@ -514,7 +514,7 @@ git commit -m "feat(admin): expose price provenance on models"
 ### Task 5: Mark measured prices in the console
 
 **Files:**
-- Modify: the models screen component under `web/src/features/models/`
+- Modify: `web/src/features/models/models-screen.tsx`
 - Test: `web/src/features/models/models-screen.test.ts`
 
 **Interfaces:**
@@ -905,6 +905,7 @@ git commit -m "fix(presetgen): trim the embeddings suffix"
 
 **Files:**
 - Create: `tools/presetgen/merge.go`, `tools/presetgen/merge_test.go`
+- Modify: `internal/catalog/preset.go` (adds the optional `APIKeyURL` field, Step 3)
 
 **Interfaces:**
 - Consumes: `nineEntry` and `scrapeNineRouter` from Task 6; the existing `entry`, `displayEntry` and `toPreset` in `main.go`.
@@ -1631,7 +1632,7 @@ git commit -m "feat(catalog): record which upstream supplied a field"
 ### Task 11: Wire the second upstream into presetgen
 
 **Files:**
-- Modify: `tools/presetgen/main.go:39-120` (flags and the main flow)
+- Modify: `tools/presetgen/main.go:39-120` (flags and the main flow), `tools/presetgen/merge.go` (adds `markOverridden`, Step 7)
 - Test: `tools/presetgen/main_test.go`
 
 **Interfaces:**
