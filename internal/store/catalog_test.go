@@ -219,3 +219,58 @@ func TestUpsertMetadataRoundTripsCacheWritePricing(t *testing.T) {
 			rows[0].CacheWriteMicrosPerMTok)
 	}
 }
+
+func TestUpsertMetadataRoundTripsPriceSource(t *testing.T) {
+	// A price a provider quoted and one a directory estimated are different
+	// claims, and the row carried no way to tell them apart.
+	ctx := context.Background()
+	db := catalogDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id) VALUES ('p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "m",
+		InputMicrosPerMTok:  500,
+		OutputMicrosPerMTok: 1_500,
+		PriceSource:         "models_dev",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].PriceSource != "models_dev" {
+		t.Errorf("PriceSource = %q, want %q", rows[0].PriceSource, "models_dev")
+	}
+}
+
+func TestUpsertMetadataKeepsPriceSourceNotNull(t *testing.T) {
+	// The metadata sync leaves the field empty; the column's default is what
+	// an unstamped row must keep reading as.
+	ctx := context.Background()
+	db := catalogDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id) VALUES ('p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "m", InputMicrosPerMTok: 500,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].PriceSource != "inferred" {
+		t.Errorf("PriceSource = %q, want %q", rows[0].PriceSource, "inferred")
+	}
+}

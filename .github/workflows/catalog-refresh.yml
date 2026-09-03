@@ -1,0 +1,149 @@
+name: Refresh provider catalogue
+
+# Weekly. The upstream registries change when somebody does a research pass,
+# which is days apart at best — polling harder would be traffic that cannot
+# find news.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: catalog-refresh
+  cancel-in-progress: true
+
+jobs:
+  # Everything that executes upstream code runs here, with a read-only token.
+  # The generator shells out to node, which evaluates all 120 files of the
+  # freshly cloned 9router registry -- top-level module code included. A
+  # hostile upstream commit therefore gets a job that cannot push a branch,
+  # cannot open a pull request, and carries no build cache a later trusted run
+  # would restore. What the split buys is that it cannot reach the repository.
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      omni_sha: ${{ steps.clone.outputs.omni_sha }}
+      nine_sha: ${{ steps.clone.outputs.nine_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # This job runs untrusted upstream code (see comment above), so it
+      # must not populate a build cache that a later, trusted run consumes.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Node evaluates the 9router registry: 14 of its files import from
+      # elsewhere in that repository and cannot be read statically.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Clone the upstream registries
+        id: clone
+        run: |
+          git clone --depth 1 https://github.com/diegosouzapw/OmniRoute /tmp/omniroute
+          git clone --depth 1 https://github.com/decolua/9router /tmp/ninerouter
+          {
+            echo "omni_sha=$(git -C /tmp/omniroute rev-parse --short HEAD)"
+            echo "nine_sha=$(git -C /tmp/ninerouter rev-parse --short HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the models.dev index
+        run: curl -sS --fail --max-time 60 -o /tmp/modelsdev.json https://models.dev/api.json
+
+      - name: Regenerate the catalogue
+        run: |
+          go run ./tools/presetgen \
+            -omniroute /tmp/omniroute \
+            -ninerouter /tmp/ninerouter \
+            -modelsdev /tmp/modelsdev.json \
+            -omniroute-sha "${{ steps.clone.outputs.omni_sha }}" \
+            -ninerouter-sha "${{ steps.clone.outputs.nine_sha }}"
+
+      # The closed-vocabulary and preset-shape tests are the gate. A malformed
+      # upstream commit fails here rather than reaching a reviewer as a green PR.
+      - name: Test
+        run: go test ./internal/catalog/... ./tools/presetgen/...
+
+      # Paths span internal/ and web/, so upload-artifact's least-common-ancestor
+      # root is the repository root and the tree unpacks in place in `propose`.
+      # Dropping the web/ entries would silently re-root the archive.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalogue
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            internal/catalog/presets.yaml
+            internal/catalog/provenance.yaml
+            internal/catalog/presetgen-conflicts.md
+            internal/catalog/models_snapshot.json
+            internal/catalog/free_models.json
+            web/public/providers
+            web/src/features/providers/provider-assets.ts
+
+  # Holds the write token and runs no upstream code: it restores the artifact
+  # over a clean checkout and does nothing but read the diff.
+  propose:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: catalogue
+
+      - name: Summarise the change
+        id: summary
+        env:
+          OMNI_SHA: ${{ needs.generate.outputs.omni_sha }}
+          NINE_SHA: ${{ needs.generate.outputs.nine_sha }}
+        run: |
+          # porcelain, not `git diff`: a newly copied provider logo is an
+          # untracked file and would not show up in a diff of tracked paths.
+          if [ -z "$(git status --porcelain)" ]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Neither upstream moved; nothing to propose.'
+            exit 0
+          fi
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          # Random delimiter: the body quotes upstream-authored strings, and a
+          # fixed one could be closed early by a crafted provider name.
+          eof="PRBODY_$(openssl rand -hex 16)"
+          {
+            echo "body<<$eof"
+            echo "OmniRoute \`$OMNI_SHA\`, 9router \`$NINE_SHA\`."
+            echo
+            echo '### Fields changed, by source'
+            git diff -U0 internal/catalog/provenance.yaml \
+              | grep -E '^\+ +[a-z_]+: ' \
+              | awk -F': ' '{print $2}' | sort | uniq -c | sort -rn \
+              | awk '{print "- " $2 ": " $1 " field(s)"}' || echo '- none'
+            echo
+            echo '### Conflicts'
+            sed -n '/^|/p' internal/catalog/presetgen-conflicts.md || echo 'None.'
+            echo "$eof"
+          } >> "$GITHUB_OUTPUT"
+
+      # Pinned by commit, not tag: this job holds contents/PR write access, and
+      # a tag can be moved by whoever controls that repository.
+      - uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
+        if: steps.summary.outputs.changed == 'true'
+        with:
+          branch: chore/catalogue-refresh
+          title: "chore(catalog): refresh the provider catalogue"
+          body: ${{ steps.summary.outputs.body }}
+          commit-message: "chore(catalog): refresh the provider catalogue"
+          labels: catalogue

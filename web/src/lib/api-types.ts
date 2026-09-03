@@ -246,10 +246,24 @@ export type Preset = {
 export type ProvidersResponse = { providers: Provider[] }
 export type PresetsResponse = { presets: Preset[] }
 
-export type Pricing = { input_micros: number; output_micros: number }
+export type Pricing = {
+  input_micros: number
+  output_micros: number
+  price_source: MergeSource
+  price_grade: PriceGrade
+}
 
 /** Where a merged model row's data came from. Mirrors catalog.MergeSource. */
-export type MergeSource = "models_dev" | "discovered" | "inferred" | "override"
+export type MergeSource =
+  | "models_dev"
+  | "discovered"
+  | "inferred"
+  | "override"
+  | "litellm"
+  | "registry"
+
+/** How confident the catalogue is in a price. Mirrors catalog.Grade. */
+export type PriceGrade = "measured" | "declared" | "indexed" | "guessed"
 
 /** A model as the catalog merges it: one row per model id, listing every
  *  provider that serves it, rather than one row per (provider, model). */

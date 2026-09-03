@@ -3,7 +3,8 @@ import { Link } from "@tanstack/react-router"
 import { Badge, Button, Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui"
 import { ModelCombobox } from "../shell/model-combobox"
 import { CapabilityTriad, ScaleBar } from "../shell/measures"
-import { ModelState } from "../shell/status-mark"
+import { ModelState, StatusMark } from "../shell/status-mark"
+import { CircleCheck, TriangleAlert } from "lucide-react"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
@@ -68,6 +69,21 @@ export function priceBand(p: Pricing | null): string {
   if (perMTok < 1) return "under $1/MTok"
   if (perMTok <= 5) return "$1–$5/MTok"
   return "over $5/MTok"
+}
+
+/**
+ * Whether a price is worth flagging.
+ *
+ * Only the two ends of the confidence scale get a mark. `indexed` and
+ * `declared` are left bare: models.dev covers most of the catalogue, so
+ * badging every indexed price would put a mark on nearly every row, and a
+ * mark on everything is read as nothing.
+ */
+export function priceMarker(p: Pricing | null): "verified" | "caution" | null {
+  if (p === null) return null
+  if (p.price_grade === "measured") return "verified"
+  if (p.price_grade === "guessed") return "caution"
+  return null
 }
 
 /** The scalar shape DataTable's facets need. `surfaces` and price are arrays
@@ -195,13 +211,26 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
       // values, and no two models share a price down to the micro-dollar.
       accessorKey: "band",
       header: "Band",
-      cell: ({ row }) => (
-        <span className="tabular-nums whitespace-nowrap">
-          {row.original.pricing
-            ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
-            : "—"}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const marker = priceMarker(row.original.pricing)
+        return (
+          <span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
+            {row.original.pricing
+              ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
+              : "—"}
+            {marker === "verified" && (
+              <StatusMark icon={CircleCheck} tone="good" label="Price quoted by the provider" />
+            )}
+            {marker === "caution" && (
+              <StatusMark
+                icon={TriangleAlert}
+                tone="warning"
+                label="No published price; this is an estimate"
+              />
+            )}
+          </span>
+        )
+      },
     },
     {
       accessorKey: "publisher",

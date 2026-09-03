@@ -89,3 +89,27 @@ func TestKnownCapabilitiesAreSelective(t *testing.T) {
 		t.Error("no requirement is always satisfied")
 	}
 }
+
+func TestSourceGrade(t *testing.T) {
+	cases := map[Source]Grade{
+		SourceDiscovered: GradeMeasured,
+		SourceOverride:   GradeDeclared,
+		SourceModelsDev:  GradeIndexed,
+		SourceLiteLLM:    GradeIndexed,
+		SourceRegistry:   GradeIndexed,
+		SourceInferred:   GradeGuessed,
+	}
+	for src, want := range cases {
+		if got := src.Grade(); got != want {
+			t.Errorf("Source(%q).Grade() = %q, want %q", src, got, want)
+		}
+	}
+}
+
+// An unrecognised source must read as a guess rather than as a measurement:
+// defaulting the other way would badge an unknown value as vendor-confirmed.
+func TestUnknownSourceGradesAsGuessed(t *testing.T) {
+	if got := Source("something-new").Grade(); got != GradeGuessed {
+		t.Errorf("unknown source graded %q, want %q", got, GradeGuessed)
+	}
+}
