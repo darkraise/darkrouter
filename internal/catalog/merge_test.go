@@ -266,8 +266,8 @@ func TestMergeStampsModelsDevPriceSource(t *testing.T) {
 	if m.Pricing.Source != SourceModelsDev {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceModelsDev)
 	}
-	if m.Pricing.Source.Grade() != GradeIndexed {
-		t.Errorf("grade = %q, want %q", m.Pricing.Source.Grade(), GradeIndexed)
+	if m.Pricing.Source.grade() != GradeIndexed {
+		t.Errorf("grade = %q, want %q", m.Pricing.Source.grade(), GradeIndexed)
 	}
 }
 
@@ -382,8 +382,8 @@ func TestLiteLLMPricesAModelModelsDevMisses(t *testing.T) {
 	if got.Pricing.Source != SourceLiteLLM || got.Pricing.InputMicrosPerMTok != 590 {
 		t.Errorf("got %+v, want the litellm price", got.Pricing)
 	}
-	if got.Pricing.Source.Grade() != GradeIndexed {
-		t.Errorf("grade = %q, want indexed", got.Pricing.Source.Grade())
+	if got.Pricing.Source.grade() != GradeIndexed {
+		t.Errorf("grade = %q, want indexed", got.Pricing.Source.grade())
 	}
 }
 
