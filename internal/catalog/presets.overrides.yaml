@@ -315,6 +315,7 @@ vertex:
   quirks: []
 
 vertex-anthropic:
+  litellm_id: vertex_ai-anthropic_models
   name: Google Vertex AI (Anthropic publisher)
   kind: vertex
   publisher: publishers/anthropic
@@ -470,3 +471,9 @@ wandb:
 
 zai:
   litellm_id: zai
+
+nlpcloud:
+  litellm_id: nlp_cloud
+
+qwen-cloud:
+  litellm_id: qwencloud

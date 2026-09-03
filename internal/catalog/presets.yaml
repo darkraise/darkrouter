@@ -1647,7 +1647,7 @@ nlpcloud:
   surfaces:
     - llm
   no_models_dev: true
-  no_litellm: true
+  litellm_id: nlp_cloud
   free_tier: true
   website: https://docs.nlpcloud.com
 nous-research:
@@ -2024,7 +2024,7 @@ qwen-cloud:
   surfaces:
     - llm
   no_models_dev: true
-  no_litellm: true
+  litellm_id: qwencloud
   website: https://www.qwencloud.com/
   models_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models
 regolo:
@@ -2419,7 +2419,7 @@ vertex-anthropic:
   surfaces:
     - llm
   models_dev_id: google-vertex-anthropic
-  no_litellm: true
+  litellm_id: vertex_ai-anthropic_models
   website: https://cloud.google.com/vertex-ai
   quirks:
     - requires-max-tokens
