@@ -297,10 +297,10 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
 		freeSync:    freeSyncWorker,
 		litellmSync: litellmSyncWorker,
-		refresher: refresher,
-		ex:        ex,
-		started:   time.Now(),
-		warnings:  startupWarnings,
+		refresher:   refresher,
+		ex:          ex,
+		started:     time.Now(),
+		warnings:    startupWarnings,
 	}, nil
 }
 
