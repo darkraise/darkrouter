@@ -37,7 +37,7 @@ func NewSQLSource(db *store.DB, key *crypto.Key) *SQLSource {
 func (s *SQLSource) Reload(ctx context.Context) error {
 	rows, err := s.db.Read.QueryContext(ctx,
 		`SELECT id, preset, kind, base_url, auth_style, priority, region, project, location,
-		        free_models_only
+		        free_models_only, allow_unsanctioned_free
 		   FROM providers
 		  WHERE enabled = 1
 		  ORDER BY priority DESC, id`)
@@ -47,16 +47,17 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 	defer rows.Close()
 
 	type row struct {
-		id, preset, kind, baseURL, authStyle string
-		priority                             int
-		region, project, location            string
-		freeModelsOnly                       int
+		id, preset, kind, baseURL, authStyle  string
+		priority                              int
+		region, project, location             string
+		freeModelsOnly, allowUnsanctionedFree int
 	}
 	var raw []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.id, &r.preset, &r.kind, &r.baseURL, &r.authStyle,
-			&r.priority, &r.region, &r.project, &r.location, &r.freeModelsOnly); err != nil {
+			&r.priority, &r.region, &r.project, &r.location, &r.freeModelsOnly,
+			&r.allowUnsanctionedFree); err != nil {
 			return fmt.Errorf("scan provider: %w", err)
 		}
 		raw = append(raw, r)
@@ -92,9 +93,10 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 			ID: r.id, Kind: r.kind, BaseURL: r.baseURL,
 			Preset: r.preset, AuthStyle: r.authStyle,
 			Region: r.region, Project: r.project, Location: r.location,
-			FreeModelsOnly: r.freeModelsOnly == 1,
-			Credentials:    enabled,
-			Priority:       r.priority, Models: models,
+			FreeModelsOnly:        r.freeModelsOnly == 1,
+			AllowUnsanctionedFree: r.allowUnsanctionedFree == 1,
+			Credentials:           enabled,
+			Priority:              r.priority, Models: models,
 		})
 	}
 
