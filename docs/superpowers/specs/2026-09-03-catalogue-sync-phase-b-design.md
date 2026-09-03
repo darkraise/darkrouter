@@ -219,6 +219,27 @@ tokens/day` — and `avoid` carries a visible warning wherever it appears.
 Per the project typography rule, hierarchy comes from colour and weight, never
 from a smaller size.
 
+
+### 6.4 Owed forward: the routing gate reads a frozen catalogue
+
+`mergeOne` populates `Model.FreeTier` from the **embedded** `FreeModels()`
+snapshot, while `FreeSyncer` holds a live one that only the discovery sweep
+consults through `opts.FreeTiers`. `MergeInput` has no equivalent field.
+
+So the two gates age differently. The import gate honours an upstream regrade
+within a day; the routing gate honours it at the next release. `FreeSyncer`'s
+own comment says the embed "freezes it at the release" — the routing gate
+reintroduces that freeze, in the one place the phase exists to protect.
+
+Both directions cost something. A tier regraded to `avoid` after a release keeps
+routing until a new binary ships. A tier upgraded from `avoid` to `ok` keeps
+being vetoed, and the operator's only symptom is a routing failure.
+
+The fix is shaped like `Store.SetLiteLLM`: a `FreeTiers` field on `MergeInput`,
+an atomic pointer and setter on `Store`, threading through `Rebuild`, one wiring
+line in `internal/server/server.go`, and a test. Roughly four files. Deferred
+from B2 rather than skipped.
+
 ## 7. Testing
 
 - `resolvePrice` is table-tested across every combination of present and absent
