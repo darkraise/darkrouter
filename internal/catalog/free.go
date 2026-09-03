@@ -56,8 +56,10 @@ func IsFreeModel(modelID string, meta Metadata, known bool, curated func(string)
 // number is also the difference between "this provider has no models" and
 // "this provider has no FREE models", which need different fixes.
 //
-// The two rules a caller supplies are in FreeRules, both optional: a provider
-// with neither has every model fall to the `:free` suffix or be dropped.
+// The three rules a caller supplies are in FreeRules, all optional: a provider
+// with none has every model fall to the `:free` suffix or be dropped. The
+// third, Unsanctioned, is a veto — it can only ever remove a model the other
+// two admitted.
 func SelectModelsForImport(
 	models []store.DiscoveredModel,
 	freeOnly bool,
