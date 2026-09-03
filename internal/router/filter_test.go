@@ -516,3 +516,22 @@ func TestAModelWithNoFreeTierRoutes(t *testing.T) {
 		t.Fatalf("candidates = %+v, skips = %+v", cands, skips)
 	}
 }
+
+// The operator can see this model in the console, so "no provider offers this
+// model" sends them hunting through the catalogue for a row that is right
+// there. The error has to name the toggle that actually unblocks it.
+func TestAVetoedModelReportsTheOptInRatherThanAbsence(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "risky", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+		FreeTier: catalog.FreeTier{FreeType: "keyless", ToS: "avoid"},
+	}})
+
+	cands, _, err := Resolve(Query{Model: "p/risky", Surface: ir.SurfaceLLM}, snap)
+	if len(cands) != 0 {
+		t.Fatalf("got %d candidates for an unsanctioned model", len(cands))
+	}
+	if !errors.Is(err, ErrUnsanctionedFree) {
+		t.Fatalf("err = %v, want ErrUnsanctionedFree", err)
+	}
+}

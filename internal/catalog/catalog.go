@@ -180,8 +180,9 @@ type Model struct {
 	Pricing         Pricing
 
 	// FreeTier is the curated catalogue's record of this model's free access,
-	// zero for the majority of models no free tier covers. The router reads its
-	// grading; the console shows the allowance behind a free model.
+	// zero for the majority of models no free tier covers. It carries the
+	// vendor's grading of that access, which is what decides whether the router
+	// may select the model without the operator having opted in.
 	FreeTier FreeTier
 }
 
