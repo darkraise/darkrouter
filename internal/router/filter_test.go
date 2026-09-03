@@ -459,3 +459,60 @@ func TestAnOptionalProviderRoutesBothWays(t *testing.T) {
 		t.Fatalf("with a credential: %+v", cands)
 	}
 }
+
+// An unsanctioned free tier is access the vendor has not sanctioned. The model
+// stays in the catalogue and stays visible; nothing selects it until the
+// operator has opted that provider in.
+func TestAnUnsanctionedModelIsNotRoutedByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		optedIn bool
+		wantN   int
+	}{
+		{name: "off by default", optedIn: false, wantN: 0},
+		{name: "opted in", optedIn: true, wantN: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := snapWithModels(t, []catalog.Model{{
+				ProviderID: "p", ModelID: "risky", State: catalog.StateLive,
+				Surfaces: []ir.Surface{ir.SurfaceLLM},
+				FreeTier: catalog.FreeTier{FreeType: "recurring-daily", ToS: "avoid"},
+			}})
+			snap.Providers[0].AllowUnsanctionedFree = tc.optedIn
+
+			cands, skips, found := filterTarget(target{"p", "risky"},
+				Query{Model: "p/risky", Surface: ir.SurfaceLLM}, snap, byIDOf(snap.Providers))
+			if !found {
+				t.Fatal("provider should have been found")
+			}
+			if len(cands) != tc.wantN {
+				t.Fatalf("got %d candidates, want %d: %+v", len(cands), tc.wantN, cands)
+			}
+			var vetoed bool
+			for _, sk := range skips {
+				if sk.Reason == SkipUnsanctioned {
+					vetoed = true
+				}
+			}
+			if vetoed == tc.optedIn {
+				t.Errorf("SkipUnsanctioned recorded = %v with opt-in %v; skips = %+v",
+					vetoed, tc.optedIn, skips)
+			}
+		})
+	}
+}
+
+// Most of the catalogue has no free tier at all, and the zero value of the
+// record must not read as a verdict about one.
+func TestAModelWithNoFreeTierRoutes(t *testing.T) {
+	snap := snapWithModels(t, []catalog.Model{{
+		ProviderID: "p", ModelID: "paid", State: catalog.StateLive,
+		Surfaces: []ir.Surface{ir.SurfaceLLM},
+	}})
+
+	cands, skips, _ := filterTarget(target{"p", "paid"},
+		Query{Model: "p/paid", Surface: ir.SurfaceLLM}, snap, byIDOf(snap.Providers))
+	if len(cands) != 1 || len(skips) != 0 {
+		t.Fatalf("candidates = %+v, skips = %+v", cands, skips)
+	}
+}
