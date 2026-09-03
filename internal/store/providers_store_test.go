@@ -178,3 +178,31 @@ func TestUnsanctionedOptInDefaultsOffAndPatches(t *testing.T) {
 		t.Error("the list read did not carry the opt-in")
 	}
 }
+
+// The create path must carry the opt-in in its own right. The two flags are
+// seeded to opposing values because the likeliest mirroring slip is passing
+// FreeModelsOnly's argument twice, which a fixture agreeing on both hides.
+func TestCreateProviderCarriesTheUnsanctionedOptIn(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "a", Kind: "openaicompat", BaseURL: "https://a", Enabled: true,
+		FreeModelsOnly: false, AllowUnsanctionedFree: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.ProviderByID(ctx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AllowUnsanctionedFree || got.FreeModelsOnly {
+		t.Errorf("ProviderByID = %+v, want the opt-in on and free-only off", got)
+	}
+	rows, err := db.ProviderRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || !rows[0].AllowUnsanctionedFree || rows[0].FreeModelsOnly {
+		t.Errorf("ProviderRows = %+v", rows)
+	}
+}
