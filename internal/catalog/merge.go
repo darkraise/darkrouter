@@ -74,26 +74,39 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 		m.Source = SourceModelsDev
 		m.ContextWindow = meta.ContextWindow
 		m.MaxOutputTokens = meta.MaxOutputTokens
-		m.Pricing = Pricing{
+	} else {
+		m.ContextWindow = row.ContextWindow
+		m.MaxOutputTokens = row.MaxOutputTokens
+		m.Source = SourceInferred
+	}
+
+	// Price precedence cannot be written as a fixed argument list, because the
+	// row holds a single slot whose stamp may be anything from an operator's
+	// own figure down to a guess. The stored candidate therefore leads a
+	// directory when its stamp outranks one and trails it otherwise.
+	stored := Pricing{
+		InputMicrosPerMTok:      row.InputMicrosPerMTok,
+		OutputMicrosPerMTok:     row.OutputMicrosPerMTok,
+		CacheReadMicrosPerMTok:  row.CacheReadMicrosPerMTok,
+		CacheWriteMicrosPerMTok: row.CacheWriteMicrosPerMTok,
+		Known:                   row.PriceKnown,
+		Source:                  priceSource(row.PriceSource),
+	}
+	var fromDoc Pricing
+	if joined && meta.PriceKnown {
+		fromDoc = Pricing{
 			InputMicrosPerMTok:      meta.InputMicrosPerMTok,
 			OutputMicrosPerMTok:     meta.OutputMicrosPerMTok,
 			CacheReadMicrosPerMTok:  meta.CacheReadMicrosPerMTok,
 			CacheWriteMicrosPerMTok: meta.CacheWriteMicrosPerMTok,
-			Known:                   meta.PriceKnown,
+			Known:                   true,
 			Source:                  SourceModelsDev,
 		}
+	}
+	if stored.Source.Authoritative() {
+		m.Pricing = resolvePrice(stored, fromDoc)
 	} else {
-		m.ContextWindow = row.ContextWindow
-		m.MaxOutputTokens = row.MaxOutputTokens
-		m.Pricing = Pricing{
-			InputMicrosPerMTok:      row.InputMicrosPerMTok,
-			OutputMicrosPerMTok:     row.OutputMicrosPerMTok,
-			CacheReadMicrosPerMTok:  row.CacheReadMicrosPerMTok,
-			CacheWriteMicrosPerMTok: row.CacheWriteMicrosPerMTok,
-			Known:                   row.PriceKnown,
-			Source:                  priceSource(row.PriceSource),
-		}
-		m.Source = SourceInferred
+		m.Pricing = resolvePrice(fromDoc, stored)
 	}
 
 	// A runtime that reports its own capabilities outranks a directory's guess
@@ -218,4 +231,18 @@ func priceSource(stored string) Source {
 	default:
 		return SourceInferred
 	}
+}
+
+// resolvePrice returns the first candidate whose price is known. Callers pass
+// candidates in precedence order; a source with nothing to say passes a
+// zero-valued Pricing, whose false Known keeps it from shadowing a source that
+// did have something to say — a known price of zero is a real price and must
+// stay distinguishable from an absent one.
+func resolvePrice(candidates ...Pricing) Pricing {
+	for _, c := range candidates {
+		if c.Known {
+			return c
+		}
+	}
+	return Pricing{Source: SourceInferred}
 }
