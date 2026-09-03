@@ -158,3 +158,56 @@ func TestOverriddenFieldIsAttributedToTheOverride(t *testing.T) {
 		t.Errorf("origins = %v, want base_url attributed to override", m.Origins["p"])
 	}
 }
+
+// The exemption is what makes a forgotten join key visible, so the generator
+// may only write it where the index genuinely has no entry for the id. Blanket
+// exemption leaves the preset test unable to fail.
+func TestJoinPriceIndexExemptsOnlyAGenuineMiss(t *testing.T) {
+	presets := catalog.Presets{
+		"groq":      {Name: "Groq"},
+		"fireworks": {Name: "Fireworks"}, // spelled fireworks_ai in the index
+	}
+	joined := joinPriceIndex(presets, map[string]bool{"groq": true, "fireworks_ai": true})
+	if joined != 1 {
+		t.Errorf("joined = %d, want 1", joined)
+	}
+	if p := presets["groq"]; p.LiteLLMID != "groq" || p.NoLiteLLM {
+		t.Errorf("groq: litellm_id = %q no_litellm = %v, want the key and no exemption",
+			p.LiteLLMID, p.NoLiteLLM)
+	}
+	if p := presets["fireworks"]; p.LiteLLMID != "" || !p.NoLiteLLM {
+		t.Errorf("fireworks: litellm_id = %q no_litellm = %v, want an exemption the "+
+			"overrides file can correct", p.LiteLLMID, p.NoLiteLLM)
+	}
+}
+
+func TestReadLiteLLMProvidersCollectsTheIndexsOwnNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "litellm.json")
+	if err := os.WriteFile(path, []byte(`{
+		"sample_spec": {"litellm_provider": ""},
+		"groq/llama-3.3-70b": {"litellm_provider": "groq"},
+		"llama-3.3-70b": {"litellm_provider": "groq"},
+		"accounts/fireworks/models/x": {"litellm_provider": "fireworks_ai"}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readLiteLLMProviders(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !got["groq"] || !got["fireworks_ai"] {
+		t.Errorf("providers = %v, want groq and fireworks_ai", got)
+	}
+}
+
+func TestReadLiteLLMProvidersRejectsAnEmptyIndex(t *testing.T) {
+	// A snapshot that parsed to nothing would exempt every preset at once,
+	// which is the state this generator must never write.
+	path := filepath.Join(t.TempDir(), "litellm.json")
+	if err := os.WriteFile(path, []byte(`{"sample_spec": {"mode": "chat"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readLiteLLMProviders(path); err == nil {
+		t.Error("an index naming no providers was accepted")
+	}
+}
