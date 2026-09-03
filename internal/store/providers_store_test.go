@@ -142,3 +142,39 @@ func TestSettingsAccessors(t *testing.T) {
 		t.Error("the setting survived DeleteSetting")
 	}
 }
+
+// The opt-in defaults off and survives a patch round trip. A column that read
+// back as its default after being set would silently un-opt the operator.
+func TestUnsanctionedOptInDefaultsOffAndPatches(t *testing.T) {
+	db := migrated(t)
+	p := ProviderRow{ID: "p", Name: "p", Preset: "groq", Kind: "openaicompat", Enabled: true}
+	if err := db.CreateProvider(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.ProviderByID(context.Background(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AllowUnsanctionedFree {
+		t.Error("the opt-in defaulted on; it is the operator's to grant")
+	}
+	yes := true
+	if err := db.UpdateProvider(context.Background(), "p",
+		ProviderPatch{AllowUnsanctionedFree: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.ProviderByID(context.Background(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AllowUnsanctionedFree {
+		t.Error("the patch did not stick")
+	}
+	rows, err := db.ProviderRows(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || !rows[0].AllowUnsanctionedFree {
+		t.Error("the list read did not carry the opt-in")
+	}
+}

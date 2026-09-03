@@ -55,6 +55,13 @@ type Provider struct {
 	// the only thing that reads it: routing never consults it, so a paid model
 	// already in the catalogue stays routable until the next sweep drops it.
 	FreeModelsOnly bool
+
+	// AllowUnsanctionedFree carries the operator's decision to accept free
+	// models whose terms grade `avoid` — largely access the vendor has not
+	// sanctioned. It rides on the provider because both the discovery sweep
+	// and routing consult it: without the opt-in such a model is neither
+	// imported nor routed to.
+	AllowUnsanctionedFree bool
 }
 
 type Source interface {

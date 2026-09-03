@@ -31,6 +31,10 @@ type ProviderRow struct {
 	// on routing: a paid model already in the catalogue stays routable until
 	// the next sweep drops it.
 	FreeModelsOnly bool
+	// AllowUnsanctionedFree lets this provider's `avoid`-graded free models be
+	// imported and routed to. Off by default: `avoid` largely means access the
+	// vendor has not sanctioned, and the risk is the operator's to accept.
+	AllowUnsanctionedFree bool
 }
 
 // ProviderPatch is a partial update. Every field is a pointer because a partial
@@ -46,6 +50,9 @@ type ProviderPatch struct {
 	// FreeModelsOnly is patchable so an operator can change their mind without
 	// deleting a provider they cannot recreate: the set is defined in code.
 	FreeModelsOnly *bool `json:"free_models_only"`
+	// AllowUnsanctionedFree is patchable because the operator's appetite for
+	// unsanctioned access can change without the provider itself changing.
+	AllowUnsanctionedFree *bool `json:"allow_unsanctioned_free"`
 }
 
 func boolToInt(b bool) int {
@@ -68,11 +75,13 @@ func (d *DB) CreateProvider(ctx context.Context, p ProviderRow) error {
 	if _, err := d.Write.ExecContext(ctx,
 		`INSERT INTO providers
 		   (id, name, preset, kind, base_url, auth_style, priority, enabled,
-		    region, project, location, free_models_only, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    region, project, location, free_models_only,
+		    allow_unsanctioned_free, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Preset, p.Kind, p.BaseURL, p.AuthStyle,
 		p.Priority, enabled, p.Region, p.Project, p.Location,
-		boolToInt(p.FreeModelsOnly), time.Now().UnixMilli()); err != nil {
+		boolToInt(p.FreeModelsOnly), boolToInt(p.AllowUnsanctionedFree),
+		time.Now().UnixMilli()); err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create provider %q: %w", p.ID, ErrConflict)
 		}
@@ -115,6 +124,10 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 	if patch.FreeModelsOnly != nil {
 		sets = append(sets, "free_models_only = ?")
 		args = append(args, boolToInt(*patch.FreeModelsOnly))
+	}
+	if patch.AllowUnsanctionedFree != nil {
+		sets = append(sets, "allow_unsanctioned_free = ?")
+		args = append(args, boolToInt(*patch.AllowUnsanctionedFree))
 	}
 	if len(sets) == 0 {
 		// An empty patch is a client bug, not a no-op to absorb: it means the
@@ -186,7 +199,8 @@ func (d *DB) DeleteCredential(ctx context.Context, providerID, keyID string) err
 func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT id, name, preset, kind, base_url, auth_style, priority, enabled,
-		        region, project, location, free_models_only
+		        region, project, location, free_models_only,
+		        allow_unsanctioned_free
 		   FROM providers ORDER BY priority DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
@@ -197,13 +211,14 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	for rows.Next() {
 		var p ProviderRow
 		var enabled int
-		var freeOnly int
+		var freeOnly, allowUnsanctioned int
 		if err := rows.Scan(&p.ID, &p.Name, &p.Preset, &p.Kind, &p.BaseURL,
 			&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project, &p.Location,
-			&freeOnly); err != nil {
+			&freeOnly, &allowUnsanctioned); err != nil {
 			return nil, fmt.Errorf("list providers: %w", err)
 		}
 		p.FreeModelsOnly = freeOnly == 1
+		p.AllowUnsanctionedFree = allowUnsanctioned == 1
 		p.Enabled = enabled != 0
 		out = append(out, p)
 	}
@@ -216,14 +231,15 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 // ProviderByID reads one provider row, or ErrNotFound.
 func (d *DB) ProviderByID(ctx context.Context, id string) (ProviderRow, error) {
 	var p ProviderRow
-	var enabled, freeOnly int
+	var enabled, freeOnly, allowUnsanctioned int
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT id, name, preset, kind, base_url, auth_style, priority, enabled,
-		        region, project, location, free_models_only
+		        region, project, location, free_models_only,
+		        allow_unsanctioned_free
 		   FROM providers WHERE id = ?`, id).Scan(
 		&p.ID, &p.Name, &p.Preset, &p.Kind, &p.BaseURL,
 		&p.AuthStyle, &p.Priority, &enabled, &p.Region, &p.Project, &p.Location,
-		&freeOnly)
+		&freeOnly, &allowUnsanctioned)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProviderRow{}, fmt.Errorf("provider %q: %w", id, ErrNotFound)
 	}
@@ -232,5 +248,6 @@ func (d *DB) ProviderByID(ctx context.Context, id string) (ProviderRow, error) {
 	}
 	p.Enabled = enabled != 0
 	p.FreeModelsOnly = freeOnly == 1
+	p.AllowUnsanctionedFree = allowUnsanctioned == 1
 	return p, nil
 }
