@@ -491,3 +491,23 @@ func TestTheFilterIndexesExist(t *testing.T) {
 		}
 	}
 }
+
+func TestPriceSourceDefaultsToInferred(t *testing.T) {
+	db := migrated(t)
+	if _, err := db.Write.Exec(
+		`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('p', 'openaicompat', 'http://x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.Exec(
+		`INSERT INTO models (provider_id, model_id, capabilities_source) VALUES ('p', 'legacy', 'inferred')`); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.Read.QueryRow(
+		`SELECT price_source FROM models WHERE model_id = 'legacy'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "inferred" {
+		t.Errorf("price_source = %q, want %q", got, "inferred")
+	}
+}
