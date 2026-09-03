@@ -168,6 +168,15 @@ func TestParseFreeCatalogRefusesAPartialRead(t *testing.T) {
 	if !strings.Contains(err.Error(), "entries") || !strings.Contains(err.Error(), " of ") {
 		t.Errorf("error does not name the shortfall: %v", err)
 	}
+	// And that it blames the shape rather than a duplicate. The two failures
+	// send an operator to different places, so one message for both is worth
+	// no more than none.
+	if !strings.Contains(err.Error(), "row shape") {
+		t.Errorf("error does not blame the row shape: %v", err)
+	}
+	if strings.Contains(err.Error(), "twice") {
+		t.Errorf("a shape break was reported as a duplicated row: %v", err)
+	}
 }
 
 // Two rows naming the same provider and model collapse into one map entry, so
@@ -176,17 +185,31 @@ func TestParseFreeCatalogRefusesAPartialRead(t *testing.T) {
 func TestParseFreeCatalogRefusesADuplicatedRow(t *testing.T) {
 	rows := bytes.SplitAfter(freeCatalogSampleTS, []byte("\n"))
 	var dup []byte
+	var provider, model string
 	for _, row := range rows {
-		if bytes.Contains(row, []byte("provider: \"")) {
-			dup = row
+		if m := freeEntry.FindSubmatch(row); m != nil {
+			dup, provider, model = row, string(m[1]), string(m[2])
 			break
 		}
 	}
 	if dup == nil {
 		t.Fatal("the fixture holds no entry row to duplicate")
 	}
-	if _, err := ParseFreeCatalog(append(append([]byte{}, freeCatalogSampleTS...), dup...)); err == nil {
-		t.Error("a catalogue carrying the same row twice parsed cleanly")
+	_, err := ParseFreeCatalog(append(append([]byte{}, freeCatalogSampleTS...), dup...))
+	if err == nil {
+		t.Fatal("a catalogue carrying the same row twice parsed cleanly")
+	}
+	// Every row here parsed, so blaming the pattern would send an operator
+	// hunting a regression that is not there. The message must say upstream
+	// repeated a row, and name the row it repeated.
+	if !strings.Contains(err.Error(), "twice") {
+		t.Errorf("error does not say a row was listed twice: %v", err)
+	}
+	if strings.Contains(err.Error(), "row shape") {
+		t.Errorf("a duplicated row was reported as a shape break: %v", err)
+	}
+	if !strings.Contains(err.Error(), provider) || !strings.Contains(err.Error(), model) {
+		t.Errorf("error does not name the duplicated %s/%s: %v", provider, model, err)
 	}
 }
 
