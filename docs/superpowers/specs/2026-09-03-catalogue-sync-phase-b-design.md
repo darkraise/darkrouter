@@ -199,7 +199,9 @@ Of 451 free-tier rows: `caution` 271, `avoid` 87, `ambiguous` 38, `ok` 50,
 
 Every row is catalogued with its grade visible. **`avoid` is excluded from the
 free-model filter and from automatic routing unless the operator opts that
-provider in explicitly.** `avoid` largely means access the vendor has not
+provider in explicitly.** A grade on a `discontinued` tier is the exception, at
+both gates alike: those terms no longer govern access, so darkrouter neither
+refuses the model nor asks anyone to consent to a free tier that is gone. `avoid` largely means access the vendor has not
 sanctioned; a gateway that silently routes production traffic through it exposes
 its operator to a risk they never agreed to. Excluding the rows entirely would
 be worse — darkrouter would drop 87 models an operator may already be using,
