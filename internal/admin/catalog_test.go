@@ -159,6 +159,15 @@ func pricedCatalog() *catalog.Store {
 				InputMicrosPerMTok: 200000, OutputMicrosPerMTok: 800000, Known: true,
 				Source: catalog.SourceDiscovered,
 			}},
+		{ProviderID: "groq", ModelID: "free-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier: catalog.FreeTier{
+				FreeType: "recurring-daily", DisplayName: "Free model",
+				MonthlyTokens: 24000000, CreditTokens: 5000,
+				PoolKey: "groq-shared", ToS: "caution",
+			}},
 		{ProviderID: "groq", ModelID: "unpriced-model", State: catalog.StateLive,
 			Surfaces:     []ir.Surface{ir.SurfaceLLM},
 			Source:       catalog.SourceInferred,
@@ -180,6 +189,13 @@ type modelSummary struct {
 		Source       string `json:"price_source"`
 		Grade        string `json:"price_grade"`
 	} `json:"pricing"`
+	FreeTier *struct {
+		FreeType      string `json:"free_type"`
+		MonthlyTokens int64  `json:"monthly_tokens"`
+		CreditTokens  int64  `json:"credit_tokens"`
+		PoolKey       string `json:"pool_key"`
+		ToS           string `json:"tos"`
+	} `json:"free_tier"`
 }
 
 func modelViews(t *testing.T, s *Server) map[string]modelSummary {
@@ -278,5 +294,42 @@ func TestModelViewCarriesPriceProvenance(t *testing.T) {
 	}
 	if overridden.Pricing.Grade != "measured" {
 		t.Errorf("price grade = %q, want %q", overridden.Pricing.Grade, "measured")
+	}
+}
+
+func TestModelAPICarriesTheFreeTierRecord(t *testing.T) {
+	// A budget and a terms verdict cannot be shown by a client that was never
+	// sent them, so the whole upstream record travels on the row.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["free-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.FreeType != "recurring-daily" || got.ToS != "caution" {
+		t.Errorf("free tier = %+v", got)
+	}
+	if got.MonthlyTokens != 24000000 || got.CreditTokens != 5000 {
+		t.Errorf("free tier allowance = %+v", got)
+	}
+	if got.PoolKey != "groq-shared" {
+		t.Errorf("pool key = %q", got.PoolKey)
+	}
+}
+
+func TestAModelWithNoFreeTierRendersNullNotZero(t *testing.T) {
+	// A zeroed record reads as "free, uncapped, terms unknown". Null is the
+	// true claim: this model has no free tier at all.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	if got := modelViews(t, s)["priced-model"].FreeTier; got != nil {
+		t.Fatalf("paid model carries a free tier: %+v", got)
+	}
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/models", "")
+	if !strings.Contains(w.Body.String(), `"free_tier":null`) {
+		t.Errorf("body = %s", w.Body.String())
 	}
 }

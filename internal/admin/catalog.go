@@ -24,6 +24,19 @@ type pricingView struct {
 	Grade  string `json:"price_grade"`
 }
 
+// freeTierView is upstream's free-allowance record for a model. Null rather
+// than a zeroed object when the model has no free tier: an uncapped allowance
+// and no allowance at all are both zero, and only one of them is free.
+type freeTierView struct {
+	FreeType      string `json:"free_type"`
+	MonthlyTokens int64  `json:"monthly_tokens"`
+	CreditTokens  int64  `json:"credit_tokens"`
+	PoolKey       string `json:"pool_key"`
+	// ToS is upstream's verdict on how the vendor regards this access: ok,
+	// caution, ambiguous, avoid or unknown.
+	ToS string `json:"tos"`
+}
+
 type modelView struct {
 	Model         string   `json:"model"`
 	Providers     []string `json:"providers"`
@@ -36,9 +49,10 @@ type modelView struct {
 	// Inferred marks a row whose capabilities were guessed rather than read.
 	// Master design §6.4 routes these with a warning, and an operator needs to
 	// know which they are.
-	Inferred bool         `json:"inferred"`
-	State    string       `json:"state"`
-	Pricing  *pricingView `json:"pricing"`
+	Inferred bool          `json:"inferred"`
+	State    string        `json:"state"`
+	Pricing  *pricingView  `json:"pricing"`
+	FreeTier *freeTierView `json:"free_tier"`
 	// Publisher and MergeSource come from the first provider in catalog order,
 	// which is priority order — the row folds several providers into one, and
 	// where they disagree the one the router would reach first is the answer
@@ -109,6 +123,18 @@ func (s *Server) collectModels(r *http.Request) []modelView {
 					OutputMicros: m.Pricing.OutputMicrosPerMTok,
 					Source:       string(m.Pricing.Source),
 					Grade:        string(m.Pricing.Grade()),
+				}
+			}
+			// ToS, not FreeType, marks the absent record: every upstream row
+			// carries a verdict, while a discontinued tier is a real record
+			// whose withdrawal a reader still needs to see.
+			if m.FreeTier.ToS != "" {
+				v.FreeTier = &freeTierView{
+					FreeType:      m.FreeTier.FreeType,
+					MonthlyTokens: m.FreeTier.MonthlyTokens,
+					CreditTokens:  m.FreeTier.CreditTokens,
+					PoolKey:       m.FreeTier.PoolKey,
+					ToS:           m.FreeTier.ToS,
 				}
 			}
 			byModel[m.ModelID] = v
