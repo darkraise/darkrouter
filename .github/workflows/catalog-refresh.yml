@@ -18,8 +18,10 @@ jobs:
   # Everything that executes upstream code runs here, with a read-only token.
   # The generator shells out to node, which evaluates all 120 files of the
   # freshly cloned 9router registry -- top-level module code included. A
-  # hostile upstream commit therefore gets a job that cannot push a branch,
-  # cannot open a pull request, and holds no credential worth stealing.
+  # hostile upstream commit therefore gets a job that cannot push a branch and
+  # cannot open a pull request. It is not a sandbox: setup-go's cache is
+  # writable, so upstream code can still poison a Go build-cache entry a later
+  # run restores. What the split buys is that it cannot reach the repository.
   generate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
