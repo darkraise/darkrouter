@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { compressedRows, matches, priceBand, facetRow } from "./models-screen"
-import type { Model } from "../../lib/api-types"
+import { compressedRows, matches, priceBand, priceMarker, facetRow } from "./models-screen"
+import type { Model, Pricing } from "../../lib/api-types"
 
 const model = (over: Partial<Model> & { model: string }): Model => ({
   providers: ["groq"],
@@ -16,6 +16,13 @@ const model = (over: Partial<Model> & { model: string }): Model => ({
   merge_source: "models_dev",
   ...over,
 })
+
+const basePricing: Pricing = {
+  input_micros: 150000,
+  output_micros: 600000,
+  price_source: "models_dev",
+  price_grade: "indexed",
+}
 
 describe("the compressed ladder", () => {
   it("never fills a mark", () => {
@@ -49,13 +56,26 @@ describe("model filtering", () => {
 
 describe("the price-band facet", () => {
   it("bands by input price", () => {
-    expect(priceBand({ input_micros: 150000, output_micros: 0 })).toBe("under $1/MTok")
-    expect(priceBand({ input_micros: 3000000, output_micros: 0 })).toBe("$1–$5/MTok")
-    expect(priceBand({ input_micros: 9000000, output_micros: 0 })).toBe("over $5/MTok")
+    expect(priceBand({ ...basePricing, input_micros: 150000 })).toBe("under $1/MTok")
+    expect(priceBand({ ...basePricing, input_micros: 3000000 })).toBe("$1–$5/MTok")
+    expect(priceBand({ ...basePricing, input_micros: 9000000 })).toBe("over $5/MTok")
   })
 
   it("bands an unpriced model as unpriced rather than as free", () => {
     expect(priceBand(null)).toBe("unpriced")
+  })
+})
+
+describe("the price marker", () => {
+  it("marks a measured price and cautions a guessed one", () => {
+    expect(priceMarker({ ...basePricing, price_grade: "measured" })).toBe("verified")
+    expect(priceMarker({ ...basePricing, price_grade: "declared" })).toBe(null)
+    expect(priceMarker({ ...basePricing, price_grade: "indexed" })).toBe(null)
+    expect(priceMarker({ ...basePricing, price_grade: "guessed" })).toBe("caution")
+  })
+
+  it("marks nothing for an unpriced model", () => {
+    expect(priceMarker(null)).toBe(null)
   })
 })
 

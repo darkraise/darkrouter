@@ -25,8 +25,24 @@ describe("the provider's models table", () => {
     render(
       <ProviderModels
         models={[
-          model({ model: "paid", pricing: { input_micros: 150000, output_micros: 600000 } }),
-          model({ model: "gratis", pricing: { input_micros: 0, output_micros: 0 } }),
+          model({
+            model: "paid",
+            pricing: {
+              input_micros: 150000,
+              output_micros: 600000,
+              price_source: "models_dev",
+              price_grade: "indexed",
+            },
+          }),
+          model({
+            model: "gratis",
+            pricing: {
+              input_micros: 0,
+              output_micros: 0,
+              price_source: "models_dev",
+              price_grade: "indexed",
+            },
+          }),
         ]}
         loading={false}
       />,
