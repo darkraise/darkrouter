@@ -484,8 +484,10 @@ func TestADiscoveredPriceIsGradedByWhoSetIt(t *testing.T) {
 		preset Preset
 		want   Grade
 	}{
-		{name: "a reseller republishes", preset: Preset{FreeTier: true}, want: GradeIndexed},
+		{name: "a declared reseller republishes", preset: Preset{Resells: true}, want: GradeIndexed},
+		{name: "a free proxy neither directory carries", preset: Preset{FreeTier: true, NoModelsDev: true, NoLiteLLM: true}, want: GradeIndexed},
 		{name: "the vendor quotes itself", preset: Preset{}, want: GradeMeasured},
+		{name: "a vendor that also runs a free tier", preset: Preset{FreeTier: true, LiteLLMID: "groq", ModelsDevID: "groq"}, want: GradeMeasured},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			row := store.ModelRow{
@@ -509,13 +511,30 @@ func TestADiscoveredPriceIsGradedByWhoSetIt(t *testing.T) {
 // down to the openrouter/auto row.
 func TestTheShippedAggregatorPresetsResellTheirPrices(t *testing.T) {
 	ps := Embedded()
-	for _, id := range []string{"hackclub", "naga-ac"} {
+	for _, id := range []string{"hackclub", "naga-ac", "openrouter", "requesty"} {
 		p, ok := ps[id]
 		if !ok {
 			t.Fatalf("%s is not a shipped preset", id)
 		}
 		if !p.ResellsPrices() {
 			t.Errorf("%s: prices read from it grade measured, but it sets none of them", id)
+		}
+	}
+}
+
+// The mirror of the test above, and the one that would have caught free_tier
+// being used as the resale signal: these vendors run a free tier and set every
+// price on their own listing. Grading their quotes third-party lights the
+// spend tile's estimate marker for traffic that is measured exactly.
+func TestVendorsWithAFreeTierStillSetTheirOwnPrices(t *testing.T) {
+	ps := Embedded()
+	for _, id := range []string{"gemini", "groq", "mistral", "cohere", "cerebras", "nvidia", "vertex"} {
+		p, ok := ps[id]
+		if !ok {
+			t.Fatalf("%s is not a shipped preset", id)
+		}
+		if p.ResellsPrices() {
+			t.Errorf("%s: its own quoted price grades indexed, but it is the vendor of record", id)
 		}
 	}
 }

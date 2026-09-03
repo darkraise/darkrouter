@@ -253,6 +253,20 @@ discovered price from an aggregator may be a list price rather than what the
 operator is billed; the `measured` grade asserts the seller quoted it, not that
 it is what appears on the invoice.
 
+Resale is therefore a property of the preset, and it is recorded two ways.
+Paid aggregators — openrouter, requesty, fastrouter and thirteen more — carry a
+hand-declared `resells_prices` in `presets.overrides.yaml`, because nothing in
+the generated data separates a paid router from a paid vendor: both charge, and
+both publish a rate per model. Free proxies are derived instead, from charging
+nothing while appearing in neither price directory as a vendor of record.
+
+`free_tier` alone is not the test. 113 of 208 presets carry it, and 27 of those
+join the LiteLLM index — gemini, groq, mistral, cohere, cerebras, nvidia and
+vertex among them. Those vendors set their own prices, and grading their own
+quotes as third-party would leave the spend tile's estimate marker lit for
+traffic priced exactly. A marker that is always on is one an operator stops
+reading, which is the same failure as an unmarked estimate, inverted.
+
 **`measured` will remain rare.** Two of five sampled providers publish prices.
 The verified marker will render on few rows even after this phase, and that is
 the honest outcome rather than a defect to engineer around.

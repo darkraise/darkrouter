@@ -127,11 +127,13 @@ fireworks:
     accounts/fireworks/models/llama-v3p3-70b-instruct: llama-3.3-70b
 
 openrouter:
+  resells_prices: true
   litellm_id: openrouter
   models_dev_id: openrouter
   quirks: [echo-reasoning-content]
 
 vercel-ai-gateway:
+  resells_prices: true
   litellm_id: vercel_ai_gateway
   models_dev_id: vercel
 
@@ -377,6 +379,7 @@ ai21:
   litellm_id: ai21
 
 aimlapi:
+  resells_prices: true
   litellm_id: aiml
 
 baseten:
@@ -416,6 +419,7 @@ lambda-ai:
   litellm_id: lambda_ai
 
 llamagate:
+  resells_prices: true
   litellm_id: llamagate
 
 meta-llama:
@@ -477,3 +481,46 @@ nlpcloud:
 
 qwen-cloud:
   litellm_id: qwencloud
+
+# Paid aggregators. Each charges real money to route other vendors' models,
+# so a rate on its listing is the vendor's figure marked up or passed
+# through, never one it set. Nothing in the generated data separates them
+# from a vendor of record — both charge and both publish a rate per model —
+# so the fact has to be declared. The free proxies are derived instead; see
+# Preset.ResellsPrices.
+
+agentrouter:
+  resells_prices: true
+
+anyapi:
+  resells_prices: true
+
+fastrouter:
+  resells_prices: true
+
+kilo-gateway:
+  resells_prices: true
+
+llmgateway:
+  resells_prices: true
+
+nanogpt:
+  resells_prices: true
+
+orcarouter:
+  resells_prices: true
+
+requesty:
+  resells_prices: true
+
+token-kiosk:
+  resells_prices: true
+
+tokenrouter:
+  resells_prices: true
+
+unorouter:
+  resells_prices: true
+
+zenmux:
+  resells_prices: true

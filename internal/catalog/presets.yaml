@@ -12,6 +12,7 @@
 
 agentrouter:
   name: AgentRouter
+  resells_prices: true
   kind: anthropic
   base_url: https://agentrouter.org/v1
   auth:
@@ -62,6 +63,7 @@ aihorde:
   models_url: https://oai.aihorde.net/v1/models
 aimlapi:
   name: AI/ML API
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.aimlapi.com/v1
   auth:
@@ -269,6 +271,7 @@ anthropic-oauth:
       port: 54545
 anyapi:
   name: AnyAPI AI
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.anyapi.ai/v1
   auth:
@@ -807,6 +810,7 @@ factory:
   website: https://factory.ai
 fastrouter:
   name: FastRouter
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.fastrouter.ai/api/v1
   auth:
@@ -1220,6 +1224,7 @@ kie:
   website: https://kie.ai
 kilo-gateway:
   name: Kilo Gateway
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.kilo.ai/api/gateway
   auth:
@@ -1348,6 +1353,7 @@ llamafile:
   website: https://github.com/Mozilla-Ocho/llamafile
 llamagate:
   name: LlamaGate
+  resells_prices: true
   kind: openaicompat
   base_url: https://llamagate.ai/v1
   auth:
@@ -1386,6 +1392,7 @@ llm7:
   models_url: https://api.llm7.io/v1/models
 llmgateway:
   name: LLM Gateway
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.llmgateway.io/v1
   auth:
@@ -1590,6 +1597,7 @@ naga-ai:
   models_url: https://api.naga.ac/v1/models
 nanogpt:
   name: NanoGPT
+  resells_prices: true
   kind: openaicompat
   base_url: https://nano-gpt.com/api/v1
   auth:
@@ -1835,6 +1843,7 @@ openference-api:
   website: https://openference.com
 openrouter:
   name: OpenRouter
+  resells_prices: true
   kind: openaicompat
   base_url: https://openrouter.ai/api/v1
   auth:
@@ -1862,6 +1871,7 @@ openvecta:
   website: https://openvecta.com
 orcarouter:
   name: OrcaRouter
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.orcarouter.ai/v1
   auth:
@@ -2052,6 +2062,7 @@ reka:
   website: https://docs.reka.ai/chat/overview
 requesty:
   name: Requesty
+  resells_prices: true
   kind: openaicompat
   base_url: https://router.requesty.ai/v1
   auth:
@@ -2263,6 +2274,7 @@ together:
   api_key_url: https://api.together.xyz/settings/api-keys
 token-kiosk:
   name: Token Kiosk
+  resells_prices: true
   kind: openaicompat
   base_url: https://agent-router.gaib.ai/v1
   auth:
@@ -2288,6 +2300,7 @@ tokenreply:
   models_url: https://api.tokenreply.com/v1/models
 tokenrouter:
   name: TokenRouter
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.tokenrouter.com/v1
   auth:
@@ -2338,6 +2351,7 @@ uncloseai:
   website: https://uncloseai.com
 unorouter:
   name: UnoRouter
+  resells_prices: true
   kind: openaicompat
   base_url: https://api.unorouter.com/v1
   auth:
@@ -2385,6 +2399,7 @@ venice:
   api_key_url: https://venice.ai/settings/api
 vercel-ai-gateway:
   name: Vercel AI Gateway
+  resells_prices: true
   kind: openaicompat
   base_url: https://ai-gateway.vercel.sh/v1
   auth:
@@ -2623,6 +2638,7 @@ zai:
   website: https://open.bigmodel.cn
 zenmux:
   name: ZenMux
+  resells_prices: true
   kind: openaicompat
   base_url: https://zenmux.ai/api/v1
   auth:

@@ -492,6 +492,9 @@ func applyOverrides(presets catalog.Presets, path string) (int, error) {
 		if o.FreeTier {
 			base.FreeTier = true
 		}
+		if o.Resells {
+			base.Resells = true
+		}
 		if len(o.Quirks) > 0 {
 			base.Quirks = o.Quirks
 		}
