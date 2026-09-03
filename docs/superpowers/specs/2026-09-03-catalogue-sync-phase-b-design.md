@@ -209,8 +209,9 @@ with no indication they exist.
 
 There are 80 distinct pools and exactly **one** is shared by more than one
 provider (`zhipu-flash-free`, by `glm` and `glm-cn`). `poolKey` is stored and
-shown, but it is not a routing input. Pool-aware routing for a single pair would
-be over-engineering.
+travels to the console on the model row, but no surface renders it, and it is
+not a routing input. Pool-aware routing for a single pair would be
+over-engineering; showing the pool at all is owed forward (§6.7).
 
 ### 6.3 Console
 
@@ -279,6 +280,18 @@ one-line palette result have different room, and none of them can carry the
 Models screen's two-line treatment as it stands. B2 did the screen that lists
 models for their own sake and left the three that list them to be picked.
 Deferred from B2 rather than skipped.
+
+
+### 6.7 Owed forward: the pool a budget is drawn from
+
+`poolKey` reaches the console on every model row and nothing shows it. It
+changes what a budget means on exactly one pair today — `zhipu-flash-free`,
+shared by `glm` and `glm-cn` — where an operator reading one provider's daily
+allowance cannot see that spending it also spends the other's.
+
+Showing it is a line beside the budget, which puts it in the same decision as
+§6.6: where the budget goes, the pool goes. Deferred from B2 rather than
+skipped.
 ## 7. Testing
 
 - `resolvePrice` is table-tested across every combination of present and absent
