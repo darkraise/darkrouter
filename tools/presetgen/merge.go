@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
 	"slices"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/darkraise/darkrouter/internal/catalog"
 )
@@ -30,8 +33,9 @@ type conflict struct {
 }
 
 const (
-	srcOmni = "omniroute"
-	srcNine = "9router"
+	srcOmni       = "omniroute"
+	srcNine       = "9router"
+	srcDarkrouter = "darkrouter"
 )
 
 // mergeSources folds both upstreams into one preset set.
@@ -56,8 +60,9 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 		if !ok {
 			// A quirk is worth flagging whether or not this entry ends up
 			// transcribed: the review trail is about what 9router declared,
-			// not about what phase A managed to ingest.
-			out.Conflicts = append(out.Conflicts, quirkConflicts(n.ID, nil, n.Transport.Quirks)...)
+			// not about what phase A managed to ingest. OmniRoute never
+			// listed this id, so it cannot be named the winner here.
+			out.Conflicts = append(out.Conflicts, quirkConflicts(n.ID, srcDarkrouter, n.Transport.Quirks)...)
 			fresh, ok := n.toPreset()
 			if !ok {
 				continue
@@ -66,7 +71,7 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 			out.Origins[n.ID] = originsOf(fresh, srcNine)
 			continue
 		}
-		out.Conflicts = append(out.Conflicts, contestedFields(n.ID, rawBaseURL(omni, n.ID), p.Quirks, n)...)
+		out.Conflicts = append(out.Conflicts, contestedFields(n.ID, rawBaseURL(omni, n.ID), n)...)
 		filled := fillGaps(&p, n)
 		out.Presets[n.ID] = p
 		out.Origins[n.ID] = append(out.Origins[n.ID], filled...)
@@ -88,7 +93,7 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 
 // contestedFields compares the two upstreams on the values they actually
 // published, not on what trimming made of them.
-func contestedFields(id, omniRaw string, existingQuirks []string, n nineEntry) []conflict {
+func contestedFields(id, omniRaw string, n nineEntry) []conflict {
 	var out []conflict
 	if omniRaw != "" && n.Transport.BaseURL != "" && omniRaw != n.Transport.BaseURL {
 		out = append(out, conflict{
@@ -97,15 +102,19 @@ func contestedFields(id, omniRaw string, existingQuirks []string, n nineEntry) [
 			Loser: srcNine, LoserValue: n.Transport.BaseURL,
 		})
 	}
-	out = append(out, quirkConflicts(id, existingQuirks, n.Transport.Quirks)...)
+	out = append(out, quirkConflicts(id, srcOmni, n.Transport.Quirks)...)
 	return out
 }
 
 // quirkConflicts reports a quirk darkrouter has no name for, never applying
 // it: the vocabulary is closed and a guessed mapping silently changes request
-// shape. A quirk the merged preset already carries (by that same name) is not
-// a disagreement -- darkrouter already does what 9router is asking for.
-func quirkConflicts(id string, existingQuirks []string, quirks map[string]bool) []conflict {
+// shape.
+//
+// winner names whichever source the review table should credit with the
+// preset as it stands: srcOmni when OmniRoute's structural fields won the
+// contested id, srcDarkrouter when the id is new to darkrouter and no
+// upstream "won" anything.
+func quirkConflicts(id, winner string, quirks map[string]bool) []conflict {
 	var out []conflict
 	names := make([]string, 0, len(quirks))
 	for q, on := range quirks {
@@ -115,12 +124,9 @@ func quirkConflicts(id string, existingQuirks []string, quirks map[string]bool) 
 	}
 	sort.Strings(names)
 	for _, q := range names {
-		if slices.Contains(existingQuirks, q) {
-			continue
-		}
 		out = append(out, conflict{
 			ID: id, Field: "quirk:" + q,
-			Winner: srcOmni, WinnerValue: "(not applied)",
+			Winner: winner, WinnerValue: "(not applied)",
 			Loser: srcNine, LoserValue: "declared upstream",
 		})
 	}
@@ -167,6 +173,12 @@ func (e nineEntry) toPreset() (catalog.Preset, bool) {
 	// per-surface config a later phase reads. Without it there is no preset.
 	base := trimAPISuffix(e.Transport.BaseURL)
 	if base == "" {
+		return catalog.Preset{}, false
+	}
+	// OmniRoute's dropReason has rejected a non-http(s) scheme since day one;
+	// 9router needs the same guard or a custom scheme with otherwise-valid
+	// auth slips through as an uncallable preset.
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
 		return catalog.Preset{}, false
 	}
 	style, ok := e.authStyle()
@@ -262,4 +274,35 @@ func originsOf(p catalog.Preset, source string) []fieldOrigin {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Field < out[j].Field })
 	return out
+}
+
+// markOverridden re-attributes every field the overrides file declares. An
+// override outranks both upstreams, so the manifest must not keep crediting
+// the scraper whose value was replaced.
+func markOverridden(m *merged, overridesPath string) {
+	raw, err := os.ReadFile(overridesPath)
+	if err != nil {
+		return
+	}
+	var declared map[string]map[string]any
+	if err := yaml.Unmarshal(raw, &declared); err != nil {
+		return
+	}
+	for id, fields := range declared {
+		for field := range fields {
+			replaced := false
+			for i := range m.Origins[id] {
+				if m.Origins[id][i].Field == field {
+					m.Origins[id][i].Source = "override"
+					replaced = true
+				}
+			}
+			if !replaced {
+				m.Origins[id] = append(m.Origins[id], fieldOrigin{Field: field, Source: "override"})
+			}
+		}
+		sort.Slice(m.Origins[id], func(i, j int) bool {
+			return m.Origins[id][i].Field < m.Origins[id][j].Field
+		})
+	}
 }

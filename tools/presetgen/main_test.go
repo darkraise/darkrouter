@@ -101,3 +101,42 @@ func TestLongerSuffixWinsOverShorter(t *testing.T) {
 		t.Errorf("BaseURL = %q", got)
 	}
 }
+
+// carryQuirks and applyOverrides run after the merge, so a hand-reviewed
+// correction still beats both upstreams.
+func TestOverridesStillWinOverBothUpstreams(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://omni.example/v1"}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://nine.example/v1"}}}
+	m := mergeSources(omni, map[string]displayEntry{}, nine)
+
+	dir := t.TempDir()
+	overrides := filepath.Join(dir, "overrides.yaml")
+	if err := os.WriteFile(overrides, []byte("p:\n  base_url: https://override.example/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyOverrides(m.Presets, overrides); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Presets["p"].BaseURL; got != "https://override.example/v1" {
+		t.Errorf("BaseURL = %q, want the override", got)
+	}
+}
+
+func TestOverriddenFieldIsAttributedToTheOverride(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://omni.example/v1"}}
+	m := mergeSources(omni, map[string]displayEntry{}, nil)
+
+	dir := t.TempDir()
+	overrides := filepath.Join(dir, "overrides.yaml")
+	if err := os.WriteFile(overrides, []byte("p:\n  base_url: https://override.example/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyOverrides(m.Presets, overrides); err != nil {
+		t.Fatal(err)
+	}
+	markOverridden(&m, overrides)
+
+	if !hasOrigin(m, "p", "base_url", "override") {
+		t.Errorf("origins = %v, want base_url attributed to override", m.Origins["p"])
+	}
+}

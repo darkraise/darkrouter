@@ -101,6 +101,50 @@ alibaba:
   models_dev_id: alibaba
   website: https://bailian.console.alibabacloud.com/
   models_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models
+alicode:
+  name: Alibaba
+  kind: openaicompat
+  base_url: https://coding.dashscope.aliyuncs.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://bailian.console.aliyun.com
+  api_key_url: https://bailian.console.aliyun.com/?apiKey=1
+alicode-intl:
+  name: Alibaba Coding
+  kind: openaicompat
+  base_url: https://coding-intl.dashscope.aliyuncs.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://www.alibabacloud.com/product/coding
+  api_key_url: https://www.alibabacloud.com/product/coding
+alims-intl:
+  name: Alibaba Studio
+  kind: openaicompat
+  base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://modelstudio.console.alibabacloud.com
+  api_key_url: https://modelstudio.console.alibabacloud.com/?apiKey=1
+alitp-intl:
+  name: Alibaba Token Plan
+  kind: openaicompat
+  base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://www.alibabacloud.com/campaign/ai-landing-page-token
+  api_key_url: https://modelstudio.console.alibabacloud.com/?apiKey=1
 ant-ling:
   name: Ant Ling / Ring (inclusionAI)
   kind: openaicompat
@@ -122,6 +166,7 @@ anthropic:
     - llm
   models_dev_id: anthropic
   website: https://platform.claude.com
+  api_key_url: https://console.anthropic.com/settings/keys
   quirks:
     - requires-max-tokens
   model_traits:
@@ -230,6 +275,7 @@ api-airforce:
   no_models_dev: true
   free_tier: true
   website: https://api.airforce
+  api_key_url: https://api.airforce
   models_url: https://api.airforce/v1/models
 auggie:
   name: Augment (Auggie CLI)
@@ -286,6 +332,7 @@ baidu:
   no_models_dev: true
   free_tier: true
   website: https://ernie.baidu.com/
+  api_key_url: https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application
 bailian-coding-plan:
   name: Alibaba Token Plan
   kind: anthropic
@@ -318,6 +365,7 @@ bazaarlink:
   no_models_dev: true
   free_tier: true
   website: https://bazaarlink.ai
+  api_key_url: https://bazaarlink.ai
   models_url: https://bazaarlink.ai/api/v1/models
 bedrock:
   name: Amazon Bedrock
@@ -340,6 +388,7 @@ blackbox:
   no_models_dev: true
   free_tier: true
   website: https://blackbox.ai
+  api_key_url: https://www.blackbox.ai/api-management
   models_url: https://api.blackbox.ai/v1/models
 bluesminds:
   name: BluesMinds
@@ -352,6 +401,7 @@ bluesminds:
   no_models_dev: true
   free_tier: true
   website: https://www.bluesminds.com
+  api_key_url: https://bluesminds.com
   models_url: https://api.bluesminds.com/v1/models
 byteplus:
   name: BytePlus ModelArk
@@ -364,6 +414,7 @@ byteplus:
   no_models_dev: true
   free_tier: true
   website: https://console.byteplus.com/ark
+  api_key_url: https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey
   models_url: https://ark.ap-southeast.bytepluses.com/api/v3/models
 bytez:
   name: Bytez
@@ -387,6 +438,7 @@ cerebras:
   models_dev_id: cerebras
   free_tier: true
   website: https://inference.cerebras.ai
+  api_key_url: https://cloud.cerebras.ai/platform
 charm-hyper:
   name: Charm Hyper
   kind: openaicompat
@@ -454,6 +506,37 @@ chutes:
     - llm
   models_dev_id: chutes
   website: https://chutes.ai
+  api_key_url: https://chutes.ai/app/api
+claude:
+  name: Claude Code
+  kind: openaicompat
+  base_url: https://api.anthropic.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://claude.ai
+cline:
+  name: Cline
+  kind: openaicompat
+  base_url: https://api.cline.bot/api/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://cline.bot
+clinepass:
+  name: ClinePass
+  kind: openaicompat
+  base_url: https://api.cline.bot/api/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://cline.bot
 cloudcode-one:
   name: CloudCode.ONE
   kind: openaicompat
@@ -477,6 +560,7 @@ cloudflare-ai:
   no_models_dev: true
   free_tier: true
   website: https://developers.cloudflare.com/workers-ai
+  api_key_url: https://dash.cloudflare.com/profile/api-tokens
 clova-studio:
   name: Naver CLOVA Studio
   kind: openaicompat
@@ -487,6 +571,26 @@ clova-studio:
     - llm
   no_models_dev: true
   website: https://api.ncloud-docs.com/docs/en/ai-naver-clovastudio-summary
+codebuddy-cn:
+  name: CodeBuddy CN
+  kind: openaicompat
+  base_url: https://copilot.tencent.com/v2
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://copilot.tencent.com
+codebuddy-intl:
+  name: CodeBuddy
+  kind: openaicompat
+  base_url: https://www.codebuddy.ai/v2
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://www.codebuddy.ai
 codestral:
   name: Codestral
   kind: openaicompat
@@ -497,6 +601,16 @@ codestral:
     - llm
   no_models_dev: true
   website: https://mistral.ai
+codex:
+  name: OpenAI Codex
+  kind: openaicompat
+  base_url: https://chatgpt.com/backend-api/codex
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://chatgpt.com/codex
 cohere:
   name: Cohere
   kind: openaicompat
@@ -510,6 +624,7 @@ cohere:
   models_dev_id: cohere
   free_tier: true
   website: https://cohere.com
+  api_key_url: https://dashboard.cohere.com/api-keys
   quirks:
     - rerank-path=/v2/rerank
   models_url: https://api.cohere.com/compatibility/v1/models
@@ -524,6 +639,17 @@ command-code:
   no_models_dev: true
   website: https://commandcode.ai/
   models_url: https://api.commandcode.ai/provider/v1/models
+commandcode:
+  name: Command Code
+  kind: openaicompat
+  base_url: https://api.commandcode.ai/alpha/generate
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://commandcode.ai
+  api_key_url: https://commandcode.ai/studio
 coze:
   name: Coze
   kind: openaicompat
@@ -545,6 +671,16 @@ crof:
     - llm
   models_dev_id: crof
   website: https://crof.ai
+cursor:
+  name: Cursor IDE
+  kind: openaicompat
+  base_url: https://api2.cursor.sh
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://cursor.com
 dahl:
   name: Dahl
   kind: openaicompat
@@ -588,6 +724,7 @@ deepseek:
     - llm
   models_dev_id: deepseek
   website: https://platform.deepseek.com
+  api_key_url: https://platform.deepseek.com/api_keys
   quirks:
     - echo-reasoning-content
 dgrid:
@@ -703,6 +840,17 @@ fastrouter:
   free_tier: true
   website: https://fastrouter.ai
   models_url: https://api.fastrouter.ai/api/v1/models
+featherless:
+  name: Featherless
+  kind: openaicompat
+  base_url: https://api.featherless.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://featherless.ai
+  api_key_url: https://featherless.ai/account/api-keys
 featherless-ai:
   name: Featherless AI
   kind: openaicompat
@@ -727,6 +875,7 @@ fireworks:
   models_dev_id: fireworks-ai
   free_tier: true
   website: https://fireworks.ai
+  api_key_url: https://fireworks.ai/account/api-keys
   model_aliases:
     accounts/fireworks/models/llama-v3p3-70b-instruct: llama-3.3-70b
 free-ai:
@@ -834,6 +983,17 @@ gemini:
   models_dev_id: google
   free_tier: true
   website: https://aistudio.google.com
+  api_key_url: https://aistudio.google.com/app/apikey
+gemini-cli:
+  name: Gemini CLI
+  kind: openaicompat
+  base_url: https://cloudcode-pa.googleapis.com/v1internal
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://github.com/google-gemini/gemini-cli
 gigachat:
   name: GigaChat (Sber)
   kind: openaicompat
@@ -844,6 +1004,27 @@ gigachat:
     - llm
   no_models_dev: true
   website: https://developers.sber.ru
+github:
+  name: GitHub Copilot
+  kind: openaicompat
+  base_url: https://api.githubcopilot.com
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+    - embedding
+  no_models_dev: true
+  website: https://github.com/features/copilot
+gitlab:
+  name: GitLab Duo
+  kind: openaicompat
+  base_url: https://gitlab.com/api/v4
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: gitlab
+  website: https://gitlab.com
 gitlawb:
   name: Gitlawb Opengateway (MiMo)
   kind: openaicompat
@@ -864,6 +1045,28 @@ glm:
     - llm
   no_models_dev: true
   website: https://z.ai/subscribe
+  api_key_url: https://open.bigmodel.cn/usercenter/apikeys
+glm-cn:
+  name: GLM (China)
+  kind: openaicompat
+  base_url: https://open.bigmodel.cn/api/coding/paas/v4
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://open.bigmodel.cn
+  api_key_url: https://open.bigmodel.cn/usercenter/apikeys
+grok-cli:
+  name: Grok CLI (Grok Build)
+  kind: openaicompat
+  base_url: https://cli-chat-proxy.grok.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://x.ai
 groq:
   name: Groq
   kind: openaicompat
@@ -877,6 +1080,7 @@ groq:
   models_dev_id: groq
   free_tier: true
   website: https://groq.com
+  api_key_url: https://console.groq.com/keys
 hackclub:
   name: Hackclub AI
   kind: openaicompat
@@ -968,6 +1172,7 @@ hyperbolic:
   no_models_dev: true
   free_tier: true
   website: https://hyperbolic.xyz
+  api_key_url: https://app.hyperbolic.xyz/settings
 ideogram:
   name: Ideogram
   kind: openaicompat
@@ -979,6 +1184,16 @@ ideogram:
     - llm
   no_models_dev: true
   website: https://ideogram.ai
+iflow:
+  name: iFlow AI
+  kind: openaicompat
+  base_url: https://apis.iflow.cn/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://iflow.cn
 iflytek:
   name: iFlytek Spark
   kind: openaicompat
@@ -1054,7 +1269,28 @@ kilo-gateway:
     - llm
   no_models_dev: true
   website: https://kilo.ai
+  api_key_url: https://kilo.ai/dashboard?tab=apiKeys
   models_url: https://api.kilo.ai/api/gateway/models
+kilocode:
+  name: Kilo Code
+  kind: openaicompat
+  base_url: https://api.kilo.ai/api/openrouter
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://kilocode.ai
+kimchi:
+  name: Kimchi
+  kind: openaicompat
+  base_url: https://llm.kimchi.dev/openai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://kimchi.dev
 kimi:
   name: Kimi (Legacy Moonshot API)
   kind: openaicompat
@@ -1065,6 +1301,7 @@ kimi:
     - llm
   no_models_dev: true
   website: https://platform.kimi.ai?aff=omniroute
+  api_key_url: https://platform.moonshot.ai/console/api-keys
 kimi-k3:
   name: kimi-k3
   kind: openaicompat
@@ -1074,6 +1311,16 @@ kimi-k3:
   surfaces:
     - llm
   no_models_dev: true
+kiro:
+  name: Kiro AI
+  kind: openaicompat
+  base_url: https://runtime.us-east-1.kiro.dev/generateAssistantResponse
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://kiro.dev
 lambda-ai:
   name: Lambda AI
   kind: openaicompat
@@ -1182,6 +1429,7 @@ llm7:
   no_models_dev: true
   free_tier: true
   website: https://llm7.io
+  api_key_url: https://llm7.io
   models_url: https://api.llm7.io/v1/models
 llmgateway:
   name: LLM Gateway
@@ -1239,6 +1487,15 @@ meta-llama:
     - llm
   no_models_dev: true
   website: https://llama.developer.meta.com
+mimo-free:
+  name: MiMo Code Free
+  kind: openaicompat
+  base_url: https://api.xiaomimimo.com/api/free-ai/openai/chat
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
 minimax:
   name: Minimax Coding
   kind: openaicompat
@@ -1249,7 +1506,19 @@ minimax:
     - llm
   models_dev_id: minimax
   website: https://www.minimax.io
+  api_key_url: https://platform.minimaxi.com/user-center/basic-information/interface-key
   models_url: https://api.minimax.io/v1/models
+minimax-cn:
+  name: Minimax (China)
+  kind: openaicompat
+  base_url: https://api.minimaxi.com/anthropic/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: minimax-cn
+  website: https://www.minimaxi.com
+  api_key_url: https://platform.minimaxi.com/user-center/basic-information/interface-key
 mistral:
   name: Mistral
   kind: openaicompat
@@ -1262,6 +1531,7 @@ mistral:
   models_dev_id: mistral
   free_tier: true
   website: https://mistral.ai
+  api_key_url: https://console.mistral.ai/api-keys
   quirks:
     - strict-unknown-fields
     - temperature-top-p-exclusive
@@ -1287,6 +1557,15 @@ mlx-lm:
     - llm
   no_models_dev: true
   website: https://github.com/ml-explore/mlx-lm
+mmf:
+  name: MMF
+  kind: openaicompat
+  base_url: https://api.xiaomimimo.com/api/free-ai/openai/chat
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
 mnn-ai:
   name: MNN AI
   kind: openaicompat
@@ -1344,6 +1623,7 @@ morph:
   models_dev_id: morph
   free_tier: true
   website: https://morphllm.com
+  api_key_url: https://morphllm.com
 naga-ac:
   name: Naga.ac
   kind: openaicompat
@@ -1413,6 +1693,7 @@ nebius:
   models_dev_id: nebius
   free_tier: true
   website: https://nebius.com
+  api_key_url: https://studio.nebius.com/settings/api-keys
 nlpcloud:
   name: NLP Cloud
   kind: openaicompat
@@ -1480,6 +1761,7 @@ nvidia:
   models_dev_id: nvidia
   free_tier: true
   website: https://build.nvidia.com
+  api_key_url: https://build.nvidia.com/settings/api-keys
 ofoxai:
   name: OfoxAI
   kind: openaicompat
@@ -1503,6 +1785,7 @@ ollama:
     - embedding
   no_models_dev: true
   website: https://ollama.com
+  api_key_url: https://ollama.com/settings/keys
   quirks:
     - usage-final-chunk-only
   capability_probe: ollama
@@ -1518,6 +1801,16 @@ ollama-cloud:
   free_tier: true
   website: https://ollama.com/settings/keys
   models_url: https://ollama.com/api/tags
+ollama-local:
+  name: Ollama Local
+  kind: openaicompat
+  base_url: http://localhost:11434/api/chat
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://ollama.com
 oobabooga:
   name: Text Generation WebUI
   kind: openaicompat
@@ -1555,6 +1848,7 @@ openai:
     - moderation
   models_dev_id: openai
   website: https://platform.openai.com
+  api_key_url: https://platform.openai.com/api-keys
   quirks:
     - max-completion-tokens-name
 opencode:
@@ -1569,6 +1863,17 @@ opencode:
   free_tier: true
   website: https://opencode.ai
   models_url: https://opencode.ai/zen/v1/models
+opencode-go:
+  name: OpenCode Go
+  kind: openaicompat
+  base_url: https://opencode.ai/zen/go/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: opencode-go
+  website: https://opencode.ai/auth
+  api_key_url: https://opencode.ai/auth
 openference-api:
   name: Openference API
   kind: openaicompat
@@ -1591,6 +1896,7 @@ openrouter:
   models_dev_id: openrouter
   free_tier: true
   website: https://openrouter.ai
+  api_key_url: https://openrouter.ai/settings/keys
   quirks:
     - echo-reasoning-content
 openvecta:
@@ -1635,6 +1941,18 @@ perplexity:
     - llm
   models_dev_id: perplexity
   website: https://www.perplexity.ai
+  api_key_url: https://www.perplexity.ai/settings/api
+perplexity-agent:
+  name: Perplexity Agent
+  kind: openaicompat
+  base_url: https://api.perplexity.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: perplexity-agent
+  website: https://www.perplexity.ai
+  api_key_url: https://www.perplexity.ai/settings/api
 pioneer:
   name: Pioneer AI
   kind: openaicompat
@@ -1690,6 +2008,7 @@ poolside:
   models_dev_id: poolside
   free_tier: true
   website: https://poolside.ai
+  api_key_url: https://platform.poolside.ai/api-keys
   models_url: https://inference.poolside.ai/v1/models
 predibase:
   name: Predibase
@@ -1743,6 +2062,7 @@ qoder:
     - llm
   no_models_dev: true
   free_tier: true
+  website: https://qoder.com
 qwen-cloud:
   name: Qwen Cloud
   kind: openaicompat
@@ -1810,6 +2130,7 @@ sambanova:
   no_models_dev: true
   free_tier: true
   website: https://sambanova.ai
+  api_key_url: https://cloud.sambanova.ai/apis
 sarvam:
   name: Sarvam AI
   kind: openaicompat
@@ -1851,7 +2172,7 @@ sensenova:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: sensenova
   free_tier: true
   website: https://platform.sensenova.cn
 siliconflow:
@@ -1865,6 +2186,7 @@ siliconflow:
   models_dev_id: siliconflow
   free_tier: true
   website: https://cloud.siliconflow.com
+  api_key_url: https://cloud.siliconflow.com/account/ak
 snowflake:
   name: Snowflake Cortex
   kind: openaicompat
@@ -1953,6 +2275,7 @@ tencent:
   no_models_dev: true
   free_tier: true
   website: https://hunyuan.tencent.com
+  api_key_url: https://console.cloud.tencent.com/hunyuan/api-key
 together:
   name: Together AI
   kind: openaicompat
@@ -1965,6 +2288,7 @@ together:
     - image
   models_dev_id: togetherai
   website: https://www.together.ai
+  api_key_url: https://api.together.xyz/settings/api-keys
 token-kiosk:
   name: Token Kiosk
   kind: openaicompat
@@ -1996,9 +2320,10 @@ tokenrouter:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: tokenrouter
   free_tier: true
   website: https://tokenrouter.com
+  api_key_url: https://www.tokenrouter.com
   models_url: https://api.tokenrouter.com/v1/models
 typhoon:
   name: Typhoon
@@ -2075,6 +2400,7 @@ venice:
     - llm
   models_dev_id: venice
   website: https://venice.ai
+  api_key_url: https://venice.ai/settings/api
 vercel-ai-gateway:
   name: Vercel AI Gateway
   kind: openaicompat
@@ -2085,6 +2411,7 @@ vercel-ai-gateway:
     - llm
   models_dev_id: vercel
   website: https://vercel.com/docs/ai-gateway
+  api_key_url: https://vercel.com/dashboard/~/ai-gateway
 vertex:
   name: Google Vertex AI
   kind: vertex
@@ -2097,6 +2424,7 @@ vertex:
   models_dev_id: google-vertex
   free_tier: true
   website: https://cloud.google.com/vertex-ai
+  api_key_url: https://console.cloud.google.com/iam-admin/serviceaccounts
   publisher: publishers/google
 vertex-anthropic:
   name: Google Vertex AI (Anthropic publisher)
@@ -2111,6 +2439,17 @@ vertex-anthropic:
   quirks:
     - requires-max-tokens
   publisher: publishers/anthropic
+vertex-partner:
+  name: Vertex Partner
+  kind: openaicompat
+  base_url: https://aiplatform.googleapis.com
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-partner-models
+  api_key_url: https://console.cloud.google.com/iam-admin/serviceaccounts
 vllm:
   name: vLLM
   kind: openaicompat
@@ -2143,6 +2482,17 @@ volcengine:
     - llm
   models_dev_id: volcengine
   website: https://www.volcengine.com
+volcengine-ark:
+  name: Volcengine Ark
+  kind: openaicompat
+  base_url: https://ark.cn-beijing.volces.com/api/coding/v3
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://ark.cn-beijing.volces.com
+  api_key_url: https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey
 voyage:
   name: Voyage AI
   kind: openaicompat
@@ -2204,6 +2554,7 @@ xai:
     - llm
   models_dev_id: xai
   website: https://x.ai
+  api_key_url: https://console.x.ai
 xiaomi-mimo:
   name: Xiaomi MiMo
   kind: openaicompat
@@ -2214,6 +2565,7 @@ xiaomi-mimo:
     - llm
   no_models_dev: true
   website: https://mimo.mi.com
+  api_key_url: https://platform.xiaomimimo.com/console/api-keys
 xiaomi-mimo-token-plan:
   name: Xiaomi MiMo Token Plan
   kind: openaicompat
@@ -2224,6 +2576,17 @@ xiaomi-mimo-token-plan:
     - llm
   no_models_dev: true
   website: https://mimo.mi.com
+xiaomi-tokenplan:
+  name: Xiaomi MiMo (Token Plan)
+  kind: openaicompat
+  base_url: https://token-plan-sgp.xiaomimimo.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  website: https://mimo.xiaomi.com
+  api_key_url: https://mimo.xiaomi.com
 xinference:
   name: Xinference
   kind: openaicompat
