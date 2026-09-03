@@ -829,6 +829,12 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 				CacheRead: rec.CacheReadTokens, CacheWrite: rec.CacheWriteTokens,
 				CacheWrite5m: rec.CacheWrite5mTokens, CacheWrite1h: rec.CacheWrite1hTokens,
 			})
+			// Stamped with the cost rather than looked up when the total is
+			// read: a sync re-stamps the catalog row, and a request must keep
+			// reporting the authority it was actually billed on.
+			if rec.CostMicros != nil {
+				rec.PriceGrade = string(m.Pricing.Source.Grade())
+			}
 		}
 	}
 
@@ -858,6 +864,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			if rec.CostMicros != nil && burned {
 				c := *rec.CostMicros
 				a.CostMicros = &c
+				a.PriceGrade = rec.PriceGrade
 			}
 			break
 		}
@@ -881,6 +888,9 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			continue
 		}
 		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0, 0)
+		if a.CostMicros != nil {
+			a.PriceGrade = string(am.Pricing.Source.Grade())
+		}
 	}
 }
 

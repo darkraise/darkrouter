@@ -3,6 +3,7 @@ import {
   errorSeries,
   flowProviders,
   requestSeries,
+  spendQualifier,
   spendReading,
   spendSeries,
 } from "./overview-screen"
@@ -25,7 +26,7 @@ const overview = (providers: ProviderTile[]): Overview => ({
   requests_per_min: 0,
   error_rate: 0,
   window_sec: 300,
-  today_spend: { micros: 0, priced: false },
+  today_spend: { micros: 0, priced: false, estimated: false },
   latency: { p50_ms: 0, p95_ms: 0 },
   series: [],
   failovers: [],
@@ -178,9 +179,20 @@ describe("the spend readout", () => {
 describe("the spend tile", () => {
   it("says no spend yet for a priced day at zero, and unknown for unpriced", () => {
     // "free" is a price; a day nothing has been charged to yet is not.
-    expect(spendReading({ micros: 0, priced: true })).toBe("no spend yet")
-    expect(spendReading({ micros: null, priced: false })).toBe("—")
-    expect(spendReading({ micros: 4_000, priced: true })).toBe("$0.0040")
+    expect(spendReading({ micros: 0, priced: true, estimated: false })).toBe("no spend yet")
+    expect(spendReading({ micros: null, priced: false, estimated: false })).toBe("—")
+    expect(spendReading({ micros: 4_000, priced: true, estimated: false })).toBe("$0.0040")
+  })
+
+  it("qualifies a total that counted a price nobody quoted", () => {
+    expect(spendQualifier({ micros: 4_000, priced: true, estimated: true }))
+      .toBe("includes estimated prices")
+  })
+
+  it("says nothing when every contributing price was firsthand", () => {
+    expect(spendQualifier({ micros: 4_000, priced: true, estimated: false })).toBeNull()
+    // Nothing priced means nothing to qualify: the tile already reads unknown.
+    expect(spendQualifier({ micros: null, priced: false, estimated: true })).toBeNull()
   })
 })
 
