@@ -32,10 +32,15 @@ type Preset struct {
 	// NoModelsDev is the explicit exemption spec §10 requires. Without it an
 	// entry that merely forgot its join key is indistinguishable from one that
 	// genuinely has no models.dev counterpart.
-	NoModelsDev bool     `yaml:"no_models_dev,omitempty"`
-	FreeTier    bool     `yaml:"free_tier,omitempty"`
-	Website     string   `yaml:"website,omitempty"`
-	Quirks      []string `yaml:"quirks,omitempty"`
+	NoModelsDev bool   `yaml:"no_models_dev,omitempty"`
+	FreeTier    bool   `yaml:"free_tier,omitempty"`
+	Website     string `yaml:"website,omitempty"`
+
+	// APIKeyURL is where an operator gets a key. Neither models.dev nor
+	// OmniRoute publishes it; 9router does, and an operator adding a provider
+	// wants it more than anything else on the page.
+	APIKeyURL string   `yaml:"api_key_url,omitempty"`
+	Quirks    []string `yaml:"quirks,omitempty"`
 
 	// ModelsURL overrides the listing endpoint the kind would otherwise
 	// derive. Some OpenAI-compatible upstreams serve chat and listing from

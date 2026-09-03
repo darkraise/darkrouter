@@ -248,13 +248,7 @@ var kindOf = map[string]string{"openai": "openaicompat", "claude": "anthropic", 
 var chatSuffixes = []string{"/chat/completions", "/embeddings", "/messages", "/responses", "/models"}
 
 func (e entry) toPreset(d displayEntry) catalog.Preset {
-	base := strings.TrimRight(e.baseURL, "/")
-	for _, s := range chatSuffixes {
-		if trimmed, ok := strings.CutSuffix(base, s); ok {
-			base = trimmed
-			break
-		}
-	}
+	base := trimAPISuffix(e.baseURL)
 	name := d.name
 	if name == "" {
 		name = e.id
