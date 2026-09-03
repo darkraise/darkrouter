@@ -55,6 +55,7 @@ const provider = (credentials: Credential[]): Provider => ({
   enabled: true,
   auth_style: "bearer",
   free_models_only: false,
+  allow_unsanctioned_free: false,
   credentials,
 })
 

@@ -9,6 +9,7 @@ const cred = (): Credential => ({
 const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
   id, name: id, preset: id, kind: "openaicompat", base_url: "https://x.example",
   priority: 10, enabled: true, auth_style: "bearer", free_models_only: false,
+  allow_unsanctioned_free: false,
   credentials: [cred()],
   ...over,
 })
