@@ -28,12 +28,16 @@ var (
 // empty document, because refusing to boot over a provenance label is worse
 // than showing none.
 func Provenance() ProvenanceDoc {
-	provOnce.Do(func() {
-		if err := yaml.Unmarshal(provenanceYAML, &provDoc); err != nil || provDoc.Presets == nil {
-			provDoc = ProvenanceDoc{Presets: map[string]map[string]string{}}
-		}
-	})
+	provOnce.Do(func() { provDoc = parseProvenance(provenanceYAML) })
 	return provDoc
+}
+
+func parseProvenance(raw []byte) ProvenanceDoc {
+	var doc ProvenanceDoc
+	if err := yaml.Unmarshal(raw, &doc); err != nil || doc.Presets == nil {
+		return ProvenanceDoc{Presets: map[string]map[string]string{}}
+	}
+	return doc
 }
 
 // FieldOrigin names the upstream a preset's field came from.
