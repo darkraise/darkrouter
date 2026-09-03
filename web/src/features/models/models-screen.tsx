@@ -238,24 +238,24 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
         const free = freeLabel(row.original.free_tier)
         return (
           <span className="flex flex-col">
-          <span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
-            {row.original.pricing
-              ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
-              : "—"}
-            {marker === "verified" && (
-              <StatusMark icon={CircleCheck} tone="good" label="Price quoted by the provider" />
+            <span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
+              {row.original.pricing
+                ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
+                : "—"}
+              {marker === "verified" && (
+                <StatusMark icon={CircleCheck} tone="good" label="Price quoted by the provider" />
+              )}
+              {marker === "caution" && (
+                <StatusMark
+                  icon={TriangleAlert}
+                  tone="warning"
+                  label="No published price; this is an estimate"
+                />
+              )}
+            </span>
+            {free && (
+              <span className="whitespace-nowrap text-sm text-[hsl(var(--legend))]">{free}</span>
             )}
-            {marker === "caution" && (
-              <StatusMark
-                icon={TriangleAlert}
-                tone="warning"
-                label="No published price; this is an estimate"
-              />
-            )}
-          </span>
-          {free && (
-            <span className="whitespace-nowrap text-sm text-[hsl(var(--legend))]">{free}</span>
-          )}
           </span>
         )
       },
