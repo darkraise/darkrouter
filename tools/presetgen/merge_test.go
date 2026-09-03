@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -143,5 +144,47 @@ func TestNineRouterDefaultsToBearer(t *testing.T) {
 	got := mergeSources(nil, map[string]displayEntry{}, nine)
 	if got.Presets["plain"].Auth.Style != "bearer" {
 		t.Errorf("Auth.Style = %q, want bearer", got.Presets["plain"].Auth.Style)
+	}
+}
+
+// A dual-surface provider serves both, and preset surfaces beat discovered
+// rows -- so dropping llm here would silently unroute its chat models.
+func TestNineRouterDualSurfaceKeepsBoth(t *testing.T) {
+	nine := []nineEntry{{
+		ID:           "bothkinds",
+		ServiceKinds: []string{"llm", "embedding"},
+		Transport:    nineTransport{BaseURL: "https://api.bothkinds.example/v1"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	want := []string{"llm", "embedding"}
+	if diff := got.Presets["bothkinds"].Surfaces; !slices.Equal(diff, want) {
+		t.Errorf("Surfaces = %v, want %v", diff, want)
+	}
+}
+
+func TestNineRouterEmbeddingOnlySurface(t *testing.T) {
+	nine := []nineEntry{{
+		ID:           "embedonly",
+		ServiceKinds: []string{"embedding"},
+		Transport:    nineTransport{BaseURL: "https://api.embedonly.example/v1"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if diff := got.Presets["embedonly"].Surfaces; !slices.Equal(diff, []string{"embedding"}) {
+		t.Errorf("Surfaces = %v, want [embedding]", diff)
+	}
+}
+
+// A skipped entry must leave no trace at all: an origin recorded before the
+// skip check would claim provenance for a preset that does not exist.
+func TestSkippedEntryRecordsNoOrigin(t *testing.T) {
+	nine := []nineEntry{
+		{ID: "nobase", AuthType: "apikey"},
+		{ID: "noauth", AuthType: "oauth", Transport: nineTransport{BaseURL: "https://api.noauth.example/v1"}},
+	}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	for _, id := range []string{"nobase", "noauth"} {
+		if o, ok := got.Origins[id]; ok {
+			t.Errorf("%s was skipped but recorded origins %v", id, o)
+		}
 	}
 }
