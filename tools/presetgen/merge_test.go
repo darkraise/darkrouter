@@ -105,16 +105,52 @@ func TestNineRouterEntryWithoutBaseURLIsSkipped(t *testing.T) {
 	}
 }
 
-// The wire style is the transport's authHeader, not the top-level category.
+// A published transport.auth header beats the authType category, which names a
+// credential kind rather than a wire header.
 func TestNineRouterAuthHeaderPicksTheStyle(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		auth nineAuth
+		want string
+	}{
+		{"flat", nineAuth{Header: "x-api-key"}, "x-api-key"},
+		{"nested", nineAuth{APIKey: nineAuthKind{Header: "x-api-key"}}, "x-api-key"},
+		{"nested wins over flat", nineAuth{
+			Header: "Authorization", APIKey: nineAuthKind{Header: "x-api-key"},
+		}, "x-api-key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nine := []nineEntry{{
+				ID:       "keyheader",
+				AuthType: "apikey",
+				Transport: nineTransport{
+					BaseURL: "https://api.keyheader.example/v1", Auth: tc.auth,
+				},
+			}}
+			got := mergeSources(nil, map[string]displayEntry{}, nine)
+			if got.Presets["keyheader"].Auth.Style != tc.want {
+				t.Errorf("Auth.Style = %q, want %q",
+					got.Presets["keyheader"].Auth.Style, tc.want)
+			}
+		})
+	}
+}
+
+// A header darkrouter has no style for must drop the entry: shipping it under
+// a header the upstream never reads produces a preset that authenticates
+// nowhere, and the closed vocabulary has no member for it.
+func TestNineRouterUnknownAuthHeaderIsSkipped(t *testing.T) {
 	nine := []nineEntry{{
-		ID:        "keyheader",
-		AuthType:  "apikey",
-		Transport: nineTransport{BaseURL: "https://api.keyheader.example/v1", AuthHeader: "x-api-key"},
+		ID:       "goog",
+		AuthType: "apikey",
+		Transport: nineTransport{
+			BaseURL: "https://api.goog.example/v1",
+			Auth:    nineAuth{APIKey: nineAuthKind{Header: "x-goog-api-key"}},
+		},
 	}}
 	got := mergeSources(nil, map[string]displayEntry{}, nine)
-	if got.Presets["keyheader"].Auth.Style != "x-api-key" {
-		t.Errorf("Auth.Style = %q, want x-api-key", got.Presets["keyheader"].Auth.Style)
+	if p, ok := got.Presets["goog"]; ok {
+		t.Errorf("emitted style %q for an unmappable header", p.Auth.Style)
 	}
 }
 
@@ -135,7 +171,7 @@ func TestNineRouterUnmappableAuthIsSkipped(t *testing.T) {
 	}
 }
 
-// The ordinary case: no authHeader and no authType is a bearer provider.
+// The ordinary case: no transport.auth and no authType is a bearer provider.
 func TestNineRouterDefaultsToBearer(t *testing.T) {
 	nine := []nineEntry{{
 		ID:        "plain",
