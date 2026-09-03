@@ -4,7 +4,6 @@
 # runtime fact and lives in the models.price_source column instead.
 omniroute_sha: 6cd4d38e2
 ninerouter_sha: 699edac3
-generated_at: 2026-09-03
 presets:
   agentrouter:
     base_url: omniroute

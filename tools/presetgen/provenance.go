@@ -16,10 +16,13 @@ var validPresetID = regexp.MustCompile(`^[a-z0-9._-]+$`)
 
 // manifestMeta stamps the run. Without the upstream SHAs nothing answers
 // whether a field changed because upstream moved or because a scraper did.
+//
+// A run timestamp is deliberately absent: it would differ on every run and
+// turn the weekly refresh into a pull request even when neither upstream
+// moved. The two SHAs already answer what the file was read from.
 type manifestMeta struct {
 	OmniRouteSHA  string
 	NineRouterSHA string
-	GeneratedAt   string
 }
 
 func writeProvenance(path string, m merged, meta manifestMeta) error {
@@ -30,7 +33,6 @@ func writeProvenance(path string, m merged, meta manifestMeta) error {
 	b.WriteString("# runtime fact and lives in the models.price_source column instead.\n")
 	fmt.Fprintf(&b, "omniroute_sha: %s\n", meta.OmniRouteSHA)
 	fmt.Fprintf(&b, "ninerouter_sha: %s\n", meta.NineRouterSHA)
-	fmt.Fprintf(&b, "generated_at: %s\n", meta.GeneratedAt)
 	b.WriteString("presets:\n")
 
 	ids := make([]string, 0, len(m.Origins))

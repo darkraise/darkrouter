@@ -15,7 +15,6 @@ var provenanceYAML []byte
 type ProvenanceDoc struct {
 	OmniRouteSHA  string                       `yaml:"omniroute_sha"`
 	NineRouterSHA string                       `yaml:"ninerouter_sha"`
-	GeneratedAt   string                       `yaml:"generated_at"`
 	Presets       map[string]map[string]string `yaml:"presets"`
 }
 

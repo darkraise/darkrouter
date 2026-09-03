@@ -13,7 +13,7 @@ func TestProvenanceRecordsSourceAndUpstreamSHAs(t *testing.T) {
 		"groq": {{Field: "api_key_url", Source: "9router"}, {Field: "base_url", Source: "omniroute"}},
 	}}
 	path := filepath.Join(t.TempDir(), "provenance.yaml")
-	meta := manifestMeta{OmniRouteSHA: "a1b2c3d", NineRouterSHA: "e4f5a6b", GeneratedAt: "2026-09-03"}
+	meta := manifestMeta{OmniRouteSHA: "a1b2c3d", NineRouterSHA: "e4f5a6b"}
 	if err := writeProvenance(path, m, meta); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestProvenanceIsByteStable(t *testing.T) {
 		"d": {{Field: "base_url", Source: "omniroute"}, {Field: "website", Source: "9router"}},
 		"e": {{Field: "website", Source: "omniroute"}, {Field: "base_url", Source: "9router"}},
 	}}
-	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y", GeneratedAt: "2026-09-03"}
+	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y"}
 	dir := t.TempDir()
 
 	const runs = 20
@@ -75,7 +75,7 @@ func TestProvenanceSortsFieldsWithinAPreset(t *testing.T) {
 		},
 	}}
 	path := filepath.Join(t.TempDir(), "provenance.yaml")
-	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y", GeneratedAt: "2026-09-03"}
+	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y"}
 	if err := writeProvenance(path, m, meta); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestWriteProvenanceRejectsInvalidID(t *testing.T) {
 		"bad: id": {{Field: "base_url", Source: "omniroute"}},
 	}}
 	path := filepath.Join(t.TempDir(), "provenance.yaml")
-	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y", GeneratedAt: "2026-09-03"}
+	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y"}
 	if err := writeProvenance(path, m, meta); err == nil {
 		t.Fatal("want an error for an id outside [a-z0-9._-]")
 	}
