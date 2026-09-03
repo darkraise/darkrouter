@@ -251,18 +251,28 @@ auto-applies.
 
 `.github/workflows/catalog-refresh.yml`, weekly plus `workflow_dispatch`:
 
+Two jobs. The split is the whole point: the generator evaluates upstream JavaScript,
+so the job that runs it must not be able to write anything.
+
 ```yaml
+generate:                        # permissions: contents: read
 - checkout darkrouter
 - shallow-clone OmniRoute and 9router; record both HEAD SHAs
 - setup-go, setup-node
 - fetch https://models.dev/api.json
 - go run ./tools/presetgen -omniroute … -ninerouter … -modelsdev … \
       -out-provenance internal/catalog/provenance.yaml
-- go test ./internal/catalog/...
-- git diff --exit-code || peter-evans/create-pull-request
+- go test ./internal/catalog/... ./tools/presetgen/...
+- upload-artifact: the generated files
+
+propose:                         # permissions: contents+PRs write; needs: generate
+- checkout darkrouter
+- download-artifact over the clean tree
+- git diff --quiet && stop
+- peter-evans/create-pull-request
 ```
 
-Four properties:
+Five properties:
 
 - **The workflow runs the identical command a developer runs locally.** There is no
   CI-only mode to keep in sync. This is the main reason the pipeline stays one program.
@@ -274,9 +284,15 @@ Four properties:
   change because upstream moved, or because our scraper did". A run timestamp is
   deliberately not recorded: it would differ on every run and open a pull request weekly
   even when neither upstream moved, which the byte-stability requirement below rules out.
-- **Tests gate the PR and it never auto-merges.** A malformed or hostile upstream commit
-  reaches a human, not production. That asymmetry is the reason structure goes through a
-  PR while volatile data goes through the runtime path.
+- **Upstream code never runs with a write token.** `go run ./tools/presetgen` shells out
+  to node, which evaluates every file of the freshly cloned 9router registry, top-level
+  module code included. That happens only in `generate`, whose token is read-only and
+  which can neither push a branch nor open a pull request. `propose` holds the write
+  token and does nothing but restore an artifact and read the diff.
+- **Tests gate the PR and it never auto-merges.** A malformed upstream commit fails the
+  closed-vocabulary and preset-shape tests in `generate`, so it reaches a human as a red
+  run rather than a green PR. That asymmetry is the reason structure goes through a PR
+  while volatile data goes through the runtime path.
 
 Deliberately not built: a guard against hand-edits to generated files. The repository
 already lives with a "Do not hand-edit" header across five generated artifacts
