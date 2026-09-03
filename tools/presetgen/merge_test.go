@@ -189,12 +189,13 @@ func TestSkippedEntryRecordsNoOrigin(t *testing.T) {
 	}
 }
 
-// The hazard the spec names: two sources whose base URLs differ only in the
-// endpoint path agree after trimming. Comparing trimmed values would call that
-// resolved and ship a wrong root silently.
+// The hazard the spec names: two base URLs that differ only in the endpoint
+// path agree after trimming. Comparing trimmed values would call that
+// resolved and ship a wrong root silently -- these trim to the same
+// "https://api.example.com/v1" and must still produce a conflict.
 func TestConflictIsDetectedOnRawValues(t *testing.T) {
 	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1/chat/completions"}}
-	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://api.example.com/v2/messages"}}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://api.example.com/v1/messages"}}}
 
 	got := mergeSources(omni, map[string]displayEntry{}, nine)
 	if len(got.Conflicts) != 1 {
@@ -204,8 +205,60 @@ func TestConflictIsDetectedOnRawValues(t *testing.T) {
 	if c.Field != "base_url" || c.Winner != "omniroute" {
 		t.Errorf("conflict = %+v", c)
 	}
-	if c.LoserValue != "https://api.example.com/v2/messages" {
+	if c.LoserValue != "https://api.example.com/v1/messages" {
 		t.Errorf("LoserValue = %q, want the raw upstream value", c.LoserValue)
+	}
+}
+
+// The simpler shape, kept alongside the trim-agreement case above: a base URL
+// that differs even before trimming must also be reported.
+func TestConflictDetectedWhenBothRawAndTrimmedDiffer(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1/chat/completions"}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://api.example.com/v2/messages"}}}
+
+	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	if len(got.Conflicts) != 1 {
+		t.Fatalf("got %d conflicts, want 1: %v", len(got.Conflicts), got.Conflicts)
+	}
+	if c := got.Conflicts[0]; c.LoserValue != "https://api.example.com/v2/messages" {
+		t.Errorf("LoserValue = %q, want the raw upstream value", c.LoserValue)
+	}
+}
+
+// A 9router entry that would fail toPreset on its own (unmappable auth) still
+// contests an existing OmniRoute id: the disagreement is worth reporting
+// whether or not the entry would be ingested standalone.
+func TestConflictRecordedEvenWhenEntryFailsToPreset(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1/chat/completions"}}
+	nine := []nineEntry{{ID: "p", AuthType: "oauth", Transport: nineTransport{BaseURL: "https://api.example.com/v1/messages"}}}
+
+	got := mergeSources(omni, map[string]displayEntry{}, nine)
+	if len(got.Conflicts) != 1 {
+		t.Fatalf("got %d conflicts, want 1: %v", len(got.Conflicts), got.Conflicts)
+	}
+}
+
+// A quirk declared on a provider new to darkrouter must still reach the
+// review trail: the closed vocabulary bars it from Preset.Quirks, but that is
+// not a reason to drop it from the artifact too.
+func TestNewProviderQuirkIsReportedNotApplied(t *testing.T) {
+	nine := []nineEntry{{ID: "freshquirk", Transport: nineTransport{
+		BaseURL: "https://api.freshquirk.example/v1",
+		Quirks:  map[string]bool{"dropClientMetadata": true},
+	}}}
+
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if len(got.Presets["freshquirk"].Quirks) != 0 {
+		t.Errorf("Quirks = %v, want none applied", got.Presets["freshquirk"].Quirks)
+	}
+	var found bool
+	for _, c := range got.Conflicts {
+		if c.Field == "quirk:dropClientMetadata" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("conflicts = %v, want the unmapped quirk reported", got.Conflicts)
 	}
 }
 
