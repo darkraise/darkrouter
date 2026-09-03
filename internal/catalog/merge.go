@@ -114,6 +114,10 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, litellm LiteLLMDoc, ov
 		m.Pricing = resolvePrice(fromDoc, fromLiteLLM, stored)
 	}
 
+	// A price read from a reseller's listing is that reseller's copy of
+	// someone else's figure, whichever candidate won above.
+	m.Pricing.Resold = preset.ResellsPrices()
+
 	// A runtime that reports its own capabilities outranks a directory's guess
 	// about a model of the same name — that is what makes Ollama's tool
 	// support a fact rather than an inference.

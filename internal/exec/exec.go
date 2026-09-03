@@ -833,7 +833,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			// read: a sync re-stamps the catalog row, and a request must keep
 			// reporting the authority it was actually billed on.
 			if rec.CostMicros != nil {
-				rec.PriceGrade = string(m.Pricing.Source.Grade())
+				rec.PriceGrade = string(m.Pricing.Grade())
 			}
 		}
 	}
@@ -889,7 +889,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		}
 		a.CostMicros = am.Pricing.CostMicros(a.TokensIn, a.TokensOut, 0, 0)
 		if a.CostMicros != nil {
-			a.PriceGrade = string(am.Pricing.Source.Grade())
+			a.PriceGrade = string(am.Pricing.Grade())
 		}
 	}
 }

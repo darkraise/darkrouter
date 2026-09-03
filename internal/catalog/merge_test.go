@@ -473,3 +473,68 @@ func TestModelsDevBeatsLiteLLMOnAnAuthoritativeRow(t *testing.T) {
 		t.Errorf("got %+v, want models.dev's 500", got.Pricing)
 	}
 }
+
+// A price discovered at a provider that resells someone else's catalogue is
+// that catalogue's figure, whatever endpoint it was read from. Grading it
+// measured would let a proxy's republished list prices produce a spend total
+// with no estimate marker on it.
+func TestADiscoveredPriceIsGradedByWhoSetIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		preset Preset
+		want   Grade
+	}{
+		{name: "a reseller republishes", preset: Preset{FreeTier: true}, want: GradeIndexed},
+		{name: "the vendor quotes itself", preset: Preset{}, want: GradeMeasured},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := store.ModelRow{
+				ProviderID: "p", ModelID: "m",
+				InputMicrosPerMTok: 100, OutputMicrosPerMTok: 300,
+				PriceKnown: true, PriceSource: string(SourceDiscovered),
+			}
+			m := mergeOne(row, tc.preset, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
+			if m.Pricing.InputMicrosPerMTok != 100 || !m.Pricing.Known {
+				t.Fatalf("pricing = %+v, want the discovered rates kept", m.Pricing)
+			}
+			if got := m.Pricing.Grade(); got != tc.want {
+				t.Errorf("grade = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The rule only bites if the shipped preset data marks the aggregators. Both
+// serve someone else's listing: hackclub's is OpenRouter's schema verbatim,
+// down to the openrouter/auto row.
+func TestTheShippedAggregatorPresetsResellTheirPrices(t *testing.T) {
+	ps := Embedded()
+	for _, id := range []string{"hackclub", "naga-ac"} {
+		p, ok := ps[id]
+		if !ok {
+			t.Fatalf("%s is not a shipped preset", id)
+		}
+		if !p.ResellsPrices() {
+			t.Errorf("%s: prices read from it grade measured, but it sets none of them", id)
+		}
+	}
+}
+
+// An operator's own figure is theirs no matter whose endpoint it describes,
+// and a directory's is already no better than indexed. Resale caps a grade; it
+// never rewrites one.
+func TestResaleOnlyCapsAMeasuredGrade(t *testing.T) {
+	for _, tc := range []struct {
+		source Source
+		want   Grade
+	}{
+		{SourceOverride, GradeDeclared},
+		{SourceModelsDev, GradeIndexed},
+		{SourceInferred, GradeGuessed},
+	} {
+		p := Pricing{Known: true, Source: tc.source, Resold: true}
+		if got := p.Grade(); got != tc.want {
+			t.Errorf("%q resold: grade = %q, want %q", tc.source, got, tc.want)
+		}
+	}
+}
