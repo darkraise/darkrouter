@@ -92,3 +92,56 @@ func hasOrigin(m merged, id, field, source string) bool {
 }
 
 var _ = catalog.Preset{}
+
+// A 9router-only entry whose baseUrl lives in a per-surface config block this
+// phase does not read would otherwise ship with no base URL at all.
+func TestNineRouterEntryWithoutBaseURLIsSkipped(t *testing.T) {
+	nine := []nineEntry{{ID: "voyage-ai", AuthType: "apikey"}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if _, ok := got.Presets["voyage-ai"]; ok {
+		t.Errorf("emitted a preset with base_url %q; an untranscribable entry must be skipped",
+			got.Presets["voyage-ai"].BaseURL)
+	}
+}
+
+// The wire style is the transport's authHeader, not the top-level category.
+func TestNineRouterAuthHeaderPicksTheStyle(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "keyheader",
+		AuthType:  "apikey",
+		Transport: nineTransport{BaseURL: "https://api.keyheader.example/v1", AuthHeader: "x-api-key"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if got.Presets["keyheader"].Auth.Style != "x-api-key" {
+		t.Errorf("Auth.Style = %q, want x-api-key", got.Presets["keyheader"].Auth.Style)
+	}
+}
+
+// An OAuth preset needs an oauth block this phase does not generate, and
+// "cookie" is not in darkrouter's closed vocabulary at all.
+func TestNineRouterUnmappableAuthIsSkipped(t *testing.T) {
+	for _, authType := range []string{"oauth", "cookie"} {
+		nine := []nineEntry{{
+			ID:        "unmappable",
+			AuthType:  authType,
+			Transport: nineTransport{BaseURL: "https://api.unmappable.example/v1"},
+		}}
+		got := mergeSources(nil, map[string]displayEntry{}, nine)
+		if p, ok := got.Presets["unmappable"]; ok {
+			t.Errorf("authType %q was ingested as style %q; it maps to no darkrouter style",
+				authType, p.Auth.Style)
+		}
+	}
+}
+
+// The ordinary case: no authHeader and no authType is a bearer provider.
+func TestNineRouterDefaultsToBearer(t *testing.T) {
+	nine := []nineEntry{{
+		ID:        "plain",
+		Transport: nineTransport{BaseURL: "https://api.plain.example/v1"},
+	}}
+	got := mergeSources(nil, map[string]displayEntry{}, nine)
+	if got.Presets["plain"].Auth.Style != "bearer" {
+		t.Errorf("Auth.Style = %q, want bearer", got.Presets["plain"].Auth.Style)
+	}
+}
