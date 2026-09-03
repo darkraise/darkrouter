@@ -15,8 +15,18 @@ type fieldOrigin struct {
 }
 
 type merged struct {
-	Presets catalog.Presets
-	Origins map[string][]fieldOrigin
+	Presets   catalog.Presets
+	Origins   map[string][]fieldOrigin
+	Conflicts []conflict
+}
+
+// conflict is one disagreement between the two upstreams, recorded on raw
+// pre-trim values so two URLs that agree only after transformation still
+// surface. Precedence still resolves the merge; this is the review trail.
+type conflict struct {
+	ID, Field           string
+	Winner, WinnerValue string
+	Loser, LoserValue   string
 }
 
 const (
@@ -52,6 +62,7 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 			out.Origins[n.ID] = originsOf(fresh, srcNine)
 			continue
 		}
+		out.Conflicts = append(out.Conflicts, contestedFields(n.ID, rawBaseURL(omni, n.ID), n)...)
 		filled := fillGaps(&p, n)
 		out.Presets[n.ID] = p
 		out.Origins[n.ID] = append(out.Origins[n.ID], filled...)
@@ -62,7 +73,52 @@ func mergeSources(omni []entry, display map[string]displayEntry, nine []nineEntr
 			return out.Origins[id][i].Field < out.Origins[id][j].Field
 		})
 	}
+	sort.Slice(out.Conflicts, func(i, j int) bool {
+		if out.Conflicts[i].ID != out.Conflicts[j].ID {
+			return out.Conflicts[i].ID < out.Conflicts[j].ID
+		}
+		return out.Conflicts[i].Field < out.Conflicts[j].Field
+	})
 	return out
+}
+
+// contestedFields compares the two upstreams on the values they actually
+// published, not on what trimming made of them.
+func contestedFields(id, omniRaw string, n nineEntry) []conflict {
+	var out []conflict
+	if omniRaw != "" && n.Transport.BaseURL != "" && omniRaw != n.Transport.BaseURL {
+		out = append(out, conflict{
+			ID: id, Field: "base_url",
+			Winner: srcOmni, WinnerValue: omniRaw,
+			Loser: srcNine, LoserValue: n.Transport.BaseURL,
+		})
+	}
+	// A quirk darkrouter has no name for is reported, never applied: the
+	// vocabulary is closed and a guessed mapping silently changes request shape.
+	names := make([]string, 0, len(n.Transport.Quirks))
+	for q, on := range n.Transport.Quirks {
+		if on {
+			names = append(names, q)
+		}
+	}
+	sort.Strings(names)
+	for _, q := range names {
+		out = append(out, conflict{
+			ID: id, Field: "quirk:" + q,
+			Winner: srcOmni, WinnerValue: "(not applied)",
+			Loser: srcNine, LoserValue: "declared upstream",
+		})
+	}
+	return out
+}
+
+func rawBaseURL(omni []entry, id string) string {
+	for _, e := range omni {
+		if e.id == id {
+			return e.baseURL
+		}
+	}
+	return ""
 }
 
 // fillGaps takes from 9router only what the winning source left empty, and
