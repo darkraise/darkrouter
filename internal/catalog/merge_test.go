@@ -253,3 +253,40 @@ func TestAPresetlessProviderFallsBackToTheRow(t *testing.T) {
 		t.Errorf("surfaces = %v, want the row's [llm rerank]", m.Surfaces)
 	}
 }
+
+// A models.dev join is a directory's figure, not the seller's. Stamping it
+// keeps "a directory priced this" distinct from "nobody did", which the
+// Known bool alone cannot express.
+func TestMergeStampsModelsDevPriceSource(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "big"}
+	doc := Doc{"p": {"big": Metadata{
+		InputMicrosPerMTok: 500, OutputMicrosPerMTok: 1500, PriceKnown: true,
+	}}}
+	m := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	if m.Pricing.Source != SourceModelsDev {
+		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceModelsDev)
+	}
+	if m.Pricing.Source.Grade() != GradeIndexed {
+		t.Errorf("grade = %q, want %q", m.Pricing.Source.Grade(), GradeIndexed)
+	}
+}
+
+func TestMergeStampsRowPriceSourceWhenModelsDevMisses(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "unknown",
+		InputMicrosPerMTok: 100, PriceKnown: true,
+		PriceSource: string(SourceDiscovered),
+	}
+	m := mergeOne(row, Preset{}, Doc{}, store.ModelOverride{})
+	if m.Pricing.Source != SourceDiscovered {
+		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceDiscovered)
+	}
+}
+
+// An empty stored source is a guess, not a measurement.
+func TestMergeDefaultsAbsentPriceSourceToInferred(t *testing.T) {
+	m := mergeOne(store.ModelRow{ProviderID: "p", ModelID: "x"}, Preset{}, Doc{}, store.ModelOverride{})
+	if m.Pricing.Source != SourceInferred {
+		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceInferred)
+	}
+}

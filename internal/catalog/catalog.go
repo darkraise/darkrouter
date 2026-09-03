@@ -123,6 +123,9 @@ type Pricing struct {
 	CacheReadMicrosPerMTok  int64
 	CacheWriteMicrosPerMTok int64
 	Known                   bool
+	// Source is the authority behind these rates. Known says whether a price
+	// exists; this says whether to believe it.
+	Source Source
 }
 
 // Model is one model as offered by one provider.
