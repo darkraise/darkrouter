@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -84,5 +85,76 @@ groq:
 	}
 	if got := presets["groq"].Quirks; len(got) != 1 || got[0] != "no-tool-streaming" {
 		t.Fatalf("groq quirks = %v", got)
+	}
+}
+
+func TestEmbeddingSuffixIsTrimmed(t *testing.T) {
+	e := entry{id: "voyage", baseURL: "https://api.voyageai.com/v1/embeddings"}
+	if got := e.toPreset(displayEntry{}).BaseURL; got != "https://api.voyageai.com/v1" {
+		t.Errorf("BaseURL = %q, want the API root", got)
+	}
+}
+
+// trimAPISuffix returns on the first match, so a suffix that is itself the tail
+// of a longer one has to come after it or the longer path is trimmed in half.
+// No current pair is nested, which is exactly why this asserts the ordering
+// rule over the live list rather than trusting one example to notice: adding
+// "/completions" beside "/chat/completions" must fail here.
+func TestSuffixOrderPutsNestedSuffixesLast(t *testing.T) {
+	for i, short := range chatSuffixes {
+		for j, long := range chatSuffixes {
+			if i < j && strings.HasSuffix(long, short) {
+				t.Errorf("chatSuffixes[%d] %q is the tail of [%d] %q; the shorter one "+
+					"matches first and trims %q to %q", i, short, j, long, long,
+					strings.TrimSuffix(long, short))
+			}
+		}
+	}
+}
+
+// The case the rule exists for: /v1/chat/completions is an API root of /v1.
+func TestLongerSuffixWinsOverShorter(t *testing.T) {
+	e := entry{id: "x", baseURL: "https://api.example.com/v1/chat/completions"}
+	if got := e.toPreset(displayEntry{}).BaseURL; got != "https://api.example.com/v1" {
+		t.Errorf("BaseURL = %q", got)
+	}
+}
+
+// carryQuirks and applyOverrides run after the merge, so a hand-reviewed
+// correction still beats both upstreams.
+func TestOverridesStillWinOverBothUpstreams(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://omni.example/v1"}}
+	nine := []nineEntry{{ID: "p", Transport: nineTransport{BaseURL: "https://nine.example/v1"}}}
+	m := mergeSources(omni, map[string]displayEntry{}, nine)
+
+	dir := t.TempDir()
+	overrides := filepath.Join(dir, "overrides.yaml")
+	if err := os.WriteFile(overrides, []byte("p:\n  base_url: https://override.example/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyOverrides(m.Presets, overrides); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Presets["p"].BaseURL; got != "https://override.example/v1" {
+		t.Errorf("BaseURL = %q, want the override", got)
+	}
+}
+
+func TestOverriddenFieldIsAttributedToTheOverride(t *testing.T) {
+	omni := []entry{{id: "p", baseURL: "https://omni.example/v1"}}
+	m := mergeSources(omni, map[string]displayEntry{}, nil)
+
+	dir := t.TempDir()
+	overrides := filepath.Join(dir, "overrides.yaml")
+	if err := os.WriteFile(overrides, []byte("p:\n  base_url: https://override.example/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyOverrides(m.Presets, overrides); err != nil {
+		t.Fatal(err)
+	}
+	markOverridden(&m, overrides)
+
+	if !hasOrigin(m, "p", "base_url", "override") {
+		t.Errorf("origins = %v, want base_url attributed to override", m.Origins["p"])
 	}
 }

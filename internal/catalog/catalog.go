@@ -18,7 +18,38 @@ const (
 	SourceDiscovered Source = "discovered"
 	SourceInferred   Source = "inferred"
 	SourceOverride   Source = "override"
+	SourceLiteLLM    Source = "litellm"
+	SourceRegistry   Source = "registry"
 )
+
+// Grade is how far a value may be trusted, which is not the same question as
+// which value wins. An operator's own figure outranks every other source and
+// is still not something a vendor confirmed.
+type Grade string
+
+const (
+	// GradeMeasured is the seller's own endpoint quoting itself.
+	GradeMeasured Grade = "measured"
+	// GradeDeclared is an operator's hand-entered value.
+	GradeDeclared Grade = "declared"
+	// GradeIndexed is a curated third party's figure.
+	GradeIndexed Grade = "indexed"
+	// GradeGuessed is derived from nothing better.
+	GradeGuessed Grade = "guessed"
+)
+
+func (s Source) Grade() Grade {
+	switch s {
+	case SourceDiscovered:
+		return GradeMeasured
+	case SourceOverride:
+		return GradeDeclared
+	case SourceModelsDev, SourceLiteLLM, SourceRegistry:
+		return GradeIndexed
+	default:
+		return GradeGuessed
+	}
+}
 
 // Capabilities is what a model can do. Known distinguishes "we checked and it
 // cannot" from "we never found out".
@@ -92,6 +123,9 @@ type Pricing struct {
 	CacheReadMicrosPerMTok  int64
 	CacheWriteMicrosPerMTok int64
 	Known                   bool
+	// Source is the authority behind these rates. Known says whether a price
+	// exists; this says whether to believe it.
+	Source Source
 }
 
 // Model is one model as offered by one provider.

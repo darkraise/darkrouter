@@ -261,3 +261,62 @@ func TestSyncRunStopsOnCancel(t *testing.T) {
 		t.Fatal("Run did not stop on cancel")
 	}
 }
+
+// The column's only writer is this sync. Leaving it unset stamps "inferred" on
+// a price models.dev supplied, and the console then draws an amber caution over
+// a figure that is not a guess.
+func TestSyncStampsModelsDevPriceSource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	if err := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()}).
+		SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := db.Models(context.Background())
+	for _, r := range rows {
+		switch r.ModelID {
+		case "big", "cheap":
+			if r.PriceSource != string(SourceModelsDev) {
+				t.Errorf("%s price_source = %q, want %q",
+					r.ModelID, r.PriceSource, SourceModelsDev)
+			}
+		case "private":
+			// No join, no write: the row keeps the migration's default.
+			if r.PriceSource != string(SourceInferred) {
+				t.Errorf("private price_source = %q, want %q",
+					r.PriceSource, SourceInferred)
+			}
+		}
+	}
+}
+
+// The capabilities stamp has sourceAfterSync; without its price counterpart the
+// first discovered price would last only until the next 24-hour sync.
+func TestSyncDoesNotOverwriteDiscoveredPriceSource(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE models SET price_source = 'discovered' WHERE model_id = 'big'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()}).
+		SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := db.Models(ctx)
+	for _, r := range rows {
+		if r.ModelID == "big" && r.PriceSource != string(SourceDiscovered) {
+			t.Errorf("price_source = %q, want %q; the sync erased a discovered stamp",
+				r.PriceSource, SourceDiscovered)
+		}
+	}
+}
