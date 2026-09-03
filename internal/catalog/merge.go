@@ -80,6 +80,7 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 			CacheReadMicrosPerMTok:  meta.CacheReadMicrosPerMTok,
 			CacheWriteMicrosPerMTok: meta.CacheWriteMicrosPerMTok,
 			Known:                   meta.PriceKnown,
+			Source:                  SourceModelsDev,
 		}
 	} else {
 		m.ContextWindow = row.ContextWindow
@@ -90,6 +91,7 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, override store.ModelOv
 			CacheReadMicrosPerMTok:  row.CacheReadMicrosPerMTok,
 			CacheWriteMicrosPerMTok: row.CacheWriteMicrosPerMTok,
 			Known:                   row.PriceKnown,
+			Source:                  priceSource(row.PriceSource),
 		}
 		m.Source = SourceInferred
 	}
@@ -205,4 +207,15 @@ func traitsFor(preset Preset, modelID string) Traits {
 		}
 	}
 	return out
+}
+
+// priceSource reads the stored authority, defaulting an empty column to a
+// guess. A row written before 0018 carries "" and must not read as measured.
+func priceSource(stored string) Source {
+	switch Source(stored) {
+	case SourceDiscovered, SourceOverride, SourceModelsDev, SourceLiteLLM, SourceRegistry:
+		return Source(stored)
+	default:
+		return SourceInferred
+	}
 }
