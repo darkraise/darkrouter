@@ -30,7 +30,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -113,7 +112,6 @@ func main() {
 	if err := writeProvenance(*outProvenance, m, manifestMeta{
 		OmniRouteSHA:  *omniSHA,
 		NineRouterSHA: *nineSHA,
-		GeneratedAt:   time.Now().UTC().Format("2006-01-02"),
 	}); err != nil {
 		log.Fatal(err)
 	}

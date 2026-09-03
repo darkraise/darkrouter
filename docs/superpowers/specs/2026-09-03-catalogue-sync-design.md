@@ -270,8 +270,10 @@ Four properties:
   "12 fields changed via 9router, 3 via models.dev" instead of making a reviewer infer
   causation from a 198-entry YAML diff. Conflicts and unmapped 9router quirks follow as a
   table.
-- **Upstream SHAs and fetch time go in the manifest header.** Without them nothing answers
-  "did this change because upstream moved, or because our scraper did".
+- **Upstream SHAs go in the manifest header.** Without them nothing answers "did this
+  change because upstream moved, or because our scraper did". A run timestamp is
+  deliberately not recorded: it would differ on every run and open a pull request weekly
+  even when neither upstream moved, which the byte-stability requirement below rules out.
 - **Tests gate the PR and it never auto-merges.** A malformed or hostile upstream commit
   reaches a human, not production. That asymmetry is the reason structure goes through a
   PR while volatile data goes through the runtime path.
