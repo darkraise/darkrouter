@@ -173,3 +173,166 @@ func TestTheRequestsCacheWritesArePriced(t *testing.T) {
 		t.Fatalf("cost %d does not include the cache write", *rec.CostMicros)
 	}
 }
+
+func TestLogRecordsTheGradeBehindTheServedPrice(t *testing.T) {
+	// Both directions, so a constant cannot pass: the grade has to come from
+	// the price the model actually carries.
+	for _, tc := range []struct {
+		name   string
+		source catalog.Source
+		resold bool
+		want   string
+	}{
+		{name: "discovered", source: catalog.SourceDiscovered, want: "measured"},
+		{name: "models_dev", source: catalog.SourceModelsDev, want: "indexed"},
+		// The spend total is marked estimated off this grade, so a reseller's
+		// republished rate has to reach the log as indexed or a proxy's prices
+		// pass for the seller's own.
+		{name: "discovered at a reseller", source: catalog.SourceDiscovered,
+			resold: true, want: "indexed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+				ProviderID: "groq", ModelID: "m",
+				Pricing: catalog.Pricing{
+					InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.source,
+					Resold: tc.resold,
+				},
+			})}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m", TokensIn: 1_000_000,
+			})
+
+			rec := cap.only(t)
+			if rec.CostMicros == nil {
+				t.Fatal("priced model: CostMicros is nil")
+			}
+			if rec.PriceGrade != tc.want {
+				t.Fatalf("PriceGrade = %q, want %q: the spend total cannot say what "+
+					"it rests on if the grade is not recorded with the cost",
+					rec.PriceGrade, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogLeavesTheGradeEmptyForAnUnpricedModel(t *testing.T) {
+	// A grade with no cost behind it would mark a total that this request
+	// contributed nothing to.
+	cap := &captureLogger{}
+	e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+		ProviderID: "groq", ModelID: "m",
+		Pricing: catalog.Pricing{Known: false, Source: catalog.SourceModelsDev},
+	})}}
+
+	e.log(&store.RequestRecord{FinalProviderID: "groq", FinalModel: "m", TokensIn: 10})
+
+	if rec := cap.only(t); rec.PriceGrade != "" {
+		t.Fatalf("PriceGrade = %q, want empty for a model with no price", rec.PriceGrade)
+	}
+}
+
+func TestLogGradesADiscardedAttemptAgainstTheModelItTried(t *testing.T) {
+	// The failed attempt's tokens were burned at the failed provider's rate,
+	// so they carry that provider's authority -- not the one that served.
+	// Both directions, and the two providers are graded oppositely, so a grade
+	// copied from the record fails as loudly as one never set.
+	for _, tc := range []struct {
+		tried, served catalog.Source
+		wantAttempt   string
+		wantRecord    string
+	}{
+		{catalog.SourceModelsDev, catalog.SourceDiscovered, "indexed", "measured"},
+		{catalog.SourceDiscovered, catalog.SourceModelsDev, "measured", "indexed"},
+	} {
+		t.Run(string(tc.tried), func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(
+				catalog.Model{ProviderID: "cerebras", ModelID: "m",
+					Pricing: catalog.Pricing{
+						InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.tried,
+					}},
+				catalog.Model{ProviderID: "groq", ModelID: "m",
+					Pricing: catalog.Pricing{
+						InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.served,
+					}},
+			)}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m", TokensIn: 1_000_000,
+				Attempts: []store.AttemptRecord{
+					{Seq: 1, ProviderID: "cerebras", Model: "m",
+						Outcome: "retryable_provider", TokensIn: 500_000},
+					{Seq: 2, ProviderID: "groq", Model: "m",
+						Outcome: "success", TokensIn: 1_000_000},
+				},
+			})
+
+			rec := cap.only(t)
+			if rec.PriceGrade != tc.wantRecord {
+				t.Fatalf("record PriceGrade = %q, want %q", rec.PriceGrade, tc.wantRecord)
+			}
+			if got := rec.Attempts[0].PriceGrade; got != tc.wantAttempt {
+				t.Fatalf("discarded attempt PriceGrade = %q, want %q: it was priced "+
+					"against %s, so it carries that provider's authority",
+					got, tc.wantAttempt, tc.tried)
+			}
+		})
+	}
+}
+
+func TestLogCarriesTheGradeOntoTheServedAttempt(t *testing.T) {
+	// The attempt row that served arrives with no usage of its own -- the
+	// record holds it -- so this row takes the record's cost, and must take
+	// the authority behind that cost with it. A cost with no grade beside it
+	// is spend the total cannot mark, and every request with attempt rows
+	// reaches SpendSince through this row.
+	//
+	// Both directions, so a constant cannot pass.
+	for _, tc := range []struct {
+		name   string
+		source catalog.Source
+		resold bool
+		want   string
+	}{
+		{name: "discovered", source: catalog.SourceDiscovered, want: "measured"},
+		{name: "models_dev", source: catalog.SourceModelsDev, want: "indexed"},
+		// The spend total is marked estimated off this grade, so a reseller's
+		// republished rate has to reach the log as indexed or a proxy's prices
+		// pass for the seller's own.
+		{name: "discovered at a reseller", source: catalog.SourceDiscovered,
+			resold: true, want: "indexed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+				ProviderID: "groq", ModelID: "m",
+				Pricing: catalog.Pricing{
+					InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.source,
+					Resold: tc.resold,
+				},
+			})}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m", TokensIn: 1_000_000,
+				// Zero tokens on the attempt is what routes it through the
+				// record's own price rather than a second lookup.
+				Attempts: []store.AttemptRecord{
+					{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "success"},
+				},
+			})
+
+			a := cap.only(t).Attempts[0]
+			if a.CostMicros == nil {
+				t.Fatal("served attempt: CostMicros is nil")
+			}
+			if a.PriceGrade != tc.want {
+				t.Fatalf("served attempt PriceGrade = %q, want %q: its cost reaches "+
+					"the spend total, so an unmarked row hides the estimate",
+					a.PriceGrade, tc.want)
+			}
+		})
+	}
+}

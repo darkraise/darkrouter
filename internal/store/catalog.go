@@ -70,6 +70,9 @@ type MetadataRow struct {
 	OutputMicrosPerMTok     int64
 	CacheReadMicrosPerMTok  int64
 	CacheWriteMicrosPerMTok int64
+	// PriceKnown separates "free" from "we never found out". Both read back as
+	// zero, and the UI shows them differently.
+	PriceKnown bool
 	// PriceSource records which authority the price came from, so the console
 	// can separate a figure the seller quoted from one a directory estimated.
 	PriceSource string
@@ -79,7 +82,7 @@ const modelColumns = `provider_id, model_id, publisher, surfaces, capabilities,
 	capabilities_source, context_window, max_output_tokens,
 	input_price_micros_per_mtok, output_price_micros_per_mtok,
 	cache_read_price_micros_per_mtok, cache_write_price_micros_per_mtok,
-	price_source,
+	price_source, price_known,
 	discovered_at, state, missing_streak, last_seen_at`
 
 // Models returns every catalogued model, including the ones discovery has
@@ -104,7 +107,7 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 		)
 		if err := rows.Scan(&r.ProviderID, &r.ModelID, &r.Publisher, &surfaces, &caps,
 			&r.CapabilitiesSource, &ctxWin, &maxOut, &inPrice, &outPrice,
-			&cacheRead, &cacheWrite, &r.PriceSource,
+			&cacheRead, &cacheWrite, &r.PriceSource, &r.PriceKnown,
 			&discovered, &r.State, &r.MissingStreak, &lastSeen); err != nil {
 			return nil, fmt.Errorf("scan model: %w", err)
 		}
@@ -120,7 +123,6 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 		r.OutputMicrosPerMTok = outPrice.Int64
 		r.CacheReadMicrosPerMTok = cacheRead.Int64
 		r.CacheWriteMicrosPerMTok = cacheWrite.Int64
-		r.PriceKnown = inPrice.Valid || outPrice.Valid
 		if lastSeen.Valid {
 			r.LastSeenAt = time.UnixMilli(lastSeen.Int64).UTC()
 		}
@@ -200,7 +202,7 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 		    input_price_micros_per_mtok = ?, output_price_micros_per_mtok = ?,
 		    cache_read_price_micros_per_mtok = ?,
 		    cache_write_price_micros_per_mtok = ?,
-		    price_source = ?
+		    price_source = ?, price_known = ?
 		  WHERE provider_id = ? AND model_id = ?`)
 	if err != nil {
 		return fmt.Errorf("prepare metadata write: %w", err)
@@ -222,7 +224,7 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 			nullableInt64(r.InputMicrosPerMTok), nullableInt64(r.OutputMicrosPerMTok),
 			nullableInt64(r.CacheReadMicrosPerMTok),
 			nullableInt64(r.CacheWriteMicrosPerMTok),
-			priceSourceOr(r.PriceSource),
+			priceSourceOr(r.PriceSource), r.PriceKnown,
 			r.ProviderID, r.ModelID); err != nil {
 			return fmt.Errorf("write metadata for %s/%s: %w", r.ProviderID, r.ModelID, err)
 		}

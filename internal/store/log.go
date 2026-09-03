@@ -34,6 +34,9 @@ type AttemptRecord struct {
 	TokensIn   int64
 	TokensOut  int64
 	CostMicros *int64
+	// PriceGrade is the authority behind the rate CostMicros was computed at,
+	// empty when nothing was priced.
+	PriceGrade string
 }
 
 // RequestRecord is a complete request, built in memory by the handler and
@@ -67,6 +70,10 @@ type RequestRecord struct {
 	// catalog is available, or when nothing served at all. Zero would read
 	// as "this request was free".
 	CostMicros *int64
+	// PriceGrade is catalog Grade of the price CostMicros was computed at,
+	// frozen here rather than re-derived: a sync re-stamps a catalog row, and
+	// a request must keep reporting what it was actually billed on.
+	PriceGrade string
 	TTFTMs     *int64
 	TotalMs    *int64
 
@@ -238,8 +245,9 @@ func (w *LogWriter) WriteBatch(ctx context.Context, batch []*RequestRecord) (int
 		    final_provider_id, final_model, status,
 		    tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, reasoning_tokens,
 		    cost_micros, ttft_ms, total_ms, error_code, warnings_json,
-		    surface_meta_json, response_bytes, response_content_type, source
-		 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		    surface_meta_json, response_bytes, response_content_type, source,
+		    price_grade
+		 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -247,8 +255,8 @@ func (w *LogWriter) WriteBatch(ctx context.Context, batch []*RequestRecord) (int
 
 	attStmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO request_attempts
-		    (request_id, seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path, tokens_in, tokens_out, cost_micros)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		    (request_id, seq, provider_id, key_id, model, outcome, status_code, latency_ms, error, path, tokens_in, tokens_out, cost_micros, price_grade)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -308,6 +316,7 @@ func insertOne(ctx context.Context, reqStmt, attStmt, bodyStmt *sql.Stmt, r *Req
 		r.TokensIn, r.TokensOut, r.CacheReadTokens, r.CacheWriteTokens, r.ReasoningTokens,
 		r.CostMicros, r.TTFTMs, r.TotalMs, r.ErrorCode, string(warnings),
 		string(surfaceMeta), r.ResponseBytes, r.ResponseContentType, sourceOf(r),
+		r.PriceGrade,
 	); err != nil {
 		return err
 	}
@@ -319,6 +328,7 @@ func insertOne(ctx context.Context, reqStmt, attStmt, bodyStmt *sql.Stmt, r *Req
 		if _, err := attStmt.ExecContext(ctx,
 			r.ID, a.Seq, a.ProviderID, a.KeyID, a.Model, a.Outcome,
 			a.StatusCode, a.LatencyMs, a.Error, path, a.TokensIn, a.TokensOut, a.CostMicros,
+			a.PriceGrade,
 		); err != nil {
 			return err
 		}

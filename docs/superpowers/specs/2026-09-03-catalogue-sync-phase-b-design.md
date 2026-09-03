@@ -56,6 +56,15 @@ lift that to **57 presets reaching 2,352 entries**. LiteLLM carries
 `litellm_provider` as a field on each record, so this is a per-preset join key,
 not string matching — structurally identical to `models_dev_id`.
 
+**As shipped, the join prices zero rows on this deployed catalogue.** The 435
+priced rows come from discovery (424) and models.dev (11), none from LiteLLM.
+Where a provider the index covers offers a model, the discovery sweep has
+already priced it and the stored figure outranks a directory; the 24 rows still
+unpriced sit at hackclub, aihorde, ollama and uncloseai — aggregator, proxy and
+local-runtime presets the index has no `litellm_provider` for, whose model names
+appear nowhere in it either. The join is coverage for a fleet the index knows,
+and this fleet is not it.
+
 ## 4. Price resolution
 
 ### 4.1 One slot, values gated on the stamp
@@ -243,6 +252,20 @@ exactly this shape, which is part of why it was rejected as a source. A
 discovered price from an aggregator may be a list price rather than what the
 operator is billed; the `measured` grade asserts the seller quoted it, not that
 it is what appears on the invoice.
+
+Resale is therefore a property of the preset, and it is recorded two ways.
+Paid aggregators — openrouter, requesty, fastrouter and thirteen more — carry a
+hand-declared `resells_prices` in `presets.overrides.yaml`, because nothing in
+the generated data separates a paid router from a paid vendor: both charge, and
+both publish a rate per model. Free proxies are derived instead, from charging
+nothing while appearing in neither price directory as a vendor of record.
+
+`free_tier` alone is not the test. 113 of 208 presets carry it, and 27 of those
+join the LiteLLM index — gemini, groq, mistral, cohere, cerebras, nvidia and
+vertex among them. Those vendors set their own prices, and grading their own
+quotes as third-party would leave the spend tile's estimate marker lit for
+traffic priced exactly. A marker that is always on is one an operator stops
+reading, which is the same failure as an unmarked estimate, inverted.
 
 **`measured` will remain rare.** Two of five sampled providers publish prices.
 The verified marker will render on few rows even after this phase, and that is

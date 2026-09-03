@@ -26,6 +26,18 @@ export function spendReading(spend: Overview["today_spend"]): string {
   return money(spend.micros)
 }
 
+/** The note under the spend figure when part of it rests on a price no seller
+ *  quoted, and null when it does not. Named on the tile rather than per row:
+ *  which price a given model carries is a catalogue question.
+ *
+ *  It names the figure it sits under, because the sparkline beside it is drawn
+ *  from usage_daily, which carries no grade — an unscoped "includes estimated
+ *  prices" would claim something about the series that nothing has checked. */
+export function spendQualifier(spend: Overview["today_spend"]): string | null {
+  if (!spend.estimated || !spend.priced || spend.micros === null) return null
+  return "this figure includes estimated prices"
+}
+
 /** Daily totals in day order, so a sparkline's x-axis is time. */
 function byDay(rows: UsageRow[], value: (r: UsageRow) => number): number[] {
   const acc = new Map<string, number>()
@@ -99,12 +111,14 @@ function Tile({
   caption,
   window,
   readings,
+  note,
   points,
   seriesLabel,
 }: {
   caption: string
   window: string
   readings: Reading[]
+  note?: string | null
   points?: number[]
   seriesLabel: string
 }) {
@@ -143,6 +157,9 @@ function Tile({
           </span>
         ))}
       </div>
+      {note && (
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">{note}</p>
+      )}
       {points ? <Sparkline points={points} /> : <div className="mt-auto h-10" />}
       <p className="text-sm text-[hsl(var(--legend))]">{seriesLabel}</p>
     </Card>
@@ -316,6 +333,7 @@ export function OverviewScreen() {
                     caption="Today's spend (UTC day)"
                     window="since 00:00 UTC"
                     readings={[{ value: spendReading(o.today_spend) }]}
+                    note={spendQualifier(o.today_spend)}
                     points={spendSeries(days)}
                     seriesLabel={`${SERIES_WINDOW} · spend per day`}
                   />

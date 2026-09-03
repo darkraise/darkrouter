@@ -262,12 +262,12 @@ func TestMergeStampsModelsDevPriceSource(t *testing.T) {
 	doc := Doc{"p": {"big": Metadata{
 		InputMicrosPerMTok: 500, OutputMicrosPerMTok: 1500, PriceKnown: true,
 	}}}
-	m := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	m := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
 	if m.Pricing.Source != SourceModelsDev {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceModelsDev)
 	}
-	if m.Pricing.Source.Grade() != GradeIndexed {
-		t.Errorf("grade = %q, want %q", m.Pricing.Source.Grade(), GradeIndexed)
+	if m.Pricing.Source.grade() != GradeIndexed {
+		t.Errorf("grade = %q, want %q", m.Pricing.Source.grade(), GradeIndexed)
 	}
 }
 
@@ -277,7 +277,7 @@ func TestMergeStampsRowPriceSourceWhenModelsDevMisses(t *testing.T) {
 		InputMicrosPerMTok: 100, PriceKnown: true,
 		PriceSource: string(SourceDiscovered),
 	}
-	m := mergeOne(row, Preset{}, Doc{}, store.ModelOverride{})
+	m := mergeOne(row, Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
 	if m.Pricing.Source != SourceDiscovered {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceDiscovered)
 	}
@@ -285,8 +285,275 @@ func TestMergeStampsRowPriceSourceWhenModelsDevMisses(t *testing.T) {
 
 // An empty stored source is a guess, not a measurement.
 func TestMergeDefaultsAbsentPriceSourceToInferred(t *testing.T) {
-	m := mergeOne(store.ModelRow{ProviderID: "p", ModelID: "x"}, Preset{}, Doc{}, store.ModelOverride{})
+	m := mergeOne(store.ModelRow{ProviderID: "p", ModelID: "x"}, Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
 	if m.Pricing.Source != SourceInferred {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceInferred)
+	}
+}
+
+func TestResolvePriceTakesTheFirstKnownCandidate(t *testing.T) {
+	md := Pricing{InputMicrosPerMTok: 500, Known: true, Source: SourceModelsDev}
+	ll := Pricing{InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}
+	if got := resolvePrice(md, ll); got.Source != SourceModelsDev || got.InputMicrosPerMTok != 500 {
+		t.Errorf("got %+v, want models.dev's 500", got)
+	}
+}
+
+// An unknown candidate is skipped, not returned. A source that had nothing to
+// say must not shadow one that did.
+func TestResolvePriceSkipsUnknownCandidates(t *testing.T) {
+	empty := Pricing{Source: SourceDiscovered}
+	ll := Pricing{InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}
+	if got := resolvePrice(empty, ll); got.Source != SourceLiteLLM {
+		t.Errorf("got %+v, want the litellm price", got)
+	}
+}
+
+// A known price of zero is a price. This is the free-model case.
+func TestResolvePriceTakesAKnownZero(t *testing.T) {
+	free := Pricing{Known: true, Source: SourceDiscovered}
+	ll := Pricing{InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}
+	if got := resolvePrice(free, ll); got.Source != SourceDiscovered {
+		t.Errorf("got %+v, want the discovered free price", got)
+	}
+}
+
+func TestResolvePriceWithNoCandidatesIsInferred(t *testing.T) {
+	got := resolvePrice()
+	if got.Known || got.Source != SourceInferred {
+		t.Errorf("got %+v, want an unknown inferred price", got)
+	}
+}
+
+// The row holds one price slot whose stamp may outrank a directory or not, so
+// the stored candidate moves rather than sitting at a fixed position. A
+// runtime that quoted its own rates keeps them even where models.dev has an
+// entry for the same name.
+func TestAStoredDiscoveredPriceBeatsModelsDev(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 100, PriceKnown: true,
+		PriceSource: string(SourceDiscovered),
+	}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
+	if got.Pricing.Source != SourceDiscovered || got.Pricing.InputMicrosPerMTok != 100 {
+		t.Errorf("got %+v, want the stored discovered price of 100", got.Pricing)
+	}
+}
+
+// The mirror of the above: a guess in the row's slot loses to a directory.
+func TestAStoredInferredPriceLosesToModelsDev(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 1, PriceKnown: true,
+		PriceSource: string(SourceInferred),
+	}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
+	if got.Pricing.Source != SourceModelsDev || got.Pricing.InputMicrosPerMTok != 500 {
+		t.Errorf("got %+v, want models.dev's 500", got.Pricing)
+	}
+}
+
+// A join that carries no cost must not blank a price the row already holds.
+func TestAPricelessJoinKeepsTheStoredPrice(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 100, PriceKnown: true,
+		PriceSource: string(SourceInferred),
+	}
+	doc := Doc{"p": {"big": Metadata{ContextWindow: 200_000}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, LiteLLMDoc{}, store.ModelOverride{})
+	if got.Pricing.Source != SourceInferred || got.Pricing.InputMicrosPerMTok != 100 {
+		t.Errorf("got %+v, want the stored 100 kept", got.Pricing)
+	}
+}
+
+// A model models.dev has never heard of takes the LiteLLM price rather than
+// reading as unpriced, which is the whole point of the phase.
+func TestLiteLLMPricesAModelModelsDevMisses(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "llama-3.3-70b"}
+	ll := LiteLLMDoc{"groq": {"llama-3.3-70b": {
+		InputMicrosPerMTok: 590, OutputMicrosPerMTok: 790,
+		Known: true, Source: SourceLiteLLM,
+	}}}
+	got := mergeOne(row, Preset{LiteLLMID: "groq"}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceLiteLLM || got.Pricing.InputMicrosPerMTok != 590 {
+		t.Errorf("got %+v, want the litellm price", got.Pricing)
+	}
+	if got.Pricing.Source.grade() != GradeIndexed {
+		t.Errorf("grade = %q, want indexed", got.Pricing.Source.grade())
+	}
+}
+
+// models.dev outranks the index where both know the model.
+func TestModelsDevBeatsLiteLLM(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "big"}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	ll := LiteLLMDoc{"groq": {"big": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p", LiteLLMID: "groq"}, doc, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceModelsDev {
+		t.Errorf("got %+v, want models.dev", got.Pricing)
+	}
+}
+
+// A preset with no LiteLLM key joins nothing rather than matching by accident.
+func TestNoLiteLLMKeyJoinsNothing(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "m"}
+	ll := LiteLLMDoc{"groq": {"m": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{NoLiteLLM: true}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Known {
+		t.Errorf("got %+v, want no price", got.Pricing)
+	}
+}
+
+// The price join walks the same alias-exact-normalized ladder the metadata join
+// does. An id models.dev can be reached with and the index cannot is a model
+// that reads as fully described and unpriced for no discoverable reason.
+func TestLiteLLMJoinsANormalizedModelID(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "openai/gpt-oss-120b"}
+	ll := LiteLLMDoc{"groq": {"gpt-oss-120b": {
+		InputMicrosPerMTok: 150_000, Known: true, Source: SourceLiteLLM,
+	}}}
+	got := mergeOne(row, Preset{LiteLLMID: "groq"}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceLiteLLM || got.Pricing.InputMicrosPerMTok != 150_000 {
+		t.Errorf("got %+v, want the index's 150000 through the normalized id", got.Pricing)
+	}
+}
+
+// An Ollama tag is a colon where every other source writes a dash, which is the
+// case NormalizeModelID was written for.
+func TestLiteLLMJoinsAnOllamaTag(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "llama3.3:70b"}
+	ll := LiteLLMDoc{"ollama": {"llama3.3-70b": {
+		InputMicrosPerMTok: 400, Known: true, Source: SourceLiteLLM,
+	}}}
+	got := mergeOne(row, Preset{LiteLLMID: "ollama"}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.InputMicrosPerMTok != 400 {
+		t.Errorf("got %+v, want 400", got.Pricing)
+	}
+}
+
+// The alias exists for the forms no rule reaches, so it leads the ladder here
+// for the same reason it leads it in Join.
+func TestLiteLLMPrefersAnAliasOverTheNormalizedID(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "vendor/big"}
+	ll := LiteLLMDoc{"groq": {
+		"big":       {InputMicrosPerMTok: 100, Known: true, Source: SourceLiteLLM},
+		"the-truth": {InputMicrosPerMTok: 900, Known: true, Source: SourceLiteLLM},
+	}}
+	preset := Preset{LiteLLMID: "groq", ModelAliases: map[string]string{"vendor/big": "the-truth"}}
+	got := mergeOne(row, preset, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.InputMicrosPerMTok != 900 {
+		t.Errorf("got %+v, want the alias's 900 rather than the rule's 100", got.Pricing)
+	}
+}
+
+// The exemption is the operator-facing promise, so it has to be what stops the
+// join rather than an empty key happening to miss.
+func TestNoLiteLLMBeatsAKeyThatWouldMatch(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "m"}
+	ll := LiteLLMDoc{"groq": {"m": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{LiteLLMID: "groq", NoLiteLLM: true}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Known {
+		t.Errorf("got %+v, want no price: an exempt preset must not join", got.Pricing)
+	}
+}
+
+// A row stamped models_dev with no price is a real state — the sync stamps the
+// column whether or not it found a rate — so the authoritative branch still has
+// to rank the document above the index behind it.
+func TestModelsDevBeatsLiteLLMOnAnAuthoritativeRow(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "big", PriceSource: string(SourceModelsDev)}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	ll := LiteLLMDoc{"groq": {"big": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p", LiteLLMID: "groq"}, doc, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceModelsDev || got.Pricing.InputMicrosPerMTok != 500 {
+		t.Errorf("got %+v, want models.dev's 500", got.Pricing)
+	}
+}
+
+// A price discovered at a provider that resells someone else's catalogue is
+// that catalogue's figure, whatever endpoint it was read from. Grading it
+// measured would let a proxy's republished list prices produce a spend total
+// with no estimate marker on it.
+func TestADiscoveredPriceIsGradedByWhoSetIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		preset Preset
+		want   Grade
+	}{
+		{name: "a declared reseller republishes", preset: Preset{Resells: true}, want: GradeIndexed},
+		{name: "a free proxy neither directory carries", preset: Preset{FreeTier: true, NoModelsDev: true, NoLiteLLM: true}, want: GradeIndexed},
+		{name: "the vendor quotes itself", preset: Preset{}, want: GradeMeasured},
+		{name: "a vendor that also runs a free tier", preset: Preset{FreeTier: true, LiteLLMID: "groq", ModelsDevID: "groq"}, want: GradeMeasured},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := store.ModelRow{
+				ProviderID: "p", ModelID: "m",
+				InputMicrosPerMTok: 100, OutputMicrosPerMTok: 300,
+				PriceKnown: true, PriceSource: string(SourceDiscovered),
+			}
+			m := mergeOne(row, tc.preset, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
+			if m.Pricing.InputMicrosPerMTok != 100 || !m.Pricing.Known {
+				t.Fatalf("pricing = %+v, want the discovered rates kept", m.Pricing)
+			}
+			if got := m.Pricing.Grade(); got != tc.want {
+				t.Errorf("grade = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The rule only bites if the shipped preset data marks the aggregators. Both
+// serve someone else's listing: hackclub's is OpenRouter's schema verbatim,
+// down to the openrouter/auto row.
+func TestTheShippedAggregatorPresetsResellTheirPrices(t *testing.T) {
+	ps := Embedded()
+	for _, id := range []string{"hackclub", "naga-ac", "openrouter", "requesty"} {
+		p, ok := ps[id]
+		if !ok {
+			t.Fatalf("%s is not a shipped preset", id)
+		}
+		if !p.ResellsPrices() {
+			t.Errorf("%s: prices read from it grade measured, but it sets none of them", id)
+		}
+	}
+}
+
+// The mirror of the test above, and the one that would have caught free_tier
+// being used as the resale signal: these vendors run a free tier and set every
+// price on their own listing. Grading their quotes third-party lights the
+// spend tile's estimate marker for traffic that is measured exactly.
+func TestVendorsWithAFreeTierStillSetTheirOwnPrices(t *testing.T) {
+	ps := Embedded()
+	for _, id := range []string{"gemini", "groq", "mistral", "cohere", "cerebras", "nvidia", "vertex"} {
+		p, ok := ps[id]
+		if !ok {
+			t.Fatalf("%s is not a shipped preset", id)
+		}
+		if p.ResellsPrices() {
+			t.Errorf("%s: its own quoted price grades indexed, but it is the vendor of record", id)
+		}
+	}
+}
+
+// An operator's own figure is theirs no matter whose endpoint it describes,
+// and a directory's is already no better than indexed. Resale caps a grade; it
+// never rewrites one.
+func TestResaleOnlyCapsAMeasuredGrade(t *testing.T) {
+	for _, tc := range []struct {
+		source Source
+		want   Grade
+	}{
+		{SourceOverride, GradeDeclared},
+		{SourceModelsDev, GradeIndexed},
+		{SourceInferred, GradeGuessed},
+	} {
+		p := Pricing{Known: true, Source: tc.source, Resold: true}
+		if got := p.Grade(); got != tc.want {
+			t.Errorf("%q resold: grade = %q, want %q", tc.source, got, tc.want)
+		}
 	}
 }

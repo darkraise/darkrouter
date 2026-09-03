@@ -63,7 +63,10 @@ type Server struct {
 	// freeSync is nil when the daily refresh is turned off; the catalogue the
 	// release shipped with is then what the import filter reads.
 	freeSync *catalog.FreeSyncer
-	sync     *catalog.Syncer
+	// litellmSync is nil when the daily price refresh is turned off; the
+	// catalogue then prices from models.dev and the row alone.
+	litellmSync *catalog.LiteLLMSyncer
+	sync        *catalog.Syncer
 
 	adm *admin.Server
 
@@ -172,6 +175,21 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Timeout:  cfg.Catalog.SyncTimeout,
 	})
 
+	// The price index has no embedded fallback, so the store is wired to the
+	// syncer whether or not the worker runs: with the refresh off it simply
+	// serves nothing and another source prices the model.
+	litellmSync := catalog.NewLiteLLMSyncer(catalog.LiteLLMSyncOptions{
+		URL:      cfg.Catalog.LiteLLMURL,
+		Interval: cfg.Catalog.LiteLLMInterval,
+		Timeout:  cfg.Catalog.SyncTimeout,
+		OnUpdate: func(c context.Context) {
+			if err := cat.Rebuild(c); err != nil {
+				slog.Warn("catalog rebuild after litellm price sync failed", "err", err)
+			}
+		},
+	})
+	cat.SetLiteLLM(litellmSync.Doc)
+
 	// A provider whose base URL names a local program rather than a host is
 	// served by a transport of its own, registered on every client that
 	// reaches providers: the executor's, the discovery sweep's, and the
@@ -206,6 +224,11 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	var freeSyncWorker *catalog.FreeSyncer
 	if cfg.Catalog.FreeCatalogSyncEnabled() {
 		freeSyncWorker = freeSync
+	}
+
+	var litellmSyncWorker *catalog.LiteLLMSyncer
+	if cfg.Catalog.LiteLLMSyncEnabled() {
+		litellmSyncWorker = litellmSync
 	}
 
 	mediaFetcher := geminiadapter.NewFetcher()
@@ -272,11 +295,12 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		metrics: met, tokens: newTokenAuth(db),
 		persist: health.NewPersister(breaker, db, 5*time.Second),
 		cat:     cat, disc: disc, sync: syncer, adm: adm,
-		freeSync:  freeSyncWorker,
-		refresher: refresher,
-		ex:        ex,
-		started:   time.Now(),
-		warnings:  startupWarnings,
+		freeSync:    freeSyncWorker,
+		litellmSync: litellmSyncWorker,
+		refresher:   refresher,
+		ex:          ex,
+		started:     time.Now(),
+		warnings:    startupWarnings,
 	}, nil
 }
 
@@ -620,6 +644,9 @@ func (s *Server) Run(ctx context.Context) error {
 	startWorker("models.dev sync", s.sync.Run)
 	if s.freeSync != nil {
 		startWorker("free catalogue sync", s.freeSync.Run)
+	}
+	if s.litellmSync != nil {
+		startWorker("litellm price sync", s.litellmSync.Run)
 	}
 
 	startWorker("config watcher", func(c context.Context) error {

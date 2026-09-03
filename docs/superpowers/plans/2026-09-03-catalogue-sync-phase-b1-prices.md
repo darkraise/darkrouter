@@ -136,7 +136,7 @@ git commit -m "feat(catalog): rank a stored price stamp"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `internal/catalog/sync_test.go`. Mirror the setup of the existing tests around `TestSyncStampsModelsDevAsThePriceSource`; read them first and reuse their fixture helpers rather than inventing new ones.
+Append to `internal/catalog/sync_test.go`. This package's sync tests use `syncFixture(t)` — which returns `(db, src, cat)` — and drive one sync through an `httptest.Server` serving a document string. Read `TestSyncWritesPricesAndLimits` (sync_test.go:49) and follow its setup exactly; do NOT use `migrated(t)` or `catalogDB(t)`, which live in package `store` and are unreachable from here.
 
 ```go
 // A discovered price keeps BOTH its stamp and its numbers across a sync. The
@@ -144,26 +144,35 @@ Append to `internal/catalog/sync_test.go`. Mirror the setup of the existing test
 // so a row stamped discovered took models.dev's figures and kept the label —
 // the console would then render "measured" over an indexed price.
 func TestSyncKeepsADiscoveredPriceNotJustItsStamp(t *testing.T) {
-	db := migrated(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
 	ctx := context.Background()
-	seedProviderAndModel(t, db, "p", "big")
+
+	// Stamp one row as discovered with its own numbers before the sync runs.
+	// Use a model id that syncDoc also prices, so the sync has something to
+	// overwrite it with; read syncDoc and testPresets() to pick one.
 	if err := db.UpsertMetadata(ctx, []store.MetadataRow{{
-		ProviderID: "p", ModelID: "big",
+		ProviderID: "groq", ModelID: "big",
 		InputMicrosPerMTok: 111, OutputMicrosPerMTok: 222,
 		PriceSource: string(SourceDiscovered),
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	syncOnceWithDoc(t, db, Doc{"p": {"big": Metadata{
-		InputMicrosPerMTok: 999, OutputMicrosPerMTok: 888, PriceKnown: true,
-	}}})
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	rows, err := db.Models(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := rows[0]
+	got := rowFor(t, rows, "groq", "big")
 	if got.PriceSource != string(SourceDiscovered) {
 		t.Errorf("PriceSource = %q, want discovered", got.PriceSource)
 	}
@@ -174,7 +183,7 @@ func TestSyncKeepsADiscoveredPriceNotJustItsStamp(t *testing.T) {
 }
 ```
 
-Replace `seedProviderAndModel` and `syncOnceWithDoc` with whatever this file's existing tests use to seed a row and run one sync. If no such helper exists, follow the setup of the nearest existing sync test literally.
+`rowFor` is a small local helper you write: scan `rows` for the matching provider and model id and `t.Fatalf` if absent — do not index `rows[0]`, whose order is not guaranteed. Confirm the provider and model ids against `syncDoc` and `testPresets()` in this file before using them; the ids above are the shape to follow, not values to trust.
 
 - [ ] **Step 2: Run it to verify it fails**
 

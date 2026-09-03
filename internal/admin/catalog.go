@@ -108,7 +108,7 @@ func (s *Server) collectModels(r *http.Request) []modelView {
 					InputMicros:  m.Pricing.InputMicrosPerMTok,
 					OutputMicros: m.Pricing.OutputMicrosPerMTok,
 					Source:       string(m.Pricing.Source),
-					Grade:        string(m.Pricing.Source.Grade()),
+					Grade:        string(m.Pricing.Grade()),
 				}
 			}
 			byModel[m.ModelID] = v

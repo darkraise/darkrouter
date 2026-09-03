@@ -101,6 +101,7 @@ func TestUpsertMetadataRoundTripsCentPrices(t *testing.T) {
 		ProviderID: "p", ModelID: "m",
 		ContextWindow: 8192, MaxOutputTokens: 4096,
 		InputMicrosPerMTok: 140_000, OutputMicrosPerMTok: 280_000,
+		PriceKnown:         true,
 		Capabilities:       ModelCapabilities{Tools: true},
 		CapabilitiesSource: "models_dev",
 	}})
@@ -272,5 +273,53 @@ func TestUpsertMetadataKeepsPriceSourceNotNull(t *testing.T) {
 	}
 	if rows[0].PriceSource != "inferred" {
 		t.Errorf("PriceSource = %q, want %q", rows[0].PriceSource, "inferred")
+	}
+}
+
+// A model whose price is genuinely zero is priced, not unpriced. nullableInt64
+// writes NULL for zero, so deriving PriceKnown from column nullability read a
+// free model back as "we never found out" -- and the providers that publish
+// prices in their listing are disproportionately the free-tier ones.
+func TestAFreeModelRoundTripsAsPriced(t *testing.T) {
+	ctx := context.Background()
+	db := catalogDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id) VALUES ('p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "m",
+		InputMicrosPerMTok: 0, OutputMicrosPerMTok: 0,
+		PriceKnown: true, PriceSource: "discovered",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rows[0].PriceKnown {
+		t.Error("a zero-priced model read back as unpriced")
+	}
+}
+
+func TestAnUnpricedModelStaysUnpriced(t *testing.T) {
+	ctx := context.Background()
+	db := catalogDB(t)
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO models (provider_id, model_id) VALUES ('p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "m", PriceKnown: false,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].PriceKnown {
+		t.Error("a model with no price read back as priced")
 	}
 }

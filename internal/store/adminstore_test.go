@@ -827,7 +827,7 @@ func TestSpendSinceCoversTheWholeDay(t *testing.T) {
 		}
 	}
 
-	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	micros, priced, _, err := db.SpendSince(ctx, startOfDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +863,7 @@ func TestSpendSinceExcludesRowsBeforeSince(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	micros, priced, _, err := db.SpendSince(ctx, startOfDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,7 +890,7 @@ func TestSpendSinceIsNilWhenNothingIsPriced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	micros, priced, err := db.SpendSince(ctx, startOfDay)
+	micros, priced, _, err := db.SpendSince(ctx, startOfDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -994,5 +994,75 @@ func TestSessionRowsOmitAnExpiredSession(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Errorf("got %d rows, want none: an expired session was listed", len(rows))
+	}
+}
+
+func TestSpendSinceMarksATotalWithAnIndexedPriceEstimated(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	for i, r := range []struct {
+		cost  int64
+		grade string
+	}{{1000, "measured"}, {250, "indexed"}} {
+		c := r.cost
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("e%d", i), TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", CostMicros: &c, PriceGrade: r.grade,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", CostMicros: &c, PriceGrade: r.grade,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	micros, priced, estimated, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !priced || micros == nil || *micros != 1250 {
+		t.Fatalf("spend = %v priced=%v, want 1250: an estimated price still counts",
+			micros, priced)
+	}
+	if !estimated {
+		t.Fatal("estimated must be true when a third-party price contributed")
+	}
+}
+
+func TestSpendSinceIsNotEstimatedWhenEveryPriceIsFirsthand(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	for i, r := range []struct {
+		cost  int64
+		grade string
+	}{{1000, "measured"}, {250, "declared"}} {
+		c := r.cost
+		if _, err := w.WriteBatch(ctx, []*RequestRecord{{
+			ID: fmt.Sprintf("f%d", i), TS: startOfDay.Add(time.Hour), ResolvedAlias: "fast",
+			FinalProviderID: "groq", FinalModel: "m", CostMicros: &c, PriceGrade: r.grade,
+			Attempts: []AttemptRecord{{
+				Seq: 0, ProviderID: "groq", Model: "m",
+				Outcome: "success", CostMicros: &c, PriceGrade: r.grade,
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, _, estimated, err := db.SpendSince(ctx, startOfDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if estimated {
+		t.Fatal("estimated must be false when every contributing price was measured or declared")
 	}
 }

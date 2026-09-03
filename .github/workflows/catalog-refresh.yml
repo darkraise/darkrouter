@@ -58,12 +58,18 @@ jobs:
       - name: Fetch the models.dev index
         run: curl -sS --fail --max-time 60 -o /tmp/modelsdev.json https://models.dev/api.json
 
+      - name: Fetch the LiteLLM price index
+        run: |
+          curl -sS --fail --max-time 60 -o /tmp/litellm.json \
+            https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+
       - name: Regenerate the catalogue
         run: |
           go run ./tools/presetgen \
             -omniroute /tmp/omniroute \
             -ninerouter /tmp/ninerouter \
             -modelsdev /tmp/modelsdev.json \
+            -litellm /tmp/litellm.json \
             -omniroute-sha "${{ steps.clone.outputs.omni_sha }}" \
             -ninerouter-sha "${{ steps.clone.outputs.nine_sha }}"
 
