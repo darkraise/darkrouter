@@ -74,9 +74,10 @@ func (t FreeTier) Live() bool { return t.FreeType != freeTypeDiscontinued }
 // operator's opt-in: a grading the vendor has not sanctioned, on a tier that
 // still exists. A withdrawn tier grades terms that no longer govern access.
 //
-// Both gates ask this one question. When the import filter and the routing
-// filter disagree, a model darkrouter itself imported is refused at request
-// time by an error naming a free tier the catalogue already withdrew.
+// Both gates and the console's fold ask this one question. When the import
+// filter and the routing filter disagree, a model darkrouter itself imported is
+// refused at request time by an error naming a free tier the catalogue already
+// withdrew.
 func (t FreeTier) Vetoed() bool { return t.Live() && t.Unsanctioned() }
 
 // freeTypeDiscontinued marks a free tier the provider has withdrawn. The
