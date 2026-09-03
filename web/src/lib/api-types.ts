@@ -283,6 +283,11 @@ export type FreeTier = {
   credit_tokens: number
   pool_key: string
   tos: string
+  /** The router is refusing at least one provider serving this model over
+   *  this tier, and allowing unsanctioned tiers on that provider lifts it.
+   *  Folded by the server: the opt-in is provider state, and a model row has
+   *  no provider to read it from. */
+  opt_in_required: boolean
 }
 
 /** How confident the catalogue is in a price. Mirrors catalog.Grade. */
@@ -305,7 +310,10 @@ export type Model = {
   state: string
   /** Null when the catalog has no price. Zero would claim the model is free. */
   pricing: Pricing | null
-  /** Null when the model has no free allowance anywhere. */
+  /** One free-tier record folded from every provider serving the model, the
+   *  unsanctioned one winning where they disagree — that is the tier the
+   *  router acts on. Null when the curated catalogue documents no free tier
+   *  here at all, which a withdrawn one is not: that record still travels. */
   free_tier: FreeTier | null
   publisher?: string
   merge_source: MergeSource

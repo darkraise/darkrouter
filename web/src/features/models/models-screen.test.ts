@@ -119,59 +119,69 @@ describe("facet rows", () => {
 describe("freeLabel", () => {
   it("names the allowance and its period", () => {
     expect(freeLabel({ free_type: "recurring-daily", monthly_tokens: 24_000_000,
-      credit_tokens: 0, pool_key: "groq", tos: "ok" })).toBe("free · ~24M tokens/day")
+      credit_tokens: 0, pool_key: "groq", tos: "ok", opt_in_required: false }))
+      .toBe("free · ~24M tokens/day")
     expect(freeLabel({ free_type: "recurring-monthly", monthly_tokens: 1_000_000,
-      credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free · ~1M tokens/month")
+      credit_tokens: 0, pool_key: "", tos: "ok", opt_in_required: false }))
+      .toBe("free · ~1M tokens/month")
     expect(freeLabel({ free_type: "one-time-initial", monthly_tokens: 0,
-      credit_tokens: 200_000_000, pool_key: "", tos: "caution" }))
+      credit_tokens: 200_000_000, pool_key: "", tos: "caution", opt_in_required: false }))
       .toBe("free · ~200M tokens once")
   })
   it("carries a one-off credit grant the same way as an initial one", () => {
     expect(freeLabel({ free_type: "recurring-credit", monthly_tokens: 0,
-      credit_tokens: 5_000_000, pool_key: "", tos: "ok" }))
+      credit_tokens: 5_000_000, pool_key: "", tos: "ok", opt_in_required: false }))
       .toBe("free · ~5M tokens once")
   })
   it("says free without a figure when the allowance is uncapped", () => {
     expect(freeLabel({ free_type: "recurring-uncapped", monthly_tokens: 0,
-      credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free")
+      credit_tokens: 0, pool_key: "", tos: "ok", opt_in_required: false })).toBe("free")
   })
   it("says free without a figure when a live tier leaves the figure out", () => {
     // free_models.json carries recurring-daily rows with no monthly_tokens and
     // recurring-credit rows with no credit_tokens. A zero there is unquantified,
     // not an allowance of nothing, so "~0 tokens/day" would be a lie.
     expect(freeLabel({ free_type: "recurring-daily", monthly_tokens: 0,
-      credit_tokens: 0, pool_key: "groq", tos: "ok" })).toBe("free")
+      credit_tokens: 0, pool_key: "groq", tos: "ok", opt_in_required: false })).toBe("free")
     expect(freeLabel({ free_type: "recurring-credit", monthly_tokens: 0,
-      credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free")
+      credit_tokens: 0, pool_key: "", tos: "ok", opt_in_required: false })).toBe("free")
   })
   it("is absent for a withdrawn tier and for no tier at all", () => {
     expect(freeLabel({ free_type: "discontinued", monthly_tokens: 0,
-      credit_tokens: 0, pool_key: "", tos: "unknown" })).toBeNull()
+      credit_tokens: 0, pool_key: "", tos: "unknown", opt_in_required: false })).toBeNull()
     expect(freeLabel(null)).toBeNull()
   })
 })
 
 describe("tierWarning", () => {
-  const tier = (tos: string): FreeTier => ({
+  const tier = (over: Partial<FreeTier> = {}): FreeTier => ({
     free_type: "recurring-daily",
     monthly_tokens: 24_000_000,
     credit_tokens: 0,
     pool_key: "groq",
-    tos,
+    tos: "avoid",
+    opt_in_required: true,
+    ...over,
   })
-  it("warns that nothing routes to an unsanctioned tier", () => {
-    const warning = tierWarning(tier("avoid"))
-    expect(warning).toBe(
-      "free tier not sanctioned by the vendor — allow it on the provider before the router will use it",
+  it("warns while the router is still refusing a provider over the tier", () => {
+    expect(tierWarning(tier())).toBe(
+      "free tier not sanctioned by the vendor — the router skips any provider " +
+        "serving it that you have not allowed",
     )
+  })
+  it("goes quiet once every provider serving it has been allowed", () => {
+    // The verdict stays avoid after an opt-in — it is the vendor's, not the
+    // operator's — and the router uses the model regardless. A row that read
+    // the verdict alone went on telling an operator to throw a switch they
+    // had already thrown, which no reload could clear.
+    expect(tierWarning(tier({ opt_in_required: false }))).toBeNull()
   })
   it("stays quiet for every other verdict and for no tier at all", () => {
     // The vocabulary is closed: upstream grades a tier ok, caution, ambiguous,
-    // avoid or unknown. Only the last one the vendor refuses earns a warning.
-    expect(tierWarning(tier("ok"))).toBeNull()
-    expect(tierWarning(tier("caution"))).toBeNull()
-    expect(tierWarning(tier("ambiguous"))).toBeNull()
-    expect(tierWarning(tier("unknown"))).toBeNull()
+    // avoid or unknown. Only the last one the vendor refuses is ever gated.
+    for (const tos of ["ok", "caution", "ambiguous", "unknown"]) {
+      expect(tierWarning(tier({ tos, opt_in_required: false }))).toBeNull()
+    }
     expect(tierWarning(null)).toBeNull()
   })
 })
