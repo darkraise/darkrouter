@@ -13,7 +13,6 @@ func TestScrapeNineRouterReadsAPlainEntry(t *testing.T) {
   display: { name: "Cerebras", website: "https://www.cerebras.ai",
              notice: { apiKeyUrl: "https://cloud.cerebras.ai/platform" } },
   category: "apikey",
-  authType: "apikey",
   transport: { baseUrl: "https://api.cerebras.ai/v1/chat/completions",
                quirks: { dropClientMetadata: true } },
   models: [{ id: "gpt-oss-120b", name: "GPT OSS 120B" }],
