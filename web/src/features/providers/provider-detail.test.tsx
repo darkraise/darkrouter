@@ -78,6 +78,7 @@ const configured: Provider = {
   enabled: true,
   auth_style: "bearer",
   free_models_only: false,
+  allow_unsanctioned_free: false,
   credentials: [],
 }
 
@@ -354,5 +355,36 @@ describe("the credentials panel", () => {
     // And the panel must not promise the act it no longer offers.
     expect(screen.queryByText(/a credential can still be added/i)).toBeNull()
     expect(screen.getByText(/address it listens on/i)).toBeInTheDocument()
+  })
+})
+
+describe("the unsanctioned-tier opt-in", () => {
+  it("is off for a provider that has not allowed it", async () => {
+    stub([configured], [preset])
+    await renderProvider("groq")
+
+    const control = await screen.findByRole("checkbox", {
+      name: /use models the vendor hasn't sanctioned/i,
+    })
+    expect(control).not.toBeChecked()
+  })
+
+  it("PATCHes the flag on when switched on", async () => {
+    stub([configured], [preset])
+    await renderProvider("groq")
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /use models the vendor hasn't sanctioned/i }),
+    )
+
+    await waitFor(() => {
+      const patch = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([u, i]) =>
+          String(u) === "/api/providers/groq" && (i as RequestInit)?.method === "PATCH",
+      )
+      expect(JSON.parse((patch?.[1] as RequestInit).body as string)).toEqual({
+        allow_unsanctioned_free: true,
+      })
+    })
   })
 })

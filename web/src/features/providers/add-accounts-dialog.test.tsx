@@ -55,7 +55,7 @@ const provider = (
 ): Provider => ({
   id, name: id, preset: id, kind: "openaicompat", base_url: "https://x.example",
   priority: 10, enabled: true, auth_style: "bearer",
-  free_models_only: freeModelsOnly, credentials,
+  free_models_only: freeModelsOnly, allow_unsanctioned_free: false, credentials,
 })
 
 const cred = (id: string): Credential => ({

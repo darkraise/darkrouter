@@ -41,6 +41,7 @@ const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
   enabled: true,
   auth_style: "bearer",
   free_models_only: false,
+  allow_unsanctioned_free: false,
   credentials: [cred("k1")],
   ...over,
 })

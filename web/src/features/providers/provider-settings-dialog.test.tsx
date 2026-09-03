@@ -17,7 +17,7 @@ function mount(ui: React.ReactNode) {
 const provider = (over: Partial<Provider> = {}): Provider => ({
   id: "groq", name: "Groq", preset: "groq", kind: "openaicompat",
   base_url: "https://api.groq.com", priority: 10, enabled: true,
-  auth_style: "bearer", free_models_only: false, credentials: [],
+  auth_style: "bearer", free_models_only: false, allow_unsanctioned_free: false, credentials: [],
   ...over,
 })
 

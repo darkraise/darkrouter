@@ -20,6 +20,7 @@ const provider = (over: Partial<Provider> = {}): Provider => ({
   kind: "openaicompat",
   base_url: "https://x",
   free_models_only: false,
+  allow_unsanctioned_free: false,
   priority: 1,
   enabled: true,
   auth_style: "bearer",

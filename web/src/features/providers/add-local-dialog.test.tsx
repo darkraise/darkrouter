@@ -172,7 +172,7 @@ describe("a runtime that is already configured", () => {
       providers: [{
         id: "ollama", name: "Ollama", preset: "ollama", kind: "openaicompat",
         base_url: "http://gw:11434/v1", priority: 10, enabled: true,
-        auth_style: "none", free_models_only: false, credentials: [],
+        auth_style: "none", free_models_only: false, allow_unsanctioned_free: false, credentials: [],
       }],
     })
     mount()
