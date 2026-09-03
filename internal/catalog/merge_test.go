@@ -290,3 +290,82 @@ func TestMergeDefaultsAbsentPriceSourceToInferred(t *testing.T) {
 		t.Errorf("Pricing.Source = %q, want %q", m.Pricing.Source, SourceInferred)
 	}
 }
+
+func TestResolvePriceTakesTheFirstKnownCandidate(t *testing.T) {
+	md := Pricing{InputMicrosPerMTok: 500, Known: true, Source: SourceModelsDev}
+	ll := Pricing{InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}
+	if got := resolvePrice(md, ll); got.Source != SourceModelsDev || got.InputMicrosPerMTok != 500 {
+		t.Errorf("got %+v, want models.dev's 500", got)
+	}
+}
+
+// An unknown candidate is skipped, not returned. A source that had nothing to
+// say must not shadow one that did.
+func TestResolvePriceSkipsUnknownCandidates(t *testing.T) {
+	empty := Pricing{Source: SourceDiscovered}
+	ll := Pricing{InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}
+	if got := resolvePrice(empty, ll); got.Source != SourceLiteLLM {
+		t.Errorf("got %+v, want the litellm price", got)
+	}
+}
+
+// A known price of zero is a price. This is the free-model case.
+func TestResolvePriceTakesAKnownZero(t *testing.T) {
+	free := Pricing{Known: true, Source: SourceDiscovered}
+	ll := Pricing{InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}
+	if got := resolvePrice(free, ll); got.Source != SourceDiscovered {
+		t.Errorf("got %+v, want the discovered free price", got)
+	}
+}
+
+func TestResolvePriceWithNoCandidatesIsInferred(t *testing.T) {
+	got := resolvePrice()
+	if got.Known || got.Source != SourceInferred {
+		t.Errorf("got %+v, want an unknown inferred price", got)
+	}
+}
+
+// The row holds one price slot whose stamp may outrank a directory or not, so
+// the stored candidate moves rather than sitting at a fixed position. A
+// runtime that quoted its own rates keeps them even where models.dev has an
+// entry for the same name.
+func TestAStoredDiscoveredPriceBeatsModelsDev(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 100, PriceKnown: true,
+		PriceSource: string(SourceDiscovered),
+	}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	if got.Pricing.Source != SourceDiscovered || got.Pricing.InputMicrosPerMTok != 100 {
+		t.Errorf("got %+v, want the stored discovered price of 100", got.Pricing)
+	}
+}
+
+// The mirror of the above: a guess in the row's slot loses to a directory.
+func TestAStoredInferredPriceLosesToModelsDev(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 1, PriceKnown: true,
+		PriceSource: string(SourceInferred),
+	}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	if got.Pricing.Source != SourceModelsDev || got.Pricing.InputMicrosPerMTok != 500 {
+		t.Errorf("got %+v, want models.dev's 500", got.Pricing)
+	}
+}
+
+// A join that carries no cost must not blank a price the row already holds.
+func TestAPricelessJoinKeepsTheStoredPrice(t *testing.T) {
+	row := store.ModelRow{
+		ProviderID: "p", ModelID: "big",
+		InputMicrosPerMTok: 100, PriceKnown: true,
+		PriceSource: string(SourceInferred),
+	}
+	doc := Doc{"p": {"big": Metadata{ContextWindow: 200_000}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p"}, doc, store.ModelOverride{})
+	if got.Pricing.Source != SourceInferred || got.Pricing.InputMicrosPerMTok != 100 {
+		t.Errorf("got %+v, want the stored 100 kept", got.Pricing)
+	}
+}

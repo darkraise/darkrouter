@@ -66,6 +66,11 @@ func TestSyncWritesPricesAndLimits(t *testing.T) {
 	if got := byID["cheap"].InputMicrosPerMTok; got != 140_000 {
 		t.Errorf("cheap input price = %d, want 140000", got)
 	}
+	// The flag travels with the figures. Without it a priced model reads back
+	// as unpriced, and the merge cannot tell it from one nobody has costed.
+	if !byID["cheap"].PriceKnown {
+		t.Error("cheap read back as unpriced after a sync that carried its cost")
+	}
 	if got := byID["big"].ContextWindow; got != 200_000 {
 		t.Errorf("big context = %d", got)
 	}
