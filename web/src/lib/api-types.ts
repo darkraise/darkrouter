@@ -265,6 +265,21 @@ export type MergeSource =
   | "litellm"
   | "registry"
 
+/**
+ * What a provider gives away, when it gives anything away.
+ *
+ * A zero in either token field means uncapped or unquantified, never "no
+ * allowance" — the wire format omits `omitempty` precisely so a real zero
+ * stays distinguishable from an absent field.
+ */
+export type FreeTier = {
+  free_type: string
+  monthly_tokens: number
+  credit_tokens: number
+  pool_key: string
+  tos: string
+}
+
 /** How confident the catalogue is in a price. Mirrors catalog.Grade. */
 export type PriceGrade = "measured" | "declared" | "indexed" | "guessed"
 
@@ -285,6 +300,8 @@ export type Model = {
   state: string
   /** Null when the catalog has no price. Zero would claim the model is free. */
   pricing: Pricing | null
+  /** Null when the model has no free allowance anywhere. */
+  free_tier: FreeTier | null
   publisher?: string
   merge_source: MergeSource
 }

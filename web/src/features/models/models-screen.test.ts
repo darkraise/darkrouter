@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { compressedRows, matches, priceBand, priceMarker, facetRow } from "./models-screen"
+import {
+  compressedRows,
+  matches,
+  priceBand,
+  priceMarker,
+  freeLabel,
+  facetRow,
+} from "./models-screen"
 import type { Model, Pricing } from "../../lib/api-types"
 
 const model = (over: Partial<Model> & { model: string }): Model => ({
@@ -13,6 +20,7 @@ const model = (over: Partial<Model> & { model: string }): Model => ({
   inferred: false,
   state: "live",
   pricing: null,
+  free_tier: null,
   merge_source: "models_dev",
   ...over,
 })
@@ -87,7 +95,7 @@ describe("facet rows", () => {
       model: "m", providers: ["groq"], surfaces: ["llm", "embedding"],
       context_window: 128000, max_output_tokens: 4096,
       tools: true, vision: false, reasoning: false,
-      inferred: false, state: "live", pricing: null, merge_source: "discovered",
+      inferred: false, state: "live", pricing: null, free_tier: null, merge_source: "discovered",
     })
     expect(row.surface_list).toBe("llm, embedding")
     expect(row.caps).toBe("tools")
@@ -98,10 +106,32 @@ describe("facet rows", () => {
     const row = facetRow({
       model: "m", providers: [], surfaces: [], context_window: 0,
       max_output_tokens: 0, tools: false, vision: false, reasoning: false,
-      inferred: false, state: "live", pricing: null, merge_source: "inferred",
+      inferred: false, state: "live", pricing: null, free_tier: null,
+      merge_source: "inferred",
     })
     // An empty facet value groups every capability-less model under a blank
     // label, which reads as a broken facet rather than as a real category.
     expect(row.caps).toBe("none")
+  })
+})
+
+describe("freeLabel", () => {
+  it("names the allowance and its period", () => {
+    expect(freeLabel({ free_type: "recurring-daily", monthly_tokens: 24_000_000,
+      credit_tokens: 0, pool_key: "groq", tos: "ok" })).toBe("free · ~24M tokens/day")
+    expect(freeLabel({ free_type: "recurring-monthly", monthly_tokens: 1_000_000,
+      credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free · ~1M tokens/month")
+    expect(freeLabel({ free_type: "one-time-initial", monthly_tokens: 0,
+      credit_tokens: 200_000_000, pool_key: "", tos: "caution" }))
+      .toBe("free · ~200M tokens once")
+  })
+  it("says free without a figure when the allowance is uncapped", () => {
+    expect(freeLabel({ free_type: "recurring-uncapped", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "", tos: "ok" })).toBe("free")
+  })
+  it("is absent for a withdrawn tier and for no tier at all", () => {
+    expect(freeLabel({ free_type: "discontinued", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "", tos: "unknown" })).toBeNull()
+    expect(freeLabel(null)).toBeNull()
   })
 })

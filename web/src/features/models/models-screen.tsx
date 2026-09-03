@@ -8,7 +8,7 @@ import { CircleCheck, TriangleAlert } from "lucide-react"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
-import type { Model, Pricing } from "../../lib/api-types"
+import type { FreeTier, Model, Pricing } from "../../lib/api-types"
 import { pricePerMillion } from "../../lib/format"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
@@ -61,6 +61,28 @@ export function tokenLabel(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`
   return String(tokens)
+}
+
+/**
+ * What a free tier actually grants, as one line: `free · ~24M tokens/day`.
+ *
+ * A zero token count is uncapped or unquantified, never "no allowance", so it
+ * falls back to a bare `free` — `~0 tokens/day` would be a lie about a tier
+ * that in fact has no ceiling. `discontinued` is not a free tier any more.
+ */
+export function freeLabel(t: FreeTier | null): string | null {
+  if (!t || t.free_type === "" || t.free_type === "discontinued") return null
+  const [tokens, period] =
+    t.free_type === "recurring-daily"
+      ? ([t.monthly_tokens, "day"] as const)
+      : t.free_type === "recurring-monthly"
+        ? ([t.monthly_tokens, "month"] as const)
+        : t.free_type === "one-time-initial" || t.free_type === "recurring-credit"
+          ? ([t.credit_tokens, "once"] as const)
+          : ([0, ""] as const)
+  if (tokens <= 0) return "free"
+  const figure = tokenLabel(tokens).replace(".0", "")
+  return `free · ~${figure} tokens${period === "once" ? " once" : `/${period}`}`
 }
 
 export function priceBand(p: Pricing | null): string {
@@ -213,7 +235,9 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
       header: "Band",
       cell: ({ row }) => {
         const marker = priceMarker(row.original.pricing)
+        const free = freeLabel(row.original.free_tier)
         return (
+          <span className="flex flex-col">
           <span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
             {row.original.pricing
               ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
@@ -228,6 +252,10 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
                 label="No published price; this is an estimate"
               />
             )}
+          </span>
+          {free && (
+            <span className="whitespace-nowrap text-sm text-[hsl(var(--legend))]">{free}</span>
+          )}
           </span>
         )
       },
