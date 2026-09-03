@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,8 +28,10 @@ func TestProvenanceRecordsSourceAndUpstreamSHAs(t *testing.T) {
 	}
 }
 
-// Two runs on identical input must produce identical bytes, or the weekly PR
-// diffs for nothing.
+// Repeated runs on identical input must produce identical bytes, or the weekly
+// PR diffs for nothing. Two runs would not settle it: Go's map iteration
+// coincides often enough at this fixture size that a map-order implementation
+// would still pass roughly one run in three.
 func TestProvenanceIsByteStable(t *testing.T) {
 	m := merged{Origins: map[string][]fieldOrigin{
 		"b": {{Field: "base_url", Source: "omniroute"}},
@@ -39,16 +42,49 @@ func TestProvenanceIsByteStable(t *testing.T) {
 	}}
 	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y", GeneratedAt: "2026-09-03"}
 	dir := t.TempDir()
-	one, two := filepath.Join(dir, "1.yaml"), filepath.Join(dir, "2.yaml")
-	if err := writeProvenance(one, m, meta); err != nil {
+
+	const runs = 20
+	var first string
+	for i := 0; i < runs; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("%d.yaml", i))
+		if err := writeProvenance(path, m, meta); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = string(got)
+			continue
+		}
+		if string(got) != first {
+			t.Fatalf("run %d differs from run 0:\n%s\n---\n%s", i, first, got)
+		}
+	}
+}
+
+// The per-preset field sort has its own guard: slice order is stable run to
+// run, so the byte-stability test above cannot see it.
+func TestProvenanceSortsFieldsWithinAPreset(t *testing.T) {
+	m := merged{Origins: map[string][]fieldOrigin{
+		"groq": {
+			{Field: "website", Source: "9router"},
+			{Field: "base_url", Source: "omniroute"},
+			{Field: "api_key_url", Source: "9router"},
+		},
+	}}
+	path := filepath.Join(t.TempDir(), "provenance.yaml")
+	meta := manifestMeta{OmniRouteSHA: "x", NineRouterSHA: "y", GeneratedAt: "2026-09-03"}
+	if err := writeProvenance(path, m, meta); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeProvenance(two, m, meta); err != nil {
+	got, err := os.ReadFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	a, _ := os.ReadFile(one)
-	b, _ := os.ReadFile(two)
-	if string(a) != string(b) {
-		t.Errorf("two runs differ:\n%s\n---\n%s", a, b)
+	want := "  groq:\n    api_key_url: 9router\n    base_url: omniroute\n    website: 9router\n"
+	if !strings.Contains(string(got), want) {
+		t.Errorf("fields not emitted in ascending order; want block:\n%s\ngot file:\n%s", want, got)
 	}
 }
