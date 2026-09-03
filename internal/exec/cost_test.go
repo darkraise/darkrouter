@@ -173,3 +173,104 @@ func TestTheRequestsCacheWritesArePriced(t *testing.T) {
 		t.Fatalf("cost %d does not include the cache write", *rec.CostMicros)
 	}
 }
+
+func TestLogRecordsTheGradeBehindTheServedPrice(t *testing.T) {
+	// Both directions, so a constant cannot pass: the grade has to come from
+	// the price the model actually carries.
+	for _, tc := range []struct {
+		source catalog.Source
+		want   string
+	}{
+		{catalog.SourceDiscovered, "measured"},
+		{catalog.SourceModelsDev, "indexed"},
+	} {
+		t.Run(string(tc.source), func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+				ProviderID: "groq", ModelID: "m",
+				Pricing: catalog.Pricing{
+					InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.source,
+				},
+			})}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m", TokensIn: 1_000_000,
+			})
+
+			rec := cap.only(t)
+			if rec.CostMicros == nil {
+				t.Fatal("priced model: CostMicros is nil")
+			}
+			if rec.PriceGrade != tc.want {
+				t.Fatalf("PriceGrade = %q, want %q: the spend total cannot say what "+
+					"it rests on if the grade is not recorded with the cost",
+					rec.PriceGrade, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogLeavesTheGradeEmptyForAnUnpricedModel(t *testing.T) {
+	// A grade with no cost behind it would mark a total that this request
+	// contributed nothing to.
+	cap := &captureLogger{}
+	e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+		ProviderID: "groq", ModelID: "m",
+		Pricing: catalog.Pricing{Known: false, Source: catalog.SourceModelsDev},
+	})}}
+
+	e.log(&store.RequestRecord{FinalProviderID: "groq", FinalModel: "m", TokensIn: 10})
+
+	if rec := cap.only(t); rec.PriceGrade != "" {
+		t.Fatalf("PriceGrade = %q, want empty for a model with no price", rec.PriceGrade)
+	}
+}
+
+func TestLogGradesADiscardedAttemptAgainstTheModelItTried(t *testing.T) {
+	// The failed attempt's tokens were burned at the failed provider's rate,
+	// so they carry that provider's authority -- not the one that served.
+	// Both directions, and the two providers are graded oppositely, so a grade
+	// copied from the record fails as loudly as one never set.
+	for _, tc := range []struct {
+		tried, served catalog.Source
+		wantAttempt   string
+		wantRecord    string
+	}{
+		{catalog.SourceModelsDev, catalog.SourceDiscovered, "indexed", "measured"},
+		{catalog.SourceDiscovered, catalog.SourceModelsDev, "measured", "indexed"},
+	} {
+		t.Run(string(tc.tried), func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(
+				catalog.Model{ProviderID: "cerebras", ModelID: "m",
+					Pricing: catalog.Pricing{
+						InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.tried,
+					}},
+				catalog.Model{ProviderID: "groq", ModelID: "m",
+					Pricing: catalog.Pricing{
+						InputMicrosPerMTok: 1_000_000, Known: true, Source: tc.served,
+					}},
+			)}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m", TokensIn: 1_000_000,
+				Attempts: []store.AttemptRecord{
+					{Seq: 1, ProviderID: "cerebras", Model: "m",
+						Outcome: "retryable_provider", TokensIn: 500_000},
+					{Seq: 2, ProviderID: "groq", Model: "m",
+						Outcome: "success", TokensIn: 1_000_000},
+				},
+			})
+
+			rec := cap.only(t)
+			if rec.PriceGrade != tc.wantRecord {
+				t.Fatalf("record PriceGrade = %q, want %q", rec.PriceGrade, tc.wantRecord)
+			}
+			if got := rec.Attempts[0].PriceGrade; got != tc.wantAttempt {
+				t.Fatalf("discarded attempt PriceGrade = %q, want %q: it was priced "+
+					"against %s, so it carries that provider's authority",
+					got, tc.wantAttempt, tc.tried)
+			}
+		})
+	}
+}
