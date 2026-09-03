@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 type catalogBody struct {
@@ -208,6 +210,7 @@ type modelSummary struct {
 		CreditTokens  int64  `json:"credit_tokens"`
 		PoolKey       string `json:"pool_key"`
 		ToS           string `json:"tos"`
+		OptInRequired bool   `json:"opt_in_required"`
 	} `json:"free_tier"`
 }
 
@@ -376,5 +379,100 @@ func TestTheTermsVerdictDecidesTheRecordIsPresent(t *testing.T) {
 	}
 	if got.ToS != "avoid" || got.FreeType != "" {
 		t.Errorf("free tier = %+v", got)
+	}
+}
+
+// sharedTierCatalog serves one model from two providers whose free tiers
+// disagree. The unsanctioned one sorts last, because the merge orders rows by
+// provider id: a fold that keeps whichever row it met first reports the
+// sanctioned tier here and the row an operator has to act on disappears.
+func sharedTierCatalog(withdrawn bool) *catalog.Store {
+	risky := catalog.FreeTier{FreeType: "recurring-daily", MonthlyTokens: 1000, ToS: "avoid"}
+	if withdrawn {
+		risky.FreeType = "discontinued"
+	}
+	c := &catalog.Store{}
+	c.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "aaa-sanctioned", ModelID: "shared-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier: catalog.FreeTier{
+				FreeType: "recurring-daily", MonthlyTokens: 24000000, ToS: "caution",
+			}},
+		{ProviderID: "zzz-risky", ModelID: "shared-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier:     risky},
+	}, []string{"aaa-sanctioned", "zzz-risky"}))
+	return c
+}
+
+func optedInProvider(t *testing.T, db *store.DB, id string) {
+	t.Helper()
+	if err := db.CreateProvider(context.Background(), store.ProviderRow{
+		ID: id, Kind: "openaicompat", BaseURL: "https://x", Enabled: true,
+		AllowUnsanctionedFree: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnUnsanctionedTierWinsTheFoldedRow(t *testing.T) {
+	// The router vetoes per candidate, so one provider serving this model on a
+	// tier the vendor has not sanctioned is refused however the other providers
+	// are graded. The single record the row carries has to say so.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = sharedTierCatalog(false)
+
+	got := modelViews(t, s)["shared-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.ToS != "avoid" {
+		t.Errorf("tos = %q, want avoid: the fold kept a sanctioned provider's verdict", got.ToS)
+	}
+	if !got.OptInRequired {
+		t.Error("the row does not ask for the opt-in the router is waiting on")
+	}
+}
+
+func TestTheOptInClearsTheFoldedWarning(t *testing.T) {
+	// The console told an operator who had already opted the provider in to go
+	// and opt it in, because the flag lives on the provider and never reached
+	// the model row. Once it is allowed the router uses the model, and the row
+	// must stop asking.
+	s, db := testServerFull(t)
+	s.deps.Catalog = sharedTierCatalog(false)
+	optedInProvider(t, db, "zzz-risky")
+
+	got := modelViews(t, s)["shared-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.OptInRequired {
+		t.Error("an opted-in provider still asked for the opt-in")
+	}
+	// The vendor's verdict is a fact about the tier, not about the operator's
+	// appetite for it, so opting in must not rewrite it.
+	if got.ToS != "avoid" {
+		t.Errorf("tos = %q, want avoid", got.ToS)
+	}
+}
+
+func TestAWithdrawnUnsanctionedTierAsksForNothing(t *testing.T) {
+	// Both gates let a withdrawn tier through: the terms it graded no longer
+	// govern access. A row that asked for an opt-in here would send the
+	// operator after a setting that changes nothing.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = sharedTierCatalog(true)
+
+	got := modelViews(t, s)["shared-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.OptInRequired {
+		t.Error("a withdrawn tier asked for an opt-in the router does not want")
 	}
 }
