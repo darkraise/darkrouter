@@ -518,3 +518,54 @@ func TestSeedingReadsTheSyncedDocument(t *testing.T) {
 		}
 	}
 }
+
+func TestTheFreeFilterSkipsAnUnsanctionedTier(t *testing.T) {
+	// A tier the vendor has not sanctioned stays catalogued -- dropping it
+	// would hide models an operator may already be using -- but the free
+	// filter does not import it until the operator opts the provider in.
+	live := FreeCatalog{Providers: map[string]map[string]FreeTier{
+		"groq": {
+			"sanctioned":   {FreeType: "recurring-daily", ToS: "ok"},
+			"unsanctioned": {FreeType: "recurring-daily", ToS: "avoid"},
+		},
+	}}
+	for _, tc := range []struct {
+		name    string
+		optedIn bool
+		want    bool
+	}{
+		{name: "off by default", optedIn: false, want: false},
+		{name: "opted in", optedIn: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Discoverer{opts: DiscoveryOptions{
+				FreeTiers: func() FreeCatalog { return live },
+			}}
+			rules := d.freeRules(provider.Provider{
+				ID: "p", Preset: "groq", AllowUnsanctionedFree: tc.optedIn,
+			}, Preset{})
+			if got := rules.Curated("unsanctioned"); got != tc.want {
+				t.Errorf("unsanctioned curated = %v, want %v", got, tc.want)
+			}
+			if !rules.Curated("sanctioned") {
+				t.Error("a sanctioned tier was skipped; the opt-in is too broad")
+			}
+		})
+	}
+}
+
+func TestAnUncoveredProviderKeepsANilCuratedRule(t *testing.T) {
+	// Nil Curated means the curated catalogue does not cover this provider,
+	// which SelectModelsForImport distinguishes from a covered provider that
+	// excludes the model.
+	d := &Discoverer{opts: DiscoveryOptions{
+		FreeTiers: func() FreeCatalog {
+			return FreeCatalog{Providers: map[string]map[string]FreeTier{
+				"groq": {"m": {FreeType: "recurring-daily", ToS: "ok"}},
+			}}
+		},
+	}}
+	if rules := d.freeRules(provider.Provider{ID: "p", Preset: "other"}, Preset{}); rules.Curated != nil {
+		t.Error("an uncovered provider must keep a nil Curated rule")
+	}
+}
