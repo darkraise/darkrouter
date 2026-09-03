@@ -338,10 +338,7 @@ func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
 		style = preset.Auth.Style
 	}
 	rules := FreeRules{Price: d.priceLookup(preset), Keyless: auth.IsKeyless(style)}
-	key := p.Preset
-	if key == "" {
-		key = p.ID
-	}
+	key := FreeCatalogKey(p)
 	free := FreeModels()
 	if d.opts.FreeTiers != nil {
 		if live := d.opts.FreeTiers(); len(live.Providers) > 0 {

@@ -39,6 +39,15 @@ func filterTarget(t target, q Query, snap Snapshot,
 		return nil, []Skip{{ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipRemoved}}, true
 	}
 
+	// Access the vendor has not sanctioned is a risk the operator has to accept
+	// deliberately. The model keeps its place in the catalogue either way; what
+	// the opt-in gates is production traffic being sent through it.
+	if m.FreeTier.Unsanctioned() && !p.AllowUnsanctionedFree {
+		return nil, []Skip{{
+			ProviderID: t.ProviderID, Model: t.ModelID, Reason: SkipUnsanctioned,
+		}}, true
+	}
+
 	// The catalog said the upstream offers this surface; this asks whether
 	// Darkrouter can render it. Spec §4 makes an unimplemented surface a
 	// routing filter rather than a runtime error, because an operator reading
