@@ -1,11 +1,14 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/provider"
@@ -415,5 +418,32 @@ func TestParseListRecordsADuplicatedModelOnce(t *testing.T) {
 	}
 	if len(got) != 3 {
 		t.Errorf("got %d models, want the 3 distinct ones", len(got))
+	}
+}
+
+func TestParseListRefusesAQuotedNaNRate(t *testing.T) {
+	// Every comparison against a NaN is false, so a rate written this way
+	// passes a ceiling test and a negative test alike, and int64(NaN) is the
+	// most negative int64 there is. It has to be refused and said out loud.
+	var log bytes.Buffer
+	prior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	t.Cleanup(func() { slog.SetDefault(prior) })
+
+	body := []byte(`{"data": [
+		{"id": "nan", "pricing": {"prompt": "NaN", "completion": "NaN"}}
+	]}`)
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d models, want the model listed despite its price", len(got))
+	}
+	if got[0].Pricing != nil {
+		t.Errorf("pricing = %s, want nil for a NaN rate", showPricing(got[0].Pricing))
+	}
+	if !strings.Contains(log.String(), "not a per-token price") {
+		t.Errorf("nothing logged for a refused rate; log = %q", log.String())
 	}
 }

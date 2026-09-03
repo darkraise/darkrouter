@@ -21,7 +21,7 @@ beforeEach(() => {
               requests_per_min: 0,
               error_rate: 0,
               window_sec: 60,
-              today_spend: { micros: 0, priced: true },
+              today_spend: { micros: 0, priced: true, estimated: false },
               latency: { p50_ms: 0, p95_ms: 0 },
               series: [],
               failovers: [],

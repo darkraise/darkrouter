@@ -235,10 +235,6 @@ func parseDataList(body []byte) ([]Discovered, error) {
 			continue // a model with no id cannot be routed to
 		}
 		price, implausible := m.Pricing.rates()
-		if implausible {
-			slog.Warn("discovery: listing quoted a rate too large to be per-token",
-				"model", m.ID)
-		}
 		if i, dup := at[m.ID]; dup {
 			// The duplicates agree today. One that stops agreeing would
 			// otherwise resolve by position with nothing to see.
@@ -247,6 +243,10 @@ func parseDataList(body []byte) ([]Discovered, error) {
 					"model", m.ID)
 			}
 			continue
+		}
+		if implausible {
+			slog.Warn("discovery: listing quoted a rate that is not a per-token price",
+				"model", m.ID)
 		}
 		at[m.ID] = len(out)
 		out = append(out, Discovered{ModelID: m.ID, Pricing: price})
@@ -404,9 +404,14 @@ func (r *listedRate) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// dollars reports the rate in dollars per token. A negative rate is
-// openrouter's "the auto-router decides", which is not a price, and one above
-// the ceiling is not a per-token rate.
+// dollars reports the rate in dollars per token, accepting only what falls
+// inside the band. The test is written as a band rather than as a list of
+// rejections because every comparison against a NaN is false, so enumerating
+// what to refuse lets a quoted "NaN" through both halves at once and
+// int64(NaN) is the most negative int64 there is.
+//
+// A negative rate is openrouter's "the auto-router decides", which is not a
+// price; one above the ceiling is not a per-token rate.
 func (r listedRate) dollars() (float64, bool) {
 	if !r.known || r.value < 0 || r.value > maxDollarsPerToken {
 		return 0, false
@@ -414,8 +419,10 @@ func (r listedRate) dollars() (float64, bool) {
 	return r.value, true
 }
 
-// implausible reports a rate the ceiling refused, which is a different fact
-// from one the listing never quoted.
+// implausible reports a rate refused for its magnitude, which is a different
+// fact from one the listing never quoted. A negative rate is excluded because
+// it is a documented sentinel rather than a number gone wrong; everything else
+// outside the band, NaN included, is worth a line in the log.
 func (r listedRate) implausible() bool {
 	return r.known && r.value > maxDollarsPerToken
 }
