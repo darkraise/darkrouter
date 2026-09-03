@@ -130,6 +130,9 @@ var restartOnlyFields = []struct {
 	{"catalog.free_catalog_interval", func(c *Config) any { return c.Catalog.FreeCatalogInterval }},
 	{"catalog.free_catalog_url", func(c *Config) any { return c.Catalog.FreeCatalogURL }},
 	{"catalog.free_catalog_sync", func(c *Config) any { return optionalBool(c.Catalog.FreeCatalogSync) }},
+	{"catalog.litellm_interval", func(c *Config) any { return c.Catalog.LiteLLMInterval }},
+	{"catalog.litellm_url", func(c *Config) any { return c.Catalog.LiteLLMURL }},
+	{"catalog.litellm_sync", func(c *Config) any { return optionalBool(c.Catalog.LiteLLMSync) }},
 	{"catalog.discovery.interval", func(c *Config) any { return c.Catalog.Discovery.Interval }},
 	// Not just the interval: whether the sweeper is constructed at all is
 	// decided once, at startup, from this.
@@ -175,6 +178,16 @@ type CatalogConfig struct {
 	// shipped with.
 	FreeCatalogSync *bool `yaml:"free_catalog_sync"`
 
+	// LiteLLMURL is the community price index. It prices models models.dev
+	// does not cover, and it is joined in memory rather than stored, so the
+	// only way to stay current with a rate change is to re-read it.
+	LiteLLMURL      string        `yaml:"litellm_url"`
+	LiteLLMInterval time.Duration `yaml:"litellm_interval"`
+	// LiteLLMSync is a pointer so an explicit false is distinguishable from an
+	// absent key. An operator who does not want the gateway reaching GitHub on
+	// a schedule turns it off and prices only from models.dev.
+	LiteLLMSync *bool `yaml:"litellm_sync"`
+
 	Discovery DiscoveryConfig `yaml:"discovery"`
 
 	// SeedFreeProviders adds a provider on first start for every preset that
@@ -200,6 +213,13 @@ func (c CatalogConfig) SeedFreeProvidersEnabled() bool {
 // and that failure is invisible where a refused outbound call is not.
 func (c CatalogConfig) FreeCatalogSyncEnabled() bool {
 	return c.FreeCatalogSync == nil || *c.FreeCatalogSync
+}
+
+// LiteLLMSyncEnabled reports whether the daily price refresh runs. Absent
+// means on: without it every model models.dev does not cover bills as
+// unpriced, which is invisible where a refused outbound call is not.
+func (c CatalogConfig) LiteLLMSyncEnabled() bool {
+	return c.LiteLLMSync == nil || *c.LiteLLMSync
 }
 
 // MediaConfig governs media the gateway fetches on a client's behalf.
