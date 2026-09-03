@@ -407,3 +407,69 @@ func TestNoLiteLLMKeyJoinsNothing(t *testing.T) {
 		t.Errorf("got %+v, want no price", got.Pricing)
 	}
 }
+
+// The price join walks the same alias-exact-normalized ladder the metadata join
+// does. An id models.dev can be reached with and the index cannot is a model
+// that reads as fully described and unpriced for no discoverable reason.
+func TestLiteLLMJoinsANormalizedModelID(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "openai/gpt-oss-120b"}
+	ll := LiteLLMDoc{"groq": {"gpt-oss-120b": {
+		InputMicrosPerMTok: 150_000, Known: true, Source: SourceLiteLLM,
+	}}}
+	got := mergeOne(row, Preset{LiteLLMID: "groq"}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceLiteLLM || got.Pricing.InputMicrosPerMTok != 150_000 {
+		t.Errorf("got %+v, want the index's 150000 through the normalized id", got.Pricing)
+	}
+}
+
+// An Ollama tag is a colon where every other source writes a dash, which is the
+// case NormalizeModelID was written for.
+func TestLiteLLMJoinsAnOllamaTag(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "llama3.3:70b"}
+	ll := LiteLLMDoc{"ollama": {"llama3.3-70b": {
+		InputMicrosPerMTok: 400, Known: true, Source: SourceLiteLLM,
+	}}}
+	got := mergeOne(row, Preset{LiteLLMID: "ollama"}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.InputMicrosPerMTok != 400 {
+		t.Errorf("got %+v, want 400", got.Pricing)
+	}
+}
+
+// The alias exists for the forms no rule reaches, so it leads the ladder here
+// for the same reason it leads it in Join.
+func TestLiteLLMPrefersAnAliasOverTheNormalizedID(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "vendor/big"}
+	ll := LiteLLMDoc{"groq": {
+		"big":       {InputMicrosPerMTok: 100, Known: true, Source: SourceLiteLLM},
+		"the-truth": {InputMicrosPerMTok: 900, Known: true, Source: SourceLiteLLM},
+	}}
+	preset := Preset{LiteLLMID: "groq", ModelAliases: map[string]string{"vendor/big": "the-truth"}}
+	got := mergeOne(row, preset, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.InputMicrosPerMTok != 900 {
+		t.Errorf("got %+v, want the alias's 900 rather than the rule's 100", got.Pricing)
+	}
+}
+
+// The exemption is the operator-facing promise, so it has to be what stops the
+// join rather than an empty key happening to miss.
+func TestNoLiteLLMBeatsAKeyThatWouldMatch(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "m"}
+	ll := LiteLLMDoc{"groq": {"m": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{LiteLLMID: "groq", NoLiteLLM: true}, Doc{}, ll, store.ModelOverride{})
+	if got.Pricing.Known {
+		t.Errorf("got %+v, want no price: an exempt preset must not join", got.Pricing)
+	}
+}
+
+// A row stamped models_dev with no price is a real state — the sync stamps the
+// column whether or not it found a rate — so the authoritative branch still has
+// to rank the document above the index behind it.
+func TestModelsDevBeatsLiteLLMOnAnAuthoritativeRow(t *testing.T) {
+	row := store.ModelRow{ProviderID: "p", ModelID: "big", PriceSource: string(SourceModelsDev)}
+	doc := Doc{"p": {"big": Metadata{InputMicrosPerMTok: 500, PriceKnown: true}}}
+	ll := LiteLLMDoc{"groq": {"big": {InputMicrosPerMTok: 700, Known: true, Source: SourceLiteLLM}}}
+	got := mergeOne(row, Preset{ModelsDevID: "p", LiteLLMID: "groq"}, doc, ll, store.ModelOverride{})
+	if got.Pricing.Source != SourceModelsDev || got.Pricing.InputMicrosPerMTok != 500 {
+		t.Errorf("got %+v, want models.dev's 500", got.Pricing)
+	}
+}

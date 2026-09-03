@@ -104,13 +104,9 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, litellm LiteLLMDoc, ov
 			Source:                  SourceModelsDev,
 		}
 	}
-	// The index is joined by the preset's own key, never by the provider id: a
-	// provider with no key must miss rather than match a same-named bucket.
 	var fromLiteLLM Pricing
-	if preset.LiteLLMID != "" {
-		if p, ok := litellm[preset.LiteLLMID][row.ModelID]; ok && p.Known {
-			fromLiteLLM = p
-		}
+	if p, ok := JoinLiteLLM(preset, litellm, row.ModelID); ok && p.Known {
+		fromLiteLLM = p
 	}
 	if stored.Source.Authoritative() {
 		m.Pricing = resolvePrice(stored, fromDoc, fromLiteLLM)
@@ -157,6 +153,46 @@ func mergeOne(row store.ModelRow, preset Preset, doc Doc, litellm LiteLLMDoc, ov
 		}
 	}
 	return m
+}
+
+// JoinLiteLLM resolves one model's price through its provider's preset, on the
+// same alias-exact-normalized ladder Join walks for models.dev. Sharing the
+// ladder is the point: an id the metadata join reaches and the price join does
+// not is a model that reads as fully described and unpriced, for no reason a
+// reader could find.
+//
+// The index is keyed by the preset's own litellm_id, never by the provider id,
+// so a provider with no key misses rather than matching a same-named bucket.
+func JoinLiteLLM(p Preset, doc LiteLLMDoc, modelID string) (Pricing, bool) {
+	if p.NoLiteLLM || p.LiteLLMID == "" {
+		return Pricing{}, false
+	}
+	if alias, ok := p.ModelAliases[modelID]; ok {
+		if price, ok := doc[p.LiteLLMID][alias]; ok {
+			return price, true
+		}
+	}
+	if price, ok := doc[p.LiteLLMID][modelID]; ok {
+		return price, true
+	}
+	want := NormalizeModelID(modelID)
+	if want == "" {
+		return Pricing{}, false
+	}
+	// Sorted rather than a bare map range: two upstream ids can normalize to
+	// the same key, and iteration order would otherwise decide which price the
+	// model carries from one rebuild to the next.
+	ids := make([]string, 0, len(doc[p.LiteLLMID]))
+	for id := range doc[p.LiteLLMID] {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if NormalizeModelID(id) == want {
+			return doc[p.LiteLLMID][id], true
+		}
+	}
+	return Pricing{}, false
 }
 
 func state(s string) State {

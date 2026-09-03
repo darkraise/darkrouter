@@ -163,3 +163,86 @@ func TestSyncPersistsCacheWritePricing(t *testing.T) {
 	}
 	t.Fatal("no row for big")
 }
+
+// unpricedModel is a model no metadata document has heard of, which is the
+// state the LiteLLM index exists to answer.
+const unpricedModel = "zzz-only-the-index-knows-me"
+
+func liteLLMFixture(t *testing.T) (*store.DB, *Store) {
+	t.Helper()
+	db, cat := liveDocFixture(t)
+	if err := db.RecordDiscoverySuccess(context.Background(), "p",
+		[]store.DiscoveredModel{{ModelID: embeddedModel}, {ModelID: unpricedModel}},
+		nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	return db, cat
+}
+
+// The store is only wired to the index if a rebuild reads it. Proving mergeOne
+// resolves a LiteLLM candidate says nothing about whether one ever reaches it.
+func TestRebuildPricesFromTheLiveLiteLLMIndex(t *testing.T) {
+	_, cat := liteLLMFixture(t)
+	cat.SetLiteLLM(func() LiteLLMDoc {
+		return LiteLLMDoc{embeddedPreset: {unpricedModel: {
+			InputMicrosPerMTok: 590, OutputMicrosPerMTok: 790,
+			Known: true, Source: SourceLiteLLM,
+		}}}
+	})
+	if err := cat.Rebuild(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := cat.Snapshot().Lookup("p", unpricedModel)
+	if !ok {
+		t.Fatalf("%s is not in the snapshot", unpricedModel)
+	}
+	if m.Pricing.Source != SourceLiteLLM || m.Pricing.InputMicrosPerMTok != 590 {
+		t.Errorf("pricing = %+v, want the live index's 590 at grade indexed: a "+
+			"rebuild that does not read the index leaves the model unpriced",
+			m.Pricing)
+	}
+}
+
+// No index source at all is the cold start, and the state a disabled refresh
+// leaves permanently. It must read as unpriced rather than panicking.
+func TestRebuildWithNoLiteLLMIndexLeavesTheModelUnpriced(t *testing.T) {
+	_, cat := liteLLMFixture(t)
+	cat.SetLiteLLM(func() LiteLLMDoc { return nil })
+	if err := cat.Rebuild(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := cat.Snapshot().Lookup("p", unpricedModel)
+	if m.Pricing.Known {
+		t.Errorf("pricing = %+v, want no price", m.Pricing)
+	}
+}
+
+// The whole path: a fetch parses an index, the callback rebuilds, and the model
+// is priced. Without the callback a successful sync is invisible until
+// something else happens to rebuild.
+func TestASyncedLiteLLMIndexReachesTheSnapshot(t *testing.T) {
+	_, cat := liteLLMFixture(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"groq/` + unpricedModel +
+			`": {"litellm_provider": "groq", "input_cost_per_token": 5.9e-07}}`))
+	}))
+	defer srv.Close()
+
+	syncer := NewLiteLLMSyncer(LiteLLMSyncOptions{URL: srv.URL, OnUpdate: func(c context.Context) {
+		if err := cat.Rebuild(c); err != nil {
+			t.Error(err)
+		}
+	}})
+	cat.SetLiteLLM(syncer.Doc)
+	if err := syncer.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok := cat.Snapshot().Lookup("p", unpricedModel)
+	if !ok {
+		t.Fatalf("%s is not in the snapshot", unpricedModel)
+	}
+	if m.Pricing.Source != SourceLiteLLM || m.Pricing.InputMicrosPerMTok != 590_000 {
+		t.Errorf("pricing = %+v, want the synced index's 590000", m.Pricing)
+	}
+}
