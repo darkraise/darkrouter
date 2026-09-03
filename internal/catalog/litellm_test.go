@@ -98,3 +98,70 @@ func TestParseLiteLLMIsStableAcrossRepeatedParses(t *testing.T) {
 		}
 	}
 }
+
+// The real Bedrock shapes: a region qualifier marks a variant listing whose
+// rate differs from the vendor's canonical one, so it must lose on shape
+// rather than on where its name happens to fall alphabetically.
+func TestParseLiteLLMPrefersAnUnqualifiedKeyOverARegionalOne(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		want    int64
+		wantKey string
+	}{{
+		name:    "bare key beats a regional one",
+		wantKey: "bedrock/deepseek.v3.2",
+		want:    3_000_000,
+		raw: `{
+			"bedrock/ap-northeast-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
+			"bedrock/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06}
+		}`,
+	}, {
+		// "ap-northeast-1" sorts before "invoke", so lexicographic order alone
+		// picks the regional key here; only the shape rule gets this right.
+		name:    "a non-region segment beats a region at equal depth",
+		wantKey: "bedrock/invoke/deepseek.v3.2",
+		want:    3_000_000,
+		raw: `{
+			"bedrock/ap-northeast-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
+			"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06}
+		}`,
+	}, {
+		name:    "us-gov is region-shaped too",
+		wantKey: "bedrock/invoke/amazon.nova-pro-v1:0",
+		want:    3_000_000,
+		raw: `{
+			"bedrock/us-gov-east-1/amazon.nova-pro-v1:0": {"litellm_provider":"bedrock","input_cost_per_token":9e-06},
+			"bedrock/invoke/amazon.nova-pro-v1:0": {"litellm_provider":"bedrock","input_cost_per_token":3e-06}
+		}`,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := ParseLiteLLM([]byte(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got int64
+			for _, p := range doc["bedrock"] {
+				got = p.InputMicrosPerMTok
+			}
+			if got != tc.want {
+				t.Errorf("input = %d, want %d from %s", got, tc.want, tc.wantKey)
+			}
+		})
+	}
+}
+
+// With no region on either side the alphabetical tiebreak still decides, so
+// the ordering stays total.
+func TestParseLiteLLMFallsBackToLexicographicWithoutARegion(t *testing.T) {
+	doc, err := ParseLiteLLM([]byte(`{
+		"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06},
+		"bedrock/converse/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":5e-06}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc["bedrock"]["deepseek.v3.2"].InputMicrosPerMTok; got != 5_000_000 {
+		t.Errorf("input = %d, want 5000000 from bedrock/converse/...", got)
+	}
+}

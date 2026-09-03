@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -65,17 +66,42 @@ func ParseLiteLLM(raw []byte) (LiteLLMDoc, error) {
 	return out, nil
 }
 
+// awsRegion matches an AWS region qualifier by shape — two lowercase letters,
+// one or more hyphenated words, then a trailing digit — so "us-east-1",
+// "eu-west-2", "ap-northeast-1" and "us-gov-east-1" all match. Matching by
+// shape rather than by an enumerated list is deliberate: a region added
+// upstream would fall through a list silently and reintroduce the very bug
+// this guards against.
+var awsRegion = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`)
+
+func hasRegionSegment(key string) bool {
+	for _, seg := range strings.Split(key, "/") {
+		if awsRegion.MatchString(seg) {
+			return true
+		}
+	}
+	return false
+}
+
 // preferredKey reports whether candidate should displace held when both reduce
 // to the same model id. The least-qualified key wins: it is the vendor's
 // canonical listing, and each extra segment qualifies it into a regional or
 // endpoint variant whose rate can differ materially from the headline one.
+//
+// Among keys of equal depth a region qualifier loses, because a regional or
+// GovCloud listing is a variant of the canonical one and is priced differently.
+// Leaving that to alphabetical order would decide it on where the region name
+// happens to sort, which is arbitrary rather than wrong-by-design.
+//
 // Lexicographic order breaks the remaining tie so the outcome is total, and
 // with it the parsed document is a function of its input rather than of map
 // iteration order.
 func preferredKey(candidate, held string) bool {
-	c, h := strings.Count(candidate, "/"), strings.Count(held, "/")
-	if c != h {
+	if c, h := strings.Count(candidate, "/"), strings.Count(held, "/"); c != h {
 		return c < h
+	}
+	if c, h := hasRegionSegment(candidate), hasRegionSegment(held); c != h {
+		return !c
 	}
 	return candidate < held
 }
