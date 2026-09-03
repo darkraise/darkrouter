@@ -240,6 +240,22 @@ an atomic pointer and setter on `Store`, threading through `Rebuild`, one wiring
 line in `internal/server/server.go`, and a test. Roughly four files. Deferred
 from B2 rather than skipped.
 
+
+### 6.5 Owed forward: the opt-in is unreachable at creation
+
+`POST /api/providers` accepts `allow_unsanctioned_free`, and the handler's own
+comment says why creation is the moment that matters: a keyless provider's first
+discovery sweep is triggered during creation, before a second call could land,
+so an opt-in arriving afterwards misses the import it was meant to widen.
+
+The console never sends it. Both create paths — the keyless add on the provider
+detail page and the accounts dialog — send `free_models_only` and nothing else,
+so an operator adding a keyless provider cannot opt in until after the sweep
+that decision was supposed to govern. The toggle added in B2 sets the flag only
+on an existing provider.
+
+Closing this is a wizard control on the two create paths, matching the API the
+server already exposes. Deferred from B2 rather than skipped.
 ## 7. Testing
 
 - `resolvePrice` is table-tested across every combination of present and absent
