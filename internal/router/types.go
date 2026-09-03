@@ -84,7 +84,8 @@ const (
 	SkipAdapterSurface SkipReason = "adapter_surface"
 	// SkipUnsanctioned is a free tier whose terms the vendor has not
 	// sanctioned, on a provider the operator has not opted in. The model stays
-	// in the catalogue and stays visible; it is not chosen automatically.
+	// in the catalogue and stays visible; it is not chosen until the operator
+	// opts in, including when it was named directly.
 	SkipUnsanctioned SkipReason = "unsanctioned"
 )
 

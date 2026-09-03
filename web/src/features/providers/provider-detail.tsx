@@ -567,7 +567,8 @@ export function ProviderDetail() {
                 </span>
                 <span className="text-sm text-[hsl(var(--muted-foreground))]">
                   Off by default. These free tiers may breach the provider&apos;s terms,
-                  so nothing routes to them automatically until you allow it.
+                  so nothing routes to them until you allow it. With free models only
+                  on, they still wait for the next discovery sweep to import.
                 </span>
               </span>
             </label>

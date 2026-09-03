@@ -231,9 +231,10 @@ export type Provider = {
   /** Narrows what the next discovery sweep imports to models it can show are
    *  free. A filter on the catalogue, not on routing. */
   free_models_only: boolean
-  /** Off by default: OmniRoute grades a free tier "avoid" when the access it
-   *  offers is not something the vendor has sanctioned, and both the import
-   *  and routing gates refuse those models until the operator opts in here. */
+  /** Off by default: the router refuses a free tier OmniRoute grades "avoid"
+   *  until the operator opts in here. A free-models-only import applies the
+   *  same veto, but only while that filter is on and only to a still-live
+   *  grading. */
   allow_unsanctioned_free: boolean
 }
 
