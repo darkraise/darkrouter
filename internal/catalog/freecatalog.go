@@ -47,11 +47,12 @@ type FreeTier struct {
 	// DisplayName is upstream's label for the model, kept for the console.
 	DisplayName string `json:"display_name,omitempty"`
 	// MonthlyTokens is the recurring allowance; CreditTokens a one-time grant.
-	// Zero in both means uncapped or unquantified, never "no allowance".
+	// Zero in both means the allowance is uncapped or unquantified -- except on
+	// a discontinued tier, where it is the plain fact that nothing is granted.
 	MonthlyTokens int64 `json:"monthly_tokens,omitempty"`
 	CreditTokens  int64 `json:"credit_tokens,omitempty"`
-	// PoolKey names a quota shared across models. Empty for the seven rows
-	// upstream publishes as null.
+	// PoolKey names a quota shared across models. Empty where upstream
+	// publishes a null, which it does for a handful of rows.
 	PoolKey string `json:"pool_key,omitempty"`
 	// ToS is upstream's verdict on how the vendor regards this access: ok,
 	// caution, ambiguous, avoid, unknown.
@@ -127,14 +128,29 @@ func (c FreeCatalog) ModelsFor(presetID string) []string {
 }
 
 // freeEntry matches one line of OmniRoute's FREE_MODEL_BUDGETS. Every field
-// upstream publishes is captured; poolKey alternates because seven rows carry
-// a literal null rather than a string.
+// upstream publishes is captured; poolKey alternates because some rows carry a
+// literal null rather than a string.
 var freeEntry = regexp.MustCompile(
 	`\{ provider: "([^"]+)", modelId: "([^"]+)", displayName: "([^"]*)", ` +
 		`monthlyTokens: (\d+), creditTokens: (\d+), freeType: "([^"]+)", ` +
 		`poolKey: (?:"([^"]+)"|null), tos: "([^"]+)"`)
 
 var curatedAt = regexp.MustCompile(`FREE_CATALOG_CURATED_AT = "([^"]+)"`)
+
+// freeEntryStart marks where a row begins, whatever the rest of it looks like.
+// Counting these is how a partial parse is caught: freeEntry is positional
+// across all eight fields, so a shape change confined to some rows -- or a
+// displayName carrying an escaped quote -- drops exactly those rows and leaves
+// a catalogue that still looks populated.
+var freeEntryStart = regexp.MustCompile(`\{ provider: "`)
+
+// freeParseTolerance is how much of the file the entry pattern may fail to read
+// before the parse is treated as broken rather than merely out of date. Upstream
+// generates every row from one template, so the two counts match exactly today;
+// the slack is there so a single hand-edited or newly-shaped row is a warning
+// sign to fix at leisure, while a structural break -- which takes out rows by
+// the dozen, since they all share the shape -- fails loudly here.
+const freeParseTolerance = 0.02
 
 // ParseFreeCatalog reads the upstream catalogue's TypeScript source.
 //
@@ -152,7 +168,8 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 	if m := curatedAt.FindSubmatch(raw); m != nil {
 		out.CuratedAt = string(m[1])
 	}
-	for _, m := range freeEntry.FindAllSubmatch(raw, -1) {
+	matches := freeEntry.FindAllSubmatch(raw, -1)
+	for _, m := range matches {
 		provider, model := string(m[1]), string(m[2])
 		if out.Providers[provider] == nil {
 			out.Providers[provider] = map[string]FreeTier{}
@@ -170,6 +187,14 @@ func ParseFreeCatalog(raw []byte) (FreeCatalog, error) {
 	}
 	if len(out.Providers) == 0 {
 		return FreeCatalog{}, fmt.Errorf("free catalogue held no entries")
+	}
+	// A short read is as damaging as an empty one: the caller stores what it
+	// gets, so a truncated catalogue would quietly replace a good one and drop
+	// every model it failed to read from the next import.
+	if rows := len(freeEntryStart.FindAll(raw, -1)); len(matches) < rows-int(float64(rows)*freeParseTolerance) {
+		return FreeCatalog{}, fmt.Errorf(
+			"free catalogue: read %d of %d entries; the upstream row shape has changed",
+			len(matches), rows)
 	}
 	return out, nil
 }

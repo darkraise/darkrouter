@@ -1,7 +1,9 @@
 package catalog
 
 import (
+	"bytes"
 	_ "embed"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/store"
@@ -141,20 +143,90 @@ func TestParseFreeCatalogReadsANullPool(t *testing.T) {
 	}
 }
 
+// A shape change that costs the entry pattern only part of the file must be an
+// error, not a shorter catalogue. The caller stores whatever it is handed, so a
+// partial read would replace a good catalogue with one missing the rows it
+// could not parse — and nothing downstream can tell the difference.
+func TestParseFreeCatalogRefusesAPartialRead(t *testing.T) {
+	// Two of the fixture's rows are given a shape the pattern cannot read,
+	// which is what an upstream field change looks like before it reaches
+	// every row.
+	broken := bytes.Replace(freeCatalogSampleTS, []byte("monthlyTokens: 0,"), []byte("monthlyTokens: null,"), 2)
+	if bytes.Equal(broken, freeCatalogSampleTS) {
+		t.Fatal("the fixture no longer contains the rows this test breaks")
+	}
+	_, err := ParseFreeCatalog(broken)
+	if err == nil {
+		t.Fatal("a catalogue missing rows the pattern could not read parsed cleanly")
+	}
+	if !strings.Contains(err.Error(), "read 11 of 13 entries") {
+		t.Errorf("error does not name how much was lost: %v", err)
+	}
+}
+
 // The embedded snapshot is generated. If a regeneration is skipped after the
 // record widens, FreeModels() degrades to an empty catalogue and the free
 // filter silently stops working — this fails loudly instead.
-func TestEmbeddedFreeCatalogCarriesTheFullRecord(t *testing.T) {
+//
+// Each widened field is asserted present on at least one row rather than on
+// every row: a real snapshot legitimately holds rows with no budget, no pool
+// and no label, so a per-row assertion would fail on good data.
+func TestEmbeddedFreeCatalogCarriesEveryWidenedField(t *testing.T) {
 	c := FreeModels()
 	if len(c.Providers) == 0 {
 		t.Fatal("embedded free catalogue is empty")
 	}
+	var withToS, withDisplayName, withMonthly, withCredit, withPool int
 	for _, models := range c.Providers {
 		for _, tier := range models {
 			if tier.ToS != "" {
-				return
+				withToS++
+			}
+			if tier.DisplayName != "" {
+				withDisplayName++
+			}
+			if tier.MonthlyTokens > 0 {
+				withMonthly++
+			}
+			if tier.CreditTokens > 0 {
+				withCredit++
+			}
+			if tier.PoolKey != "" {
+				withPool++
 			}
 		}
 	}
-	t.Error("no embedded entry carries a tos; free_models.json needs regenerating")
+	for _, f := range []struct {
+		field string
+		count int
+	}{
+		{"tos", withToS},
+		{"display_name", withDisplayName},
+		{"monthly_tokens", withMonthly},
+		{"credit_tokens", withCredit},
+		{"pool_key", withPool},
+	} {
+		if f.count == 0 {
+			t.Errorf("no embedded entry carries a %s; free_models.json needs regenerating", f.field)
+		}
+	}
+}
+
+// The snapshot's size is its own guard. ParseFreeCatalog stores what it reads,
+// so a shape change that costs the entry pattern a slice of the file yields a
+// smaller but still plausible-looking catalogue, and every other test here
+// still passes. The floor is well under the 437 rows upstream carries today so
+// ordinary curation does not redden the suite, and far above what a structural
+// break would leave.
+func TestEmbeddedFreeCatalogHoldsEveryUpstreamRow(t *testing.T) {
+	const floor = 400
+	var entries int
+	for _, models := range FreeModels().Providers {
+		entries += len(models)
+	}
+	if entries < floor {
+		t.Errorf("embedded free catalogue holds %d entries, want at least %d; "+
+			"either the parse is dropping rows or free_models.json needs regenerating",
+			entries, floor)
+	}
 }
