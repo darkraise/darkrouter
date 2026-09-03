@@ -451,3 +451,42 @@ func TestNineRouterPlainOpenAIFormatIsKept(t *testing.T) {
 		t.Error("an explicit openai-format apikey entry was skipped")
 	}
 }
+
+// The guard itself, called directly: the vocabulary is closed, so a quirk
+// darkrouter has no name for is reported and never applied. Reached through
+// mergeSources it is only ever exercised with one quirk at a time, which
+// leaves the off-flag and ordering rules untested.
+func TestQuirkConflictsReportsWithoutApplying(t *testing.T) {
+	got := quirkConflicts("acme", srcOmni, map[string]bool{
+		"zebraMode":          true,
+		"alphaMode":          true,
+		"disabledQuirk":      false,
+		"dropClientMetadata": true,
+	})
+
+	var fields []string
+	for _, c := range got {
+		fields = append(fields, c.Field)
+	}
+	// Sorted, because the conflicts artifact is regenerated on every run and a
+	// map's iteration order would churn the file for no reason.
+	want := []string{"quirk:alphaMode", "quirk:dropClientMetadata", "quirk:zebraMode"}
+	if !slices.Equal(fields, want) {
+		t.Fatalf("fields = %v, want %v (a false flag is not a declared quirk)", fields, want)
+	}
+	for _, c := range got {
+		if c.ID != "acme" || c.Winner != srcOmni || c.Loser != srcNine {
+			t.Errorf("%+v: wrong attribution", c)
+		}
+		if c.WinnerValue != "(not applied)" {
+			t.Errorf("WinnerValue = %q; the row must say the quirk was not applied",
+				c.WinnerValue)
+		}
+	}
+}
+
+func TestQuirkConflictsOnNoQuirks(t *testing.T) {
+	if got := quirkConflicts("acme", srcDarkrouter, nil); got != nil {
+		t.Errorf("got %v, want no rows", got)
+	}
+}
