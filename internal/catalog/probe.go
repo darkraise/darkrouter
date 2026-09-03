@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // anthropicVersion is required on every Anthropic request, listing included.
@@ -31,6 +33,11 @@ type Discovered struct {
 	// carries them, which today is Gemini alone.
 	ContextWindow   int
 	MaxOutputTokens int
+
+	// Pricing is nil unless the listing quoted a rate this parser can read in
+	// a unit it is sure of. Nil means "the provider did not say", which must
+	// not overwrite what another source already knows.
+	Pricing *store.ModelPricing
 }
 
 // Probe is everything a listing request needs, with no live collaborators. The
@@ -210,7 +217,8 @@ func ParseList(kind string, body []byte) ([]Discovered, error) {
 func parseDataList(body []byte) ([]Discovered, error) {
 	var doc struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID      string        `json:"id"`
+			Pricing listedPricing `json:"pricing"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -221,9 +229,128 @@ func parseDataList(body []byte) ([]Discovered, error) {
 		if m.ID == "" {
 			continue // a model with no id cannot be routed to
 		}
-		out = append(out, Discovered{ModelID: m.ID})
+		out = append(out, Discovered{ModelID: m.ID, Pricing: m.Pricing.rates()})
 	}
 	return out, nil
+}
+
+// listedPricing is the price block of an OpenAI-compatible listing, in the two
+// shapes that publish one. Every field is optional and every one of them is
+// absent from most listings.
+type listedPricing struct {
+	// OpenRouter's names, and hackclub proxies them verbatim. Read only when
+	// quoted as a JSON string: chutes.ai publishes the same two names as
+	// numbers meaning dollars per million tokens, so taking a number here
+	// would price its models a million times over.
+	Prompt     listedRate `json:"prompt"`
+	Completion listedRate `json:"completion"`
+	CacheRead  listedRate `json:"input_cache_read"`
+	CacheWrite listedRate `json:"input_cache_write"`
+
+	// naga.ac's names, quoted as JSON numbers. They carry their unit in the
+	// name, so either form is unambiguous.
+	PerInput       listedRate `json:"per_input_token"`
+	PerOutput      listedRate `json:"per_output_token"`
+	PerCachedInput listedRate `json:"per_cached_input_token"`
+}
+
+// rates renders the block into the catalog's unit, or nil when the listing
+// quoted nothing this parser trusts. A zero rate is a real price — free models
+// are most of what these aggregators serve — so absence has to be a nil rather
+// than a zeroed struct.
+//
+// Both a prompt and a completion rate are required. A block quoting one side
+// alone, or an image or audio rate alone, prices a modality this parser does
+// not read, and filling the missing half with a zero would report it as free.
+func (l listedPricing) rates() *store.ModelPricing {
+	in, inOK := firstRate(l.Prompt, l.PerInput)
+	out, outOK := firstRate(l.Completion, l.PerOutput)
+	if !inOK || !outOK {
+		return nil
+	}
+	cacheRead, _ := firstRate(l.CacheRead, l.PerCachedInput)
+	cacheWrite, _ := l.CacheWrite.quotedDollars()
+	return &store.ModelPricing{
+		InputMicrosPerMTok:      perMTok(in),
+		OutputMicrosPerMTok:     perMTok(out),
+		CacheReadMicrosPerMTok:  perMTok(cacheRead),
+		CacheWriteMicrosPerMTok: perMTok(cacheWrite),
+	}
+}
+
+// firstRate takes whichever of the two shapes quoted this rate. A listing
+// speaks one of them, never both.
+func firstRate(quoted, numeric listedRate) (float64, bool) {
+	if v, ok := quoted.quotedDollars(); ok {
+		return v, true
+	}
+	return numeric.dollars()
+}
+
+// UnmarshalJSON reads only an object. A provider that puts a string or a
+// number where the price block goes still has a listing worth recording, and
+// failing the decode would retire every model it serves.
+func (l *listedPricing) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || b[0] != '{' {
+		return nil
+	}
+	type plain listedPricing
+	var v plain
+	if json.Unmarshal(b, &v) != nil {
+		return nil
+	}
+	*l = listedPricing(v)
+	return nil
+}
+
+// listedRate is one rate as a listing quoted it, remembering whether it
+// arrived as a JSON string. It never fails: a price field in a shape this
+// parser does not know reads as absent, because a listing is worth having for
+// its model ids even when its prices are unreadable.
+type listedRate struct {
+	value  float64
+	known  bool
+	quoted bool
+}
+
+func (r *listedRate) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if json.Unmarshal(b, &s) != nil {
+			return nil
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil
+		}
+		r.value, r.known, r.quoted = v, true, true
+		return nil
+	}
+	var v float64
+	if json.Unmarshal(b, &v) != nil {
+		return nil
+	}
+	r.value, r.known = v, true
+	return nil
+}
+
+// dollars reports the rate in dollars per token. A negative rate is
+// openrouter's "the auto-router decides", which is not a price.
+func (r listedRate) dollars() (float64, bool) {
+	if !r.known || r.value < 0 {
+		return 0, false
+	}
+	return r.value, true
+}
+
+func (r listedRate) quotedDollars() (float64, bool) {
+	if !r.quoted {
+		return 0, false
+	}
+	return r.dollars()
 }
 
 func parseGeminiList(body []byte) ([]Discovered, error) {

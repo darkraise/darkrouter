@@ -322,3 +322,62 @@ func TestFilteredCountIsWhatTheSweepDropped(t *testing.T) {
 		t.Errorf("filtered_out = %d, want 3", filtered)
 	}
 }
+
+func TestSuccessWritesPricesOnlyForPricedModels(t *testing.T) {
+	db, ctx := lifecycleDB(t)
+
+	// "kept" already carries a models.dev price. Its listing quotes none, so
+	// the sweep must leave every one of its numbers alone.
+	if err := db.RecordDiscoverySuccess(ctx, "p",
+		[]DiscoveredModel{{ModelID: "kept"}, {ModelID: "priced"}, {ModelID: "free"}}, nil, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetadata(ctx, []MetadataRow{{
+		ProviderID: "p", ModelID: "kept",
+		InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000,
+		PriceKnown: true, PriceSource: "models_dev",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.RecordDiscoverySuccess(ctx, "p", []DiscoveredModel{
+		{ModelID: "kept"},
+		{ModelID: "priced", Pricing: &ModelPricing{
+			InputMicrosPerMTok: 750_000, OutputMicrosPerMTok: 3_750_000,
+			CacheReadMicrosPerMTok: 75_000, CacheWriteMicrosPerMTok: 41_667,
+		}},
+		{ModelID: "free", Pricing: &ModelPricing{}},
+	}, nil, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]ModelRow{}
+	for _, r := range rows {
+		by[r.ModelID] = r
+	}
+
+	if got := by["kept"]; got.InputMicrosPerMTok != 3_000_000 ||
+		got.OutputMicrosPerMTok != 15_000_000 || got.PriceSource != "models_dev" || !got.PriceKnown {
+		t.Errorf("kept = %+v, want its models.dev price untouched", got)
+	}
+
+	got := by["priced"]
+	if got.InputMicrosPerMTok != 750_000 || got.OutputMicrosPerMTok != 3_750_000 ||
+		got.CacheReadMicrosPerMTok != 75_000 || got.CacheWriteMicrosPerMTok != 41_667 {
+		t.Errorf("priced rates = %+v", got)
+	}
+	if !got.PriceKnown || got.PriceSource != "discovered" {
+		t.Errorf("priced stamp = (%v, %q), want (true, \"discovered\")", got.PriceKnown, got.PriceSource)
+	}
+
+	// A free model is priced, not unpriced: its zeroes are what the seller
+	// quoted, and price_known is what tells the two apart.
+	if free := by["free"]; !free.PriceKnown || free.PriceSource != "discovered" ||
+		free.InputMicrosPerMTok != 0 {
+		t.Errorf("free = %+v, want a known zero price stamped discovered", free)
+	}
+}

@@ -306,6 +306,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 			ModelID:         m.ModelID,
 			ContextWindow:   m.ContextWindow,
 			MaxOutputTokens: m.MaxOutputTokens,
+			Pricing:         m.Pricing,
 		}
 		if preset.CapabilityProbe == "ollama" {
 			if caps, ok := d.showCapabilities(ctx, pr, m.ModelID); ok {

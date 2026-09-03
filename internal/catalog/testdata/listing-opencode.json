@@ -1,0 +1,4 @@
+{"object": "list", "data": [
+{"id":"claude-fable-5","object":"model","created":1788429628,"owned_by":"opencode"},
+{"id":"claude-fable-5-1","object":"model","created":1788429628,"owned_by":"opencode"}
+]}

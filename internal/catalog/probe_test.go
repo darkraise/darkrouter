@@ -3,9 +3,11 @@ package catalog
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func TestProbeForBuildsFromThePreset(t *testing.T) {
@@ -219,5 +221,127 @@ func TestParseListRejectsEntriesWithoutIDs(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ModelID != "a" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+// The four price tests below read listings captured verbatim from the live
+// endpoints on 2026-09-03 and decoded through the production parser.
+
+func TestParseListHarvestsStringQuotedPrices(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-hackclub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Discovered{}
+	for _, m := range got {
+		by[m.ModelID] = m
+	}
+
+	// "prompt": "0.00000075" is $0.75 per million tokens, 750000 micros.
+	priced := by["google/gemini-3.8-flash"]
+	if priced.Pricing == nil {
+		t.Fatalf("gemini-3.8-flash carried no price")
+	}
+	want := store.ModelPricing{
+		InputMicrosPerMTok:      750_000,
+		OutputMicrosPerMTok:     3_750_000,
+		CacheReadMicrosPerMTok:  75_000,
+		CacheWriteMicrosPerMTok: 41_667,
+	}
+	if *priced.Pricing != want {
+		t.Errorf("pricing = %+v, want %+v", *priced.Pricing, want)
+	}
+
+	// A free model's zeroes are a price, not an absence.
+	free := by["inclusionai/ling-3.0-flash-fin:free"]
+	if free.Pricing == nil {
+		t.Fatalf("a free model must carry a known price of zero")
+	}
+	if *free.Pricing != (store.ModelPricing{}) {
+		t.Errorf("free pricing = %+v, want all zero", *free.Pricing)
+	}
+
+	// -1 is openrouter's "the auto-router decides", not a rate.
+	if auto := by["openrouter/auto"]; auto.Pricing != nil {
+		t.Errorf("openrouter/auto priced at %+v from a -1 rate", *auto.Pricing)
+	}
+}
+
+func TestParseListHarvestsNumericPerTokenPrices(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-naga.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Discovered{}
+	for _, m := range got {
+		by[m.ModelID] = m
+	}
+
+	priced := by["qwen3.8-flash"]
+	if priced.Pricing == nil {
+		t.Fatalf("qwen3.8-flash carried no price")
+	}
+	want := store.ModelPricing{
+		InputMicrosPerMTok:     75_000,
+		OutputMicrosPerMTok:    235_000,
+		CacheReadMicrosPerMTok: 8_000,
+	}
+	if *priced.Pricing != want {
+		t.Errorf("pricing = %+v, want %+v", *priced.Pricing, want)
+	}
+
+	if free := by["dots-3-note-preview:free"]; free.Pricing == nil {
+		t.Errorf("a free model must carry a known price of zero")
+	}
+
+	// An image model quotes per_output_image_token alone. It has no token
+	// price, and a zeroed one would report it as free.
+	if img := by["seedream-5-lite"]; img.Pricing != nil {
+		t.Errorf("seedream-5-lite priced at %+v from an image-only rate", *img.Pricing)
+	}
+}
+
+func TestParseListLeavesAnUnpricedListingNil(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-opencode.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range got {
+		if m.Pricing != nil {
+			t.Errorf("%s: pricing = %+v, want nil for a listing with no price",
+				m.ModelID, *m.Pricing)
+		}
+	}
+}
+
+func TestParseListRefusesAmbiguousNumericPromptRates(t *testing.T) {
+	// chutes.ai reuses openrouter's "prompt"/"completion" names for numbers
+	// that mean dollars per million, not per token. Reading them as per-token
+	// would price every one of its models a million times over.
+	body, err := os.ReadFile("testdata/listing-chutes.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList("openaicompat", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range got {
+		if m.Pricing != nil {
+			t.Errorf("%s: pricing = %+v, want nil for an ambiguous unit",
+				m.ModelID, *m.Pricing)
+		}
 	}
 }
