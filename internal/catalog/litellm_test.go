@@ -151,9 +151,9 @@ func TestParseLiteLLMPrefersAnUnqualifiedKeyOverARegionalOne(t *testing.T) {
 	}
 }
 
-// With no region on either side the alphabetical tiebreak still decides, so
-// the ordering stays total.
-func TestParseLiteLLMFallsBackToLexicographicWithoutARegion(t *testing.T) {
+// Equally-qualified candidates need not be regional: two endpoint variants can
+// disagree just as materially, and are refused on the same grounds.
+func TestParseLiteLLMRefusesDisagreeingNonRegionalCandidates(t *testing.T) {
 	doc, err := ParseLiteLLM([]byte(`{
 		"bedrock/invoke/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":3e-06},
 		"bedrock/converse/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":5e-06}
@@ -161,7 +161,63 @@ func TestParseLiteLLMFallsBackToLexicographicWithoutARegion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := doc["bedrock"]["deepseek.v3.2"].InputMicrosPerMTok; got != 5_000_000 {
-		t.Errorf("input = %d, want 5000000 from bedrock/converse/...", got)
+	if p := doc["bedrock"]["deepseek.v3.2"]; p.Known {
+		t.Errorf("input = %d, want no price from disagreeing endpoint variants", p.InputMicrosPerMTok)
+	}
+}
+
+// When the surviving candidates disagree on price there is no canonical key to
+// prefer, so the source has nothing to say and must contribute no candidate.
+func TestParseLiteLLMRefusesToPriceDisagreeingCandidates(t *testing.T) {
+	doc, err := ParseLiteLLM([]byte(`{
+		"bedrock/us-east-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":6.2e-07,"output_cost_per_token":1.85e-06},
+		"bedrock/ap-south-1/deepseek.v3.2": {"litellm_provider":"bedrock","input_cost_per_token":7.4e-07,"output_cost_per_token":2.22e-06}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, ok := doc["bedrock"]
+	if !ok {
+		t.Fatal("provider missing")
+	}
+	p, ok := models["deepseek.v3.2"]
+	if !ok {
+		t.Fatal("the model must stay present even when it cannot be priced")
+	}
+	if p.Known {
+		t.Error("disagreeing candidates produced a price")
+	}
+	if p.InputMicrosPerMTok != 0 || p.OutputMicrosPerMTok != 0 {
+		t.Errorf("rates = %d/%d, want zero", p.InputMicrosPerMTok, p.OutputMicrosPerMTok)
+	}
+}
+
+// Agreement is the common case among regional listings; refusing there would
+// cost coverage for nothing.
+func TestParseLiteLLMPricesAgreeingTiedCandidates(t *testing.T) {
+	doc, err := ParseLiteLLM([]byte(`{
+		"bedrock/us-east-1/zai.glm-5": {"litellm_provider":"bedrock","input_cost_per_token":5e-07,"output_cost_per_token":1.5e-06},
+		"bedrock/ap-south-1/zai.glm-5": {"litellm_provider":"bedrock","input_cost_per_token":5e-07,"output_cost_per_token":1.5e-06}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := doc["bedrock"]["zai.glm-5"]
+	if !p.Known || p.InputMicrosPerMTok != 500_000 || p.OutputMicrosPerMTok != 1_500_000 {
+		t.Errorf("got known=%v %d/%d, want true 500000/1500000", p.Known, p.InputMicrosPerMTok, p.OutputMicrosPerMTok)
+	}
+}
+
+// The disagreement check must not fire on the single-candidate path, which is
+// almost every entry in the index.
+func TestParseLiteLLMPricesASingleCandidate(t *testing.T) {
+	doc, err := ParseLiteLLM([]byte(`{
+		"bedrock/us-east-1/zai.glm-5": {"litellm_provider":"bedrock","input_cost_per_token":5e-07,"output_cost_per_token":1.5e-06}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := doc["bedrock"]["zai.glm-5"]; !p.Known || p.InputMicrosPerMTok != 500_000 {
+		t.Errorf("got known=%v %d, want true 500000", p.Known, p.InputMicrosPerMTok)
 	}
 }
