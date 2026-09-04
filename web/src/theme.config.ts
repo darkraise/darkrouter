@@ -37,34 +37,42 @@ export const themeConfig: ThemeConfig = {
   },
   switcher: {
     enabled: true,
-    // Every axis is exposed. The identity still ships as the defaults above,
-    // so a console that has never been touched looks the way it was designed;
-    // what changed is that an operator is now trusted to change it.
+    // Only the two axes an operator has a reason to change: mode, because a
+    // room's light changes, and accentColor, because it is a preference.
     //
-    // The one axis worth knowing about before turning it: accentColor. Coral
-    // is position and primary action only, and the routing ladder and the
-    // provider pips sit beside it in amber, green and red. An accent moved
-    // into that range makes "brand" and "state" the same colour, and the
-    // ladder is then legible only by shape.
+    // The rest are the Warm Console identity rather than preferences -- the
+    // warm ground the language is built on, the pinned accent intensity that
+    // is the one step keeping button labels above AA, the density and radius
+    // the screens were drawn against. Exposing them offered an operator a
+    // dozen ways to make the console worse and one to make it theirs.
+    //
+    // Worth knowing before turning accentColor: coral is position and primary
+    // action only, and the routing ladder and provider pips sit beside it in
+    // amber, green and red. An accent moved into that range makes "brand" and
+    // "state" the same colour, and the ladder is then legible only by shape.
+    //
+    // A hidden axis keeps whatever the defaults above say, and any value a
+    // browser stored while it was still offered is cleared on load -- see
+    // theme-storage.ts, which reads this same block so the two cannot drift.
     axes: {
       mode: true,
-      density: true,
       accentColor: true,
-      surfaceColor: true,
-      preset: true,
-      backgroundStyle: true,
-      backgroundIntensity: true,
-      gradientPattern: true,
-      elevation: true,
-      buttonElevation: true,
-      controlDepth: true,
-      surfaceIntensity: true,
-      radius: true,
-      fontSize: true,
-      accentIntensity: true,
-      outerGlow: true,
-      innerGlow: true,
-      presetAxes: true,
+      density: false,
+      surfaceColor: false,
+      preset: false,
+      backgroundStyle: false,
+      backgroundIntensity: false,
+      gradientPattern: false,
+      elevation: false,
+      buttonElevation: false,
+      controlDepth: false,
+      surfaceIntensity: false,
+      radius: false,
+      fontSize: false,
+      accentIntensity: false,
+      outerGlow: false,
+      innerGlow: false,
+      presetAxes: false,
     },
   },
 }
