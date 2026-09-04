@@ -13,6 +13,7 @@ const provider = (id: string, name: string): Provider => ({
   auth_style: "bearer",
   credentials: [],
   free_models_only: false,
+  allow_unsanctioned_free: false,
 })
 
 const model = (id: string, providers: string[]): Model => ({
@@ -27,6 +28,7 @@ const model = (id: string, providers: string[]): Model => ({
   inferred: false,
   state: "live",
   pricing: null,
+  free_tier: null,
   merge_source: "models_dev",
 })
 

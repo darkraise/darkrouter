@@ -301,6 +301,12 @@ export function ProviderDetail() {
     success: "Provider updated",
     invalidates: [keys.providers, keys.overview, keys.health, keys.discovery],
   })
+  const allowUnsanctioned = useApiMutation({
+    mutationFn: (allow: boolean) =>
+      api.patch(`/api/providers/${id}`, { allow_unsanctioned_free: allow }),
+    success: "Provider updated",
+    invalidates: [keys.providers, keys.models],
+  })
   // No row is not the same as no such provider: the list holds every provider
   // the release supports, and clicking one that nobody has configured has to
   // land somewhere that explains it rather than on a deletion notice.
@@ -543,6 +549,29 @@ export function ProviderDetail() {
               <Fact term="Auth style">{provider.auth_style}</Fact>
               <Fact term="Kind">{provider.kind}</Fact>
             </dl>
+          </Card>
+
+          <Card className="p-4">
+            {/* Off by default, on this provider, is the router's whole
+                answer to a free tier OmniRoute grades "avoid": it will not
+                pick that access for anyone until the operator says so here. */}
+            <label className="flex items-start gap-2">
+              <Checkbox
+                id="allow-unsanctioned-free"
+                checked={provider.allow_unsanctioned_free}
+                onCheckedChange={(next) => allowUnsanctioned.mutate(next === true)}
+              />
+              <span className="flex flex-col">
+                <span className="text-sm font-medium">
+                  Use models the vendor hasn&apos;t sanctioned
+                </span>
+                <span className="text-sm text-[hsl(var(--muted-foreground))]">
+                  Off by default. These free tiers may breach the provider&apos;s terms,
+                  so nothing routes to them until you allow it. With free models only
+                  on, they still wait for the next discovery sweep to import.
+                </span>
+              </span>
+            </label>
           </Card>
 
           {models.length > 0 && (

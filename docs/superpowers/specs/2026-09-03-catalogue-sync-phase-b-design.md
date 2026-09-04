@@ -199,7 +199,9 @@ Of 451 free-tier rows: `caution` 271, `avoid` 87, `ambiguous` 38, `ok` 50,
 
 Every row is catalogued with its grade visible. **`avoid` is excluded from the
 free-model filter and from automatic routing unless the operator opts that
-provider in explicitly.** `avoid` largely means access the vendor has not
+provider in explicitly.** A grade on a `discontinued` tier is the exception, at
+both gates alike: those terms no longer govern access, so darkrouter neither
+refuses the model nor asks anyone to consent to a free tier that is gone. `avoid` largely means access the vendor has not
 sanctioned; a gateway that silently routes production traffic through it exposes
 its operator to a risk they never agreed to. Excluding the rows entirely would
 be worse — darkrouter would drop 87 models an operator may already be using,
@@ -209,16 +211,89 @@ with no indication they exist.
 
 There are 80 distinct pools and exactly **one** is shared by more than one
 provider (`zhipu-flash-free`, by `glm` and `glm-cn`). `poolKey` is stored and
-shown, but it is not a routing input. Pool-aware routing for a single pair would
-be over-engineering.
+travels to the console on the model row, but no surface renders it, and it is
+not a routing input. Pool-aware routing for a single pair would be
+over-engineering; showing the pool at all is owed forward (§6.7).
 
 ### 6.3 Console
 
-A free model shows its budget rather than a bare badge — `free · ~24M
-tokens/day` — and `avoid` carries a visible warning wherever it appears.
-Per the project typography rule, hierarchy comes from colour and weight, never
-from a smaller size.
+On the **Models screen**, a free model shows its budget rather than a bare
+badge — `free · ~24M tokens/day` — and a tier the router is refusing carries a
+visible warning beside the model id. Per the project typography rule, hierarchy
+comes from colour and weight, never from a smaller size.
 
+The warning is keyed on the folded `opt_in_required` the API sends, not on the
+vendor's verdict alone. `avoid` on a provider the operator has already allowed
+is a model the router uses; a row warning there would be demanding a decision
+that has been taken.
+
+The three other surfaces a model appears on show neither the budget nor the
+warning — see §6.6.
+
+
+### 6.4 Owed forward: the routing gate reads a frozen catalogue
+
+`mergeOne` populates `Model.FreeTier` from the **embedded** `FreeModels()`
+snapshot, while `FreeSyncer` holds a live one that only the discovery sweep
+consults through `opts.FreeTiers`. `MergeInput` has no equivalent field.
+
+So the two gates age differently. The import gate honours an upstream regrade
+within a day; the routing gate honours it at the next release. `FreeSyncer`'s
+own comment says the embed "freezes it at the release" — the routing gate
+reintroduces that freeze, in the one place the phase exists to protect.
+
+Both directions cost something. A tier regraded to `avoid` after a release keeps
+routing until a new binary ships. A tier upgraded from `avoid` to `ok` keeps
+being vetoed, and the operator's only symptom is a routing failure.
+
+The fix is shaped like `Store.SetLiteLLM`: a `FreeTiers` field on `MergeInput`,
+an atomic pointer and setter on `Store`, threading through `Rebuild`, one wiring
+line in `internal/server/server.go`, and a test. Roughly four files. Deferred
+from B2 rather than skipped.
+
+
+### 6.5 Owed forward: the opt-in is unreachable at creation
+
+`POST /api/providers` accepts `allow_unsanctioned_free`, and the handler's own
+comment says why creation is the moment that matters: a keyless provider's first
+discovery sweep is triggered during creation, before a second call could land,
+so an opt-in arriving afterwards misses the import it was meant to widen.
+
+The console never sends it. Both create paths — the keyless add on the provider
+detail page and the accounts dialog — send `free_models_only` and nothing else,
+so an operator adding a keyless provider cannot opt in until after the sweep
+that decision was supposed to govern. The toggle added in B2 sets the flag only
+on an existing provider.
+
+Closing this is a wizard control on the two create paths, matching the API the
+server already exposes. Deferred from B2 rather than skipped.
+
+
+### 6.6 Owed forward: three model surfaces show no free tier
+
+`freeLabel` and `tierWarning` are called from `models-screen.tsx` and nowhere
+else. The provider detail page's model table, the model combobox and the
+command palette all consume the same `Model` and render neither, so a free
+tier — its budget and the vendor's verdict alike — is invisible on three of the
+four surfaces a model appears on.
+
+Each is a different presentation problem: a table cell, a dropdown option and a
+one-line palette result have different room, and none of them can carry the
+Models screen's two-line treatment as it stands. B2 did the screen that lists
+models for their own sake and left the three that list them to be picked.
+Deferred from B2 rather than skipped.
+
+
+### 6.7 Owed forward: the pool a budget is drawn from
+
+`poolKey` reaches the console on every model row and nothing shows it. It
+changes what a budget means on exactly one pair today — `zhipu-flash-free`,
+shared by `glm` and `glm-cn` — where an operator reading one provider's daily
+allowance cannot see that spending it also spends the other's.
+
+Showing it is a line beside the budget, which puts it in the same decision as
+§6.6: where the budget goes, the pool goes. Deferred from B2 rather than
+skipped.
 ## 7. Testing
 
 - `resolvePrice` is table-tested across every combination of present and absent

@@ -86,7 +86,7 @@ Provider view, returned wherever a provider is:
 
 ```
 {id, name, preset, kind, base_url, priority, enabled, auth_style,
- free_models_only,
+ free_models_only, allow_unsanctioned_free,
  credentials: [{id, label, masked, enabled, cooling, kind, expires_at?, scope?}]}
 ```
 
@@ -97,8 +97,8 @@ Provider view, returned wherever a provider is:
 |---|---|---|
 | `GET /api/presets` | — | `200 {presets: [{id, name, kind, base_url, surfaces, auth_kind, website, free_tier}]}` sorted by id |
 | `GET /api/providers` | — | `200 {providers: [provider]}`. Credential counts and states come from a projection that never decrypts a secret. |
-| `POST /api/providers` | `{id, name?, preset?, kind?, base_url?, auth_style?, priority?, enabled?, region?, project?, location?, free_models_only?}` | `201 provider`. `409` when the id exists. |
-| `PATCH /api/providers/{id}` | `{name?, base_url?, priority?, enabled?, region?, project?, free_models_only?}` | `200 provider` (the updated resource). `404` unknown id. |
+| `POST /api/providers` | `{id, name?, preset?, kind?, base_url?, auth_style?, priority?, enabled?, region?, project?, location?, free_models_only?, allow_unsanctioned_free?}` | `201 {id}`. `409` when the id exists. The created resource is not echoed; read it back with `GET /api/providers`. |
+| `PATCH /api/providers/{id}` | `{name?, base_url?, priority?, enabled?, region?, project?, free_models_only?, allow_unsanctioned_free?}` | `200 provider` (the updated resource). `404` unknown id. |
 | `DELETE /api/providers/{id}` | — | `204`; `404` unknown id. Aliases whose chain named the provider keep the dangling target and are reported as invalid by `GET /api/config`. |
 | `POST /api/providers/{id}/test` | query `key` (credential id; default the first) | `200 {ok, probe, latency_ms, model_count?, error?}` — a failed probe is `ok: false` with `error`, not an error status. `probe` names what was exercised: `listing`, `completion`, `signature`, `permission`, `region`, `reachability`, `expiry`, `refresh`. `404` unknown provider or credential, `400` no credential to test. |
 | `POST /api/providers/{id}/keys` | `{label?, secret}` | `201 {id, label}`. The secret is never returned again. |
@@ -140,7 +140,7 @@ minutes. Starting a new flow stops the previous listener.
 
 | Route | Body | Response |
 |---|---|---|
-| `GET /api/models` | query `q` (substring of the model id), `surface`, `min_context`, `tools=true` | `200 {models: [{model, providers, surfaces, context_window, max_output_tokens, tools, vision, reasoning, inferred, state, pricing: {input_micros, output_micros} \| null, publisher?, merge_source}], aliases: [{name, targets}]}` |
+| `GET /api/models` | query `q` (substring of the model id), `surface`, `min_context`, `tools=true` | `200 {models: [{model, providers, surfaces, context_window, max_output_tokens, tools, vision, reasoning, inferred, state, pricing: {input_micros, output_micros, price_source, price_grade} \| null, free_tier: {free_type, monthly_tokens, credit_tokens, pool_key, tos, opt_in_required} \| null, publisher?, merge_source}], aliases: [{name, targets}]}` |
 | `GET /api/models/{provider}/{model}/override` | — | `200 {surfaces?, capabilities?: {tools, vision, reasoning}, context_window?}` — unset fields are omitted; an empty object when no override exists (not a 404, so the console's inspection of any model stays quiet). |
 | `PUT /api/models/{provider}/{model}/override` | same shape | `200` the stored override. `404` unknown provider; `400` when a surface is not one of `llm`, `embedding`, `image`, `tts`, `stt`, `rerank`, `moderation`. |
 | `DELETE /api/models/{provider}/{model}/override` | — | `204`; `404` when there was none |

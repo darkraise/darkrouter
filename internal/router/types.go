@@ -82,6 +82,11 @@ const (
 	// SkipSurface because the fix is different: one is a catalog gap the
 	// operator can close, the other is a Darkrouter gap they cannot.
 	SkipAdapterSurface SkipReason = "adapter_surface"
+	// SkipUnsanctioned is a free tier whose terms the vendor has not
+	// sanctioned, on a provider the operator has not opted in. The model stays
+	// in the catalogue and stays visible; it is not chosen until the operator
+	// opts in, including when it was named directly.
+	SkipUnsanctioned SkipReason = "unsanctioned"
 )
 
 // Skip records a target that was considered and rejected. These are persisted

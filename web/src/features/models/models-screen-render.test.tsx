@@ -12,8 +12,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { ModelsScreen } from "./models-screen"
-import type { CatalogResponse, Model, Pricing } from "../../lib/api-types"
+import { ModelsScreen, tierWarning } from "./models-screen"
+import type { CatalogResponse, FreeTier, Model, Pricing } from "../../lib/api-types"
 
 // PageHeader calls useRouterAdapter unconditionally, and this screen never
 // navigates through it, so a stub satisfying the interface is enough — the
@@ -73,6 +73,7 @@ const catalog = (): CatalogResponse => ({
       inferred: false,
       state: "live",
       pricing: null,
+      free_tier: null,
       merge_source: "models_dev",
     },
   ],
@@ -89,6 +90,7 @@ const baseModel: Omit<Model, "model" | "pricing"> = {
   reasoning: false,
   inferred: false,
   state: "live",
+  free_tier: null,
   merge_source: "models_dev",
 }
 
@@ -120,6 +122,34 @@ function pricedCatalog(): CatalogResponse {
         model: "guessed-model",
         pricing: pricing({ price_source: "inferred", price_grade: "guessed" }),
       },
+    ],
+    aliases: [],
+  }
+}
+
+const freeTier = (tos: string, optInRequired = false): FreeTier => ({
+  free_type: "recurring-daily",
+  monthly_tokens: 24_000_000,
+  credit_tokens: 0,
+  pool_key: "openai",
+  tos,
+  opt_in_required: optInRequired,
+})
+
+/** Three rows a render test can tell apart: one the router is still refusing,
+ *  one the vendor grades the same way but the operator has allowed, and one
+ *  the vendor never objected to. */
+function tieredCatalog(): CatalogResponse {
+  return {
+    models: [
+      {
+        ...baseModel,
+        model: "avoid-model",
+        pricing: null,
+        free_tier: freeTier("avoid", true),
+      },
+      { ...baseModel, model: "allowed-model", pricing: null, free_tier: freeTier("avoid") },
+      { ...baseModel, model: "caution-model", pricing: null, free_tier: freeTier("caution") },
     ],
     aliases: [],
   }
@@ -261,5 +291,36 @@ describe("the price marker in the Band cell", () => {
     if (!verifiedCell || !cautionCell) throw new Error("expected the marker inside a table cell")
     expect(verifiedCell).toHaveTextContent("$0.1500 / $0.6000")
     expect(cautionCell).toHaveTextContent("$0.1500 / $0.6000")
+  })
+})
+
+describe("the unsanctioned-tier warning", () => {
+  it("warns on the refused row, beside the model, and leaves the others alone", async () => {
+    mockCatalog(tieredCatalog())
+    await renderAt("/")
+
+    const avoidRow = (await screen.findByText("avoid-model")).closest("tr")
+    const allowedRow = (await screen.findByText("allowed-model")).closest("tr")
+    const cautionRow = (await screen.findByText("caution-model")).closest("tr")
+    if (!avoidRow || !allowedRow || !cautionRow) {
+      throw new Error("expected each model name inside a table row")
+    }
+
+    const warning = tierWarning(freeTier("avoid", true))
+    if (!warning) throw new Error("expected a refused tier to warn")
+
+    expect(within(avoidRow).getByText(warning)).toBeInTheDocument()
+    // Allowed on its provider: the vendor's verdict has not changed, and the
+    // router uses the model anyway. Telling the operator to allow it here is
+    // an instruction they have already carried out.
+    expect(within(allowedRow).queryByText(warning)).not.toBeInTheDocument()
+    expect(within(cautionRow).queryByText(warning)).not.toBeInTheDocument()
+    expect(screen.getAllByText(warning)).toHaveLength(1)
+
+    // Beside the model id, not in the Band cell: Band can be switched off
+    // through the column-visibility menu and the warning would go with it.
+    expect(within(avoidRow).getByText(warning).closest("td")).toBe(
+      within(avoidRow).getByText("avoid-model").closest("td"),
+    )
   })
 })

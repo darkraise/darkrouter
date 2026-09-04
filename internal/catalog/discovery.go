@@ -338,10 +338,7 @@ func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
 		style = preset.Auth.Style
 	}
 	rules := FreeRules{Price: d.priceLookup(preset), Keyless: auth.IsKeyless(style)}
-	key := p.Preset
-	if key == "" {
-		key = p.ID
-	}
+	key := freeCatalogKey(p)
 	free := FreeModels()
 	if d.opts.FreeTiers != nil {
 		if live := d.opts.FreeTiers(); len(live.Providers) > 0 {
@@ -350,6 +347,12 @@ func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
 	}
 	if len(free.Providers[key]) > 0 {
 		rules.Curated = func(modelID string) bool { return free.Covers(key, modelID) }
+		if !p.AllowUnsanctionedFree {
+			rules.Unsanctioned = func(modelID string) bool {
+				tier, ok := free.Tier(key, modelID)
+				return ok && tier.Vetoed()
+			}
+		}
 	}
 	return rules
 }

@@ -120,7 +120,7 @@ func TestMergeReadsCacheWritePricingFromAnUnjoinedRow(t *testing.T) {
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
 		CacheReadMicrosPerMTok: 30_000, CacheWriteMicrosPerMTok: 375_000,
 		PriceKnown: true,
-	}, Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
+	}, "", Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
 
 	if got.Source != SourceInferred {
 		t.Fatalf("source = %v, want the row to be the source", got.Source)

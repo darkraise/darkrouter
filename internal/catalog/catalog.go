@@ -178,6 +178,12 @@ type Model struct {
 	MaxOutputTokens int
 	Traits          Traits
 	Pricing         Pricing
+
+	// FreeTier is the curated catalogue's record of this model's free access,
+	// zero for the majority of models no free tier covers. It carries the
+	// vendor's grading of that access, which is what decides whether the router
+	// may select the model without the operator having opted in.
+	FreeTier FreeTier
 }
 
 // Routable reports whether the router may attempt this model. A stale model is

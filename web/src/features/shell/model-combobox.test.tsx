@@ -8,7 +8,7 @@ import type { Model } from "../../lib/api-types"
 const model = (name: string, providers: string[], surfaces = ["llm"]): Model => ({
   model: name, providers, surfaces, context_window: 0, max_output_tokens: 0,
   tools: false, vision: false, reasoning: false, inferred: false, state: "live",
-  pricing: null, merge_source: "discovered",
+  pricing: null, free_tier: null, merge_source: "discovered",
 })
 
 describe("modelCandidates", () => {

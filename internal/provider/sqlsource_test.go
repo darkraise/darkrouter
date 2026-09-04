@@ -337,3 +337,31 @@ func TestSQLSourceKeepsAKeylessProviderWithNoCredential(t *testing.T) {
 		}
 	}
 }
+
+// The unsanctioned-tier opt-in has to survive the whole path: the store writes
+// the column, and this source is what carries it to the sweep and the router.
+// Read back as false here, it would silently un-opt the operator.
+func TestReloadCarriesTheUnsanctionedOptIn(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	seed(t, db, key, "p1", 1, true, "m1")
+	yes := true
+	if err := db.UpdateProvider(ctx, "p1",
+		store.ProviderPatch{AllowUnsanctionedFree: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	src := NewSQLSource(db, key)
+	if err := src.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := src.Providers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 provider, got %d", len(got))
+	}
+	if !got[0].AllowUnsanctionedFree {
+		t.Error("the opt-in did not reach the provider set")
+	}
+}

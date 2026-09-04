@@ -10,6 +10,7 @@ const cred = (over: Partial<Credential> = {}): Credential => ({
 const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
   id, name: id, preset: id, kind: "openaicompat", base_url: "https://x.example",
   priority: 10, enabled: true, auth_style: "bearer", free_models_only: false,
+  allow_unsanctioned_free: false,
   credentials: [cred()],
   ...over,
 })
@@ -17,7 +18,7 @@ const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
 const model = (name: string, providers: string[]): Model => ({
   model: name, providers, surfaces: ["llm"], context_window: 0, max_output_tokens: 0,
   tools: false, vision: false, reasoning: false, inferred: false, state: "live",
-  pricing: null, merge_source: "discovered",
+  pricing: null, free_tier: null, merge_source: "discovered",
 })
 
 const ctx = (over: Partial<ChainContext> = {}): ChainContext => ({

@@ -80,7 +80,7 @@ const presets: Preset[] = [
 const groq: Provider = {
   id: "groq", name: "Groq", preset: "groq", kind: "openaicompat",
   base_url: "https://api.groq.com/openai/v1", priority: 10, enabled: true,
-  auth_style: "bearer", free_models_only: false,
+  auth_style: "bearer", free_models_only: false, allow_unsanctioned_free: false,
   credentials: [
     { id: "k1", label: "k1", masked: "sk-…", enabled: true, cooling: false, kind: "static" },
   ],
