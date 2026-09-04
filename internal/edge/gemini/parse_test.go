@@ -88,7 +88,7 @@ func TestParseRequestMapsRolesAndParts(t *testing.T) {
 	if u[1].Type != ir.BlockImage || u[1].Media.Data != "AAAA" {
 		t.Errorf("inlineData = %+v", u[1])
 	}
-	if u[2].Media.URL != "https://youtu.be/abc" {
+	if u[2].Media.FileID != "https://youtu.be/abc" {
 		t.Errorf("fileData = %+v", u[2])
 	}
 	m := req.Messages[1].Content
@@ -196,5 +196,21 @@ func TestParseLeavesModelFieldEmptyForURLCarriedModels(t *testing.T) {
 	}
 	if pt.Method != "generateContent" || pt.Stream {
 		t.Errorf("Method = %q Stream = %v", pt.Method, pt.Stream)
+	}
+}
+
+// fileUri is a provider-side handle, which is what Media.FileID is for.
+// Carrying it as Media.URL makes a non-Gemini target render it as a public
+// address the vendor will refuse.
+func TestAFileURIParsesAsAProviderHandleNotAURL(t *testing.T) {
+	req := parsed(t, "m:generateContent", "",
+		`{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"video/mp4","fileUri":"https://youtu.be/abc"}}]}]}`)
+
+	blk := req.Messages[0].Content[0]
+	if blk.Media.FileID != "https://youtu.be/abc" {
+		t.Errorf("Media.FileID = %q, want the fileUri", blk.Media.FileID)
+	}
+	if blk.Media.URL != "" {
+		t.Errorf("Media.URL = %q, want empty; a fileUri is not a public address", blk.Media.URL)
 	}
 }
