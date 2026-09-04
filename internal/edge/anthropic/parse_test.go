@@ -148,7 +148,7 @@ func TestParseRequestKeepsTheBetaHeader(t *testing.T) {
 	// it sees a silently different API.
 	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[]}`,
 		map[string]string{"anthropic-beta": "context-1m-2025-08-07"})
-	if req.Metadata["anthropic-beta"] != "context-1m-2025-08-07" {
+	if req.Metadata["anthropic_beta"] != "context-1m-2025-08-07" {
 		t.Errorf("metadata = %v", req.Metadata)
 	}
 }
@@ -174,5 +174,26 @@ func TestParseRequestCarriesTypedServerTools(t *testing.T) {
 	}
 	if _, ok := plain.Extra["type"]; ok {
 		t.Errorf("a plain tool must not look typed: %v", plain.Extra)
+	}
+}
+
+// The adapters that are not Anthropic strip this edge's transport state by
+// its key prefix, so a key that misses the prefix is forwarded to an upstream
+// that has no idea what it is.
+func TestEveryTransportMetadataKeyCarriesTheStrippedPrefix(t *testing.T) {
+	req := parsed(t, `{"model":"claude-opus-4-5","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{
+			"anthropic-version": "2023-06-01",
+			"anthropic-beta":    "context-1m-2025-08-07",
+		})
+
+	for k := range req.Metadata {
+		if strings.HasPrefix(k, "anthropic") && !strings.HasPrefix(k, "anthropic_") {
+			t.Errorf("metadata key %q is anthropic transport state but misses the anthropic_ prefix "+
+				"every other adapter strips on; it will be forwarded upstream", k)
+		}
+	}
+	if req.Metadata["anthropic_beta"] != "context-1m-2025-08-07" {
+		t.Errorf("anthropic_beta = %q, want the inbound beta list", req.Metadata["anthropic_beta"])
 	}
 }

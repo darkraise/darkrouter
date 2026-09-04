@@ -123,7 +123,7 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		if req.Metadata == nil {
 			req.Metadata = map[string]string{}
 		}
-		req.Metadata["anthropic-beta"] = v
+		req.Metadata["anthropic_beta"] = v
 	}
 	if oc := w.OutputConfig; oc != nil {
 		if oc.Effort != "" {

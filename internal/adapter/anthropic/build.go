@@ -232,7 +232,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		version = v
 	}
 	hr.Header.Set("anthropic-version", version)
-	if beta := req.Metadata["anthropic-beta"]; beta != "" {
+	if beta := req.Metadata["anthropic_beta"]; beta != "" {
 		hr.Header.Set("anthropic-beta", beta)
 	}
 	return hr, warns, nil
