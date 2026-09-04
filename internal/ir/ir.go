@@ -72,6 +72,20 @@ const (
 	BlockToolResult       BlockType = "tool_result"
 )
 
+// MediaKind picks the block type for a medium carried as a bare MIME type.
+// Dialects that use one part shape for every medium have no other signal, and
+// the router's vision capability check reads the result.
+func MediaKind(mime string) BlockType {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return BlockImage
+	case strings.HasPrefix(mime, "audio/"):
+		return BlockAudio
+	default:
+		return BlockDocument
+	}
+}
+
 type StopReason string
 
 const (

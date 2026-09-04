@@ -296,12 +296,12 @@ func parseParts(turn int, parts []wirePart, pending []string) ([]ir.ContentBlock
 			}})
 
 		case p.InlineData != nil:
-			out = append(out, ir.ContentBlock{Type: mediaKind(p.InlineData.MimeType),
+			out = append(out, ir.ContentBlock{Type: ir.MediaKind(p.InlineData.MimeType),
 				Media: &ir.Media{MIME: p.InlineData.MimeType, Data: p.InlineData.Data}})
 
 		case p.FileData != nil:
-			out = append(out, ir.ContentBlock{Type: mediaKind(p.FileData.MimeType),
-				Media: &ir.Media{MIME: p.FileData.MimeType, URL: p.FileData.FileURI}})
+			out = append(out, ir.ContentBlock{Type: ir.MediaKind(p.FileData.MimeType),
+				Media: &ir.Media{MIME: p.FileData.MimeType, FileID: p.FileData.FileURI}})
 
 		case p.Text != "" || p.ThoughtSignature != "":
 			blk := ir.ContentBlock{Type: ir.BlockText, Text: p.Text}
@@ -312,18 +312,4 @@ func parseParts(turn int, parts []wirePart, pending []string) ([]ir.ContentBlock
 		}
 	}
 	return out, calls
-}
-
-// mediaKind picks the IR block type from a MIME type. Gemini has one part shape
-// for every medium, so the type is the only signal, and the router's vision
-// capability check reads it.
-func mediaKind(mime string) ir.BlockType {
-	switch {
-	case strings.HasPrefix(mime, "image/"):
-		return ir.BlockImage
-	case strings.HasPrefix(mime, "audio/"):
-		return ir.BlockAudio
-	default:
-		return ir.BlockDocument
-	}
 }
