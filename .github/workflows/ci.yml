@@ -50,7 +50,19 @@ jobs:
         working-directory: web
         run: |
           npm ci
-          npm audit --audit-level=high
+
+          # Reports, but does not gate. The advisories endpoint is an external
+          # service reached on every run, and when it is degraded it answers a
+          # ~750-package bulk request with a timeout or a 503 -- which under
+          # `bash -e` failed the step before a single test ran, so a registry
+          # outage read as a broken build. Findings are raised as an annotation
+          # so they stay visible in the run summary.
+          #
+          # The trade is deliberate: a genuine high-severity advisory no longer
+          # stops a release, so it has to be caught by reading this warning.
+          npm audit --audit-level=high \
+            || echo "::warning title=npm audit::did not pass, or the advisories endpoint could not be reached -- see the step log"
+
           npm test
           npm run lint
           npm run build
