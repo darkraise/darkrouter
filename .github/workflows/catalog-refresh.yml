@@ -30,18 +30,18 @@ jobs:
       omni_sha: ${{ steps.clone.outputs.omni_sha }}
       nine_sha: ${{ steps.clone.outputs.nine_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # This job runs untrusted upstream code (see comment above), so it
       # must not populate a build cache that a later, trusted run consumes.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
 
       # Node evaluates the 9router registry: 14 of its files import from
       # elsewhere in that repository and cannot be read statically.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
 
@@ -81,7 +81,7 @@ jobs:
       # Paths span internal/ and web/, so upload-artifact's least-common-ancestor
       # root is the repository root and the tree unpacks in place in `propose`.
       # Dropping the web/ entries would silently re-root the archive.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: catalogue
           if-no-files-found: error
@@ -105,9 +105,9 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: catalogue
 
