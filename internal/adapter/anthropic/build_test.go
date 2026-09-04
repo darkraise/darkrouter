@@ -572,7 +572,7 @@ func TestNoForcedToolChoiceDowngradesToAuto(t *testing.T) {
 func TestBuildRequestEchoesTheBetaHeader(t *testing.T) {
 	hr, _, _ := built(t, &ir.Request{
 		Messages: []ir.Message{userMsg("hi")},
-		Metadata: map[string]string{"anthropic-beta": "context-1m-2025-08-07"},
+		Metadata: map[string]string{"anthropic_beta": "context-1m-2025-08-07"},
 	})
 	if got := hr.Header.Get("anthropic-beta"); got != "context-1m-2025-08-07" {
 		t.Errorf("anthropic-beta = %q", got)
