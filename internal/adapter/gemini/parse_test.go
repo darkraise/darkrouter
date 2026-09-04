@@ -169,3 +169,26 @@ func TestClassifyUsesTheSharedLadder(t *testing.T) {
 		t.Errorf("503 = %q", got)
 	}
 }
+
+// Gemini uses one part shape for every medium, so the MIME type is the only
+// signal. The inbound edge switches on it; the response path typed every
+// inlineData part as an image, which also feeds the router's vision check.
+func TestResponseMediaIsTypedFromItsMIMEType(t *testing.T) {
+	for _, c := range []struct {
+		mime string
+		want ir.BlockType
+	}{
+		{"image/png", ir.BlockImage},
+		{"audio/wav", ir.BlockAudio},
+		{"application/pdf", ir.BlockDocument},
+	} {
+		resp, err := parseBody(t, `{"candidates":[{"content":{"parts":[
+			{"inlineData":{"mimeType":"`+c.mime+`","data":"AAAA"}}]}}]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := resp.Content[0].Type; got != c.want {
+			t.Errorf("%s parsed as %q, want %q", c.mime, got, c.want)
+		}
+	}
+}

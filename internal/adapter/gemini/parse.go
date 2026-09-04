@@ -157,7 +157,7 @@ func partToIR(p wirePart) (ir.ContentBlock, bool) {
 			Text: p.Text, Signature: p.ThoughtSignature,
 		}}, true
 	case p.InlineData != nil:
-		return ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{
+		return ir.ContentBlock{Type: ir.MediaKind(p.InlineData.MimeType), Media: &ir.Media{
 			MIME: p.InlineData.MimeType, Data: p.InlineData.Data,
 		}}, true
 	case p.Text != "" || p.ThoughtSignature != "":
