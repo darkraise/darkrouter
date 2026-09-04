@@ -30,7 +30,7 @@ jobs:
       omni_sha: ${{ steps.clone.outputs.omni_sha }}
       nine_sha: ${{ steps.clone.outputs.nine_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # This job runs untrusted upstream code (see comment above), so it
       # must not populate a build cache that a later, trusted run consumes.
@@ -105,7 +105,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v4
         with:
