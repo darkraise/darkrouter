@@ -52,7 +52,7 @@ console bundle at compile time, so neither `npm run build` nor `go build`
 changes what the running container serves.
 
 The build, deploy and byte-level verification procedure is in
-**[`docs/DEPLOY.md`](docs/DEPLOY.md)** under "Local build (UAT)". Two things
+**[`docs/operations/deploy.md`](docs/operations/deploy.md)** under "Local build (UAT)". Two things
 from it that are easy to get wrong: the `compose.uat.yml` overlay is required
 or the published image is pulled over the local build, and this machine
 publishes the admin port on **8091** (8081 is a different container).

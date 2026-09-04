@@ -1,8 +1,8 @@
 # Brand assets
 
-The identity mark is specified in
-[`../superpowers/specs/2026-08-24-darkrouter-phase10-operator-console.md`](../superpowers/specs/2026-08-24-darkrouter-phase10-operator-console.md)
-§3.5 and drawn in the console by `web/src/features/shell/identity-mark.tsx`.
+The identity mark's design rationale is in
+[`../plan/decisions.md`](../plan/decisions.md) under "Console and brand"; it is
+drawn in the console by `web/src/features/shell/identity-mark.tsx`.
 The files here are the same mark for everything outside the React app.
 
 | File | What it is |
