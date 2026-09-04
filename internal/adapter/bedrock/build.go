@@ -145,6 +145,19 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 			Reason: "reasoning_config is an Anthropic-only additional field; dropped for this publisher",
 		}}
 	}
+	// The catalog, not the model id, knows which shape a generation takes. A
+	// generation that dropped the manual budget refuses reasoning_config, and
+	// Converse has no field for the adaptive shape, so the honest move is to
+	// drop the ask and say so rather than send a request that cannot serve.
+	// TraitsKnown false keeps the permissive fallback an unrecognized or
+	// proxied model has always had.
+	if t.Info.TraitsKnown && !t.Info.ManualBudget {
+		return nil, []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model takes the adaptive thinking shape, which Converse cannot express; reasoning dropped",
+		}}
+	}
+
 	var warns []ir.Warning
 	budget := r.Budget
 	if budget == 0 {

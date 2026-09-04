@@ -475,3 +475,47 @@ func TestTypedServerToolsAreWarnedAndDropped(t *testing.T) {
 		t.Errorf("warnings = %+v", warns)
 	}
 }
+
+// The catalog's per-generation traits are what decide the thinking shape
+// everywhere else. Bedrock read only the model id, so a generation that takes
+// the adaptive shape was sent a manual budget it refuses, and a model that
+// always thinks was sent a budget it does not accept either.
+func TestReasoningHonoursTheCatalogThinkingTraits(t *testing.T) {
+	adaptiveOnly := anthropicTarget("us.anthropic.claude-opus-4-7-v1:0")
+	adaptiveOnly.Info = adapter.ModelInfo{
+		TraitsKnown: true, Adaptive: true, ManualBudget: false, MaxOutputTokens: 64000,
+	}
+	req := simple()
+	req.Reasoning = &ir.Reasoning{Budget: 2048}
+
+	body, _, warns := build(t, adaptiveOnly, req)
+	if extra, ok := body["additionalModelRequestFields"].(map[string]any); ok {
+		if _, sent := extra["reasoning_config"]; sent {
+			t.Errorf("sent a manual reasoning_config to a model the catalog says takes "+
+				"only the adaptive shape: %#v", extra["reasoning_config"])
+		}
+	}
+	if !hasWarn(warns, "reasoning") {
+		t.Error("dropped the reasoning request without warning")
+	}
+
+	// A model whose traits are known and manual-capable still gets the budget.
+	manual := anthropicTarget("us.anthropic.claude-sonnet-4-20250514-v1:0")
+	manual.Info = adapter.ModelInfo{
+		TraitsKnown: true, Adaptive: true, ManualBudget: true, MaxOutputTokens: 64000,
+	}
+	body, _, _ = build(t, manual, req)
+	cfg := body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	if cfg["budget_tokens"] != float64(2048) {
+		t.Errorf("budget_tokens = %v on a manual-capable model", cfg["budget_tokens"])
+	}
+}
+
+func hasWarn(warns []ir.Warning, field string) bool {
+	for _, w := range warns {
+		if w.Field == field {
+			return true
+		}
+	}
+	return false
+}
