@@ -26,6 +26,8 @@ var mutations = map[string]func(*Config){
 	"catalog.litellm_sync":          func(c *Config) { f := false; c.Catalog.LiteLLMSync = &f },
 	"catalog.discovery.interval":    func(c *Config) { c.Catalog.Discovery.Interval = 13 * time.Minute },
 	"catalog.discovery.enabled":     func(c *Config) { f := false; c.Catalog.Discovery.Enabled = &f },
+	"catalog.discovery.timeout":     func(c *Config) { c.Catalog.Discovery.Timeout = 21 * time.Second },
+	"catalog.discovery.concurrency": func(c *Config) { c.Catalog.Discovery.Concurrency = 17 },
 	"media.inline":                  func(c *Config) { f := false; c.Media.Inline = &f },
 }
 
@@ -81,6 +83,9 @@ func TestEveryWarnedFieldIsNamedInRestartOnly(t *testing.T) {
 func TestRestartOnlyNamesTheWorkerConstructionInputs(t *testing.T) {
 	for _, field := range []string{
 		"catalog.models_dev_url", "catalog.sync_timeout", "catalog.discovery.enabled",
+		// The sweeper bakes these into its HTTP client and its semaphore when
+		// it is built, so a reload that accepts them silently changes nothing.
+		"catalog.discovery.timeout", "catalog.discovery.concurrency",
 	} {
 		found := false
 		for _, got := range RestartOnly {
