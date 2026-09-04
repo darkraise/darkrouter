@@ -61,36 +61,6 @@ func AnthropicEffort(effort string) string {
 	return e
 }
 
-// GeminiMinBudget is the smallest thinkingBudget every Gemini 2.5 model
-// accepts as "think, but barely": Flash allows 0, Pro 128, Flash-Lite 512,
-// and 0 means off rather than minimal.
-const GeminiMinBudget = 512
-
-// GeminiBudgetCap is the largest thinkingBudget a Gemini model accepts. The
-// Flash line caps lower than Pro; an unrecognized name gets Pro's cap, which
-// is also Gemini's documented default ceiling.
-func GeminiBudgetCap(model string) int {
-	if strings.Contains(strings.ToLower(model), "flash") {
-		return 24576
-	}
-	return 32768
-}
-
-// GeminiEffortBudget bands an effort onto a thinkingBudget for one model:
-// minimal is the floor, xhigh and max are the model's cap, and the three
-// middle bands come from the shared table clamped to that cap.
-func GeminiEffortBudget(effort, model string) int {
-	cap := GeminiBudgetCap(model)
-	switch strings.ToLower(effort) {
-	case "minimal":
-		return GeminiMinBudget
-	case "xhigh", "max":
-		return cap
-	default:
-		return EffortBudget(effort, cap)
-	}
-}
-
 // BudgetEffort is the inverse banding, for targets that take an effort rather
 // than a budget. The boundaries sit midway between the table's values so a
 // budget written by EffortBudget maps back to the effort it came from.
