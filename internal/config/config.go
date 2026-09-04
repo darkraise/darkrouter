@@ -134,6 +134,10 @@ var restartOnlyFields = []struct {
 	{"catalog.litellm_url", func(c *Config) any { return c.Catalog.LiteLLMURL }},
 	{"catalog.litellm_sync", func(c *Config) any { return optionalBool(c.Catalog.LiteLLMSync) }},
 	{"catalog.discovery.interval", func(c *Config) any { return c.Catalog.Discovery.Interval }},
+	// The sweeper builds its HTTP client from the timeout and sizes its
+	// semaphore from the concurrency, both once, when it is constructed.
+	{"catalog.discovery.timeout", func(c *Config) any { return c.Catalog.Discovery.Timeout }},
+	{"catalog.discovery.concurrency", func(c *Config) any { return c.Catalog.Discovery.Concurrency }},
 	// Not just the interval: whether the sweeper is constructed at all is
 	// decided once, at startup, from this.
 	{"catalog.discovery.enabled", func(c *Config) any { return optionalBool(c.Catalog.Discovery.Enabled) }},
