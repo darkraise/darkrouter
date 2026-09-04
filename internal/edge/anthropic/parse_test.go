@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -195,5 +196,20 @@ func TestEveryTransportMetadataKeyCarriesTheStrippedPrefix(t *testing.T) {
 	}
 	if req.Metadata["anthropic_beta"] != "context-1m-2025-08-07" {
 		t.Errorf("anthropic_beta = %q, want the inbound beta list", req.Metadata["anthropic_beta"])
+	}
+}
+
+// Only the typed error carries the distinction out to a 413; an untyped one
+// is written as a 400, so an oversized body on this dialect alone reports a
+// different status than the same body on every other route.
+func TestAnOversizedBodyIsTypedAsPayloadTooLarge(t *testing.T) {
+	r := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(strings.Repeat("x", 64)))
+	_, _, err := ParseRequest(r, 16)
+	if err == nil {
+		t.Fatal("an oversized body must not parse")
+	}
+	var ie *ir.Error
+	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
+		t.Errorf("err = %#v, want an *ir.Error of type %q", err, ir.ErrPayloadTooLarge)
 	}
 }
