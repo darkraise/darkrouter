@@ -2,10 +2,10 @@
 // compares them. Spec §10: the IR path is the correctness baseline, and the
 // fast path is validated by proving it agrees with that baseline.
 //
-// It deliberately does not assert on two known IR-path fidelity gaps recorded
-// in docs/PROGRESS.md §3b: the IR path emits a usage chunk the client never
-// asked for, and that chunk carries a synthesized choice where OpenAI emits an
-// empty array. Both are IR-path defects that predate this phase.
+// It deliberately does not assert on a known IR-path fidelity gap recorded in
+// docs/plan/status.md: the IR path emits a usage chunk the client never asked
+// for. The sibling defect — that chunk carrying a synthesized choice where
+// OpenAI emits an empty array — has since been fixed.
 package golden
 
 import (
