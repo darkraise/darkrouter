@@ -95,3 +95,22 @@
 .providers-sticky-panel {
   box-shadow: 0 -1.5rem 0 0 hsl(var(--background));
 }
+
+/* No column picker on this screen.
+
+   The columns are the answer to "what does this release ship, and is it
+   configured" — provider, state, credentials, models, traffic. Every one of
+   them is part of that question, so hiding any of them leaves a table that
+   looks complete and is not, with nothing on screen saying so.
+
+   DataTable renders the control unconditionally; there is no prop for it. It
+   lives in the toolbar, and this table passes neither `searchKey` nor
+   `facets` and sets no column filters, so the toolbar holds nothing else and
+   goes with it — otherwise an empty band sits above the header.
+
+   If this table ever gains a search box or a facet, this rule has to become
+   `.dr-data-table-column-visibility-trigger` alone, or the new control
+   disappears with the old one. */
+.providers-table .dr-data-table-toolbar {
+  display: none;
+}
