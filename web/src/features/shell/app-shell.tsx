@@ -131,6 +131,7 @@ export function AppShell({
             <header className="dr-layout-header header-gradient-overlay theme-transition">
               <MobileDrawer
                 nav={nav}
+                activeBar={ACTIVE_BAR}
                 footer={
                   <>
                     <RailNav nav={footerNav} />
@@ -187,6 +188,16 @@ function Brand({ collapsed = false }: { collapsed?: boolean }) {
 }
 
 /**
+ * Indicator style for the active nav item.
+ *
+ * The library keys its CSS on an ancestor attribute, and SidebarNav sets it
+ * from an `activeBar` prop. RailNav is our own markup, so it has to set the
+ * same attribute or the rail falls back to the preset's look while the
+ * drawer — which does go through SidebarNav — follows the prop.
+ */
+const ACTIVE_BAR = "both"
+
+/**
  * The rail's links, in the library's own markup.
  *
  * Rendered here rather than through SidebarNav so a collapsed link — an icon
@@ -196,7 +207,11 @@ function Brand({ collapsed = false }: { collapsed?: boolean }) {
 export function RailNav({ nav }: { nav: NavGroup[] }) {
   const { collapsed } = useSidebar()
   return (
-    <nav className="dr-sidebar-nav" data-collapsed={collapsed || undefined}>
+    <nav
+      className="dr-sidebar-nav"
+      data-collapsed={collapsed || undefined}
+      data-active-bar={ACTIVE_BAR}
+    >
       {nav.map((group, i) => (
         <div
           key={group.label}

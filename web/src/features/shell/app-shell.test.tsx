@@ -103,3 +103,18 @@ describe("the app shell", () => {
     }
   })
 })
+
+describe("the sidebar's active indicator", () => {
+  // The console renders the rail in the library's markup rather than through
+  // SidebarNav, so the attribute the library's CSS keys on has to be set here
+  // too — otherwise the rail silently falls back to the preset's own look and
+  // the drawer and the rail disagree.
+  it("asks for both the rail and the ring, in the rail and the drawer alike", async () => {
+    shell()
+    const aside = await screen.findByRole("complementary", { name: "Primary" })
+    for (const nav of aside.querySelectorAll(".dr-sidebar-nav")) {
+      expect(nav.getAttribute("data-active-bar")).toBe("both")
+    }
+    expect(aside.querySelectorAll(".dr-sidebar-nav").length).toBeGreaterThan(0)
+  })
+})
