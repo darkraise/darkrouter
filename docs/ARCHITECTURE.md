@@ -245,7 +245,7 @@ tokens. Timestamps are Unix milliseconds unless noted.
 
 | Table | Purpose | Time columns |
 |---|---|---|
-| `providers` | One row per upstream: id, name, preset, kind, base URL, auth style, priority, enabled, region/project/location, `free_models_only` | `created_at` ms |
+| `providers` | One row per upstream: id, name, preset, kind, base URL, auth style, priority, enabled, region/project/location, `free_models_only`, `allow_unsanctioned_free` | `created_at` ms |
 | `provider_keys` | Credentials: label, kind, AES-GCM ciphertext and nonce, scope, enabled | `expires_at` seconds (OAuth), `last_used_at` ms |
 | `models` | The merged catalog per `(provider, model)`: surfaces, capabilities and their source, context window, max output, per-million prices for input, output, cache read and cache write, lifecycle state (`live`, `stale`, `removed_upstream`) and missing streak | `discovered_at`, `last_seen_at` ms |
 | `model_overrides` | Operator overrides of surfaces, capabilities, context window | — |

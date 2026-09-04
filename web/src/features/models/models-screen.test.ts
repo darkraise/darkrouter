@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest"
-import { compressedRows, matches, priceBand, priceMarker, facetRow } from "./models-screen"
-import type { Model, Pricing } from "../../lib/api-types"
+import {
+  compressedRows,
+  matches,
+  priceBand,
+  priceMarker,
+  freeLabel,
+  tierWarning,
+  facetRow,
+} from "./models-screen"
+import type { FreeTier, Model, Pricing } from "../../lib/api-types"
 
 const model = (over: Partial<Model> & { model: string }): Model => ({
   providers: ["groq"],
@@ -13,6 +21,7 @@ const model = (over: Partial<Model> & { model: string }): Model => ({
   inferred: false,
   state: "live",
   pricing: null,
+  free_tier: null,
   merge_source: "models_dev",
   ...over,
 })
@@ -87,7 +96,7 @@ describe("facet rows", () => {
       model: "m", providers: ["groq"], surfaces: ["llm", "embedding"],
       context_window: 128000, max_output_tokens: 4096,
       tools: true, vision: false, reasoning: false,
-      inferred: false, state: "live", pricing: null, merge_source: "discovered",
+      inferred: false, state: "live", pricing: null, free_tier: null, merge_source: "discovered",
     })
     expect(row.surface_list).toBe("llm, embedding")
     expect(row.caps).toBe("tools")
@@ -98,10 +107,81 @@ describe("facet rows", () => {
     const row = facetRow({
       model: "m", providers: [], surfaces: [], context_window: 0,
       max_output_tokens: 0, tools: false, vision: false, reasoning: false,
-      inferred: false, state: "live", pricing: null, merge_source: "inferred",
+      inferred: false, state: "live", pricing: null, free_tier: null,
+      merge_source: "inferred",
     })
     // An empty facet value groups every capability-less model under a blank
     // label, which reads as a broken facet rather than as a real category.
     expect(row.caps).toBe("none")
+  })
+})
+
+describe("freeLabel", () => {
+  it("names the allowance and its period", () => {
+    expect(freeLabel({ free_type: "recurring-daily", monthly_tokens: 24_000_000,
+      credit_tokens: 0, pool_key: "groq", tos: "ok", opt_in_required: false }))
+      .toBe("free · ~24M tokens/day")
+    expect(freeLabel({ free_type: "recurring-monthly", monthly_tokens: 1_000_000,
+      credit_tokens: 0, pool_key: "", tos: "ok", opt_in_required: false }))
+      .toBe("free · ~1M tokens/month")
+    expect(freeLabel({ free_type: "one-time-initial", monthly_tokens: 0,
+      credit_tokens: 200_000_000, pool_key: "", tos: "caution", opt_in_required: false }))
+      .toBe("free · ~200M tokens once")
+  })
+  it("carries a one-off credit grant the same way as an initial one", () => {
+    expect(freeLabel({ free_type: "recurring-credit", monthly_tokens: 0,
+      credit_tokens: 5_000_000, pool_key: "", tos: "ok", opt_in_required: false }))
+      .toBe("free · ~5M tokens once")
+  })
+  it("says free without a figure when the allowance is uncapped", () => {
+    expect(freeLabel({ free_type: "recurring-uncapped", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "", tos: "ok", opt_in_required: false })).toBe("free")
+  })
+  it("says free without a figure when a live tier leaves the figure out", () => {
+    // free_models.json carries recurring-daily rows with no monthly_tokens and
+    // recurring-credit rows with no credit_tokens. A zero there is unquantified,
+    // not an allowance of nothing, so "~0 tokens/day" would be a lie.
+    expect(freeLabel({ free_type: "recurring-daily", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "groq", tos: "ok", opt_in_required: false })).toBe("free")
+    expect(freeLabel({ free_type: "recurring-credit", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "", tos: "ok", opt_in_required: false })).toBe("free")
+  })
+  it("is absent for a withdrawn tier and for no tier at all", () => {
+    expect(freeLabel({ free_type: "discontinued", monthly_tokens: 0,
+      credit_tokens: 0, pool_key: "", tos: "unknown", opt_in_required: false })).toBeNull()
+    expect(freeLabel(null)).toBeNull()
+  })
+})
+
+describe("tierWarning", () => {
+  const tier = (over: Partial<FreeTier> = {}): FreeTier => ({
+    free_type: "recurring-daily",
+    monthly_tokens: 24_000_000,
+    credit_tokens: 0,
+    pool_key: "groq",
+    tos: "avoid",
+    opt_in_required: true,
+    ...over,
+  })
+  it("warns while the router is still refusing a provider over the tier", () => {
+    expect(tierWarning(tier())).toBe(
+      "free tier not sanctioned by the vendor — the router skips any provider " +
+        "serving it that you have not allowed",
+    )
+  })
+  it("goes quiet once every provider serving it has been allowed", () => {
+    // The verdict stays avoid after an opt-in — it is the vendor's, not the
+    // operator's — and the router uses the model regardless. A row that read
+    // the verdict alone went on telling an operator to throw a switch they
+    // had already thrown, which no reload could clear.
+    expect(tierWarning(tier({ opt_in_required: false }))).toBeNull()
+  })
+  it("stays quiet for every other verdict and for no tier at all", () => {
+    // The vocabulary is closed: upstream grades a tier ok, caution, ambiguous,
+    // avoid or unknown. Only the last one the vendor refuses is ever gated.
+    for (const tos of ["ok", "caution", "ambiguous", "unknown"]) {
+      expect(tierWarning(tier({ tos, opt_in_required: false }))).toBeNull()
+    }
+    expect(tierWarning(null)).toBeNull()
   })
 })

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -462,8 +463,8 @@ func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
 	// A provider that opened a free tier after this binary was built is
 	// invisible to the embedded catalogue, which is the whole reason the daily
 	// refresh exists.
-	live := FreeCatalog{Providers: map[string]map[string]string{
-		"newcomer": {"m": "recurring-daily"},
+	live := FreeCatalog{Providers: map[string]map[string]FreeTier{
+		"newcomer": {"m": {FreeType: "recurring-daily"}},
 	}}
 	d := &Discoverer{opts: DiscoveryOptions{FreeTiers: func() FreeCatalog { return live }}}
 	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{})
@@ -516,5 +517,177 @@ func TestSeedingReadsTheSyncedDocument(t *testing.T) {
 		if len(SeedFromPreset(preset, d.doc())) == 0 {
 			t.Error("the embedded snapshot did not seed")
 		}
+	}
+}
+
+// unsanctionedFixture is a provider whose curated tier grades one model avoid
+// and another ok, both of them priced at zero so the price rule would admit
+// either one on its own.
+func unsanctionedFixture() FreeCatalog {
+	return FreeCatalog{Providers: map[string]map[string]FreeTier{
+		"opencode": {
+			"sanctioned":   {FreeType: "recurring-daily", ToS: "ok"},
+			"unsanctioned": {FreeType: "recurring-daily", ToS: "avoid"},
+		},
+	}}
+}
+
+// zeroPriced admits every id at a known price of zero, which is the shape
+// models.dev publishes for OpenCode and the reason the veto has to outrank it.
+func zeroPriced(string) (Metadata, bool) {
+	return Metadata{ContextWindow: 1, PriceKnown: true}, true
+}
+
+func discovered(ids ...string) []store.DiscoveredModel {
+	out := make([]store.DiscoveredModel, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, store.DiscoveredModel{ModelID: id})
+	}
+	return out
+}
+
+func kept(models []store.DiscoveredModel) []string {
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		out = append(out, m.ModelID)
+	}
+	return out
+}
+
+func TestTheFreeFilterVetoesAnUnsanctionedTier(t *testing.T) {
+	// avoid largely means access the vendor has not sanctioned. A zero price
+	// says the access costs nothing, which is a different question, so the
+	// veto has to outrank it: OpenCode's whole tier is graded avoid and every
+	// one of its models is priced at zero.
+	live := unsanctionedFixture()
+	for _, tc := range []struct {
+		name    string
+		optedIn bool
+		want    []string
+	}{
+		{name: "off by default", optedIn: false, want: []string{"sanctioned"}},
+		{name: "opted in", optedIn: true, want: []string{"sanctioned", "unsanctioned"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Discoverer{opts: DiscoveryOptions{
+				FreeTiers: func() FreeCatalog { return live },
+			}}
+			rules := d.freeRules(provider.Provider{
+				ID: "p", Preset: "opencode", AllowUnsanctionedFree: tc.optedIn,
+			}, Preset{})
+			rules.Price = zeroPriced
+
+			out, dropped := SelectModelsForImport(
+				discovered("sanctioned", "unsanctioned"), true, rules)
+			if got := kept(out); !slices.Equal(got, tc.want) {
+				t.Errorf("kept = %v, want %v", got, tc.want)
+			}
+			if !slices.Contains(kept(out), "sanctioned") {
+				t.Error("a sanctioned tier was dropped; the veto is too broad")
+			}
+			var wantDropped []string
+			if !tc.optedIn {
+				wantDropped = []string{"unsanctioned"}
+			}
+			if !slices.Equal(dropped, wantDropped) {
+				t.Errorf("dropped = %v, want %v", dropped, wantDropped)
+			}
+		})
+	}
+}
+
+func TestTheVetoSurvivesTheKeylessFallback(t *testing.T) {
+	// The keyless fallback exists because there is no account to bill against a
+	// provider reached with no credential. That argument is about money and
+	// says nothing about access the vendor has not granted, so emptying the
+	// kept set must not readmit a vetoed model. OpenCode is `optional`, which
+	// counts as keyless.
+	d := &Discoverer{opts: DiscoveryOptions{
+		FreeTiers: func() FreeCatalog { return unsanctionedFixture() },
+	}}
+	rules := d.freeRules(provider.Provider{
+		ID: "p", Preset: "opencode", AuthStyle: "optional",
+	}, Preset{})
+	if !rules.Keyless {
+		t.Fatal("the fixture is not keyless; the fallback is not under test")
+	}
+	// No price lookup, so nothing qualifies and the fallback is the only path.
+	rules.Price = nil
+
+	out, dropped := SelectModelsForImport(discovered("unsanctioned"), true, rules)
+	if len(out) != 0 {
+		t.Errorf("kept = %v, want none: the fallback readmitted a vetoed model", kept(out))
+	}
+	if !slices.Equal(dropped, []string{"unsanctioned"}) {
+		t.Errorf("dropped = %v, want [unsanctioned]", dropped)
+	}
+}
+
+func TestTheKeylessFallbackStillKeepsAnUnvetoedModel(t *testing.T) {
+	// The fallback itself is unchanged for everyone else: a provider no
+	// catalogue covers has a nil veto and keeps its whole listing.
+	d := &Discoverer{opts: DiscoveryOptions{
+		FreeTiers: func() FreeCatalog { return unsanctionedFixture() },
+	}}
+	rules := d.freeRules(provider.Provider{
+		ID: "p", Preset: "uncovered", AuthStyle: "none",
+	}, Preset{})
+	out, dropped := SelectModelsForImport(discovered("a", "b"), true, rules)
+	if !slices.Equal(kept(out), []string{"a", "b"}) || dropped != nil {
+		t.Errorf("kept = %v dropped = %v, want both models and no drops", kept(out), dropped)
+	}
+}
+
+func TestAWithdrawnTierDoesNotVeto(t *testing.T) {
+	// A discontinued row is kept upstream for its history. The terms it grades
+	// no longer govern access, so it is not a live avoid and vetoes nothing --
+	// the same reason Covers excludes it from the curated rule.
+	live := FreeCatalog{Providers: map[string]map[string]FreeTier{
+		"opencode": {"withdrawn": {FreeType: "discontinued", ToS: "avoid"}},
+	}}
+	d := &Discoverer{opts: DiscoveryOptions{
+		FreeTiers: func() FreeCatalog { return live },
+	}}
+	rules := d.freeRules(provider.Provider{ID: "p", Preset: "opencode"}, Preset{})
+	rules.Price = zeroPriced
+	if rules.Unsanctioned("withdrawn") {
+		t.Error("a withdrawn tier vetoed; only a live grading may")
+	}
+	out, _ := SelectModelsForImport(discovered("withdrawn"), true, rules)
+	if !slices.Equal(kept(out), []string{"withdrawn"}) {
+		t.Errorf("kept = %v, want the zero-priced model", kept(out))
+	}
+}
+
+func TestAnUncoveredProviderKeepsNilRules(t *testing.T) {
+	// Nil Curated means the curated catalogue does not cover this provider,
+	// which SelectModelsForImport distinguishes from a covered provider that
+	// excludes the model. A nil veto is the same fact: nothing to grade.
+	d := &Discoverer{opts: DiscoveryOptions{
+		FreeTiers: func() FreeCatalog { return unsanctionedFixture() },
+	}}
+	rules := d.freeRules(provider.Provider{ID: "p", Preset: "other"}, Preset{})
+	if rules.Curated != nil {
+		t.Error("an uncovered provider must keep a nil Curated rule")
+	}
+	if rules.Unsanctioned != nil {
+		t.Error("an uncovered provider must keep a nil veto")
+	}
+}
+
+func TestOptingInClearsTheVeto(t *testing.T) {
+	// The opt-in is the operator's consent, so it removes the veto entirely
+	// rather than leaving one the filter has to remember to skip.
+	d := &Discoverer{opts: DiscoveryOptions{
+		FreeTiers: func() FreeCatalog { return unsanctionedFixture() },
+	}}
+	rules := d.freeRules(provider.Provider{
+		ID: "p", Preset: "opencode", AllowUnsanctionedFree: true,
+	}, Preset{})
+	if rules.Unsanctioned != nil {
+		t.Error("an opted-in provider must carry no veto")
+	}
+	if rules.Curated == nil || !rules.Curated("sanctioned") {
+		t.Error("the opt-in must leave the curated rule intact")
 	}
 }

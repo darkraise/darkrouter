@@ -231,6 +231,11 @@ export type Provider = {
   /** Narrows what the next discovery sweep imports to models it can show are
    *  free. A filter on the catalogue, not on routing. */
   free_models_only: boolean
+  /** Off by default: the router refuses a free tier OmniRoute grades "avoid"
+   *  until the operator opts in here. A free-models-only import applies the
+   *  same veto, but only while that filter is on and only to a still-live
+   *  grading. */
+  allow_unsanctioned_free: boolean
 }
 
 export type Preset = {
@@ -265,6 +270,26 @@ export type MergeSource =
   | "litellm"
   | "registry"
 
+/**
+ * What a provider gives away, when it gives anything away.
+ *
+ * A zero in either token field means uncapped or unquantified, never "no
+ * allowance" — the wire format omits `omitempty` precisely so a real zero
+ * stays distinguishable from an absent field.
+ */
+export type FreeTier = {
+  free_type: string
+  monthly_tokens: number
+  credit_tokens: number
+  pool_key: string
+  tos: string
+  /** The router is refusing at least one provider serving this model over
+   *  this tier, and allowing unsanctioned tiers on that provider lifts it.
+   *  Folded by the server: the opt-in is provider state, and a model row has
+   *  no provider to read it from. */
+  opt_in_required: boolean
+}
+
 /** How confident the catalogue is in a price. Mirrors catalog.Grade. */
 export type PriceGrade = "measured" | "declared" | "indexed" | "guessed"
 
@@ -285,6 +310,11 @@ export type Model = {
   state: string
   /** Null when the catalog has no price. Zero would claim the model is free. */
   pricing: Pricing | null
+  /** One free-tier record folded from every provider serving the model, the
+   *  unsanctioned one winning where they disagree — that is the tier the
+   *  router acts on. Null when the curated catalogue documents no free tier
+   *  here at all, which a withdrawn one is not: that record still travels. */
+  free_tier: FreeTier | null
   publisher?: string
   merge_source: MergeSource
 }

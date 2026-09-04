@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 type catalogBody struct {
@@ -159,6 +161,28 @@ func pricedCatalog() *catalog.Store {
 				InputMicrosPerMTok: 200000, OutputMicrosPerMTok: 800000, Known: true,
 				Source: catalog.SourceDiscovered,
 			}},
+		{ProviderID: "groq", ModelID: "free-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier: catalog.FreeTier{
+				FreeType:      "recurring-daily",
+				MonthlyTokens: 24000000, CreditTokens: 5000,
+				PoolKey: "groq-shared", ToS: "caution",
+			}},
+		{ProviderID: "groq", ModelID: "withdrawn-free-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier:     catalog.FreeTier{FreeType: "discontinued", ToS: "unknown"}},
+		{ProviderID: "groq", ModelID: "shapeless-free-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			// A verdict with no allowance shape. Upstream's parser cannot emit
+			// this row, so it exists to pin which field decides the record is
+			// present: only a key on ToS keeps it on the wire.
+			FreeTier: catalog.FreeTier{ToS: "avoid"}},
 		{ProviderID: "groq", ModelID: "unpriced-model", State: catalog.StateLive,
 			Surfaces:     []ir.Surface{ir.SurfaceLLM},
 			Source:       catalog.SourceInferred,
@@ -180,6 +204,14 @@ type modelSummary struct {
 		Source       string `json:"price_source"`
 		Grade        string `json:"price_grade"`
 	} `json:"pricing"`
+	FreeTier *struct {
+		FreeType      string `json:"free_type"`
+		MonthlyTokens int64  `json:"monthly_tokens"`
+		CreditTokens  int64  `json:"credit_tokens"`
+		PoolKey       string `json:"pool_key"`
+		ToS           string `json:"tos"`
+		OptInRequired bool   `json:"opt_in_required"`
+	} `json:"free_tier"`
 }
 
 func modelViews(t *testing.T, s *Server) map[string]modelSummary {
@@ -278,5 +310,176 @@ func TestModelViewCarriesPriceProvenance(t *testing.T) {
 	}
 	if overridden.Pricing.Grade != "measured" {
 		t.Errorf("price grade = %q, want %q", overridden.Pricing.Grade, "measured")
+	}
+}
+
+func TestModelAPICarriesTheFreeTierRecord(t *testing.T) {
+	// A budget and a terms verdict cannot be shown by a client that was never
+	// sent them, so the whole upstream record travels on the row.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["free-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.FreeType != "recurring-daily" || got.ToS != "caution" {
+		t.Errorf("free tier = %+v", got)
+	}
+	if got.MonthlyTokens != 24000000 || got.CreditTokens != 5000 {
+		t.Errorf("free tier allowance = %+v", got)
+	}
+	if got.PoolKey != "groq-shared" {
+		t.Errorf("pool key = %q", got.PoolKey)
+	}
+}
+
+func TestAModelWithNoFreeTierRendersNullNotZero(t *testing.T) {
+	// A zeroed record reads as "free, uncapped, terms unknown". Null is the
+	// true claim: this model has no free tier at all.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	if got := modelViews(t, s)["priced-model"].FreeTier; got != nil {
+		t.Fatalf("paid model carries a free tier: %+v", got)
+	}
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/models", "")
+	if !strings.Contains(w.Body.String(), `"free_tier":null`) {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestAWithdrawnFreeTierStillReachesTheWire(t *testing.T) {
+	// A discontinued tier is a real record, not an absent one: a reader has to
+	// be able to tell "this had a free tier and it was withdrawn" from "this
+	// never had one".
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["withdrawn-free-model"].FreeTier
+	if got == nil {
+		t.Fatal("a withdrawn free tier must still be sent")
+	}
+	if got.FreeType != "discontinued" || got.ToS != "unknown" {
+		t.Errorf("free tier = %+v", got)
+	}
+}
+
+func TestTheTermsVerdictDecidesTheRecordIsPresent(t *testing.T) {
+	// Pins the field the presence check keys on. A record whose allowance
+	// shape is missing but whose verdict is not still travels, because the
+	// verdict is the half a reader cannot safely be left to assume.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = pricedCatalog()
+
+	got := modelViews(t, s)["shapeless-free-model"].FreeTier
+	if got == nil {
+		t.Fatal("a tier carrying only a terms verdict must still be sent")
+	}
+	if got.ToS != "avoid" || got.FreeType != "" {
+		t.Errorf("free tier = %+v", got)
+	}
+}
+
+// sharedTierCatalog serves one model from two providers whose free tiers
+// disagree. The unsanctioned one sorts last, because the merge orders rows by
+// provider id: a fold that keeps whichever row it met first reports the
+// sanctioned tier here and the row an operator has to act on disappears.
+func sharedTierCatalog(withdrawn bool) *catalog.Store {
+	risky := catalog.FreeTier{FreeType: "recurring-daily", MonthlyTokens: 1000, ToS: "avoid"}
+	if withdrawn {
+		risky.FreeType = "discontinued"
+	}
+	c := &catalog.Store{}
+	c.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "aaa-sanctioned", ModelID: "shared-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier: catalog.FreeTier{
+				FreeType: "recurring-daily", MonthlyTokens: 24000000, ToS: "caution",
+			}},
+		{ProviderID: "zzz-risky", ModelID: "shared-model", State: catalog.StateLive,
+			Surfaces:     []ir.Surface{ir.SurfaceLLM},
+			Source:       catalog.SourceModelsDev,
+			Capabilities: catalog.Capabilities{Known: true},
+			FreeTier:     risky},
+	}, []string{"aaa-sanctioned", "zzz-risky"}))
+	return c
+}
+
+func optedInProvider(t *testing.T, db *store.DB, id string) {
+	t.Helper()
+	if err := db.CreateProvider(context.Background(), store.ProviderRow{
+		ID: id, Kind: "openaicompat", BaseURL: "https://x", Enabled: true,
+		AllowUnsanctionedFree: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnUnsanctionedTierWinsTheFoldedRow(t *testing.T) {
+	// The router vetoes per candidate, so one provider serving this model on a
+	// tier the vendor has not sanctioned is refused however the other providers
+	// are graded. The single record the row carries has to say so.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = sharedTierCatalog(false)
+
+	got := modelViews(t, s)["shared-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.ToS != "avoid" {
+		t.Errorf("tos = %q, want avoid: the fold kept a sanctioned provider's verdict", got.ToS)
+	}
+	if !got.OptInRequired {
+		t.Error("the row does not ask for the opt-in the router is waiting on")
+	}
+}
+
+func TestTheOptInClearsTheFoldedWarning(t *testing.T) {
+	// The console told an operator who had already opted the provider in to go
+	// and opt it in, because the flag lives on the provider and never reached
+	// the model row. Once it is allowed the router uses the model, and the row
+	// must stop asking.
+	s, db := testServerFull(t)
+	s.deps.Catalog = sharedTierCatalog(false)
+	optedInProvider(t, db, "zzz-risky")
+
+	got := modelViews(t, s)["shared-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.OptInRequired {
+		t.Error("an opted-in provider still asked for the opt-in")
+	}
+	// The vendor's verdict is a fact about the tier, not about the operator's
+	// appetite for it, so opting in must not rewrite it.
+	if got.ToS != "avoid" {
+		t.Errorf("tos = %q, want avoid", got.ToS)
+	}
+}
+
+func TestAWithdrawnUnsanctionedTierAsksForNothing(t *testing.T) {
+	// Both gates let a withdrawn tier through: the terms it graded no longer
+	// govern access. A row that asked for an opt-in here would send the
+	// operator after a setting that changes nothing.
+	s, _ := testServerFull(t)
+	s.deps.Catalog = sharedTierCatalog(true)
+
+	got := modelViews(t, s)["shared-model"].FreeTier
+	if got == nil {
+		t.Fatal("a model with a free tier must carry one")
+	}
+	if got.OptInRequired {
+		t.Error("a withdrawn tier asked for an opt-in the router does not want")
+	}
+	// The fold ranks on the same question the gates ask. Ranking on the raw
+	// verdict instead would let a withdrawn record outrank a live one and
+	// blank the allowance the reader is actually offered, since freeLabel
+	// renders nothing for a discontinued tier.
+	if got.FreeType == "discontinued" {
+		t.Errorf("the withdrawn record won the fold over a live one: %+v", got)
 	}
 }

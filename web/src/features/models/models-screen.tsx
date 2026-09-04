@@ -8,7 +8,7 @@ import { CircleCheck, TriangleAlert } from "lucide-react"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { useModels } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
-import type { Model, Pricing } from "../../lib/api-types"
+import type { FreeTier, Model, Pricing } from "../../lib/api-types"
 import { pricePerMillion } from "../../lib/format"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
@@ -61,6 +61,45 @@ export function tokenLabel(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`
   return String(tokens)
+}
+
+/**
+ * What a free tier actually grants, as one line: `free · ~24M tokens/day`.
+ *
+ * A zero token count is uncapped or unquantified, never "no allowance", so it
+ * falls back to a bare `free` — `~0 tokens/day` would be a lie about a tier
+ * that in fact has no ceiling. `discontinued` is not a free tier any more.
+ */
+export function freeLabel(t: FreeTier | null): string | null {
+  if (!t || t.free_type === "" || t.free_type === "discontinued") return null
+  const [tokens, period] =
+    t.free_type === "recurring-daily"
+      ? ([t.monthly_tokens, "day"] as const)
+      : t.free_type === "recurring-monthly"
+        ? ([t.monthly_tokens, "month"] as const)
+        : t.free_type === "one-time-initial" || t.free_type === "recurring-credit"
+          ? ([t.credit_tokens, "once"] as const)
+          : ([0, ""] as const)
+  if (tokens <= 0) return "free"
+  const figure = tokenLabel(tokens).replace(".0", "")
+  return `free · ~${figure} tokens${period === "once" ? " once" : `/${period}`}`
+}
+
+/**
+ * The warning an unsanctioned free tier earns, or null where it earns none.
+ *
+ * Keyed on the server's `opt_in_required` rather than on the vendor's verdict.
+ * The verdict says how the vendor regards the access; whether the router will
+ * act on it also depends on the opt-in, which lives on the provider and not on
+ * this row. Reading the verdict alone told an operator who had already allowed
+ * the tier to go and allow it — a demand nothing they could do would clear.
+ */
+export function tierWarning(t: FreeTier | null): string | null {
+  if (!t || !t.opt_in_required) return null
+  return (
+    "free tier not sanctioned by the vendor — the router skips any provider " +
+    "serving it that you have not allowed"
+  )
 }
 
 export function priceBand(p: Pricing | null): string {
@@ -156,6 +195,21 @@ function ServesCell({ row }: { row: Row }) {
   )
 }
 
+function ModelCell({ row }: { row: Model }) {
+  const warning = tierWarning(row.free_tier)
+  return (
+    <span className="flex min-w-[16rem] flex-col">
+      <span className="font-mono text-sm">{row.model}</span>
+      {warning && (
+        <span className="flex items-start gap-1.5 text-sm font-medium text-[hsl(var(--warning))]">
+          <TriangleAlert className="mt-0.5 size-[var(--icon-size)] shrink-0" aria-hidden />
+          {warning}
+        </span>
+      )}
+    </span>
+  )
+}
+
 // `darkraise-ui` bundles its own tanstack/react-table internally and does not
 // re-export its column types, so the shape is pulled from the component's own
 // signature rather than from a second, independently-versioned install of the
@@ -170,9 +224,7 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
     {
       accessorKey: "model",
       header: ({ column }) => <ColumnHeader column={column} title="Model" />,
-      cell: ({ row }) => (
-        <span className="block min-w-[16rem] font-mono text-sm">{row.original.model}</span>
-      ),
+      cell: ({ row }) => <ModelCell row={row.original} />,
     },
     {
       id: "serves",
@@ -213,20 +265,26 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
       header: "Band",
       cell: ({ row }) => {
         const marker = priceMarker(row.original.pricing)
+        const free = freeLabel(row.original.free_tier)
         return (
-          <span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
-            {row.original.pricing
-              ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
-              : "—"}
-            {marker === "verified" && (
-              <StatusMark icon={CircleCheck} tone="good" label="Price quoted by the provider" />
-            )}
-            {marker === "caution" && (
-              <StatusMark
-                icon={TriangleAlert}
-                tone="warning"
-                label="No published price; this is an estimate"
-              />
+          <span className="flex flex-col">
+            <span className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
+              {row.original.pricing
+                ? `${pricePerMillion(row.original.pricing.input_micros)} / ${pricePerMillion(row.original.pricing.output_micros)}`
+                : "—"}
+              {marker === "verified" && (
+                <StatusMark icon={CircleCheck} tone="good" label="Price quoted by the provider" />
+              )}
+              {marker === "caution" && (
+                <StatusMark
+                  icon={TriangleAlert}
+                  tone="warning"
+                  label="No published price; this is an estimate"
+                />
+              )}
+            </span>
+            {free && (
+              <span className="whitespace-nowrap text-sm text-[hsl(var(--legend))]">{free}</span>
             )}
           </span>
         )
