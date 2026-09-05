@@ -6,10 +6,10 @@
 # with every rebuild of the upstream image and has to be resolved by pulling;
 # Dependabot's docker ecosystem tracks these tags instead and opens a pull
 # request when one moves, which is the review point a digest bump would need
-# anyway. Tags in this file: node:24-alpine, golang:1.26.6-alpine, alpine:3.22.
+# anyway. Tags in this file: node:26-alpine, golang:1.27.1-alpine, alpine:3.24.
 ARG WITH_AUGGIE=1
 
-FROM node:24-alpine AS web
+FROM node:26-alpine AS web
 # Mirrors the repo layout so the bundle lands where vite.config.ts points it,
 # at /src/internal/admin/dist.
 WORKDIR /src/web
@@ -21,7 +21,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26.6-alpine AS build
+FROM golang:1.27.1-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -51,7 +51,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # stage without duplicating the final one. The argument itself is declared
 # at the top of the file: an ARG a FROM line reads has to precede every stage.
 
-FROM node:24-alpine AS auggie-1
+FROM node:26-alpine AS auggie-1
 # Pinned for the reason web/ uses npm ci: an image is meant to be reproducible,
 # and an unpinned CLI would change under a rebuild that touched nothing else.
 ARG AUGGIE_VERSION=0.36.0
@@ -59,12 +59,12 @@ RUN npm install -g --prefix /opt/auggie @augmentcode/auggie@${AUGGIE_VERSION}
 
 # The empty counterpart: the final stage copies /opt/auggie unconditionally,
 # so the stage it copies from has to exist either way.
-FROM alpine:3.22 AS auggie-0
+FROM alpine:3.24 AS auggie-0
 RUN mkdir -p /opt/auggie
 
 FROM auggie-${WITH_AUGGIE} AS auggie
 
-FROM alpine:3.22
+FROM alpine:3.24
 ARG WITH_AUGGIE
 # nodejs is here for auggie alone — the gateway itself is a static binary and
 # needs no runtime. It is the cost of a vendor who ships a CLI instead of an API.
