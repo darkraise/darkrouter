@@ -32,7 +32,12 @@ type AuthStatus = {
 }
 
 function Shell() {
-  const [authed, setAuthed] = useState<boolean | null>(null)
+  // Not whether the operator is authenticated -- that is the status call's
+  // answer -- but whether a later call has since found the session gone. The
+  // cleared cache alone cannot say so: an undefined status reads the same
+  // before the first call as after a logout, and one renders nothing while
+  // the other has to render the login form.
+  const [revoked, setRevoked] = useState(false)
 
   const status = useQuery({
     queryKey: ["auth-status"],
@@ -40,9 +45,7 @@ function Shell() {
   })
 
   useEffect(() => {
-    if (!status.data) return
-    setAuthed(status.data.authenticated)
-    if (status.data.csrf_token) setCsrfToken(status.data.csrf_token)
+    if (status.data?.csrf_token) setCsrfToken(status.data.csrf_token)
   }, [status.data])
 
   useEffect(
@@ -50,18 +53,27 @@ function Shell() {
       onUnauthorized(() => {
         // Any call anywhere can discover the session is gone. One listener
         // beats every screen handling it.
-        setAuthed(false)
+        setRevoked(true)
         queryClient.clear()
       }),
     [],
   )
+
+  const authed = revoked ? false : status.data ? status.data.authenticated : null
 
   if (authed === null) return null
   if (!authed) {
     // A login form nobody can pass is worse than useless: it refuses every
     // password and says nothing about why.
     if (status.data && !status.data.configured) return <FirstRun />
-    return <LoginScreen onAuthenticated={() => void status.refetch()} />
+    return (
+      <LoginScreen
+        onAuthenticated={() => {
+          setRevoked(false)
+          void status.refetch()
+        }}
+      />
+    )
   }
   // The shell is the root route's component rather than a wrapper here, so
   // that darkraise-ui's sidebar has the router context its adapter needs.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import {
   Button, Card,
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -57,7 +57,13 @@ export function ConversationHeader({
 
   // The field follows the conversation, not the keystroke: selecting another
   // conversation in the rail must not leave the previous one's name in it.
-  useEffect(() => setDraftTitle(title), [title])
+  // Adjusted during render rather than in an effect, so the field never
+  // paints the previous conversation's name for a frame first.
+  const [shownTitle, setShownTitle] = useState(title)
+  if (title !== shownTitle) {
+    setShownTitle(title)
+    setDraftTitle(title)
+  }
 
   function commitTitle() {
     if (abandoning.current) {

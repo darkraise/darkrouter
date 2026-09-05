@@ -30,27 +30,29 @@ function Reading({ label, value }: { label: string; value: string }) {
  * is not is worse than no number.
  */
 export function RunReadings({ run }: { run: AuxRun | undefined }) {
-  const [trace, setTrace] = useState<RequestTrace | null>(null)
-  const [waiting, setWaiting] = useState(false)
+  // Tagged with the run it answers, so the reading a previous run left behind
+  // is not read as this one's. The tag is also what says "asked and answered"
+  // as against "still asking": a trace that comes back null is a run the
+  // gateway never wrote a row for, which is an answer, not a wait.
+  const [settled, setSettled] = useState<{ id: string; trace: RequestTrace | null } | null>(null)
+  const requestId = run?.requestId ?? ""
 
   useEffect(() => {
-    if (!run || run.requestId === "") {
-      setTrace(null)
-      return
-    }
+    if (requestId === "") return
     // Aborted on the way out, so the retry stops with the panel rather than
     // running on and writing into a run that has been superseded or a
     // surface that has been left.
     const controller = new AbortController()
-    setWaiting(true)
-    setTrace(null)
-    void traceWhenWritten(run.requestId, controller.signal).then((t) => {
+    void traceWhenWritten(requestId, controller.signal).then((t) => {
       if (controller.signal.aborted) return
-      setTrace(t)
-      setWaiting(false)
+      setSettled({ id: requestId, trace: t })
     })
     return () => controller.abort()
-  }, [run?.requestId, run])
+  }, [requestId])
+
+  const answered = settled?.id === requestId
+  const trace = answered ? settled.trace : null
+  const waiting = requestId !== "" && !answered
 
   return (
     <Card className="flex shrink-0 flex-col gap-3 p-4">

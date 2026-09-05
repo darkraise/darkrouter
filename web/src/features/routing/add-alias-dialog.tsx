@@ -70,15 +70,20 @@ export function AddAliasDialog({
   // Unique to this dialog instance, so a row id can never collide with one
   // the editor behind it minted.
   const idPrefix = useId()
-  const counter = useRef(0)
+  // Past the first row, which is minted from the prefix alone. The dialog
+  // opens with one row every time, so that row needs no counter to be
+  // unique -- and the initial state is built during render, where a ref
+  // must not be read.
+  const counter = useRef(1)
+  const firstRow = (): Row => ({ id: `${idPrefix}-first`, value: "" })
   const makeRow = (): Row => ({ id: `${idPrefix}${counter.current++}`, value: "" })
   const [name, setName] = useState("")
-  const [rows, setRows] = useState<Row[]>(() => [makeRow()])
+  const [rows, setRows] = useState<Row[]>(() => [firstRow()])
 
   function reset() {
     setName("")
-    counter.current = 0
-    setRows([makeRow()])
+    counter.current = 1
+    setRows([firstRow()])
   }
 
   const problem = aliasNameProblem(name, existingNames)

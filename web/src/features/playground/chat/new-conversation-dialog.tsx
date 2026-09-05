@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   Button,
   Dialog,
@@ -58,12 +58,15 @@ export function NewConversationDialog({
   // tracked the seed would be rewritten under the operator's hands the
   // moment anything behind the dialog moved, and one that never reseeded
   // would hand back the edits a Cancel had just discarded.
-  useEffect(() => {
+  //
+  // The seed is read at the moment of opening, which is what makes this an
+  // adjustment during render rather than an effect: an effect would paint
+  // the discarded draft for a frame before replacing it.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) setDraft(seed)
-    // The seed is read at the moment of opening. Listing it would reseed
-    // mid-edit, which is the case above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }
 
   return (
     <Dialog

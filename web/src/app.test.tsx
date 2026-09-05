@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { App } from "./app"
+import { api } from "./lib/api"
 
 // The authenticated shell is the first thing that renders darkraise-ui's
 // SidebarLayout, and SidebarItem reaches for the router adapter. Everything
@@ -72,5 +73,81 @@ describe("the authenticated shell", () => {
     const inputs = await screen.findAllByPlaceholderText(/jump to a provider/i)
     expect(inputs).toHaveLength(1)
     expect(screen.getAllByRole("dialog")).toHaveLength(1)
+  })
+})
+
+describe("a session that dies while the console is open", () => {
+  /** Answers every call with 401, the way the gateway does once the cookie
+   *  has expired. */
+  function sessionGone() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "not authenticated" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    )
+  }
+
+  it("drops to the login screen rather than leaving the shell up", async () => {
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+
+    sessionGone()
+    // Any call anywhere discovers it; the shell listens once for all of them.
+    await expect(api.get("/api/overview")).rejects.toThrow()
+
+    expect(await screen.findByPlaceholderText(/admin password/i)).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /Requests/i })).not.toBeInTheDocument()
+  })
+
+  it("puts the shell back when the operator signs in again", async () => {
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+
+    sessionGone()
+    await expect(api.get("/api/overview")).rejects.toThrow()
+    const field = await screen.findByPlaceholderText(/admin password/i)
+
+    // The password is accepted this time, and the status call behind it
+    // reports a live session again.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const body = url.includes("/api/auth/login")
+          ? { authenticated: true, csrf_token: "fresh-token" }
+          : url.includes("/api/auth/status")
+            ? { authenticated: true, configured: true, csrf_token: "fresh-token" }
+            : url.includes("/api/overview")
+              ? {
+                  providers: [],
+                  requests_per_min: 0,
+                  error_rate: 0,
+                  window_sec: 60,
+                  today_spend: { micros: 0, priced: true, estimated: false },
+                  latency: { p50_ms: 0, p95_ms: 0 },
+                  series: [],
+                  failovers: [],
+                  failover_edges: [],
+                }
+              : url.includes("/api/usage")
+                ? []
+                : {}
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }),
+    )
+
+    await userEvent.setup().type(field, "hunter2")
+    await userEvent.setup().click(screen.getByRole("button", { name: /sign in/i }))
+
+    expect(
+      await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 }),
+    ).toBeInTheDocument()
   })
 })
