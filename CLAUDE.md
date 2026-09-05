@@ -56,3 +56,22 @@ The build, deploy and byte-level verification procedure is in
 from it that are easy to get wrong: the `compose.uat.yml` overlay is required
 or the published image is pulled over the local build, and this machine
 publishes the admin port on **8091** (8081 is a different container).
+
+## darkraise-ui is pinned to an exact version
+
+`web/package.json` names `6.7.0` with no caret, alone among its dependencies.
+That is deliberate: **6.8.0 breaks the app shell.** Its `dist/styles.css` drops
+the `.dr-sidebar-layout` rule — `@apply flex h-screen overflow-hidden` — that
+6.5.0 and 6.7.0 both ship, so the container computes to `display: block`, the
+sidebar stops spanning the viewport, and the whole main column renders
+underneath it rather than beside it.
+
+A caret range is enough to reach it: `npm ci` is safe because the lockfile
+pins the version, but any `npm install` resolves to the newest match and
+silently breaks every screen. Nothing in the test suite sees it — the layout
+is CSS, and the components render exactly as they should.
+
+Take a bump past 6.7.0 only after logging into the running console and looking
+at a screen, per "Verifying a change in the running console" above. 6.8.0 also
+adds two required `ThemeConfig` axes, `shellStyle` and `sidebarActiveBar`, so
+`theme.config.ts` will need both before it compiles.
