@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "darkraise-ui/components/tabs"
 import { ChatMode } from "./chat/chat-mode"
 import { Compare } from "./compare"
 import { AuxMode } from "./aux/aux-mode"
 import { emptyConfig, type PlaygroundConfig } from "./config"
-import { initialMode, readMode, rememberMode, type PlaygroundMode } from "./mode"
+import { initialMode, readMode, rememberMode } from "./mode"
 
 /**
  * The playground, as three surfaces rather than a mode with tabs inside it.
@@ -24,7 +24,13 @@ import { initialMode, readMode, rememberMode, type PlaygroundMode } from "./mode
 export function PlaygroundScreen() {
   const search = useSearch({ strict: false })
   const navigate = useNavigate()
-  const [mode, setMode] = useState<PlaygroundMode>(() => initialMode(search))
+  // The URL is the surface, rather than a copy of it kept in state. The
+  // router does not remount a route when only its search changes, so a copy
+  // had to be resynced on every Back -- and Back is the browser restoring a
+  // location, not the operator picking a surface, which meant that resync had
+  // to be careful to neither write the preference nor navigate. Reading the
+  // location directly leaves nothing to resync and nothing to get wrong.
+  const mode = initialMode(search)
   // Compare's request settings live here rather than inside it, so switching
   // to Auxiliary and back does not silently reset the system prompt every
   // column was being compared under.
@@ -33,25 +39,9 @@ export function PlaygroundScreen() {
   function choose(next: string) {
     const picked = readMode(next)
     if (picked === undefined || picked === mode) return
-    setMode(picked)
     rememberMode(picked)
     void navigate({ to: "/playground", search: (prev) => ({ ...prev, mode: picked }) })
   }
-
-  // The seed above runs once, and the router does not remount a route when
-  // only its search changes -- so without this, Back after a switch moves the
-  // URL to ?mode=compare and leaves Chat on screen.
-  //
-  // It sets the mode rather than routing through choose(). Back is the
-  // browser restoring a location, not the operator picking a surface, so it
-  // must neither write the preference nor navigate -- and navigating would
-  // push ?mode= back onto a bare /playground and undo the Back that just
-  // happened.
-  useEffect(() => {
-    setMode(initialMode(search))
-    // search is a fresh object each render; its two fields are what matter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.mode, search.seed])
 
   return (
     <div className="-m-6 flex h-[calc(100%+3rem)] min-h-0 flex-col">

@@ -15,16 +15,14 @@ function useThrottled(text: string, active: boolean): string {
   const [shown, setShown] = useState(text)
   const flushedAt = useRef(0)
   useEffect(() => {
-    if (!active) {
-      setShown(text)
-      return
-    }
-    const wait = STREAM_PARSE_MS - (Date.now() - flushedAt.current)
-    if (wait <= 0) {
-      flushedAt.current = Date.now()
-      setShown(text)
-      return
-    }
+    // Nothing to hold back when the answer is finished: the return below
+    // hands back `text` itself, so `shown` is not read at all.
+    if (!active) return
+    // Always through the timer, even when the interval has already elapsed
+    // and the wait is zero. Flushing synchronously here would land a second
+    // render inside the first one's effects for every chunk that arrives
+    // more than 50 ms after the last.
+    const wait = Math.max(0, STREAM_PARSE_MS - (Date.now() - flushedAt.current))
     const timer = window.setTimeout(() => {
       flushedAt.current = Date.now()
       setShown(text)

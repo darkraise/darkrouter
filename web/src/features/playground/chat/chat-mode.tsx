@@ -99,12 +99,18 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // it streams cannot redirect its stored turn.
   const conversationRef = useRef("")
   const configRef = useRef(config)
-  configRef.current = config
   // A config commit can be scheduled by the header and fire a moment later, so
   // the title it carries is read when it fires rather than when it was queued:
   // a rename in between would otherwise be undone by the write that follows it.
   const titleRef = useRef(title)
-  titleRef.current = title
+  // Written after the commit rather than during the render. Every reader is a
+  // callback that runs later -- a send completing, a scheduled commit -- so
+  // what they need is the last rendered value, which is what a render React
+  // went on to discard did not produce.
+  useEffect(() => {
+    configRef.current = config
+    titleRef.current = title
+  })
   // The create is memoized on its own promise rather than on the id it
   // resolves to: two exchanges completing while the first create is still in
   // flight would both read an empty conversationRef and make two
@@ -206,16 +212,12 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // Applied once per seed, and never over a conversation: a seed sets up a
   // fresh request, and stomping the model of a thread the operator opened
   // from the rail would rewrite what its answers were produced under.
-  useEffect(() => {
-    if (!trace.data || seed === undefined || seededFrom === seed) return
-    if (run.messages.length > 0) return
+  // `seededFrom` is what makes it once: the guard is false on the render the
+  // adjustment itself causes.
+  if (trace.data && seed !== undefined && seededFrom !== seed && run.messages.length === 0) {
     setConfig((prev) => ({ ...prev, ...seedFromTrace(trace.data as RequestTrace) }))
     setSeededFrom(seed)
-    // run is a fresh object each render; the transcript's length is what
-    // matters, and it is read rather than depended on for the same reason
-    // config is set functionally above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trace.data, seed, seededFrom])
+  }
 
   const seedNote =
     seed !== undefined && run.messages.length === 0
@@ -232,6 +234,15 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   // Applied once per conversation: re-firing would stomp on turns the operator
   // has typed since it was opened.
+  //
+  // The one place on this screen that still seeds state from an effect. It
+  // cannot be an adjustment during render, because the seeding is inseparable
+  // from `run.load`, which aborts whatever is streaming: a render React goes
+  // on to discard would kill a live request. Splitting the two apart is worse
+  // still -- `loadedId` is what `selectionPending` reads, so moving it a
+  // commit ahead of the transcript paints the new conversation as loaded with
+  // the previous one's turns under it.
+  /* eslint-disable react-hooks/set-state-in-effect -- see above */
   useEffect(() => {
     if (!detail.data || detail.data.id === loadedId) return
     run.load(messagesOfTurns(detail.data.messages), routesOfTurns(detail.data.messages))
@@ -242,6 +253,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
     // this fire every render rather than once per conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data, loadedId])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function startNew() {
     selectionGeneration.current += 1

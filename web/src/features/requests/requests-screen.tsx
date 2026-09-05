@@ -101,9 +101,6 @@ export function RequestsScreen() {
   const [cursor, setCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
-  // Bumped whenever paging resets, so a page that was requested under the
-  // previous filters is thrown away when it lands rather than appended.
-  const pagingGeneration = useRef(0)
   // The first page the reader is currently looking at, frozen. `null` means
   // "not yet loaded" — distinct from an empty result set, which would
   // otherwise look identical and re-freeze forever on every poll.
@@ -116,26 +113,40 @@ export function RequestsScreen() {
   const catalog = useModels()
   const aliases = useAliases()
 
-  useEffect(() => {
-    // An empty first load must keep re-freezing on every poll, same as
-    // `null`: freezing `[]` once would leave the very first row that ever
-    // arrives uncounted and undisplayed until something else forced a reload.
-    if (first.data && (held === null || held.length === 0)) setHeld(first.data.requests)
-  }, [first.data, held])
-
   // Paging follows the URL rather than the control that changed it: Back and
   // a pasted link change the filters without passing through any handler
   // here, and pages accumulated under the old filters would otherwise sit
   // under the new ones. The cursor is rejected under different filters by
   // design; resetting it here is what keeps that rejection invisible.
   const filterKey = JSON.stringify(apiFilters(filters))
-  useEffect(() => {
-    pagingGeneration.current += 1
+  // The filters in force right now, readable from an async callback that was
+  // started under earlier ones. A page requested under the previous filters
+  // is thrown away when it lands rather than appended.
+  const latestFilterKey = useRef(filterKey)
+  const [pagedUnder, setPagedUnder] = useState(filterKey)
+
+  // Both adjustments run during render rather than after it. An effect would
+  // paint one frame of the previous filters' pages under the new filters,
+  // and a second frame of the empty state before the first row it already
+  // has in hand.
+  if (filterKey !== pagedUnder) {
+    setPagedUnder(filterKey)
     setOlder([])
     setCursor(null)
     setHeld(null)
     setLoadingMore(false)
     setLoadMoreError(null)
+  } else if (first.data && (held === null || held.length === 0) && held !== first.data.requests) {
+    // An empty first load must keep re-freezing on every poll, same as
+    // `null`: freezing `[]` once would leave the very first row that ever
+    // arrives uncounted and undisplayed until something else forced a reload.
+    // Each poll brings a new array, which is what stops this repeating
+    // against the one already held.
+    setHeld(first.data.requests)
+  }
+
+  useEffect(() => {
+    latestFilterKey.current = filterKey
   }, [filterKey])
 
   /**
@@ -164,21 +175,21 @@ export function RequestsScreen() {
   async function loadMore() {
     const from = cursor ?? first.data?.next_cursor
     if (!from || loadingMore) return
-    const generation = pagingGeneration.current
+    const requestedUnder = filterKey
     setLoadingMore(true)
     setLoadMoreError(null)
     try {
       const page = await api.get<RequestPage>(
         `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
       )
-      if (pagingGeneration.current !== generation) return
+      if (latestFilterKey.current !== requestedUnder) return
       setOlder((p) => [...p, ...page.requests])
       setCursor(page.next_cursor ?? null)
     } catch (err) {
-      if (pagingGeneration.current !== generation) return
+      if (latestFilterKey.current !== requestedUnder) return
       setLoadMoreError((err as Error).message)
     } finally {
-      if (pagingGeneration.current === generation) setLoadingMore(false)
+      if (latestFilterKey.current === requestedUnder) setLoadingMore(false)
     }
   }
 

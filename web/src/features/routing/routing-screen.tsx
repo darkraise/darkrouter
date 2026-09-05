@@ -139,11 +139,14 @@ export function validateChain(
  *  yet — keying on text there would collapse two rows onto one DOM node. */
 type DraftRow = { id: string; value: string }
 
-function toDraftRows(aliases: Aliases, makeId: () => string): Record<string, DraftRow[]> {
+function toDraftRows(
+  aliases: Aliases,
+  makeId: (name: string, index: number) => string,
+): Record<string, DraftRow[]> {
   return Object.fromEntries(
     Object.entries(aliases).map(([name, targets]) => [
       name,
-      targets.map((value) => ({ id: makeId(), value })),
+      targets.map((value, index) => ({ id: makeId(name, index), value })),
     ]),
   )
 }
@@ -183,10 +186,18 @@ export function AliasEditor({
   // mint the same row id; the counter only has to be unique within it.
   const idPrefix = useId()
   const idCounter = useRef(0)
+  /** For a row the operator has just added, minted in the handler that adds
+   *  it. Rows that come out of the saved map use `seedId` instead: seeding
+   *  happens during render, where a ref must not be read. */
   const makeId = () => `${idPrefix}${idCounter.current++}`
+  /** Where the row sits in the saved map, which is identity enough for a row
+   *  that has not been touched yet -- and unlike a counter it is the same on
+   *  every render, so seeding is pure. The shape cannot collide with what
+   *  `makeId` mints. */
+  const seedId = (name: string, index: number) => `${idPrefix}-${name}-${index}`
 
   const [draft, setDraft] = useState<Record<string, DraftRow[]>>(() =>
-    toDraftRows(aliases, makeId),
+    toDraftRows(aliases, seedId),
   )
   // What the draft was seeded from. `PUT /api/aliases` replaces the whole map
   // rather than merging, so a draft that never notices an alias added
@@ -199,7 +210,8 @@ export function AliasEditor({
     setDraft((d) => {
       const next = { ...d }
       for (const [name, targets] of Object.entries(aliases)) {
-        if (!(name in next)) next[name] = targets.map((value) => ({ id: makeId(), value }))
+        if (!(name in next))
+          next[name] = targets.map((value, index) => ({ id: seedId(name, index), value }))
       }
       return next
     })
@@ -488,7 +500,7 @@ export function AliasEditor({
             size="sm"
             variant="ghost"
             onClick={() => {
-              setDraft(toDraftRows(aliases, makeId))
+              setDraft(toDraftRows(aliases, seedId))
               setEditing(null)
             }}
           >
