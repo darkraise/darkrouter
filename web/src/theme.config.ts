@@ -13,8 +13,9 @@ export const themeConfig: ThemeConfig = {
     // Brand. Coral is position and primary action only, never state, so it
     // never joins amber and red in the routing ladder's gutter.
     accentColor: "coral",
-    // Hue 36: the warm ground the language is built on. Slate is the cool
-    // baseline this console deliberately is not.
+    // Hue 36: the warm ground the language is built on, and the ground an
+    // operator starts from. Slate is the cool baseline this console
+    // deliberately is not.
     surfaceColor: "sepia",
     mode: "system",
     density: "comfortable",
@@ -37,19 +38,23 @@ export const themeConfig: ThemeConfig = {
   },
   switcher: {
     enabled: true,
-    // Only the two axes an operator has a reason to change: mode, because a
-    // room's light changes, and accentColor, because it is a preference.
+    // The three axes an operator has a reason to change: mode, because a
+    // room's light changes, and accentColor and surfaceColor, because the
+    // brand and the ground it sits on are preferences.
     //
     // The rest are the Warm Console identity rather than preferences -- the
-    // warm ground the language is built on, the pinned accent intensity that
-    // is the one step keeping button labels above AA, the density and radius
-    // the screens were drawn against. Exposing them offered an operator a
-    // dozen ways to make the console worse and one to make it theirs.
+    // pinned accent intensity that is the one step keeping button labels
+    // above AA, the density and radius the screens were drawn against.
+    // Exposing them offered an operator a dozen ways to make the console
+    // worse and one to make it theirs.
     //
     // Worth knowing before turning accentColor: coral is position and primary
     // action only, and the routing ladder and provider pips sit beside it in
     // amber, green and red. An accent moved into that range makes "brand" and
     // "state" the same colour, and the ladder is then legible only by shape.
+    // surfaceColor moves the ground those pips are read against rather than
+    // the pips themselves, so it changes the console's temperature without
+    // changing what a colour means.
     //
     // A hidden axis keeps whatever the defaults above say, and any value a
     // browser stored while it was still offered is cleared on load -- see
@@ -58,7 +63,7 @@ export const themeConfig: ThemeConfig = {
       mode: true,
       accentColor: true,
       density: false,
-      surfaceColor: false,
+      surfaceColor: true,
       preset: false,
       backgroundStyle: false,
       backgroundIntensity: false,
