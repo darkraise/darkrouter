@@ -6,8 +6,11 @@
 #   docker compose -f compose.prod.yml up -d
 #
 # Expects, beside this file:
-#   .env                  the settings (.env.example is the template)
-#   data/darkrouter.yaml  the configuration (darkrouter.example.yaml is the template)
+#   .env    the settings (.env.example is the template)
+#   data/   a directory the container owns; it holds the database
+#
+# data/darkrouter.yaml is optional and only tunes defaults; see
+# docs/operations/deploy.md.
 #
 # data/ must be writable by uid 10001, which is the unprivileged user the image
 # runs as:  mkdir -p data && sudo chown -R 10001:10001 data

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -551,5 +553,87 @@ func TestShutdownGraceDefaults(t *testing.T) {
 	if _, err := Parse([]byte(negative), env(map[string]string{"GROQ_KEY": "sk-x"})); err == nil ||
 		!strings.Contains(err.Error(), "server.shutdown_grace must be positive") {
 		t.Errorf("err = %v, want a rejection", err)
+	}
+}
+
+// A configuration file is optional. Every setting has a default, providers
+// and aliases live in the database, and proxy authentication is issued in the
+// console -- so requiring the file made a deployment copy a document it had
+// nothing to say in, and crash when it forgot.
+func TestAMissingFileLoadsDefaults(t *testing.T) {
+	c, err := Load(filepath.Join(t.TempDir(), "absent.yaml"), env(nil))
+	if err != nil {
+		t.Fatalf("a missing config file must not be fatal: %v", err)
+	}
+	if c.Server.ProxyListen != ":8080" || c.Server.AdminListen != ":8081" {
+		t.Errorf("listen addresses = %q/%q, want the defaults", c.Server.ProxyListen, c.Server.AdminListen)
+	}
+	if len(c.Providers) != 0 {
+		t.Errorf("providers = %d, want none", len(c.Providers))
+	}
+}
+
+// Silence would leave a botched volume mount looking like a healthy default
+// deployment until someone noticed their tuning had no effect.
+func TestAMissingFileSaysSoInTheWarnings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent.yaml")
+	c, err := Load(path, env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, w := range c.Warnings {
+		if strings.Contains(w, path) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v; nothing names the missing file", c.Warnings)
+	}
+}
+
+// Absent and unparseable are different. Applying defaults over a file an
+// operator did write would discard the settings in it without saying so.
+func TestAFileThatExistsButDoesNotParseStillFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	if err := os.WriteFile(path, []byte("server: [this is not a mapping\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, env(nil)); err == nil {
+		t.Fatal("a malformed configuration file was accepted")
+	}
+}
+
+// Nothing in the document means nothing came from the file, which is what the
+// settings screen reads to label each value's source.
+func TestAMissingFileReportsNoFileKeys(t *testing.T) {
+	c, err := Load(filepath.Join(t.TempDir(), "absent.yaml"), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.FileKeys) != 0 {
+		t.Errorf("FileKeys = %v, want none", c.FileKeys)
+	}
+}
+
+// Start with no file, add tuning later: the store is built on a path that does
+// not exist yet, and a reload picks the file up when it appears.
+func TestAConfigFileAppearingLaterIsPickedUp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	s, err := NewStore(path, env(nil))
+	if err != nil {
+		t.Fatalf("a store over a missing file must build: %v", err)
+	}
+	if s.Current().Log.Retention == 48*time.Hour {
+		t.Fatal("the default already matches what the test writes, so this proves nothing")
+	}
+	if err := os.WriteFile(path, []byte("log:\n  retention: 48h\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Current().Log.Retention != 48*time.Hour {
+		t.Errorf("Log.Retention = %s, want the file's 48h", s.Current().Log.Retention)
 	}
 }

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"regexp"
@@ -16,8 +18,30 @@ var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Load reads and parses path. lookup resolves ${ENV} references; pass
 // os.LookupEnv in production.
+//
+// A path that does not exist loads the defaults rather than failing. The file
+// is a tuning document: every setting has one, providers and aliases are owned
+// by the database after the first import, and proxy authentication is issued
+// in the console -- so a deployment with nothing to say in it was being made to
+// copy one anyway, and to crash when it forgot.
+//
+// A file that exists and does not parse still fails. Defaults applied over an
+// edit an operator did write would discard it with nothing on screen to say
+// so, which is worse than refusing to start.
 func Load(path string, lookup func(string) (string, bool)) (*Config, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		c, perr := Parse([]byte("{}"), lookup)
+		if perr != nil {
+			return nil, perr
+		}
+		// Surfaced on /healthz and the settings screen. Absent is a legitimate
+		// state, but it is indistinguishable from a volume mounted at the
+		// wrong path until something says which one this is.
+		c.Warnings = append(c.Warnings,
+			fmt.Sprintf("no configuration file at %s; every setting is on its default", path))
+		return c, nil
+	}
 	if err != nil {
 		return nil, err
 	}

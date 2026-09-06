@@ -1,3 +1,7 @@
+# This file is optional. Every key below has the default it is shown with, so a
+# deployment that wants none of them can leave it out entirely and the gateway
+# runs on defaults. Copy it to data/darkrouter.yaml when you want to change one.
+#
 # One environment variable lives outside this file and is required:
 # DARKROUTER_MASTER_KEY, which unlocks the keyring stored credentials are
 # encrypted with. The admin password is not here either — it is set in the

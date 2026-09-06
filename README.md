@@ -23,15 +23,14 @@ was decided that way (`plan/`), and how it is run (`operations/`).
 
 ```bash
 mkdir -p data
-cp darkrouter.example.yaml data/darkrouter.yaml
 export DARKROUTER_MASTER_KEY="$(openssl rand -base64 32)"   # keep it: it unlocks stored credentials
 docker compose up --build
 ```
 
-That is the whole of it — the example config ships no providers, and they are
-added from the console once it is up. To start with one already configured
-instead, uncomment the provider block in `data/darkrouter.yaml` and
-`export GROQ_KEY=your-key` before bringing the stack up.
+That is the whole of it. There is no configuration file to write: every setting
+has a default, and providers are added from the console once it is up. To tune
+something, or to start with a provider already configured, copy
+`darkrouter.example.yaml` to `data/darkrouter.yaml` and edit it.
 
 The master key encrypts every credential stored in `data/darkrouter.db`; the
 process refuses to start without one, and a database opened under a different
