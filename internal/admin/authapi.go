@@ -156,9 +156,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // servedOverTLS reports whether the browser's own connection is HTTPS.
 //
 // r.TLS answers it for a direct connection and is nil behind a reverse proxy
-// that terminates TLS — which the shipped Caddyfile does, proxying plain HTTP
-// to the admin port. Reading the scheme off the connection alone therefore
-// left the intended HTTPS deployment issuing session cookies without Secure.
+// that terminates TLS and forwards plain HTTP to the admin port, which is how
+// any internet-facing deployment is expected to run. Reading the scheme off
+// the connection alone therefore left those deployments issuing session
+// cookies without Secure.
 //
 // The forwarded header is evidence only when the peer that set it is a proxy
 // rather than a client, so it is read only from a loopback or private address.
