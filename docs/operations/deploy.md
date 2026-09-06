@@ -14,8 +14,7 @@ and says so on `/healthz`.
 ## Production
 
 ```bash
-mkdir -p data && sudo chown -R 10001:10001 data   # the image's unprivileged uid
-cp .env.example .env                              # fill it in
+cp .env.example .env   # fill it in
 docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
@@ -41,9 +40,16 @@ Setting a password closes setup for good. `DARKROUTER_ADMIN_PASSWORD_HASH`
 still works and still overrides the stored password on the next restart, which
 is how a lost password is recovered — see below.
 
-> **Upgrading a deployment made before this change:** the bcrypt hash used to
-> need every `$` doubled. It no longer does, and a doubled hash now refuses a
-> correct password. Undo it once with `sed -i 's/\$\$/$/g' .env`.
+> **Upgrading a deployment made before these changes**, two one-time fixes:
+>
+> The bcrypt hash used to need every `$` doubled. It no longer does, and a
+> doubled hash now refuses a correct password — `sed -i 's/\$\$/$/g' .env`.
+>
+> The container used to run as uid 10001 and `data/` was chowned to match. It
+> now runs as root, and root with every capability dropped cannot write a
+> directory owned by someone else, so an existing `data/` locks the database
+> read-only — `sudo chown -R 0:0 data`. A deployment created after this change
+> needs neither.
 
 **Recovering a lost password.** Put a fresh hash in `DARKROUTER_ADMIN_PASSWORD_HASH`
 and restart. A hash that differs from the one in force when the password was
@@ -58,9 +64,20 @@ The whole of `.env` is passed to the container, so a `${SOME_KEY}` written
 into `data/darkrouter.yaml` resolves from it under any name, without touching
 `compose.prod.yml`.
 
-The container runs read-only, with all capabilities dropped and a 1 GB memory
-and 512 pid ceiling. It needs nothing writable beyond `/data` and a tmpfs
-`/tmp`.
+The container runs as root, read-only, with all capabilities dropped and a 1 GB
+memory and 512 pid ceiling. It needs nothing writable beyond `/data` and a
+tmpfs `/tmp`.
+
+Root is what lets a bind-mounted `data/` work with nothing done to it on the
+host: Docker creates that directory owned by root, and an unprivileged process
+cannot write into it. What makes it defensible is the empty capability set —
+uid 0 with no capabilities cannot chown, mount, load a module, bind a
+privileged port, or override a file mode. Keep `cap_drop`, `read_only` and
+`no-new-privileges` together; dropping any one of them is what would make the
+uid matter.
+
+To run unprivileged instead, add `user: "10001:10001"` to the service and
+`sudo chown -R 10001:10001 data`. The image still builds that account.
 
 `compose.prod.yml` sets `pull_policy: always`, so `up` fetches the tag named
 by `DARKROUTER_TAG` (default `latest`) every time.

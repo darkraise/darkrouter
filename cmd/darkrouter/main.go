@@ -108,6 +108,12 @@ func runServer(args []string) error {
 	defer stop()
 	armSecondSignal(ctx, stop)
 
+	// Before SQLite, whose error for this names neither the directory nor the
+	// uid: a bind-mounted data directory owned by the wrong user is the first
+	// thing a container deployment can get wrong.
+	if err := store.CheckWritable(*dbPath); err != nil {
+		return err
+	}
 	db, err := store.Open(*dbPath)
 	if err != nil {
 		return err

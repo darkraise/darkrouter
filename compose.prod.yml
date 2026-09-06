@@ -12,8 +12,11 @@
 # data/darkrouter.yaml is optional and only tunes defaults; see
 # docs/operations/deploy.md.
 #
-# data/ must be writable by uid 10001, which is the unprivileged user the image
-# runs as:  mkdir -p data && sudo chown -R 10001:10001 data
+# data/ needs nothing done to it. The container runs as root, so the directory
+# Docker creates for the bind mount is writable as it stands -- with every
+# capability dropped, the root filesystem read-only and no-new-privileges set,
+# which is what makes running as uid 0 defensible. To run unprivileged instead,
+# add  user: "10001:10001"  below and chown data/ to match.
 
 services:
   darkrouter:
