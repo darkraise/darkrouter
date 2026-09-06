@@ -252,6 +252,17 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 		return
 	}
 
+	// The account belongs to the credential just chosen, so the listing URL is
+	// only knowable now. A credential missing one cannot list; that is a fact
+	// about the credential, and the next sweep may pick another that can.
+	base, err := provider.ResolveBaseURL(p.BaseURL, cred.AccountID)
+	if err != nil {
+		slog.Warn("discovery: credential cannot address this provider",
+			"provider", p.ID, "credential", cred.ID, "err", err)
+		return
+	}
+	p.BaseURL = base
+
 	pr, err := ProbeForKind(p, preset, preset.Auth.Secret(cred.Secret), d.opts.Listers)
 	if err != nil {
 		// An undiscoverable kind is a permanent, known fact rather than a

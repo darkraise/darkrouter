@@ -12,6 +12,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -385,6 +386,11 @@ func (s *Server) forgetCredential(credID string) {
 type addCredentialBody struct {
 	Label  string `json:"label"`
 	Secret string `json:"secret"`
+	// AccountID is required only where the provider's endpoint carries an
+	// {account_id}, and belongs here rather than on the provider because the
+	// account is the credential's: one provider row can hold keys from two
+	// Cloudflare accounts, each reaching a different endpoint.
+	AccountID string `json:"account_id"`
 }
 
 func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
@@ -404,8 +410,16 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		body.Label = "default"
 	}
 	providerID := r.PathValue("id")
-	if _, err := s.deps.DB.ProviderByID(r.Context(), providerID); err != nil {
+	row, err := s.deps.DB.ProviderByID(r.Context(), providerID)
+	if err != nil {
 		writeStoreError(w, r, err)
+		return
+	}
+	// Refused here rather than at the first request: a key stored without the
+	// account it needs is a provider that looks configured and 404s from a URL
+	// the operator never sees.
+	if _, err := provider.ResolveBaseURL(row.BaseURL, body.AccountID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Counted before the write, so "was there anything here" is answerable
@@ -417,7 +431,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 
 	id, err := s.deps.DB.AddCredential(r.Context(), s.deps.Key, store.Credential{
 		ProviderID: providerID, Label: body.Label,
-		Secret: body.Secret, Enabled: true,
+		Secret: body.Secret, Enabled: true, AccountID: body.AccountID,
 	})
 	if err != nil {
 		internalError(w, r, err)

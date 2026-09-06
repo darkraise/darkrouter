@@ -32,7 +32,7 @@ itself.
 | Table | Holds |
 |---|---|
 | `providers` | The configured fleet, its priority and its per-provider switches. |
-| `provider_keys` | Sealed credentials, their kind, scope and expiry. |
+| `provider_keys` | Sealed credentials, their kind, scope, expiry and account. |
 | `models` | The merged catalogue: capabilities, prices, price provenance, lifecycle state. |
 | `model_overrides` | Operator corrections, which outrank every other source. |
 | `requests` | One row per client request: outcome, timing, tokens, cost, serving path. |

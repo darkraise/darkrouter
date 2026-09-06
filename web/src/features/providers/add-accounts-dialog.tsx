@@ -19,7 +19,13 @@ import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
 import { isLocalPreset } from "./local-runtimes"
-import { AccountFields, secretFieldFor, type AccountDraft, emptyAccounts } from "./account-fields"
+import {
+  AccountFields,
+  emptyAccounts,
+  needsAccount,
+  secretFieldFor,
+  type AccountDraft,
+} from "./account-fields"
 import {
   addAccountsLabel,
   addCredentials,
@@ -451,6 +457,7 @@ export function AddAccountsDialog({
             <div className="ml-12 border-t" aria-hidden="true" />
 
             <AccountFields
+              needsAccount={needsAccount(chosen?.base_url)}
               value={accounts}
               onChange={setAccounts}
               autoFocus

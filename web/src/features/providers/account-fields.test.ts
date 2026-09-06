@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  type AccountDraft,
   draftAccounts,
   emptyAccounts,
   maskSecret,
@@ -125,5 +126,29 @@ describe("secretFieldFor", () => {
     // The empty case is legitimate here and the copy has to say so: a login
     // done inside the container needs no account at all.
     expect(field.help).toMatch(/Leave this empty/)
+  })
+})
+
+describe("a provider whose endpoint carries an account", () => {
+  it("puts the account on every credential the draft creates", () => {
+    // Cloudflare serves each account under its own URL, so a key without one
+    // is a key that cannot address the provider at all. A bulk paste is keys
+    // for one account, so the value rides along with each of them.
+    const draft: AccountDraft = {
+      ...emptyAccounts,
+      mode: "bulk",
+      bulk: "sk-one\nsk-two",
+      accountId: "abc123",
+    }
+    const out = draftAccounts(draft)
+    expect(out).toHaveLength(2)
+    expect(out.every((a) => a.account_id === "abc123")).toBe(true)
+  })
+
+  it("omits the field for the rest of the catalogue", () => {
+    // Sending an empty account_id everywhere would make every provider look
+    // like one that needs it.
+    const out = draftAccounts({ ...emptyAccounts, secret: "sk-one" })
+    expect(out[0]).not.toHaveProperty("account_id")
   })
 })

@@ -141,7 +141,7 @@ func enabledOnly(creds []store.Credential) []Credential {
 		if !c.Enabled {
 			continue
 		}
-		out = append(out, Credential{ID: c.ID, Secret: c.Secret, Kind: c.Kind, Enabled: true})
+		out = append(out, Credential{ID: c.ID, Secret: c.Secret, Kind: c.Kind, Enabled: true, AccountID: c.AccountID})
 	}
 	return out
 }

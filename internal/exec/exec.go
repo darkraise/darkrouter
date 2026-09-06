@@ -493,8 +493,16 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		return failBefore(adapter.OutcomeRetryableCredential, credErr,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
+	// The endpoint is per credential for a provider whose base URL carries an
+	// account, so this resolves after the credential is chosen and fails the
+	// same way: the next credential may well carry the account this one lacks.
+	baseURL, urlErr := provider.ResolveBaseURL(p.BaseURL, accountOf(p, c.KeyID))
+	if urlErr != nil {
+		return failBefore(adapter.OutcomeRetryableCredential, urlErr,
+			msgCredentialUnavailable, ir.ErrAuthentication)
+	}
 	tgt := &adapter.Target{
-		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
+		BaseURL: baseURL, APIKey: apiKey, Model: c.Model,
 		Info:       modelInfo(cat, c.ProviderID, c.Model),
 		Preset:     p.Preset,
 		RerankPath: rerankPath(p.Preset),
@@ -1007,6 +1015,18 @@ func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
 		return "", nil, err
 	}
 	return "", az, nil
+}
+
+// accountOf resolves the account identifier for one candidate's credential.
+// Empty for the whole catalogue except the providers whose endpoint carries
+// one, where ResolveBaseURL turns the emptiness into a refusal.
+func accountOf(p provider.Provider, keyID string) string {
+	for _, c := range p.Credentials {
+		if c.ID == keyID {
+			return c.AccountID
+		}
+	}
+	return ""
 }
 
 func credentialKind(p provider.Provider, keyID string) string {
