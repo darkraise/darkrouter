@@ -76,16 +76,43 @@ RUN apk upgrade --no-cache && apk add --no-cache ca-certificates wget \
 COPY --from=build /out/darkrouter /usr/local/bin/darkrouter
 COPY --from=auggie /opt/auggie /opt/auggie
 # On PATH under its own name, which is how internal/localcli finds it when
-# AUGGIE_BIN is unset. The state directory is created here so that a volume
-# mounted over it inherits the unprivileged user's ownership instead of arriving
-# owned by root and unwritable — which is where `auggie login` would fail.
+# AUGGIE_BIN is unset. The state directory is created here so that a named
+# volume mounted over it inherits a usable mode; without it `auggie login`
+# writes into a directory it does not own and fails.
+#
+# Mode rather than ownership, because the uid is the operator's choice: this
+# image runs as root so a bind-mounted /data needs nothing done to it on the
+# host, and `user: "10001:10001"` opts back into the unprivileged account that
+# is still built below. A directory owned by either uid would break the other.
+# It is single-tenant state that a volume mount replaces in every real
+# deployment, which is what makes the mode acceptable here and nowhere else.
 RUN if [ "$WITH_AUGGIE" = "1" ]; then ln -s /opt/auggie/bin/auggie /usr/local/bin/auggie; fi \
-    && install -d -o darkrouter -g darkrouter /home/darkrouter/.augment
+    && install -d -m 0777 /home/darkrouter/.augment
 # The notices travel with the artifact rather than only with the repository:
 # Apache-2.0 asks for them to reach whoever receives the binary, and an image
 # is how most people receive this one.
 COPY THIRD_PARTY_NOTICES.md /usr/share/doc/darkrouter/THIRD_PARTY_NOTICES.md
-USER darkrouter
+
+# No USER: the container runs as root so a bind-mounted ./data works with
+# nothing done to it on the host. Docker creates a missing bind-mount source
+# owned by root, and an unprivileged process cannot write into it -- so an
+# unprivileged default charges every deployment a chown before it will start.
+#
+# What makes that acceptable is compose.prod.yml, which drops every capability,
+# mounts the root filesystem read-only and sets no-new-privileges. Root with an
+# empty capability set cannot chown, mount, load a module, bind a privileged
+# port, or override a file mode -- it is uid 0 and almost nothing else. Keep
+# those three settings beside any `user:` override.
+#
+# HOME is explicit because the Augment CLI reads its session from under it and
+# the value must not change with the uid: dropping to `user: "10001:10001"`
+# would otherwise resolve it to /home/darkrouter by passwd lookup and root to
+# /root, silently splitting the volume from the directory that is mounted.
+ENV HOME=/home/darkrouter
+
+# 0777 for the same reason as the Augment directory: a named volume mounted
+# here inherits this mode, and the operator picks the uid.
+RUN install -d -m 0777 /data
 WORKDIR /data
 EXPOSE 8080 8081
 # readyz rather than healthz: readiness fails while the store or the config
