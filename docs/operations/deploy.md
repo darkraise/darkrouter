@@ -1,19 +1,28 @@
 # Deploying and running Darkrouter
 
-One image carries the gateway and the embedded console. Three files sit beside
-it on the host: `compose.prod.yml`, `.env`, and `data/darkrouter.yaml`. `data/`
-also holds the database, which stores every provider credential encrypted under
-`DARKROUTER_MASTER_KEY` — treat the whole directory as a secret.
+One image carries the gateway and the embedded console. Two files sit beside it
+on the host: `compose.prod.yml` and `.env`. `data/` holds the database, which
+stores every provider credential encrypted under `DARKROUTER_MASTER_KEY` —
+treat the whole directory as a secret.
+
+`data/darkrouter.yaml` is optional. It tunes body and streaming limits, log and
+capture retention, and the catalogue sync; every key has a working default,
+providers and aliases are owned by the database after the first import, and
+proxy tokens are issued in the console. Without it the gateway runs on defaults
+and says so on `/healthz`.
 
 ## Production
 
 ```bash
 mkdir -p data && sudo chown -R 10001:10001 data   # the image's unprivileged uid
-cp darkrouter.example.yaml data/darkrouter.yaml
 cp .env.example .env                              # fill it in
 docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
+
+To tune something later, drop `darkrouter.example.yaml` in as
+`data/darkrouter.yaml` and edit it — the file is watched, so it is picked up
+without a restart for every key that reloads live.
 
 `.env` needs one value to start: `DARKROUTER_MASTER_KEY`. Everything else in
 `.env.example` is commented out and has a working default, and providers are

@@ -9,6 +9,12 @@ Five steps, in order:
    is no search chain. Unknown keys are rejected, so a typo is an error rather
    than a silently ignored setting. `${VAR}` is interpolated in exactly two
    string fields: `server.proxy_token` and a provider's `api_key`.
+
+   The file is optional: a path that does not exist loads step 1 and warns,
+   because every key has a default and the blocks that do not are owned by
+   step 3. A path that exists and does not parse is still fatal — falling back
+   to defaults there would discard an operator's settings silently, which is
+   worse than refusing to start.
 3. **The database overlay**, for `providers`, `aliases` and `policy` — applied
    *before* a snapshot is published, not after.
 4. **Hot reload**, on a debounced file watch. The whole document is validated
