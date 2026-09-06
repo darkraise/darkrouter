@@ -15,9 +15,19 @@ docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
 
-**Double every `$` in the bcrypt password hash in `.env`.** Compose reads a
-single `$` as a variable, and the value arrives silently truncated — a correct
-password then fails to log in.
+`.env` needs two values to start: `DARKROUTER_MASTER_KEY` and
+`DARKROUTER_ADMIN_PASSWORD_HASH`. Everything else in `.env.example` is
+commented out and has a working default, and providers are added in the
+console rather than here — nothing in the file is interpolated, so values are
+pasted exactly as they were printed.
+
+> **Upgrading a deployment made before this change:** the bcrypt hash used to
+> need every `$` doubled. It no longer does, and a doubled hash now refuses a
+> correct password. Undo it once with `sed -i 's/\$\$/$/g' .env`.
+
+The whole of `.env` is passed to the container, so a `${SOME_KEY}` written
+into `data/darkrouter.yaml` resolves from it under any name, without touching
+`compose.prod.yml`.
 
 The container runs read-only, with all capabilities dropped and a 1 GB memory
 and 512 pid ceiling. It needs nothing writable beyond `/data` and a tmpfs

@@ -21,18 +21,27 @@ server:
     # of preamble inside that window.
     max_precommit_bytes: 1048576
 
+# None to start with, so a fresh deployment needs no provider account before
+# it will run. Add providers from the console's Providers screen, where the
+# credential is stored encrypted in the database rather than sitting in an
+# environment variable.
+#
+# Writing one here works too, and is the way to keep a provider under version
+# control: uncomment the example below and set GROQ_KEY in .env. An api_key
+# that names an unset variable is an error rather than an empty key, so a
+# provider listed here must have its key present at startup.
 providers:
-  - id: groq
-    kind: openaicompat
-    # preset connects this provider to its shipped metadata: pricing, model
-    # capabilities, quirks, and the surfaces it serves. Omitting it leaves the
-    # provider a base URL and a key, with none of those applied.
-    preset: groq
-    base_url: https://api.groq.com/openai/v1
-    api_key: ${GROQ_KEY}
-    priority: 10
-    models:
-      - openai/gpt-oss-120b
+#  - id: groq
+#    kind: openaicompat
+#    # preset connects this provider to its shipped metadata: pricing, model
+#    # capabilities, quirks, and the surfaces it serves. Omitting it leaves the
+#    # provider a base URL and a key, with none of those applied.
+#    preset: groq
+#    base_url: https://api.groq.com/openai/v1
+#    api_key: ${GROQ_KEY}
+#    priority: 10
+#    models:
+#      - openai/gpt-oss-120b
 
 # Bedrock and Vertex cannot be configured in this file. They carry endpoint
 # properties rather than a base URL and a key -- an AWS region and credential
