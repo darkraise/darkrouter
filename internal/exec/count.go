@@ -139,8 +139,13 @@ func (e *Executor) countOnce(ctx context.Context, req *ir.Request, c router.Cand
 		outcome = adapter.OutcomeRetryableCredential
 		return 0, false
 	}
+	baseURL, urlErr := provider.ResolveBaseURL(p.BaseURL, accountOf(p, c.KeyID))
+	if urlErr != nil {
+		outcome = adapter.OutcomeRetryableCredential
+		return 0, false
+	}
 	tgt := &adapter.Target{
-		BaseURL: p.BaseURL, APIKey: apiKey, Model: c.Model,
+		BaseURL: baseURL, APIKey: apiKey, Model: c.Model,
 		Info:   modelInfo(cat, c.ProviderID, c.Model),
 		Region: p.Region, Project: p.Project, Location: p.Location, Publisher: c.Publisher,
 	}

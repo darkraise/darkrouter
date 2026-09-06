@@ -129,3 +129,27 @@ pair is replaced — a crash mid-refresh then loses a refresh rather than the
 account. Two instances pointed at one account will trip the vendor's
 rotation-reuse detection; this is architectural, not a bug to be fixed in the
 worker.
+
+## Endpoints that carry an account
+
+Two providers serve each customer at a different address: Cloudflare Workers AI
+under `/accounts/{account_id}/ai/v1`, Snowflake Cortex under
+`{account_id}.snowflakecomputing.com`. Their upstream registry entries carry a
+stub URL that a bespoke executor completes, so transcribing them verbatim
+produced a preset that 404s on every call.
+
+A preset may therefore carry one placeholder, `{account_id}`, and nothing else
+— a test refuses any other spelling, because the console decides whether to ask
+for the value by looking for exactly this one.
+
+The value lives **on the credential**, not the provider: a Cloudflare token
+belongs to one account, so a provider row can hold keys for two accounts and
+each reaches its own endpoint. It is resolved after the credential is chosen —
+on the request path, in a discovery sweep, and in the console's probe — and a
+credential that lacks one is refused when it is added rather than at the first
+request.
+
+The substituted value is restricted to letters, digits, dot, dash and
+underscore. For Snowflake the placeholder is the hostname, so a separator there
+would not break the URL; it would produce a working one pointing somewhere the
+operator never configured.

@@ -563,7 +563,7 @@ cloudcode-one:
 cloudflare-ai:
   name: Cloudflare Workers AI
   kind: openaicompat
-  base_url: https://api.cloudflare.com/client/v4/accounts
+  base_url: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
   auth:
     style: bearer
   surfaces:
@@ -2164,7 +2164,7 @@ siliconflow:
 snowflake:
   name: Snowflake Cortex
   kind: openaicompat
-  base_url: https://{account}.snowflakecomputing.com/api/v2
+  base_url: https://{account_id}.snowflakecomputing.com/api/v2
   auth:
     style: bearer
   surfaces:

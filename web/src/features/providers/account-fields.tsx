@@ -17,6 +17,11 @@ export type AccountDraft = {
   freeModelsOnly: boolean
   /** Probe each key as it is added and keep only the ones that answer. */
   verifyKeys: boolean
+  /** The operator's own account identifier, for a provider whose endpoint
+   *  carries one -- Cloudflare Workers AI serves under /accounts/{id}/ai/v1.
+   *  Empty for the rest of the catalogue. It rides on the credential rather
+   *  than the provider because the account is the key's. */
+  accountId: string
 }
 
 export const emptyAccounts: AccountDraft = {
@@ -26,9 +31,21 @@ export const emptyAccounts: AccountDraft = {
   bulk: "",
   freeModelsOnly: false,
   verifyKeys: true,
+  accountId: "",
 }
 
-export type ParsedAccount = { label: string; secret: string }
+export type ParsedAccount = { label: string; secret: string; account_id?: string }
+
+/** The one placeholder a shipped base URL may carry. Kept in step with the
+ *  gateway's resolver, which refuses any other. */
+const ACCOUNT_PLACEHOLDER = "{account_id}"
+
+/** Whether this provider's endpoint cannot be reached by a key alone. Read
+ *  from the base URL rather than a flag, because the URL is what actually
+ *  needs the value and the two could not then disagree. */
+export function needsAccount(baseURL?: string): boolean {
+  return (baseURL ?? "").includes(ACCOUNT_PLACEHOLDER)
+}
 
 /** What the secret field asks for. Most providers hand out a key; a local CLI
  *  hands out a session document, and asking for an "API key" would send the
@@ -108,11 +125,20 @@ export function maskSecret(secret: string): string {
 
 /** What the draft would create, in the order it will be written. */
 export function draftAccounts(draft: AccountDraft): ParsedAccount[] {
-  if (draft.mode === "single") {
-    const secret = draft.secret.trim()
-    return secret === "" ? [] : [{ label: draft.label.trim() || "default", secret }]
-  }
-  return parseBulkAccounts(draft.bulk, draft.label.trim() || "key")
+  const accounts =
+    draft.mode === "single"
+      ? ((): ParsedAccount[] => {
+          const secret = draft.secret.trim()
+          return secret === "" ? [] : [{ label: draft.label.trim() || "default", secret }]
+        })()
+      : parseBulkAccounts(draft.bulk, draft.label.trim() || "key")
+
+  // Absent rather than empty for the rest of the catalogue: a provider that
+  // does not need an account should not be sent one, or every provider starts
+  // looking like one that does.
+  const account = draft.accountId.trim()
+  if (account === "") return accounts
+  return accounts.map((a) => ({ ...a, account_id: account }))
 }
 
 /**
@@ -127,16 +153,38 @@ export function AccountFields({
   onChange,
   autoFocus,
   field = API_KEY_FIELD,
+  needsAccount = false,
 }: {
   value: AccountDraft
   onChange: (next: AccountDraft) => void
   autoFocus?: boolean
   /** What this provider's secret is called and looks like. */
   field?: SecretField
+  /** Whether this provider's endpoint carries the operator's account, and so
+   *  cannot be reached by a key alone. */
+  needsAccount?: boolean
 }) {
   const parsed = parseBulkAccounts(value.bulk, value.label.trim() || "key")
   return (
     <div className="flex flex-col gap-4">
+      {/* Above the key: it belongs to the same account the key does, and the
+          endpoint is unreachable without it, so it is not an afterthought. */}
+      {needsAccount ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="account-id">Account ID</Label>
+          <Input
+            id="account-id"
+            value={value.accountId}
+            spellCheck={false}
+            className="font-mono"
+            onChange={(e) => onChange({ ...value, accountId: e.target.value })}
+          />
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            This provider serves each account at its own address, so a key on
+            its own cannot reach it. One account per credential.
+          </p>
+        </div>
+      ) : null}
       <ToggleGroup
         type="single"
         value={value.mode}

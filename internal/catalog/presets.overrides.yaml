@@ -387,6 +387,13 @@ baseten:
 
 cloudflare-ai:
   litellm_id: cloudflare
+  # Upstream's registry carries a stub here -- its own comment reads "URL is
+  # dynamic: uses accountId from credentials. The executor builds it", and its
+  # executor appends {accountId}/ai/v1. presetgen transcribes base URLs
+  # verbatim, so what it generated was a URL that 404s on every call. The
+  # placeholder is filled from the credential's account, per credential,
+  # because one Cloudflare token belongs to exactly one account.
+  base_url: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
 
 codestral:
   litellm_id: codestral
@@ -459,6 +466,11 @@ scaleway:
   litellm_id: scaleway
 
 snowflake:
+  # The same defect as cloudflare-ai, in the hostname rather than the path:
+  # upstream ships https://{account}.snowflakecomputing.com/api/v2 and nothing
+  # substituted it, so a request went to a host literally named "{account}".
+  # Renamed to the one placeholder the resolver knows.
+  base_url: https://{account_id}.snowflakecomputing.com/api/v2
   litellm_id: snowflake
 
 tencent:

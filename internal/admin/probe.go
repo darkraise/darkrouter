@@ -181,8 +181,12 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 		return s.probeOAuth(ctx, row, cred)
 	}
 
+	base, err := provider.ResolveBaseURL(row.BaseURL, cred.AccountID)
+	if err != nil {
+		return "listing", 0, err
+	}
 	pr, err := catalog.ProbeFor(provider.Provider{
-		ID: row.ID, Kind: row.Kind, BaseURL: row.BaseURL, Preset: row.Preset,
+		ID: row.ID, Kind: row.Kind, BaseURL: base, Preset: row.Preset,
 	}, preset, preset.Auth.Secret(cred.Secret))
 	if err != nil {
 		// No listing endpoint for this kind. Spec §4.3's fallback is a

@@ -1,0 +1,12 @@
+-- The account identifier some providers need in their endpoint before a
+-- credential can be used at all: Cloudflare Workers AI serves under
+-- /accounts/{id}/ai/v1, Snowflake Cortex under {id}.snowflakecomputing.com.
+--
+-- On the credential rather than the provider because it belongs to the same
+-- account the key does. One provider row can then hold keys from two
+-- Cloudflare accounts, which is how upstream models it and what a provider-row
+-- column would have made impossible.
+--
+-- Not a secret: it names an account, it does not authenticate one, and the
+-- refresh and routing paths need it without decrypting anything.
+ALTER TABLE provider_keys ADD COLUMN account_id TEXT NOT NULL DEFAULT '';

@@ -27,6 +27,12 @@ type Credential struct {
 	// secret, and the refresh worker has to find rows expiring soon without
 	// decrypting every credential in the database on every tick.
 	ExpiresAt *int64
+
+	// AccountID is the operator's own account identifier, for a provider whose
+	// endpoint carries one. Empty for the rest of the catalogue. It names an
+	// account rather than authenticating one, so it is stored in the clear
+	// beside the ciphertext.
+	AccountID string
 }
 
 // newID returns a ULID. Application-generated ids matter here for the same
@@ -81,9 +87,9 @@ func insertCredentialTx(ctx context.Context, e execer, key *crypto.Key, c Creden
 		enabled = 1
 	}
 	_, err = e.ExecContext(ctx,
-		`INSERT INTO provider_keys (id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, c.ProviderID, c.Label, kind, ciphertext, nonce, c.Scope, enabled, c.ExpiresAt)
+		`INSERT INTO provider_keys (id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at, account_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, c.ProviderID, c.Label, kind, ciphertext, nonce, c.Scope, enabled, c.ExpiresAt, c.AccountID)
 	if err != nil {
 		return "", fmt.Errorf("insert credential for provider %q: %w", c.ProviderID, err)
 	}
@@ -96,7 +102,7 @@ func insertCredentialTx(ctx context.Context, e execer, key *crypto.Key, c Creden
 // is indistinguishable from one that was never configured.
 func (d *DB) Credentials(ctx context.Context, key *crypto.Key, providerID string) ([]Credential, error) {
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at
+		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at, account_id
 		   FROM provider_keys
 		  WHERE provider_id = ?
 		  ORDER BY id`, providerID)
@@ -120,7 +126,7 @@ func scanCredentials(rows *sql.Rows, key *crypto.Key) ([]Credential, error) {
 			enabled    int
 		)
 		if err := rows.Scan(&c.ID, &c.ProviderID, &c.Label, &c.Kind,
-			&ciphertext, &nonce, &c.Scope, &enabled, &c.ExpiresAt); err != nil {
+			&ciphertext, &nonce, &c.Scope, &enabled, &c.ExpiresAt, &c.AccountID); err != nil {
 			return nil, fmt.Errorf("scan credential: %w", err)
 		}
 		plaintext, err := key.Open(ciphertext, nonce, []byte(c.ID))
@@ -239,7 +245,7 @@ func (d *DB) ExpiringCredentials(ctx context.Context, key *crypto.Key,
 	kind string, before int64) ([]Credential, error) {
 
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at
+		`SELECT id, provider_id, label, kind, ciphertext, nonce, scope, enabled, expires_at, account_id
 		   FROM provider_keys
 		  WHERE kind = ? AND enabled = 1 AND expires_at IS NOT NULL AND expires_at <= ?
 		  ORDER BY expires_at`, kind, before)

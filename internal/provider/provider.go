@@ -21,6 +21,12 @@ type Credential struct {
 	// Kind is static, sigv4, gcp_sa or oauth. It says how to read Secret: a
 	// bare key, a service-account document, or a marshalled token.
 	Kind string
+
+	// AccountID fills the {account_id} placeholder a provider's base URL may
+	// carry. It is per credential because it belongs to the same account the
+	// secret does -- one provider row can hold keys from two Cloudflare
+	// accounts, and each reaches a different endpoint.
+	AccountID string
 }
 
 type Provider struct {
