@@ -204,11 +204,11 @@ func TestRetentionOfExactlyTwoDaysIsAccepted(t *testing.T) {
 }
 
 // The shipped example is documentation that has to stay loadable. It drifted
-// once already, naming a model the provider had decommissioned.
+// once already, naming a model the provider had decommissioned. The empty
+// environment is the point: a fresh deployment copies this file and starts
+// with no provider key set at all, adding providers from the console instead.
 func TestShippedExampleParses(t *testing.T) {
-	c, err := Load("../../darkrouter.example.yaml", env(map[string]string{
-		"GROQ_KEY": "sk-x",
-	}))
+	c, err := Load("../../darkrouter.example.yaml", env(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
