@@ -330,7 +330,7 @@ export function AddAccountsDialog({
           free_models_only: accounts.freeModelsOnly,
         })
       }
-      return addCredentials(chosen.id, accounts, setProgress)
+      return addCredentials(chosen.id, accounts, needsAccount(chosen.base_url), setProgress)
     },
     // The catalogue too: the first credential makes the provider
     // discoverable, and a sweep lands models the screen that opened this
@@ -357,7 +357,7 @@ export function AddAccountsDialog({
   const filtered = filterPresets(all, { q, surface, authKind, freeTier, exclude })
   const surfaceOptions = distinctSorted(all.flatMap((p) => p.surfaces))
   const authKindOptions = distinctSorted(all.map((p) => p.auth_kind))
-  const count = countAccounts(accounts)
+  const count = countAccounts(accounts, needsAccount(chosen?.base_url))
 
   return (
     <Dialog

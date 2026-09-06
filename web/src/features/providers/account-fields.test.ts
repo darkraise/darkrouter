@@ -130,19 +130,52 @@ describe("secretFieldFor", () => {
 })
 
 describe("a provider whose endpoint carries an account", () => {
-  it("puts the account on every credential the draft creates", () => {
-    // Cloudflare serves each account under its own URL, so a key without one
-    // is a key that cannot address the provider at all. A bulk paste is keys
-    // for one account, so the value rides along with each of them.
+  it("takes the account from the single-credential field", () => {
+    const draft: AccountDraft = { ...emptyAccounts, secret: "sk-one", accountId: "abc123" }
+    expect(draftAccounts(draft, true)).toEqual([
+      { label: "default", secret: "sk-one", account_id: "abc123" },
+    ])
+  })
+
+  it("reads a different account per line in a bulk paste", () => {
+    // Each Cloudflare token belongs to its own account, so a paste of five
+    // keys is five accounts. One field applied to all of them would send four
+    // of the five to the wrong address.
     const draft: AccountDraft = {
       ...emptyAccounts,
       mode: "bulk",
-      bulk: "sk-one\nsk-two",
-      accountId: "abc123",
+      bulk: "acct-a|sk-one\nacct-b|sk-two",
+      accountId: "ignored",
     }
-    const out = draftAccounts(draft)
-    expect(out).toHaveLength(2)
-    expect(out.every((a) => a.account_id === "abc123")).toBe(true)
+    expect(draftAccounts(draft, true)).toEqual([
+      { label: "key-1", secret: "sk-one", account_id: "acct-a" },
+      { label: "key-2", secret: "sk-two", account_id: "acct-b" },
+    ])
+  })
+
+  it("takes a name before the account when the line carries three fields", () => {
+    const out = parseBulkAccounts("work|acct-a|sk-one", "key", true)
+    expect(out).toEqual([{ label: "work", secret: "sk-one", account_id: "acct-a" }])
+  })
+
+  it("drops a line that names no account", () => {
+    // It cannot address the provider, and creating it would leave a credential
+    // the gateway refuses on every request.
+    expect(parseBulkAccounts("sk-lonely", "key", true)).toEqual([])
+  })
+
+  it("drops a line whose account is empty", () => {
+    // A leading pipe, which is what a column pasted with a blank first field
+    // looks like. The pipe makes it well-formed; the empty account still
+    // cannot address anything.
+    expect(parseBulkAccounts("|sk-lonely", "key", true)).toEqual([])
+    expect(parseBulkAccounts("work||sk-lonely", "key", true)).toEqual([])
+  })
+
+  it("still splits name|key for the rest of the catalogue", () => {
+    expect(parseBulkAccounts("work|sk-one", "key")).toEqual([
+      { label: "work", secret: "sk-one" },
+    ])
   })
 
   it("omits the field for the rest of the catalogue", () => {

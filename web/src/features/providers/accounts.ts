@@ -26,8 +26,8 @@ export function progressLabel(p: AddProgress): string {
 }
 
 /** How many accounts the draft would create. */
-export function countAccounts(draft: AccountDraft): number {
-  return draftAccounts(draft).length
+export function countAccounts(draft: AccountDraft, needsAccount = false): number {
+  return draftAccounts(draft, needsAccount).length
 }
 
 /** The label on the button that submits the draft, so it says what will
@@ -53,13 +53,14 @@ export function addAccountsLabel(n: number): string {
 export async function addCredentials(
   providerId: string,
   draft: AccountDraft,
+  needsAccount: boolean,
   onProgress?: (p: AddProgress) => void,
 ): Promise<AddResult> {
   const failed: AddFailure[] = []
   const rejected: AddFailure[] = []
   let added = 0
 
-  const items = draftAccounts(draft)
+  const items = draftAccounts(draft, needsAccount)
   for (const [done, item] of items.entries()) {
     const report = (step: AddProgress["step"]) =>
       onProgress?.({ done, total: items.length, label: item.label, step })
