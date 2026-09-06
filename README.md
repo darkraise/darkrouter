@@ -181,14 +181,25 @@ discovery, aliases and policy, route preview, requests and traces, usage,
 sessions and proxy tokens, the playground, OAuth connection, and the
 config view.
 
-Set a password before starting:
+The first time the console is opened it asks for a password. A console with no
+password is claimed rather than open: the process prints a one-time setup token
+to its log, and the setup page wants that token alongside the password you are
+choosing, so claiming it takes host access rather than a route to the port.
+
+```bash
+docker compose logs | grep 'setup token'
+```
+
+Setting a password closes setup permanently. To provision one ahead of time
+instead — or to recover a lost one, since a changed hash overrides the stored
+password on the next restart — set `DARKROUTER_ADMIN_PASSWORD_HASH`:
 
 ```bash
 export DARKROUTER_ADMIN_PASSWORD_HASH="$(echo -n 'your-password' | darkrouter hash-password)"
 ```
 
-Without it the gateway still proxies — that is its job — but every login is
-refused and `/healthz` carries a warning saying so.
+Either way the gateway keeps proxying — that is its job — and `/healthz`
+carries a warning while the console is still unclaimed.
 
 Nine destinations cover operations and configuration: **Overview**,
 **Requests**, **Usage**, **Providers**, **Models**, **Routing**,

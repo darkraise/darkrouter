@@ -87,8 +87,8 @@ func TestEveryRouteCarriesItsGuard(t *testing.T) {
 			}
 		}
 	}
-	if public != 2 {
-		t.Errorf("%d public routes, want exactly status and login", public)
+	if public != 3 {
+		t.Errorf("%d public routes, want exactly status, login and setup", public)
 	}
 }
 

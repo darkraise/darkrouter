@@ -15,15 +15,35 @@ docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
 
-`.env` needs two values to start: `DARKROUTER_MASTER_KEY` and
-`DARKROUTER_ADMIN_PASSWORD_HASH`. Everything else in `.env.example` is
-commented out and has a working default, and providers are added in the
-console rather than here — nothing in the file is interpolated, so values are
-pasted exactly as they were printed.
+`.env` needs one value to start: `DARKROUTER_MASTER_KEY`. Everything else in
+`.env.example` is commented out and has a working default, and providers are
+added in the console rather than here — nothing in the file is interpolated,
+so values are pasted exactly as they were printed.
+
+The admin password is set in the browser, not here. On first run the process
+prints a one-time setup token; open the console and it asks for that token and
+a password:
+
+```bash
+docker compose -f compose.prod.yml logs | grep 'setup token'
+```
+
+Setting a password closes setup for good. `DARKROUTER_ADMIN_PASSWORD_HASH`
+still works and still overrides the stored password on the next restart, which
+is how a lost password is recovered — see below.
 
 > **Upgrading a deployment made before this change:** the bcrypt hash used to
 > need every `$` doubled. It no longer does, and a doubled hash now refuses a
 > correct password. Undo it once with `sed -i 's/\$\$/$/g' .env`.
+
+**Recovering a lost password.** Put a fresh hash in `DARKROUTER_ADMIN_PASSWORD_HASH`
+and restart. A hash that differs from the one in force when the password was
+last set reads as newer, and the stored password is dropped in its favour:
+
+```bash
+docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
+  hash-password -password 'yours'
+```
 
 The whole of `.env` is passed to the container, so a `${SOME_KEY}` written
 into `data/darkrouter.yaml` resolves from it under any name, without touching

@@ -1,8 +1,8 @@
-# Two environment variables live outside this file. DARKROUTER_MASTER_KEY
-# unlocks the keyring stored credentials are encrypted with and is required.
-# DARKROUTER_ADMIN_PASSWORD_HASH holds the bcrypt hash the dashboard logs in
-# against — leaving it unset closes the dashboard rather than opening it, and
-# `darkrouter hash-password` produces the value.
+# One environment variable lives outside this file and is required:
+# DARKROUTER_MASTER_KEY, which unlocks the keyring stored credentials are
+# encrypted with. The admin password is not here either — it is set in the
+# console on first run, with the one-time setup token the process logs, and
+# DARKROUTER_ADMIN_PASSWORD_HASH is the optional way to provision or reset it.
 
 server:
   proxy_listen: :8080

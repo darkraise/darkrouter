@@ -65,7 +65,15 @@ function Shell() {
   if (!authed) {
     // A login form nobody can pass is worse than useless: it refuses every
     // password and says nothing about why.
-    if (status.data && !status.data.configured) return <FirstRun />
+    if (status.data && !status.data.configured)
+      return (
+        <FirstRun
+          onClaimed={() => {
+            setRevoked(false)
+            void status.refetch()
+          }}
+        />
+      )
     return (
       <LoginScreen
         onAuthenticated={() => {
