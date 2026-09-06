@@ -1,6 +1,8 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { App } from "../../app"
+import { FirstRun } from "./first-run"
 import { EmptyState, NoMatch } from "./empty-state"
 import { FirstRunProviders } from "./first-run-providers"
 
@@ -16,18 +18,43 @@ function mockStatus(configured: boolean) {
   )
 }
 
+/** Answers each call in turn, so a test can script setup-then-login. */
+function mockSequence(...replies: Array<{ status: number; body: unknown }>) {
+  let i = 0
+  const calls: string[] = []
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input))
+      const r = replies[Math.min(i++, replies.length - 1)] ?? replies[0]!
+      return new Response(JSON.stringify(r.body), {
+        status: r.status,
+        headers: { "Content-Type": "application/json" },
+      })
+    }),
+  )
+  return calls
+}
+
+async function fillSetup(token: string, password: string) {
+  const user = userEvent.setup()
+  await user.type(screen.getByLabelText(/setup token/i), token)
+  await user.type(screen.getByLabelText(/^admin password/i), password)
+  await user.click(screen.getByRole("button", { name: /set password/i }))
+}
+
 beforeEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe("a fresh install", () => {
-  it("explains itself instead of showing a login it cannot pass", async () => {
-    // §12. Every password would be refused, and the form says nothing about
-    // why or what to do next.
+  it("offers a setup form rather than a login it cannot pass", async () => {
+    // Every password would be refused, and a login form says nothing about
+    // why or what to do next. The claim happens here instead.
     mockStatus(false)
     render(<App />)
-    expect(await screen.findByText(/no admin password set/i)).toBeInTheDocument()
-    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument()
+    expect(await screen.findByLabelText(/setup token/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^admin password/i)).toBeInTheDocument()
   })
 
   it("shows the login once a password exists", async () => {
@@ -37,6 +64,49 @@ describe("a fresh install", () => {
     expect(
       await screen.findByRole("button", { name: /sign in|log in/i }),
     ).toBeInTheDocument()
+  })
+})
+
+describe("claiming the console", () => {
+  it("logs the operator in with the password it just set", async () => {
+    // One password typed once. Setup mints no session, so the console
+    // spends the new password on a real login rather than a second code
+    // path that issues cookies.
+    const calls = mockSequence(
+      { status: 200, body: { configured: true } },
+      { status: 200, body: { authenticated: true, csrf_token: "t" } },
+    )
+    const onClaimed = vi.fn()
+    render(<FirstRun onClaimed={onClaimed} />)
+
+    await fillSetup("the-token", "a long enough password")
+
+    await waitFor(() => expect(onClaimed).toHaveBeenCalled())
+    expect(calls[0]).toContain("/api/auth/setup")
+    expect(calls[1]).toContain("/api/auth/login")
+  })
+
+  it("keeps a wrong token on the page instead of logging anyone in", async () => {
+    mockSequence({ status: 401, body: { error: "invalid setup token" } })
+    const onClaimed = vi.fn()
+    render(<FirstRun onClaimed={onClaimed} />)
+
+    await fillSetup("wrong", "a long enough password")
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/setup token/i)
+    expect(onClaimed).not.toHaveBeenCalled()
+  })
+
+  it("hands over to the login screen when someone else claimed it first", async () => {
+    // 409. The console now has a password; this operator needs the login
+    // form, not a setup form that will refuse them forever.
+    mockSequence({ status: 409, body: { error: "the console has already been set up" } })
+    const onClaimed = vi.fn()
+    render(<FirstRun onClaimed={onClaimed} />)
+
+    await fillSetup("the-token", "a long enough password")
+
+    await waitFor(() => expect(onClaimed).toHaveBeenCalled())
   })
 })
 

@@ -376,12 +376,12 @@ func TestAMissingPasswordHashWarnsRatherThanFailingStartup(t *testing.T) {
 	}
 	var found bool
 	for _, w := range body.Warnings {
-		if strings.Contains(w, "PASSWORD_HASH") {
+		if strings.Contains(w, "setup token") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("warnings = %v; an operator cannot tell the dashboard is closed", body.Warnings)
+		t.Errorf("warnings = %v; an operator cannot tell the console is unclaimed", body.Warnings)
 	}
 }
 
@@ -525,5 +525,46 @@ func TestTheSyncedLiteLLMIndexReachesTheRoutedCatalog(t *testing.T) {
 	if m.Pricing.Source != catalog.SourceLiteLLM || m.Pricing.InputMicrosPerMTok != 590_000 {
 		t.Errorf("pricing = %+v, want the index's 590000 at source litellm: the "+
 			"synced index never reaches the catalog the router serves", m.Pricing)
+	}
+}
+
+// warnsAboutSetup reports whether /healthz is telling an operator the console
+// still has to be claimed.
+func warnsAboutSetup(t *testing.T, s *Server) bool {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	var body struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range body.Warnings {
+		if strings.Contains(w, "setup token") {
+			return true
+		}
+	}
+	return false
+}
+
+// The console is claimed through the setup page now, not only by restarting
+// with an environment hash, so this warning describes state that changes while
+// the process runs. Computed once at startup it goes stale the moment an
+// operator sets a password, and monitoring keeps alerting on a console that is
+// fine.
+func TestTheUnclaimedWarningClearsOnceAPasswordIsSet(t *testing.T) {
+	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", "")
+	s := newTestServer(t, "")
+	if !warnsAboutSetup(t, s) {
+		t.Fatal("an unclaimed console does not say so")
+	}
+	// The row the setup page writes; the key is admin's settingAdminPasswordHash.
+	if err := s.db.PutSetting(context.Background(), "admin.password_hash",
+		"$2a$10$P4Ck2vJmRy1kM1sJ8jvLZuJ3s6Q0iJm9Xq0y3cZ1oR9pC5oGm0m0y"); err != nil {
+		t.Fatal(err)
+	}
+	if warnsAboutSetup(t, s) {
+		t.Error("the console still warns it is unclaimed after a password was set")
 	}
 }

@@ -102,6 +102,14 @@ type Server struct {
 	probes probeLocks
 	logins *loginLimiter
 
+	// setupToken is the one-time claim on a console that has no password yet.
+	// It lives in memory and nowhere else: the database would outlive the
+	// process that logged it, and /healthz serves startup warnings without a
+	// session. Empty once the console is claimed, and on any server that
+	// started with a password already configured.
+	setupMu    sync.Mutex
+	setupToken string
+
 	// listeners are the temporary loopback servers receiving OAuth redirects,
 	// keyed by provider so a second flow replaces the first rather than failing
 	// to bind a port the first still holds.
@@ -131,6 +139,9 @@ func New(deps Deps) (*Server, error) {
 		stopSweep: make(chan struct{}),
 	}
 	if err := s.reconcilePasswordHash(ctx); err != nil {
+		return nil, fmt.Errorf("admin: %w", err)
+	}
+	if err := s.mintSetupToken(ctx); err != nil {
 		return nil, fmt.Errorf("admin: %w", err)
 	}
 	if _, err := deps.DB.SweepSessions(ctx); err != nil {
@@ -198,6 +209,9 @@ func (s *Server) routeTable() []route {
 		// decide whether to render the login screen.
 		{"GET", "/api/auth/status", routePublic, s.handleAuthStatus},
 		{"POST", "/api/auth/login", routePublic, s.handleLogin},
+		// Public because a console with no password has no session to offer.
+		// It refuses once one is set, and needs the token from the startup log.
+		{"POST", "/api/auth/setup", routePublic, s.handleSetup},
 		{"POST", "/api/auth/logout", routeCSRF, s.handleLogout},
 
 		{"GET", "/api/presets", routeSession, s.handlePresets},

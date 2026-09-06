@@ -263,11 +263,6 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	// The warning is appended before admin.New because startupWarnings is
 	// passed by value, and the same slice is what /healthz reads.
 	passwordHash := os.Getenv("DARKROUTER_ADMIN_PASSWORD_HASH")
-	if passwordHash == "" {
-		startupWarnings = append(startupWarnings,
-			"DARKROUTER_ADMIN_PASSWORD_HASH is not set; the admin dashboard will refuse "+
-				"every login. Generate one with: darkrouter hash-password")
-	}
 	// A typed nil is not a nil interface. Assigning a disabled discoverer
 	// straight into admin.Deps.Disc would satisfy every `Disc != nil` guard in
 	// that package and then dereference on the first call.
@@ -502,6 +497,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 // without running it, which a test does.
 func (s *Server) CloseAdmin() { s.adm.Close() }
 
+// unclaimedWarning is what /healthz says while the console still has to be
+// claimed. It names where the setup token is, never the token.
+const unclaimedWarning = "no admin password is set; open the console and claim it with the " +
+	"setup token printed in this process's log"
+
 func (s *Server) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -513,6 +513,13 @@ func (s *Server) AdminHandler() http.Handler {
 		// Startup warnings first: they explain state the config file cannot,
 		// such as a providers block that is no longer the source of truth.
 		warnings := append(append([]string{}, s.warnings...), cfg.Warnings...)
+		// Not a startup warning: the setup page sets a password while the
+		// process runs, and a warning fixed at startup would keep telling an
+		// operator to claim a console they already claimed. The token itself
+		// stays out of it -- this endpoint needs no session.
+		if !s.adm.PasswordConfigured(r.Context()) {
+			warnings = append(warnings, unclaimedWarning)
+		}
 
 		body := map[string]any{
 			"config_valid": cfgErr == nil,

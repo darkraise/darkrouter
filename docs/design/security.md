@@ -48,7 +48,22 @@ which a revoked token keeps working.
 
 ## The admin surface
 
-Password login, bcrypt at cost 12, failing closed on an empty hash. The
+Password login, bcrypt at cost 12, failing closed on an empty hash.
+
+A console with no password yet is claimed, not open. At startup the process
+mints a one-time setup token, keeps it in memory, and writes it to its log;
+`POST /api/auth/setup` takes that token and sets the first password. So the
+claim needs the ability to read the host's log, not merely a route to the
+port — which matters because the admin port binds every interface and the
+project ships no reverse proxy. The token is never persisted, never returned
+by an endpoint, and deliberately kept out of the startup warnings, which
+`/healthz` serves without a session. It is spent on first use, and setup
+refuses with 409 once any password exists. The write goes through an
+insert-if-absent so two simultaneous claims cannot both believe they won.
+
+Setup issues no session. The console spends the password it just set on an
+ordinary login, so one code path mints cookies and the stored hash is
+exercised before anyone depends on it. The
 session is a sliding 30-day `HttpOnly`, `SameSite=Lax` cookie, stored hashed —
 so the identifier in a session listing, and in the revoke path, is a digest
 prefix, never the cookie value.

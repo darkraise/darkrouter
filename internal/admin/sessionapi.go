@@ -21,6 +21,9 @@ const settingAdminPasswordHash = "admin.password_hash"
 // be told from an unchanged one without keeping the hash itself twice.
 const settingPasswordEnvFingerprint = "admin.password_env_fingerprint"
 
+// minPasswordChars is the floor the setup page and a password change share.
+const minPasswordChars = 12
+
 func fingerprint(hash string) string {
 	sum := sha256.Sum256([]byte(hash))
 	return hex.EncodeToString(sum[:])
@@ -64,6 +67,18 @@ func (s *Server) reconcilePasswordHash(ctx context.Context) error {
 	}
 	slog.Warn("DARKROUTER_ADMIN_PASSWORD_HASH changed since the password was last set in the console; the environment's hash is now in effect")
 	return db.PutSetting(ctx, settingPasswordEnvFingerprint, current)
+}
+
+// recordPasswordEnv notes which environment hash was in force when the stored
+// password was written.
+//
+// Unconditional, empty environment included. reconcilePasswordHash only
+// overrides the row when the fingerprint it finds differs from the current
+// environment's, so a row written with no fingerprint is a row that survives
+// the operator seeding DARKROUTER_ADMIN_PASSWORD_HASH to recover a lost
+// password -- the recovery documented in deploy.md, silently doing nothing.
+func (s *Server) recordPasswordEnv(ctx context.Context) error {
+	return s.deps.DB.PutSetting(ctx, settingPasswordEnvFingerprint, fingerprint(s.deps.PasswordHash))
 }
 
 // currentPasswordHash is the hash logins are checked against: whatever the
@@ -176,7 +191,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
-	if len(body.New) < 12 {
+	if len(body.New) < minPasswordChars {
 		writeError(w, http.StatusBadRequest, "the new password must be at least 12 characters")
 		return
 	}
@@ -195,12 +210,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// The environment hash in force now is the one this row was set beside;
 	// only a later change to it should override the row.
-	if s.deps.PasswordHash != "" {
-		if err := s.deps.DB.PutSetting(r.Context(), settingPasswordEnvFingerprint,
-			fingerprint(s.deps.PasswordHash)); err != nil {
-			internalError(w, r, err)
-			return
-		}
+	if err := s.recordPasswordEnv(r.Context()); err != nil {
+		internalError(w, r, err)
+		return
 	}
 	// Every other session, not this one: revoking the caller would log the
 	// operator out of the screen they just used.
