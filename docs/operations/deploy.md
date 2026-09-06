@@ -15,9 +15,19 @@ docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
 
-**Double every `$` in the bcrypt password hash in `.env`.** Compose reads a
-single `$` as a variable, and the value arrives silently truncated — a correct
-password then fails to log in.
+`.env` needs two values to start: `DARKROUTER_MASTER_KEY` and
+`DARKROUTER_ADMIN_PASSWORD_HASH`. Everything else in `.env.example` is
+commented out and has a working default, and providers are added in the
+console rather than here — nothing in the file is interpolated, so values are
+pasted exactly as they were printed.
+
+> **Upgrading a deployment made before this change:** the bcrypt hash used to
+> need every `$` doubled. It no longer does, and a doubled hash now refuses a
+> correct password. Undo it once with `sed -i 's/\$\$/$/g' .env`.
+
+The whole of `.env` is passed to the container, so a `${SOME_KEY}` written
+into `data/darkrouter.yaml` resolves from it under any name, without touching
+`compose.prod.yml`.
 
 The container runs read-only, with all capabilities dropped and a 1 GB memory
 and 512 pid ceiling. It needs nothing writable beyond `/data` and a tmpfs
@@ -111,18 +121,29 @@ owned by the database from then on — edit them in the console.
 
 ## Exposure
 
-Both ports bind every interface, so the LAN reaches them directly. For the
-internet, `--profile edge` adds Caddy, which terminates TLS for `ADMIN_DOMAIN`
-and `PROXY_DOMAIN` and sets HSTS, `nosniff`, a referrer policy and frame denial
-on the console.
+Both ports bind every interface, so the LAN reaches them directly. Neither
+speaks TLS, so anything reachable from the internet needs a reverse proxy in
+front — Caddy, nginx, Traefik, a Cloudflare tunnel; the stack ships none and
+takes no view on which. Four requirements it has to meet:
 
-**Each surface must be a whole origin** — no subpath, no split between the
-console host and the API host — or the console's same-origin `/api` calls
-break. See [`../design/security.md`](../design/security.md) for why no CORS
-configuration exists.
+- **Terminate TLS and add HSTS.** Darkrouter already sets `nosniff`, frame
+  denial, a referrer policy and a CSP on every console response, but
+  `Strict-Transport-Security` belongs to whatever holds the certificate.
+- **Give each surface a whole origin** — the console on one name, the gateway
+  on another, each owning the root of its name. No subpath, no split between
+  the console host and the API host, or the console's same-origin `/api` calls
+  break. See [`../design/security.md`](../design/security.md) for why no CORS
+  configuration exists.
+- **Forward `X-Forwarded-Proto`.** The console reads it to mark the session
+  cookie `Secure`; without it an HTTPS deployment issues cookies that are not.
+  It is honoured only from a loopback or private peer, so the proxy has to
+  reach Darkrouter over the container network rather than a public address.
+- **Do not buffer the gateway's responses** — Caddy's `flush_interval -1`,
+  nginx's `proxy_buffering off`. Buffered streaming delivers a completion in
+  one lump instead of token by token.
 
-Login rate limiting is Darkrouter's own, because Caddy's standard build ships
-no rate limiter.
+Login rate limiting is Darkrouter's own, per IP, so it holds whatever sits in
+front.
 
 ## Reaching a model runtime on the host
 

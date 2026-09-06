@@ -53,9 +53,9 @@ func TestSessionCookieIsNotSecureOverPlainHTTP(t *testing.T) {
 	}
 }
 
-// The shipped Caddyfile terminates TLS and proxies plain HTTP to the admin
-// port, so r.TLS is nil for a deployment that is HTTPS end to end from the
-// browser's side. The cookie has to be Secure anyway.
+// An edge proxy terminates TLS and forwards plain HTTP to the admin port, so
+// r.TLS is nil for a deployment that is HTTPS end to end from the browser's
+// side. The cookie has to be Secure anyway.
 func TestSessionCookieIsSecureBehindATerminatingProxy(t *testing.T) {
 	s, _ := testServerFull(t)
 	c, _ := loginFrom(t, s, func(r *http.Request) {

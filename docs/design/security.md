@@ -62,8 +62,9 @@ mutating route cannot acquire one without the other.
 top-level navigation carries no header to check, and the OAuth `state`
 parameter does that work instead.
 
-Login is rate-limited by Darkrouter itself, per IP, because Caddy's standard
-build ships no rate limiter and a custom build is deliberately not assumed.
+Login is rate-limited by Darkrouter itself, per IP, rather than at an edge
+proxy: the stack ships no proxy, so a guard that depended on one would be a
+guard that is usually absent.
 
 **The proxy port never honours cookies.** No proxy dialect reads one. This
 holds by construction rather than by a runtime guard — nothing rejects an

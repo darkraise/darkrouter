@@ -6,7 +6,7 @@
 #   docker compose -f compose.prod.yml up -d
 #
 # Expects, beside this file:
-#   .env                  the secrets below
+#   .env                  the settings (.env.example is the template)
 #   data/darkrouter.yaml  the configuration (darkrouter.example.yaml is the template)
 #
 # data/ must be writable by uid 10001, which is the unprivileged user the image
@@ -21,10 +21,10 @@ services:
     pull_policy: always
     restart: unless-stopped
 
-    # Bound to every interface so the LAN can reach it directly. Put a reverse
-    # proxy in front for the internet — see the edge profile below — rather than
-    # forwarding these ports at the router, which would publish the dashboard
-    # over plain HTTP.
+    # Bound to every interface so the LAN can reach it directly. For the
+    # internet, put your own reverse proxy in front — docs/operations/deploy.md
+    # lists what it has to do — rather than forwarding these ports at the
+    # router, which would publish the dashboard over plain HTTP.
     ports:
       - "${PROXY_PORT:-8080}:8080"
       - "${ADMIN_PORT:-8081}:8081"
@@ -36,38 +36,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-    environment:
-      # Required. Unlocks the keyring stored provider credentials are encrypted
-      # with; the process refuses to start without it. Losing it means losing
-      # every stored credential, so keep it somewhere other than this host.
-      DARKROUTER_MASTER_KEY: ${DARKROUTER_MASTER_KEY:?set DARKROUTER_MASTER_KEY in .env}
-      # Optional. Unset means proxy authentication is off, which is the wrong
-      # posture for anything reachable from the internet.
-      DARKROUTER_PROXY_TOKEN: ${DARKROUTER_PROXY_TOKEN:-}
-      DARKROUTER_LOG_FORMAT: ${DARKROUTER_LOG_FORMAT:-}
-      DARKROUTER_LOG_LEVEL: ${DARKROUTER_LOG_LEVEL:-}
-      # Optional, and unsetting it closes the dashboard rather than opening it:
-      # every login is refused.
-      #
-      # A bcrypt hash always contains '$', which compose reads as the start of
-      # a variable while it loads .env. Double every one of them in .env --
-      # $$2a$$10$$... -- or the value silently arrives truncated and every
-      # login fails with a correct password. Produce a value with:
-      # The image's entrypoint already supplies -config, so the subcommand needs
-      # an explicit entrypoint to be seen at all:
-      #   docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
-      #     hash-password -password 'yours'
-      DARKROUTER_ADMIN_PASSWORD_HASH: ${DARKROUTER_ADMIN_PASSWORD_HASH:-}
-      # Optional, and an alternative to running `auggie login` inside the
-      # container: the bundled Augment CLI reads its session from here when it
-      # is set. Either way the credential stays with the CLI — darkrouter never
-      # reads it, and it is not in the keyring with the provider keys.
-      AUGMENT_SESSION_AUTH: ${AUGMENT_SESSION_AUTH:-}
-      # Provider keys the configuration interpolates. Providers added through the
-      # dashboard are stored encrypted in the database and need nothing here.
-      GROQ_KEY: ${GROQ_KEY:-}
-      ANTHROPIC_KEY: ${ANTHROPIC_KEY:-}
-      GEMINI_KEY: ${GEMINI_KEY:-}
+    # Everything in .env reaches the container, so a ${VAR} written into
+    # darkrouter.yaml resolves without editing this file — a provider key
+    # under any name, not a fixed list. Raw means values are passed through
+    # verbatim: a bcrypt hash is pasted as it was printed, and nothing needs
+    # a dollar sign escaped.
+    env_file:
+      - path: .env
+        format: raw
 
     volumes:
       # Carries darkrouter.yaml, darkrouter.db and its WAL. The database holds
@@ -109,36 +85,5 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Opt in with --profile edge. Terminates TLS and gives both surfaces a public
-  # name, which is what makes the deployment reachable from the internet without
-  # exposing plain HTTP.
-  #
-  # The one rule that matters: each surface must be a whole origin of its own.
-  # The dashboard is a single-page app that calls /api on its own origin, so
-  # proxying the UI and its API to different hostnames — or mounting the app
-  # under a subpath — is what would produce the CORS failure this layout avoids.
-  caddy:
-    image: caddy:2-alpine
-    container_name: darkrouter-caddy
-    profiles: ["edge"]
-    restart: unless-stopped
-    depends_on:
-      - darkrouter
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      # Not marked required: compose interpolates every service before it
-      # filters by profile, so a :? here would block plain `up` with the edge
-      # profile switched off. Caddy fails loudly on an empty site address.
-      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-}
-      PROXY_DOMAIN: ${PROXY_DOMAIN:-}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-
 volumes:
   auggie-state:
-  caddy-data:
-  caddy-config:
