@@ -16,6 +16,16 @@ describe("the account field", () => {
     expect(screen.getByLabelText(/account id/i)).toBeInTheDocument()
   })
 
+  it("is not asked for in bulk, where each line carries its own", async () => {
+    // One field applied to a paste of five keys would send four of them to the
+    // wrong account's address.
+    render(
+      <AccountFields value={{ ...emptyAccounts, mode: "bulk" }} onChange={() => {}} needsAccount />,
+    )
+    expect(screen.queryByLabelText(/account id/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/name\|account\|key/i)).toBeInTheDocument()
+  })
+
   it("reports what was typed into it", async () => {
     const onChange = vi.fn()
     const user = userEvent.setup()

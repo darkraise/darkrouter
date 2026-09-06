@@ -94,25 +94,61 @@ export function secretFieldFor(presetID?: string): SecretField {
  * column pasted out of a password manager looks like. A key containing a pipe
  * survives, because only the first one splits.
  *
+ * Where the provider's endpoint carries an account the line carries one too,
+ * as `account|key` or `name|account|key`. Each key belongs to its own account
+ * -- a Cloudflare token is issued under one -- so a paste of five keys is five
+ * accounts, and a single field applied to all of them would send four of the
+ * five to the wrong address. A line naming no account is dropped: it cannot
+ * address the provider, and creating it would leave a credential the gateway
+ * refuses on every request.
+ *
  * Duplicates are dropped by secret rather than by name: pasting a column
  * twice is a slip, and two credentials holding one key cool and fail as one
  * while presenting as two working accounts. Surrounding quotes and commas
  * come off because a paste out of a CSV or a JSON array brings them along.
  */
-export function parseBulkAccounts(text: string, prefix = "key"): ParsedAccount[] {
+export function parseBulkAccounts(
+  text: string,
+  prefix = "key",
+  needsAccount = false,
+): ParsedAccount[] {
   const seen = new Set<string>()
   const out: ParsedAccount[] = []
+  const clean = (v: string) => v.trim().replace(/,$/, "").replace(/^["']|["']$/g, "").trim()
+
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim()
     if (line === "") continue
-    const pipe = line.indexOf("|")
-    const clean = (v: string) =>
-      v.trim().replace(/,$/, "").replace(/^["']|["']$/g, "").trim()
-    const name = pipe === -1 ? "" : clean(line.slice(0, pipe))
-    const secret = clean(pipe === -1 ? line : line.slice(pipe + 1))
+
+    const first = line.indexOf("|")
+    let name = ""
+    let account = ""
+    let secret = ""
+
+    if (!needsAccount) {
+      name = first === -1 ? "" : clean(line.slice(0, first))
+      secret = clean(first === -1 ? line : line.slice(first + 1))
+    } else {
+      if (first === -1) continue
+      const second = line.indexOf("|", first + 1)
+      if (second === -1) {
+        account = clean(line.slice(0, first))
+        secret = clean(line.slice(first + 1))
+      } else {
+        // Only the first two pipes split, so a key carrying one survives here
+        // exactly as it does in the two-field form.
+        name = clean(line.slice(0, first))
+        account = clean(line.slice(first + 1, second))
+        secret = clean(line.slice(second + 1))
+      }
+      if (account === "") continue
+    }
+
     if (secret === "" || seen.has(secret)) continue
     seen.add(secret)
-    out.push({ label: name || `${prefix}-${out.length + 1}`, secret })
+    const entry: ParsedAccount = { label: name || `${prefix}-${out.length + 1}`, secret }
+    if (account !== "") entry.account_id = account
+    out.push(entry)
   }
   return out
 }
@@ -124,21 +160,22 @@ export function maskSecret(secret: string): string {
 }
 
 /** What the draft would create, in the order it will be written. */
-export function draftAccounts(draft: AccountDraft): ParsedAccount[] {
-  const accounts =
-    draft.mode === "single"
-      ? ((): ParsedAccount[] => {
-          const secret = draft.secret.trim()
-          return secret === "" ? [] : [{ label: draft.label.trim() || "default", secret }]
-        })()
-      : parseBulkAccounts(draft.bulk, draft.label.trim() || "key")
+export function draftAccounts(draft: AccountDraft, needsAccount = false): ParsedAccount[] {
+  if (draft.mode === "bulk") {
+    // The account comes from each line rather than the field: bulk is where
+    // the accounts differ, which is the whole reason the column exists.
+    return parseBulkAccounts(draft.bulk, draft.label.trim() || "key", needsAccount)
+  }
+  const secret = draft.secret.trim()
+  if (secret === "") return []
+  const one: ParsedAccount = { label: draft.label.trim() || "default", secret }
 
   // Absent rather than empty for the rest of the catalogue: a provider that
   // does not need an account should not be sent one, or every provider starts
   // looking like one that does.
   const account = draft.accountId.trim()
-  if (account === "") return accounts
-  return accounts.map((a) => ({ ...a, account_id: account }))
+  if (needsAccount && account !== "") one.account_id = account
+  return [one]
 }
 
 /**
@@ -164,12 +201,14 @@ export function AccountFields({
    *  cannot be reached by a key alone. */
   needsAccount?: boolean
 }) {
-  const parsed = parseBulkAccounts(value.bulk, value.label.trim() || "key")
+  const parsed = parseBulkAccounts(value.bulk, value.label.trim() || "key", needsAccount)
   return (
     <div className="flex flex-col gap-4">
       {/* Above the key: it belongs to the same account the key does, and the
-          endpoint is unreachable without it, so it is not an afterthought. */}
-      {needsAccount ? (
+          endpoint is unreachable without it, so it is not an afterthought.
+          Single mode only -- in bulk each line carries its own, because that
+          is where the accounts differ. */}
+      {needsAccount && value.mode === "single" ? (
         <div className="flex flex-col gap-2">
           <Label htmlFor="account-id">Account ID</Label>
           <Input
@@ -259,11 +298,26 @@ export function AccountFields({
               rows={12}
               value={value.bulk}
               onChange={(e) => onChange({ ...value, bulk: e.target.value })}
-              placeholder={"work|sk-aaa…\nspare|sk-bbb…\nsk-ccc…"}
+              placeholder={
+                needsAccount
+                  ? "acct-a1b2|cf-aaa…\nwork|acct-c3d4|cf-bbb…"
+                  : "work|sk-aaa…\nspare|sk-bbb…\nsk-ccc…"
+              }
               className="font-mono text-sm"
             />
             <p className="text-sm text-[hsl(var(--legend))]">
-              <span className="font-mono">name|key</span>, or just the key on its own.
+              {needsAccount ? (
+                <>
+                  <span className="font-mono">account|key</span>, or{" "}
+                  <span className="font-mono">name|account|key</span>. Each key is issued
+                  under its own account, so every line names one; a line without one is
+                  skipped.
+                </>
+              ) : (
+                <>
+                  <span className="font-mono">name|key</span>, or just the key on its own.
+                </>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-3">
@@ -288,7 +342,11 @@ export function AccountFields({
                 ? "Nothing to import yet"
                 : `${parsed.length} ${parsed.length === 1 ? "credential" : "credentials"} · ${parsed
                     .slice(0, 3)
-                    .map((a) => `${a.label} ${maskSecret(a.secret)}`)
+                    .map((a) =>
+                      a.account_id
+                        ? `${a.label} ${a.account_id} ${maskSecret(a.secret)}`
+                        : `${a.label} ${maskSecret(a.secret)}`,
+                    )
                     .join(", ")}${parsed.length > 3 ? " …" : ""}`}
             </p>
           </div>
