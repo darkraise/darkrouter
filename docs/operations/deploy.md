@@ -111,18 +111,29 @@ owned by the database from then on — edit them in the console.
 
 ## Exposure
 
-Both ports bind every interface, so the LAN reaches them directly. For the
-internet, `--profile edge` adds Caddy, which terminates TLS for `ADMIN_DOMAIN`
-and `PROXY_DOMAIN` and sets HSTS, `nosniff`, a referrer policy and frame denial
-on the console.
+Both ports bind every interface, so the LAN reaches them directly. Neither
+speaks TLS, so anything reachable from the internet needs a reverse proxy in
+front — Caddy, nginx, Traefik, a Cloudflare tunnel; the stack ships none and
+takes no view on which. Four requirements it has to meet:
 
-**Each surface must be a whole origin** — no subpath, no split between the
-console host and the API host — or the console's same-origin `/api` calls
-break. See [`../design/security.md`](../design/security.md) for why no CORS
-configuration exists.
+- **Terminate TLS and add HSTS.** Darkrouter already sets `nosniff`, frame
+  denial, a referrer policy and a CSP on every console response, but
+  `Strict-Transport-Security` belongs to whatever holds the certificate.
+- **Give each surface a whole origin** — the console on one name, the gateway
+  on another, each owning the root of its name. No subpath, no split between
+  the console host and the API host, or the console's same-origin `/api` calls
+  break. See [`../design/security.md`](../design/security.md) for why no CORS
+  configuration exists.
+- **Forward `X-Forwarded-Proto`.** The console reads it to mark the session
+  cookie `Secure`; without it an HTTPS deployment issues cookies that are not.
+  It is honoured only from a loopback or private peer, so the proxy has to
+  reach Darkrouter over the container network rather than a public address.
+- **Do not buffer the gateway's responses** — Caddy's `flush_interval -1`,
+  nginx's `proxy_buffering off`. Buffered streaming delivers a completion in
+  one lump instead of token by token.
 
-Login rate limiting is Darkrouter's own, because Caddy's standard build ships
-no rate limiter.
+Login rate limiting is Darkrouter's own, per IP, so it holds whatever sits in
+front.
 
 ## Reaching a model runtime on the host
 
