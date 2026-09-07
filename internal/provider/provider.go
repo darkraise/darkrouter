@@ -1,15 +1,10 @@
 // Package provider exposes configured upstreams to the router.
 //
 // Source is an interface so the SQLite-backed source the gateway runs on and
-// the config-backed one tests build are interchangeable to every consumer.
+// the fixed one tests build are interchangeable to every consumer.
 package provider
 
-import (
-	"context"
-	"hash/fnv"
-
-	"github.com/darkraise/darkrouter/internal/config"
-)
+import "context"
 
 // Credential is one usable key for a provider. Secret is plaintext and lives
 // only in memory; the store decrypts once at load.
@@ -74,39 +69,3 @@ type Source interface {
 	Providers(context.Context) ([]Provider, error)
 	Revision() uint64
 }
-
-type YAMLSource struct {
-	store *config.Store
-}
-
-func NewYAMLSource(s *config.Store) *YAMLSource { return &YAMLSource{store: s} }
-
-func (s *YAMLSource) Providers(context.Context) ([]Provider, error) {
-	cfg := s.store.Current()
-	out := make([]Provider, 0, len(cfg.Providers))
-	for _, p := range cfg.Providers {
-		out = append(out, Provider{
-			ID: p.ID, Kind: p.Kind, BaseURL: p.BaseURL, Preset: p.Preset,
-			// A config credential has no database row, so its id is empty. The
-			// breaker keys on that empty id, which is what phase 2 already did.
-			Credentials: []Credential{{ID: "", Secret: p.APIKey, Enabled: true}},
-			Priority:    p.Priority, Models: p.Models,
-		})
-	}
-	return out, nil
-}
-
-// Revision changes when the provider set changes, so callers can cache.
-func (s *YAMLSource) Revision() uint64 {
-	h := fnv.New64a()
-	for _, p := range s.store.Current().Providers {
-		_, _ = h.Write([]byte(p.ID))
-		_, _ = h.Write([]byte(p.BaseURL))
-		for _, m := range p.Models {
-			_, _ = h.Write([]byte(m))
-		}
-	}
-	return h.Sum64()
-}
-
-var _ Source = (*YAMLSource)(nil)

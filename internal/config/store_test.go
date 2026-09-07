@@ -34,23 +34,23 @@ func defaulted() *Config {
 
 func TestStoreServesCurrentConfig(t *testing.T) {
 	c := defaulted()
-	c.Providers = []ProviderConfig{{ID: "groq"}}
-	if got := NewStoreOf(c).Current().Providers[0].ID; got != "groq" {
-		t.Fatalf("provider = %q, want groq", got)
+	c.Policy.Retry.MaxAttempts = 7
+	if got := NewStoreOf(c).Current().Policy.Retry.MaxAttempts; got != 7 {
+		t.Fatalf("max_attempts = %d, want 7", got)
 	}
 }
 
 func TestReloadAppliesValidChange(t *testing.T) {
 	stored := defaulted()
-	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	stored.Policy.Retry.MaxAttempts = 3
 	s := storeOver(t, stored)
 
-	stored.Providers = []ProviderConfig{{ID: "renamed"}}
+	stored.Policy.Retry.MaxAttempts = 4
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Current().Providers[0].ID; got != "renamed" {
-		t.Fatalf("provider = %q; the reload did not apply", got)
+	if got := s.Current().Policy.Retry.MaxAttempts; got != 4 {
+		t.Fatalf("max_attempts = %d; the reload did not apply", got)
 	}
 }
 
@@ -131,7 +131,7 @@ func TestOverlayAppliesOnEveryReload(t *testing.T) {
 	// aliases until the next restart, which is the whole failure the overlay
 	// exists to prevent.
 	stored := defaulted()
-	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	stored.Policy.Retry.MaxAttempts = 3
 	s := storeOver(t, stored)
 	s.SetOverlay(func(c *Config) error {
 		c.Aliases = map[string][]string{"from-db": {"groq/llama"}}
@@ -144,27 +144,27 @@ func TestOverlayAppliesOnEveryReload(t *testing.T) {
 		t.Fatalf("overlay did not reach the first reload: %v", s.Current().Aliases)
 	}
 
-	stored.Providers = []ProviderConfig{{ID: "renamed"}}
+	stored.Policy.Retry.MaxAttempts = 4
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.Current().Aliases["from-db"]; len(got) != 1 {
 		t.Fatalf("overlay was dropped by a later reload: %v", s.Current().Aliases)
 	}
-	if s.Current().Providers[0].ID != "renamed" {
+	if s.Current().Policy.Retry.MaxAttempts != 4 {
 		t.Fatal("the overlay swallowed the loader's own change")
 	}
 }
 
 func TestOverlayFailureKeepsThePreviousConfig(t *testing.T) {
 	stored := defaulted()
-	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	stored.Policy.Retry.MaxAttempts = 3
 	s := storeOver(t, stored)
 	s.SetOverlay(func(*Config) error { return errors.New("database unreachable") })
 	if err := s.Reload(); err == nil {
 		t.Fatal("expected the reload to fail")
 	}
-	if s.Current().Providers[0].ID != "groq" {
+	if s.Current().Policy.Retry.MaxAttempts != 3 {
 		t.Fatal("a failed overlay must leave the previous config live")
 	}
 	if s.LastError() == nil {
@@ -176,10 +176,10 @@ func TestOverlayFailureKeepsThePreviousConfig(t *testing.T) {
 // interleave a stale snapshot over a newer one.
 func TestConcurrentReloadsPublishTheLatest(t *testing.T) {
 	stored := defaulted()
-	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	stored.Policy.Retry.MaxAttempts = 3
 	s := storeOver(t, stored)
 
-	stored.Providers = []ProviderConfig{{ID: "latest"}}
+	stored.Policy.Retry.MaxAttempts = 9
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -189,8 +189,8 @@ func TestConcurrentReloadsPublishTheLatest(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if s.Current().Providers[0].ID != "latest" {
-		t.Fatalf("published provider = %q", s.Current().Providers[0].ID)
+	if s.Current().Policy.Retry.MaxAttempts != 9 {
+		t.Fatalf("published max_attempts = %d", s.Current().Policy.Retry.MaxAttempts)
 	}
 }
 

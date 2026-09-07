@@ -5,8 +5,7 @@ package config
 import "time"
 
 type Config struct {
-	Server    ServerConfig
-	Providers []ProviderConfig
+	Server ServerConfig
 	// Aliases map a friendly name to an ordered fallback chain. Order is the
 	// chain order, so a map of slices is the right shape: the values are
 	// ordered even though the keys are not.
@@ -52,19 +51,6 @@ type SSEConfig struct {
 	// The first_byte deadline alone is not enough: a provider can emit
 	// megabytes inside sixty seconds.
 	MaxPrecommitBytes int
-}
-
-type ProviderConfig struct {
-	ID   string
-	Kind string
-	// Preset names the shipped catalog entry this provider is an instance of.
-	// It is how quirks, surfaces, model traits and the models.dev join key are
-	// reached at request time; without it a provider is a base URL and a key.
-	Preset   string
-	BaseURL  string
-	APIKey   string
-	Priority int
-	Models   []string
 }
 
 type PolicyConfig struct {

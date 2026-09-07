@@ -62,9 +62,7 @@ func TestOrphanWarningsAreDeterministic(t *testing.T) {
 }
 
 func TestAConfiguredProviderWithAnUnknownPresetIsAnOrphan(t *testing.T) {
-	// The warning already existed; nothing a configured provider carried could
-	// ever trigger it, because the preset name was dropped on the way to
-	// provider.Provider. This is the whole chain, not just the last link.
+	// A provider whose preset names no shipped entry is reported as an orphan.
 	p := providertest.Keyed("p", "openaicompat", "https://x/v1", "sk", "m")
 	p.Preset = "not-a-real-preset"
 	ps, err := providertest.NewSource(p).Providers(context.Background())
