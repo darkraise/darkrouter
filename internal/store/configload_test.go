@@ -9,7 +9,7 @@ import (
 )
 
 func boot() config.Bootstrap {
-	return config.Bootstrap{ProxyListen: ":18080", AdminListen: ":18081"}
+	return config.Bootstrap{ProxyListen: ":18080", AdminListen: ":18081", ProxyToken: "sekrit"}
 }
 
 func TestLoadConfigUsesDefaultsWhenNothingIsStored(t *testing.T) {
@@ -23,6 +23,11 @@ func TestLoadConfigUsesDefaultsWhenNothingIsStored(t *testing.T) {
 	}
 	if c.Server.ProxyListen != ":18080" {
 		t.Errorf("proxy_listen = %q, want the bootstrap value", c.Server.ProxyListen)
+	}
+	// An empty shared token admits every unauthenticated request when no
+	// per-client token exists, so losing it here opens the gateway.
+	if c.Server.ProxyToken != "sekrit" {
+		t.Errorf("proxy_token = %q, want the bootstrap value", c.Server.ProxyToken)
 	}
 }
 
@@ -87,6 +92,11 @@ func TestLoadConfigRevertsEveryKeyInAFailedRule(t *testing.T) {
 		t.Errorf("timeouts = %v/%v/%v, want all three back at their defaults",
 			c.Policy.Timeout.Connect, c.Policy.Timeout.FirstByte, c.Policy.Timeout.Total)
 	}
+	// The revert path rebuilds the config from scratch, so it is where a
+	// refactor would drop the bootstrap fields without any other test noticing.
+	if c.Server.ProxyToken != "sekrit" {
+		t.Errorf("proxy_token = %q, want the bootstrap value to survive a revert", c.Server.ProxyToken)
+	}
 	if len(c.Warnings) == 0 {
 		t.Error("a reverted rule must warn")
 	}
@@ -101,6 +111,24 @@ func TestLoadConfigIgnoresForeignRows(t *testing.T) {
 	if err := putSetting(ctx, db.Write, "csrf_secret", "not-a-config-value"); err != nil {
 		t.Fatal(err)
 	}
+	if err := putSetting(ctx, db.Write, "log.retention", "100h"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Asserted on configRows rather than on the warnings LoadConfig produces:
+	// ApplyConfigRows walks the registry, not the rows, so a foreign row is
+	// silent either way and only this can see the filter disappear.
+	rows, err := configRows(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rows["csrf_secret"]; ok {
+		t.Error("csrf_secret reached the registry; the settings table is shared, so reads must filter by membership")
+	}
+	if rows["log.retention"] != "100h" {
+		t.Errorf("log.retention = %q, want the stored row to survive the filter", rows["log.retention"])
+	}
+
 	c, err := LoadConfig(ctx, db, boot())
 	if err != nil {
 		t.Fatal(err)
