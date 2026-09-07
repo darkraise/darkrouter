@@ -19,7 +19,20 @@ type configField struct {
 	key string
 	get func(*config.Config) string
 	set func(*config.Config, string) error
+	// validate is the bound this key carries on its own, checked against the
+	// Config the setter has already written to. Nil for a key whose only rules
+	// are in config.Validate, which is most of them.
+	//
+	// It runs on both paths, which is the point: a bound the save enforced and
+	// the loader did not would let a row into the database that every later
+	// start silently accepted.
+	validate func(*config.Config) error
 }
+
+// maxRetryAttempts bounds policy.retry.max_attempts. Past ten, a failing
+// request walks the whole candidate list several times over and a client waits
+// minutes for an error it could have had in seconds.
+const maxRetryAttempts = 10
 
 var configRegistry = buildConfigRegistry()
 
@@ -140,6 +153,11 @@ func buildConfigRegistry() []configField {
 		return f
 	}
 
+	withValidate := func(f configField, v func(*config.Config) error) configField {
+		f.validate = v
+		return f
+	}
+
 	return []configField{
 		domain("server.public_url", func(c *config.Config) *string { return &c.Server.PublicURL }),
 		integer64("server.max_body_bytes", func(c *config.Config) *int64 { return &c.Server.MaxBodyBytes }),
@@ -149,7 +167,14 @@ func buildConfigRegistry() []configField {
 
 		optInt("policy.cooldown.trip_after", func(c *config.Config) **int { return &c.Policy.Cooldown.TripAfter }),
 		duration("policy.cooldown.max", func(c *config.Config) *time.Duration { return &c.Policy.Cooldown.Max }),
-		integer("policy.retry.max_attempts", func(c *config.Config) *int { return &c.Policy.Retry.MaxAttempts }),
+		withValidate(
+			integer("policy.retry.max_attempts", func(c *config.Config) *int { return &c.Policy.Retry.MaxAttempts }),
+			func(c *config.Config) error {
+				if n := c.Policy.Retry.MaxAttempts; n < 1 || n > maxRetryAttempts {
+					return fmt.Errorf("policy.retry.max_attempts must be between 1 and %d", maxRetryAttempts)
+				}
+				return nil
+			}),
 		duration("policy.timeout.connect", func(c *config.Config) *time.Duration { return &c.Policy.Timeout.Connect }),
 		duration("policy.timeout.first_byte", func(c *config.Config) *time.Duration { return &c.Policy.Timeout.FirstByte }),
 		duration("policy.timeout.total", func(c *config.Config) *time.Duration { return &c.Policy.Timeout.Total }),
@@ -225,10 +250,25 @@ func ApplyConfigRows(c *config.Config, rows map[string]string) []string {
 		if !ok {
 			continue
 		}
-		if err := f.set(c, v); err != nil {
+		// Judged on a copy. The setter has already landed the value by the
+		// time a validator can look at it, and putting the old one back
+		// through the setter would turn a nil *bool into a pointer to false.
+		// A shallow copy is enough: every setter writes a scalar or a freshly
+		// allocated pointer, so it shares nothing with the original.
+		scratch := *c
+		if err := f.set(&scratch, v); err != nil {
 			warnings = append(warnings,
 				fmt.Sprintf("stored %s is unusable (%v); using the default", f.key, err))
+			continue
 		}
+		if f.validate != nil {
+			if err := f.validate(&scratch); err != nil {
+				warnings = append(warnings,
+					fmt.Sprintf("stored %s is unusable (%v); using the default", f.key, err))
+				continue
+			}
+		}
+		*c = scratch
 	}
 	return warnings
 }
