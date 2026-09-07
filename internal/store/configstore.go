@@ -372,8 +372,20 @@ func OverlayConfig(ctx context.Context, d *DB, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	if err := ApplyPolicy(&cfg.Policy, overrides); err != nil {
-		return err
+	// One key at a time, and a failure is a warning rather than an error.
+	// LoadConfig has already reverted a row it could not parse and said so;
+	// failing here on that same row would turn a value the loader deliberately
+	// tolerated into a process that refuses to start.
+	for key, value := range overrides {
+		// Onto a copy, committed only on success: a policyFields setter
+		// assigns before it reports a parse error, so applying a bad row in
+		// place would leave the field zeroed rather than untouched.
+		trial := cfg.Policy
+		if err := ApplyPolicy(&trial, map[string]string{key: value}); err != nil {
+			cfg.Warnings = append(cfg.Warnings, err.Error())
+			continue
+		}
+		cfg.Policy = trial
 	}
 	cfg.Aliases = aliases
 	return nil
