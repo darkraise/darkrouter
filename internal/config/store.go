@@ -34,8 +34,9 @@ type Store struct {
 //
 // It is a function rather than a direct call because this package may not
 // import internal/store: store already imports config, and the reverse edge
-// would close a cycle. Aliases and policy reach a snapshot from SQLite through
+// would close a cycle. The alias table reaches a snapshot from SQLite through
 // here, which is what lets every reader keep using config.Store.Current().
+// Scalar settings do not: the loader reads those itself, from the registry.
 func (s *Store) SetOverlay(fn func(*Config) error) {
 	s.overlay.Store(&fn)
 }
