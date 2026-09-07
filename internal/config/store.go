@@ -59,6 +59,10 @@ func (s *Store) applyOverlay(c *Config) error {
 // SetWriter installs the transactional commit Update runs under the reload
 // lock. Injected rather than called directly, for the same import-cycle reason
 // SetOverlay is.
+//
+// The installed function must not call Reload or Update: it already runs under
+// the non-reentrant reload lock, which Update republishes on its behalf once
+// the commit returns, so either call deadlocks every future save and reload.
 func (s *Store) SetWriter(fn func(context.Context, Patch) ([]string, error)) {
 	s.writer.Store(&fn)
 }
