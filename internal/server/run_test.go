@@ -163,6 +163,37 @@ func testConfigOf(t *testing.T, tune func(*config.Config)) *config.Config {
 	return c
 }
 
+// seedProviders materialises a fixture's declared providers into the database.
+//
+// Providers have lived in SQLite since phase 2, so a Config that declares them
+// describes nothing the server can serve until the rows exist. The first-run
+// YAML importer used to do this; it is gone, and this is the test-side
+// replacement rather than a reason to keep production code alive for fixtures.
+func seedProviders(t *testing.T, ctx context.Context, db *store.DB, key *crypto.Key, cfg *config.Config) {
+	t.Helper()
+	for _, p := range cfg.Providers {
+		if err := db.CreateProvider(ctx, store.ProviderRow{
+			ID: p.ID, Name: p.ID, Preset: p.Preset, Kind: p.Kind,
+			BaseURL: p.BaseURL, Priority: p.Priority, Enabled: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range p.Models {
+			if _, err := db.Write.ExecContext(ctx,
+				`INSERT INTO models (provider_id, model_id, capabilities_source)
+				 VALUES (?, ?, 'inferred')`, p.ID, m); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := db.AddCredential(ctx, key, store.Credential{
+			ProviderID: p.ID, Label: "imported", Kind: "static",
+			Secret: p.APIKey, Enabled: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // serverBackedBy builds a Server on a temporary database, so every test in this
 // package exercises the real persistence wiring.
 func serverBackedBy(t *testing.T, cfgStore *config.Store) *Server {
@@ -180,12 +211,7 @@ func serverBackedBy(t *testing.T, cfgStore *config.Store) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Mirror what main.go does on first start: providers live in SQLite from
-	// phase 2 on, so a config that declares them has to be imported before the
-	// server can serve them.
-	if _, err := store.ImportFromConfig(ctx, db, key, cfgStore.Current()); err != nil {
-		t.Fatal(err)
-	}
+	seedProviders(t, ctx, db, key, cfgStore.Current())
 	s, err := New(cfgStore, db, key, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -399,9 +425,7 @@ func serverFixtureWith(t *testing.T, tune func(*config.Config)) (*store.DB, *cry
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ImportFromConfig(ctx, db, key, cfgStore.Current()); err != nil {
-		t.Fatal(err)
-	}
+	seedProviders(t, ctx, db, key, cfgStore.Current())
 	return db, key, cfgStore
 }
 

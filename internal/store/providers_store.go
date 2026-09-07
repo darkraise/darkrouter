@@ -68,8 +68,8 @@ func (d *DB) CreateProvider(ctx context.Context, p ProviderRow) error {
 		enabled = 1
 	}
 	if p.AuthStyle == "" {
-		// Matches the column default. Sent explicitly so a row created here has
-		// the same shape as one created by ImportFromConfig.
+		// Matches the column default. Sent explicitly so a caller that leaves
+		// it empty gets a row with the same shape as one that names it.
 		p.AuthStyle = "bearer"
 	}
 	if _, err := d.Write.ExecContext(ctx,
