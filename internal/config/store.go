@@ -25,6 +25,11 @@ type Store struct {
 	lastErr atomic.Pointer[error]
 	overlay atomic.Pointer[func(*Config) error]
 
+	// load builds a fresh Config. Injected rather than called directly,
+	// because this package may not import internal/store: store already
+	// imports config and the reverse edge would close a cycle.
+	load func() (*Config, error)
+
 	// boot is the snapshot the process is actually running restart-only values
 	// from. Pending-restart is boot versus current, never the diff between two
 	// consecutive reloads: that diff is cleared by the next unrelated save
@@ -66,7 +71,20 @@ func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
 	return s, nil
 }
 
+// NewStoreFrom builds a store over an injected loader instead of a file.
+func NewStoreFrom(load func() (*Config, error)) (*Store, error) {
+	s := &Store{load: load}
+	c, err := load()
+	if err != nil {
+		return nil, err
+	}
+	s.cur.Store(c)
+	s.boot.Store(c)
+	return s, nil
+}
+
 func (s *Store) Current() *Config { return s.cur.Load() }
+
 
 // PendingRestart names every restart-only field whose stored value differs
 // from the one this process started with.
@@ -111,7 +129,7 @@ func (s *Store) RecordError(err error) {
 func (s *Store) Reload() error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	next, err := Load(s.path, s.lookup)
+	next, err := s.loadNext()
 	if err != nil {
 		s.lastErr.Store(&err)
 		return err
@@ -127,6 +145,13 @@ func (s *Store) Reload() error {
 	s.cur.Store(next)
 	s.lastErr.Store(nil)
 	return nil
+}
+
+func (s *Store) loadNext() (*Config, error) {
+	if s.load != nil {
+		return s.load()
+	}
+	return Load(s.path, s.lookup)
 }
 
 // restartOnlyWarnings names every restart-only field this edit changed.
