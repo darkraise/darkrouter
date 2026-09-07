@@ -51,33 +51,43 @@ const commonPragmas = "_pragma=busy_timeout(5000)" +
 	"&_pragma=journal_mode(WAL)" +
 	"&_pragma=auto_vacuum(incremental)"
 
-func dsn(path, synchronous string) string {
+// writeTxLock makes every transaction on a write handle take its lock at BEGIN
+// rather than at the first mutation. A transaction that reads and then writes
+// -- which the configuration write path does deliberately, to decide against
+// the rows it is about to replace -- otherwise has its snapshot invalidated by
+// any other handle's commit and fails with a busy error no timeout waits out.
+//
+// The read pool must not carry it: a read transaction would take the write
+// lock and serialise the pool behind itself.
+const writeTxLock = "&_txlock=immediate"
+
+func dsn(path, synchronous, extra string) string {
 	// EscapedPath leaves separators intact while escaping the characters the
 	// DSN's query string would otherwise consume, notably '?' and '#'.
 	// url.PathEscape is wrong here: it escapes '/' too, which breaks every
 	// absolute path.
 	escaped := (&url.URL{Path: path}).EscapedPath()
 	return "file:" + escaped +
-		"?" + commonPragmas + "&_pragma=synchronous(" + synchronous + ")"
+		"?" + commonPragmas + "&_pragma=synchronous(" + synchronous + ")" + extra
 }
 
 // Open creates the database file if it does not exist and returns all three
 // handles. It does not apply migrations; call Migrate.
 func Open(path string) (*DB, error) {
-	write, err := sql.Open("sqlite", dsn(path, "NORMAL"))
+	write, err := sql.Open("sqlite", dsn(path, "NORMAL", writeTxLock))
 	if err != nil {
 		return nil, fmt.Errorf("open write handle: %w", err)
 	}
 	write.SetMaxOpenConns(1)
 
-	read, err := sql.Open("sqlite", dsn(path, "NORMAL"))
+	read, err := sql.Open("sqlite", dsn(path, "NORMAL", ""))
 	if err != nil {
 		_ = write.Close()
 		return nil, fmt.Errorf("open read handle: %w", err)
 	}
 	read.SetMaxOpenConns(4)
 
-	syncH, err := sql.Open("sqlite", dsn(path, "FULL"))
+	syncH, err := sql.Open("sqlite", dsn(path, "FULL", writeTxLock))
 	if err != nil {
 		_ = write.Close()
 		_ = read.Close()
