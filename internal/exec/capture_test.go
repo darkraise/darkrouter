@@ -12,7 +12,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
-	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 func capturingExecutor(t *testing.T, upstream string, maxBytes int) (*Executor, *captureLogger) {
@@ -21,13 +21,10 @@ func capturingExecutor(t *testing.T, upstream string, maxBytes int) (*Executor, 
 		c.Capture.Bodies = true
 		c.Capture.MaxBytes = int64(maxBytes)
 		c.Capture.Retention = time.Hour
-		c.Providers = []config.ProviderConfig{{
-			ID: "groq", Kind: "openaicompat", BaseURL: upstream,
-			APIKey: "sk", Models: []string{"m"},
-		}}
 	}))
+	src := providertest.NewSource(providertest.Keyed("groq", "openaicompat", upstream, "sk", "m"))
 	log := &captureLogger{}
-	e := New(cfgStore, provider.NewYAMLSource(cfgStore),
+	e := New(cfgStore, src,
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: log})
 	return e, log
 }

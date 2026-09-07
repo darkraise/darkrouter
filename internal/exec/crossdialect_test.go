@@ -16,6 +16,7 @@ import (
 	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 // fleetProvider is one upstream in a test fleet.
@@ -28,15 +29,15 @@ type fleetProvider struct {
 
 func fleetExecutor(t *testing.T, ps []fleetProvider) *Executor {
 	t.Helper()
-	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
-		for _, p := range ps {
-			c.Providers = append(c.Providers, config.ProviderConfig{
-				ID: p.id, Kind: p.kind, BaseURL: p.baseURL, APIKey: "sk",
-				Priority: p.prio, Models: []string{"m"},
-			})
-		}
-	}))
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
+	cfgStore := config.NewStoreOf(testConfig(t, nil))
+	providers := make([]provider.Provider, 0, len(ps))
+	for _, p := range ps {
+		pr := providertest.Keyed(p.id, p.kind, p.baseURL, "sk", "m")
+		pr.Priority = p.prio
+		providers = append(providers, pr)
+	}
+	src := providertest.NewSource(providers...)
+	return New(cfgStore, src, map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),
 		"gemini":       geminiadapter.New(),

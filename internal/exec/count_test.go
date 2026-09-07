@@ -15,18 +15,15 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	"github.com/darkraise/darkrouter/internal/health"
-	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 // countExecutor builds an executor over one provider of the given kind.
 func countExecutor(t *testing.T, kind, upstreamURL string) *Executor {
 	t.Helper()
-	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{{
-			ID: "fake", Kind: kind, BaseURL: upstreamURL, APIKey: "sk", Models: []string{"m"},
-		}}
-	}))
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
+	cfgStore := config.NewStoreOf(testConfig(t, nil))
+	src := providertest.NewSource(providertest.Keyed("fake", kind, upstreamURL, "sk", "m"))
+	return New(cfgStore, src, map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropic.New(),
 	}, Deps{})
@@ -123,16 +120,11 @@ func countExecutorWith(t *testing.T, kind, upstreamURL, preset string, deps Deps
 	tune func(*config.Config)) *Executor {
 
 	t.Helper()
-	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{{
-			ID: "fake", Kind: kind, Preset: preset, BaseURL: upstreamURL,
-			APIKey: "sk", Models: []string{"m"},
-		}}
-		if tune != nil {
-			tune(c)
-		}
-	}))
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
+	cfgStore := config.NewStoreOf(testConfig(t, tune))
+	p := providertest.Keyed("fake", kind, upstreamURL, "sk", "m")
+	p.Preset = preset
+	src := providertest.NewSource(p)
+	return New(cfgStore, src, map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropic.New(),
 	}, deps)
