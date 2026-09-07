@@ -9,6 +9,7 @@ import {
   fieldErrors,
   orderSessions,
   passwordProblem,
+  pendingRestartMessage,
   reloadMessage,
   revokedText,
   SettingsScreen,
@@ -225,6 +226,17 @@ describe("the sync result", () => {
   })
 })
 
+describe("pendingRestartMessage", () => {
+  it("names one key", () => {
+    expect(pendingRestartMessage(["catalog.sync_interval"])).toContain("catalog.sync_interval")
+  })
+  it("names several", () => {
+    const msg = pendingRestartMessage(["catalog.sync_interval", "media.inline"])
+    expect(msg).toContain("catalog.sync_interval")
+    expect(msg).toContain("media.inline")
+  })
+})
+
 /** A promise the test decides when to settle, so a request can be held open
  *  while the screen is inspected mid-flight. */
 function gate() {
@@ -240,6 +252,8 @@ function stubSettingsFetch(overrides: {
   sync?: { triggered: boolean }
   sessions?: unknown[]
   save?: { status?: number; body?: unknown }
+  /** What GET /api/config answers before any save. */
+  config?: () => ConfigResponse
   /** What GET /api/config answers once a save has landed. */
   configAfterSave?: () => ConfigResponse
   /** Holds every GET after the first, so the refetch a save triggers can be
@@ -256,7 +270,10 @@ function stubSettingsFetch(overrides: {
     if (url === "/api/config" && method === "GET") {
       configFetches += 1
       if (configFetches > 1 && overrides.holdRefetch) await overrides.holdRefetch.held
-      const body = saved && overrides.configAfterSave ? overrides.configAfterSave() : cfg()
+      const body =
+        saved && overrides.configAfterSave
+          ? overrides.configAfterSave()
+          : (overrides.config?.() ?? cfg())
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -320,6 +337,26 @@ describe("a failed reload", () => {
     // Only the initial load fetched it; the failed reload did not trigger a
     // second GET for the same answer.
     await waitFor(() => expect(configFetches()).toBe(1))
+  })
+})
+
+describe("the pending-restart notice", () => {
+  it("names what is stored but not yet running", async () => {
+    stubSettingsFetch({ config: () => ({ ...cfg(), pending_restart: ["catalog.sync_interval"] }) })
+    mount(<SettingsScreen />)
+
+    expect(await screen.findByText(/waiting for a restart/i)).toBeInTheDocument()
+    expect(screen.getByText(/catalog\.sync_interval/)).toBeInTheDocument()
+  })
+
+  it("says nothing when nothing is pending", async () => {
+    stubSettingsFetch({ config: () => ({ ...cfg(), pending_restart: [] }) })
+    mount(<SettingsScreen />)
+
+    // Waits on a stable element from the same load before asserting the
+    // negative, so the query does not just run before the fetch resolves.
+    await screen.findByText("log.retention")
+    expect(screen.queryByText(/waiting for a restart/i)).not.toBeInTheDocument()
   })
 })
 

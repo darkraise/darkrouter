@@ -114,6 +114,21 @@ export function syncMessage(res: SyncResult): string {
   return res.triggered ? "Catalog sync started." : "Catalog sync was not started."
 }
 
+/**
+ * What is stored but not yet running.
+ *
+ * Measured against the snapshot this process booted on, not against the
+ * previous reload, so it survives the next unrelated save. The transient
+ * warning in `warnings` does not, and that is why this is a separate notice
+ * rather than one more line in that list.
+ */
+export function pendingRestartMessage(fields: string[]): string {
+  const list = fields.join(", ")
+  return fields.length === 1
+    ? `${list} is stored but the gateway is still running the value it started with.`
+    : `${list} are stored but the gateway is still running the values it started with.`
+}
+
 const GROUP_ICON: Record<GroupId, typeof Clock> = {
   requests: Clock,
   failure: ShieldAlert,
@@ -332,6 +347,7 @@ export function SettingsScreen() {
   const purgeConversations = usePurgeConversations()
 
   const warnings = config.data?.warnings ?? []
+  const pendingRestart = config.data?.pending_restart ?? []
 
   return (
     <>
@@ -384,6 +400,13 @@ export function SettingsScreen() {
           <p className="text-sm font-medium">The configuration is invalid</p>
           <p className="mt-1 font-mono text-sm break-words">{config.data.error}</p>
           {config.data.serving && <p className="mt-1 text-sm">{config.data.serving}</p>}
+        </Banner>
+      )}
+
+      {pendingRestart.length > 0 && (
+        <Banner className="mb-4">
+          <p className="text-sm font-medium">Waiting for a restart</p>
+          <p className="mt-1 text-sm">{pendingRestartMessage(pendingRestart)}</p>
         </Banner>
       )}
 
