@@ -212,12 +212,19 @@ function ReadOnlySetting({ row }: { row: SettingRow }) {
             {SOURCE_LABEL[row.source]}
           </Badge>
           {/* Stated as a fact rather than offered and refused: PUT /api/policy
-              will not accept a write to a restart-only field. */}
-          {row.hotReloadable ? (
-            <Badge variant="green">hot</Badge>
-          ) : (
-            <Badge variant="secondary">restart</Badge>
-          )}
+              will not accept a write to a restart-only field.
+
+              An environment value gets neither badge. It is technically
+              hot-reloadable — nothing captures it at construction — but an
+              environment variable cannot change under a running process, so
+              "hot" would promise a live edit that is impossible. The
+              environment chip already says the whole story. */}
+          {row.source !== "environment" &&
+            (row.hotReloadable ? (
+              <Badge variant="green">hot</Badge>
+            ) : (
+              <Badge variant="secondary">restart</Badge>
+            ))}
         </span>
       </div>
     </div>

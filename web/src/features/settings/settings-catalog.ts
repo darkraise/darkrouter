@@ -52,7 +52,8 @@ export const GROUPS: Group[] = [
   {
     id: "server",
     title: "Server",
-    blurb: "Addresses and limits. Every one of these needs a restart.",
+    blurb:
+      "Addresses and limits. The listen addresses come from the environment and take a restart to change; every other key here applies on reload.",
   },
 ]
 
