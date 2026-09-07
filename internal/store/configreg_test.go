@@ -64,6 +64,28 @@ func TestConfigRegistryWarnsAndKeepsTheDefault(t *testing.T) {
 	}
 }
 
+// media.inline defaults to on, but its zero value is a nil pointer. If the
+// registry read that nil as false, a defaulted config would round-trip into
+// a stored row that turns media inlining off.
+func TestConfigRegistryDefaultsOnBoolReadsAsTrue(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+
+	rows := ConfigRowsFor(c)
+	if got := rows["media.inline"]; got != "true" {
+		t.Fatalf(`rows["media.inline"] = %q, want "true"`, got)
+	}
+
+	dst := &config.Config{}
+	config.ApplyDefaults(dst)
+	if warn := ApplyConfigRows(dst, rows); len(warn) > 0 {
+		t.Fatalf("round trip warned: %v", warn)
+	}
+	if !dst.MediaInline() {
+		t.Error("media.inline round-tripped from a defaulted config as off")
+	}
+}
+
 func TestConfigRegistryHasNoDuplicateKeys(t *testing.T) {
 	seen := map[string]bool{}
 	for _, k := range ConfigKeys() {

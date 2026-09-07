@@ -141,12 +141,24 @@ func applyDefaults(c *Config) {
 		// which is weeks apart.
 		c.Catalog.FreeCatalogInterval = 24 * time.Hour
 	}
+	if c.Catalog.FreeCatalogSync == nil {
+		on := true
+		c.Catalog.FreeCatalogSync = &on
+	}
 	if c.Catalog.LiteLLMURL == "" {
 		c.Catalog.LiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 	}
 	if c.Catalog.LiteLLMInterval == 0 {
 		// Daily. Rate changes are announced days ahead of taking effect.
 		c.Catalog.LiteLLMInterval = 24 * time.Hour
+	}
+	if c.Catalog.LiteLLMSync == nil {
+		on := true
+		c.Catalog.LiteLLMSync = &on
+	}
+	if c.Catalog.SeedFreeProviders == nil {
+		on := true
+		c.Catalog.SeedFreeProviders = &on
 	}
 	if c.Catalog.Discovery.Enabled == nil {
 		on := true
@@ -164,6 +176,10 @@ func applyDefaults(c *Config) {
 	if c.Playground.SaveConversations == nil {
 		on := true
 		c.Playground.SaveConversations = &on
+	}
+	if c.Media.Inline == nil {
+		on := true
+		c.Media.Inline = &on
 	}
 	if c.Policy.Retry.MaxAttempts == 0 {
 		c.Policy.Retry.MaxAttempts = 4
