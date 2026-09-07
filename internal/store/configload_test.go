@@ -70,7 +70,7 @@ func TestLoadConfigRevertsEveryKeyInAFailedRule(t *testing.T) {
 	ctx := context.Background()
 	for k, v := range map[string]string{
 		"policy.timeout.connect":    "30s",
-		"policy.timeout.first_byte": "60s",
+		"policy.timeout.first_byte": "90s",
 		"policy.timeout.total":      "40s",
 	} {
 		if err := putSetting(ctx, db.Write, k, v); err != nil {
