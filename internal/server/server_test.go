@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -642,5 +644,80 @@ func TestAWhitespaceProxyTokenStillRejects(t *testing.T) {
 	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("code = %d, want 401: a whitespace secret is still a secret", rec.Code)
+	}
+}
+
+// The invariant the whole database-backed configuration rests on: settings
+// content never takes the process down. A stored value the loader could not
+// use, and a set of values no single key broke, both revert to defaults with a
+// warning -- and an orchestrator reading /readyz must keep routing to a gateway
+// that is serving every request correctly.
+func TestReadyzStaysUpThroughUnusableStoredSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rows map[string]string
+		want string
+	}{
+		{
+			name: "a key that will not parse",
+			rows: map[string]string{"capture.max_bytes": "-1"},
+			want: "capture.max_bytes",
+		},
+		{
+			// No single key is wrong; the three together break the timeout
+			// budget rule, so the whole set is reverted.
+			name: "a rule no single key broke",
+			rows: map[string]string{
+				"policy.timeout.connect":    "30s",
+				"policy.timeout.first_byte": "30s",
+				"policy.timeout.total":      "40s",
+			},
+			want: "policy.timeout.total",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, err := store.Open(filepath.Join(t.TempDir(), "darkrouter.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			if err := db.Migrate(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for k, v := range tc.rows {
+				if _, err := db.Write.ExecContext(ctx,
+					`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, k, v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			key, err := store.OpenKeyring(ctx, db, "master")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfgStore, err := config.NewStoreFrom(func() (*config.Config, error) {
+				return store.LoadConfig(ctx, db, config.Bootstrap{ProxyListen: ":0", AdminListen: ":0"})
+			})
+			if err != nil {
+				t.Fatalf("a stored value must never fail the load: %v", err)
+			}
+			// Assert the fixture really provoked a revert, or the 200 below
+			// would prove nothing about the invariant.
+			if !slices.Contains(cfgStore.Current().Skipped, tc.want) {
+				t.Fatalf("skipped = %v, want %s among them", cfgStore.Current().Skipped, tc.want)
+			}
+
+			s, err := New(cfgStore, db, key, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := httptest.NewRecorder()
+			s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+			if rec.Code != 200 {
+				t.Fatalf("/readyz = %d (%s); a reverted setting must not stop an "+
+					"orchestrator routing to a gateway that serves every request",
+					rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
