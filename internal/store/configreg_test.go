@@ -114,3 +114,50 @@ func TestConfigKeysAreNotSubstringsOfEachOther(t *testing.T) {
 		}
 	}
 }
+
+// The bound used to live in the admin handler, where a save was refused and a
+// row written by hand was not. One validator means the loader refuses it too.
+func TestApplyConfigRowsRevertsAnOutOfRangeRetryCount(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	warnings := ApplyConfigRows(c, map[string]string{"policy.retry.max_attempts": "20"})
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	// The prefix LoadConfig matches on to find the key it must revert.
+	if !strings.HasPrefix(warnings[0], "stored policy.retry.max_attempts ") {
+		t.Errorf("warning = %q, want it to open with the key", warnings[0])
+	}
+	if c.Policy.Retry.MaxAttempts != 4 {
+		t.Errorf("MaxAttempts = %d, want the compiled default", c.Policy.Retry.MaxAttempts)
+	}
+}
+
+func TestApplyConfigRowsAcceptsTheRetryCountAtTheCap(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	if w := ApplyConfigRows(c, map[string]string{"policy.retry.max_attempts": "10"}); len(w) != 0 {
+		t.Fatalf("warnings = %v, want none", w)
+	}
+	if c.Policy.Retry.MaxAttempts != 10 {
+		t.Errorf("MaxAttempts = %d, want 10", c.Policy.Retry.MaxAttempts)
+	}
+}
+
+// A rejected value must leave nothing behind. The setter runs before the
+// validator can see the result, so the pass has to work on a copy rather than
+// undo itself afterwards.
+func TestApplyConfigRowsLeavesAnUnrelatedKeyAlone(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	warnings := ApplyConfigRows(c, map[string]string{
+		"policy.retry.max_attempts": "20",
+		"log.retention":             "96h",
+	})
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if c.Log.Retention != 96*time.Hour {
+		t.Errorf("log.retention = %s, want 96h", c.Log.Retention)
+	}
+}
