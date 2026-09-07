@@ -41,7 +41,14 @@ export function useApiMutation<TData, TVars>(opts: {
       for (const key of opts.invalidates ?? []) {
         void queryClient.invalidateQueries({ queryKey: key })
       }
-      opts.onSuccess?.(data, vars, ctx, mutation)
+      // Returned, not called and dropped: query-core awaits this handler
+      // before it dispatches success, so a caller whose own handler is async
+      // only keeps `isPending` true for its duration if the promise travels
+      // back through here. The settings screen gates its editors on exactly
+      // that -- it reseeds the form from a refetch it awaits, and an editor
+      // re-enabled before the reseed is an editor whose next keystroke the
+      // reseed discards.
+      return opts.onSuccess?.(data, vars, ctx, mutation)
     },
     onError: (err) => {
       // A 401 is handled once, globally, by the unauthorized listener that

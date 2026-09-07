@@ -16,17 +16,31 @@ export function SettingField({
   value,
   onChange,
   onReset,
+  resetting = false,
+  disabled = false,
   error,
 }: {
   row: SettingRow
   /** The draft value, in the stored spelling. */
   value: string
   onChange: (next: string) => void
-  /** Null when the key is on its default and there is nothing to reset. */
+  /** Toggles the row in and out of the save's reset list. Null when the key is
+   *  on its default and there is nothing to reset. */
   onReset: (() => void) | null
+  /** This row's stored value is being deleted by the next save. The editor is
+   *  gated rather than emptied: a stored `true` shown as an unchecked switch
+   *  is what "set this to false" looks like, which is a different write. */
+  resetting?: boolean
+  /** A save is in flight. A keystroke landing now is wiped by the reseed that
+   *  follows it, so the box would swallow an edit the operator watched. */
+  disabled?: boolean
   /** The server's complaint about this key from the last refused save. */
   error?: string
 }) {
+  // An emptied box means the same thing as the Reset button: the store cannot
+  // hold "" as a value distinct from absent, so the row has to say so rather
+  // than letting an empty field read as a value of nothing.
+  const willReset = resetting || (row.editable && row.source === "database" && value.trim() === "")
   return (
     <div className="flex flex-wrap items-start gap-4 border-t py-3 first:border-t-0 first:pt-0">
       <div className="min-w-0 flex-1">
@@ -44,7 +58,7 @@ export function SettingField({
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         {row.editable ? (
-          <Editor row={row} value={value} onChange={onChange} />
+          <Editor row={row} value={value} onChange={onChange} disabled={disabled || resetting} />
         ) : (
           <span className="font-mono text-base font-medium tabular-nums">{row.display}</span>
         )}
@@ -65,6 +79,7 @@ export function SettingField({
           ) : (
             <Badge variant="secondary">restart</Badge>
           )}
+          {willReset && <Badge variant="outline">resets to default on save</Badge>}
           {/* The guarantee that an environment row has no reset lives here
               rather than in a convention every caller has to remember. */}
           {row.editable && onReset && (
@@ -72,9 +87,13 @@ export function SettingField({
               variant="ghost"
               size="sm"
               onClick={onReset}
-              title="Delete the stored row and fall back to the built-in default"
+              title={
+                resetting
+                  ? "Leave the stored row alone after all"
+                  : "Delete the stored row and fall back to the built-in default"
+              }
             >
-              Reset
+              {resetting ? "Keep" : "Reset"}
             </Button>
           )}
         </span>
@@ -88,10 +107,12 @@ function Editor({
   row,
   value,
   onChange,
+  disabled,
 }: {
   row: SettingRow
   value: string
   onChange: (next: string) => void
+  disabled: boolean
 }) {
   switch (row.kind) {
     case "bool":
@@ -103,6 +124,7 @@ function Editor({
           id={row.field}
           aria-label={row.meta.name}
           checked={value === "true"}
+          disabled={disabled}
           onCheckedChange={(next: boolean) => onChange(String(next))}
         />
       )
@@ -112,6 +134,11 @@ function Editor({
           id={row.field}
           value={value}
           onChange={onChange}
+          disabled={disabled}
+          // A gated row is still a row being read: dimming its value to
+          // placeholder grey would hide the number the operator is deciding
+          // about. The border dims instead.
+          retainValue
           step={1}
           precision={0}
           className="w-40 shrink-0"
@@ -126,6 +153,7 @@ function Editor({
           row={row}
           value={value}
           onChange={onChange}
+          disabled={disabled}
           seed={seedBytes}
           emit={(text) => {
             const bytes = parseBytes(text)
@@ -139,6 +167,7 @@ function Editor({
           row={row}
           value={value}
           onChange={onChange}
+          disabled={disabled}
           seed={(v) => v}
           emit={(text) => text}
           placeholder={row.kind === "url" ? "llm.example.com" : undefined}
@@ -171,6 +200,7 @@ function DraftBox({
   row,
   value,
   onChange,
+  disabled,
   seed,
   emit,
   placeholder,
@@ -178,6 +208,7 @@ function DraftBox({
   row: SettingRow
   value: string
   onChange: (next: string) => void
+  disabled: boolean
   /** The stored value as the box first shows it. */
   seed: (value: string, row: SettingRow) => string
   /** The typed text as the store spells it. */
@@ -195,6 +226,7 @@ function DraftBox({
     <Input
       id={row.field}
       value={text}
+      disabled={disabled}
       placeholder={placeholder}
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
         const next = e.target.value

@@ -1,52 +1,102 @@
-import { useState, type ChangeEvent } from "react"
+import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Badge, Banner, Button, Card, Input, Label, toast } from "darkraise-ui"
+import { Badge, Banner, Button, Card, toast } from "darkraise-ui"
 import { AlertTriangle, Boxes, Clock, FileText, KeyRound, Server, ShieldAlert } from "lucide-react"
-import { api } from "../../lib/api"
+import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
-import { NumberBox } from "../shell/number-box"
 import { LoadError, LoadingRows } from "../shell/screen-state"
 import { usePurgeConversations } from "../playground/lib/conversations"
-import { keys, useConfig, usePolicy, useSessions } from "../../lib/queries"
+import { keys, useConfig, useSessions } from "../../lib/queries"
 import { dateTime, zoneLabel } from "../../lib/format"
-import type { ConfigResponse, PolicyBlock, Session } from "../../lib/api-types"
+import type { ConfigResponse, Session } from "../../lib/api-types"
 import { ChangePasswordDialog } from "./change-password-dialog"
-import {
-  EDITABLE,
-  SOURCE_LABEL,
-  SOURCE_NOTE,
-  settingGroups,
-  type EditableSetting,
-  type GroupId,
-  type SettingRow,
-} from "./settings-catalog"
+import { SettingField } from "./setting-field"
+import { settingGroups, type GroupId } from "./settings-catalog"
 
 export { passwordProblem, revokedText } from "./change-password-dialog"
 
 type ReloadResult = { valid: boolean; error?: string; serving?: string }
 type SyncResult = { triggered: boolean }
 
+export type ConfigPatch = { set?: Record<string, string>; reset?: string[] }
+
+export type SaveResult = {
+  valid: boolean
+  restart_required?: string[]
+  error?: string
+  serving?: string
+}
+
 /**
- * The settings this screen shows but cannot change, grouped for reading.
+ * The save, built from the draft.
  *
- * The editable fields are removed rather than repeated. Listing a setting as a
- * live input above and as a read-only row below is what made the previous
- * version of this screen show the same five values twice under two different
- * names; the source and restart facts they would have carried belong to the
- * field they are already displayed as.
+ * Only what changed. The previous screen sent three policy keys on every save
+ * whatever the operator touched, so those three reported as stored until the
+ * next start reconciled them back to default -- the flip retiring the old
+ * policy write path was meant to end.
  *
- * A group emptied by that removal drops out, so "Requests" does not appear as
- * a heading with nothing under it.
+ * An emptied box is a reset, because the store cannot hold "" as a value
+ * distinct from absent. It resets the one key that was emptied.
  */
-export function readOnlyGroups(cfg: ConfigResponse) {
-  const editable = new Set(EDITABLE.map((e) => e.field))
-  return settingGroups(cfg)
-    .map((section) => ({
-      ...section,
-      rows: section.rows.filter((row) => !editable.has(row.field)),
-    }))
-    .filter((section) => section.rows.length > 0)
+export function settingsPatch(
+  draft: Record<string, string>,
+  reset: Set<string>,
+  cfg: ConfigResponse,
+): ConfigPatch {
+  const set: Record<string, string> = {}
+  const clear: string[] = []
+
+  for (const [field, typed] of Object.entries(draft)) {
+    const meta = cfg.fields[field]
+    // An environment key is not ours to write, and a key the gateway does not
+    // report is not one this build knows how to send.
+    if (!meta || meta.source === "env") continue
+    if (reset.has(field)) continue
+    // Trimmed once, for the comparison as well as the send. Comparing the
+    // untrimmed text made " 10m0s " a change from "10m0s" and then sent the
+    // padding along with it.
+    const next = typed.trim()
+    const current = cfg.values[field] ?? ""
+    if (next === "") {
+      // Only if there is a row to delete. Resetting a key already on its
+      // default writes nothing and would still be named in restart_required.
+      if (meta.source === "database") clear.push(field)
+      continue
+    }
+    if (next !== current) set[field] = next
+  }
+
+  for (const field of reset) {
+    const meta = cfg.fields[field]
+    if (!meta || meta.source !== "database") continue
+    if (!clear.includes(field)) clear.push(field)
+  }
+
+  const patch: ConfigPatch = {}
+  if (Object.keys(set).length > 0) patch.set = set
+  if (clear.length > 0) patch.reset = clear
+  return patch
+}
+
+/**
+ * The server's refusal, against the fields it names.
+ *
+ * One refusal can belong to several keys: a cross-key rule reverts its whole
+ * set together and its message lists them, so the operator sees the complaint
+ * on every field that has to move for it to pass rather than on one of them.
+ */
+export function fieldErrors(message: string, fields: string[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const field of fields) {
+    if (message.includes(field)) out[field] = message
+  }
+  return out
+}
+
+/** Every key one patch touches, which is the set a refusal can name. */
+function patchedKeys(patch: ConfigPatch): string[] {
+  return [...Object.keys(patch.set ?? {}), ...(patch.reset ?? [])]
 }
 
 export function reloadMessage(res: ReloadResult): string {
@@ -64,73 +114,6 @@ export function syncMessage(res: SyncResult): string {
   return res.triggered ? "Catalog sync started." : "Catalog sync was not started."
 }
 
-type Draft = Record<string, string>
-
-/**
- * The form's starting values.
- *
- * Every block is read defensively. A policy response missing one is not
- * something the gateway sends, but reading through it unguarded took the
- * whole screen down with it -- including the banners that would have said
- * what was wrong.
- */
-export function toDraft(policy: PolicyBlock): Draft {
-  const trip = policy.cooldown?.trip_after
-  return {
-    "policy.cooldown.trip_after": trip !== undefined ? String(trip) : "",
-    "policy.cooldown.max": policy.cooldown?.max ?? "",
-    "policy.retry.max_attempts":
-      policy.retry?.max_attempts !== undefined ? String(policy.retry.max_attempts) : "",
-    "policy.timeout.total": policy.timeout?.total ?? "",
-    "policy.timeout.idle": policy.timeout?.idle ?? "",
-  }
-}
-
-export type PolicyWrite = {
-  cooldown: { trip_after?: number; max: string }
-  /** Optional, mirroring the Go `policyWrite` where every block is a pointer:
-   *  an omitted block leaves the setting alone, which is what an emptied or
-   *  unparseable field should do rather than writing a value nobody typed. */
-  retry?: { max_attempts: number }
-  timeout: { total: string; idle: string }
-}
-
-/**
- * The write, built from the draft.
- *
- * `connect` and `first_byte` never enter it. Both configure the one shared
- * transport built at startup, so no reload can apply them: the API accepts a
- * write and names them as waiting for a restart, and this screen has no editor
- * for that yet.
- */
-/** A count field's value, or undefined when it holds nothing a count can be.
- *  Left out rather than sent as 0: `Number("")` is 0, and the store reads 0
- *  as "no override", so an emptied box would delete the setting and silently
- *  fall back to the built-in default under a toast reporting success. NaN is
- *  worse: it serialises to null and the field is ignored with no complaint
- *  either. */
-function wholeNumber(raw: string | undefined): number | undefined {
-  const text = (raw ?? "").trim()
-  if (text === "" || !Number.isInteger(Number(text))) return undefined
-  return Number(text)
-}
-
-export function toWrite(draft: Draft): PolicyWrite {
-  const tripAfter = wholeNumber(draft["policy.cooldown.trip_after"])
-  const attempts = wholeNumber(draft["policy.retry.max_attempts"])
-  return {
-    cooldown: {
-      max: draft["policy.cooldown.max"] ?? "",
-      ...(tripAfter !== undefined ? { trip_after: tripAfter } : {}),
-    },
-    ...(attempts !== undefined ? { retry: { max_attempts: attempts } } : {}),
-    timeout: {
-      total: draft["policy.timeout.total"] ?? "",
-      idle: draft["policy.timeout.idle"] ?? "",
-    },
-  }
-}
-
 const GROUP_ICON: Record<GroupId, typeof Clock> = {
   requests: Clock,
   failure: ShieldAlert,
@@ -139,173 +122,109 @@ const GROUP_ICON: Record<GroupId, typeof Clock> = {
   server: Server,
 }
 
-function SettingField({
-  setting,
-  value,
-  onChange,
-}: {
-  setting: EditableSetting
-  value: string
-  onChange: (next: string) => void
-}) {
-  return (
-    <div className="flex flex-wrap items-start gap-4 border-t py-3 first:border-t-0 first:pt-0">
-      <div className="min-w-0 flex-1">
-        <Label htmlFor={setting.field} className="font-medium">
-          {setting.name}
-        </Label>
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">{setting.description}</p>
-        <p className="font-mono text-sm text-[hsl(var(--legend))]">{setting.field}</p>
-      </div>
-      {setting.kind === "count" ? (
-        <NumberBox
-          id={setting.field}
-          value={value}
-          onChange={onChange}
-          placeholder={setting.placeholder}
-          step={1}
-          precision={0}
-          className="w-40 shrink-0"
-        />
-      ) : (
-        <Input
-          id={setting.field}
-          value={value}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-          placeholder={setting.placeholder}
-          className="w-40 shrink-0 font-mono"
-        />
-      )}
-    </div>
-  )
+/** Every editable key's stored spelling, which is what a save submits. */
+function seedDraft(cfg: ConfigResponse): Record<string, string> {
+  const draft: Record<string, string> = {}
+  for (const { rows } of settingGroups(cfg)) {
+    for (const row of rows) {
+      if (row.editable) draft[row.field] = row.value
+    }
+  }
+  return draft
 }
 
 /**
- * One setting this screen shows but cannot change.
+ * Every stored setting, in one form with one Save.
  *
- * The key sits under the name in mono rather than replacing it. It is what
- * the settings table and every error message use, so dropping it would break
- * the trail from this screen to the stored value.
+ * A save per field would be a way to leave half the visit applied; and the
+ * gateway validates the configuration as a whole, so a cross-key rule can only
+ * be satisfied by the keys that break it moving together.
  */
-function ReadOnlySetting({ row }: { row: SettingRow }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t py-3 first:border-t-0 first:pt-0">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{row.meta.name}</p>
-        {row.meta.description && (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">{row.meta.description}</p>
-        )}
-        <p className="font-mono text-sm text-[hsl(var(--legend))]">{row.field}</p>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        {/* One reading. The file's own spelling, when it differs, is on the
-            title: 720h0m0s reads as 30 days here, and printing both made
-            every duration look like two settings. */}
-        <span
-          className="font-mono text-base font-medium tabular-nums"
-          title={row.literal || undefined}
-        >
-          {row.display}
-        </span>
-        <span className="flex items-center gap-1">
-          <Badge variant="outline" title={SOURCE_NOTE[row.source]}>
-            {SOURCE_LABEL[row.source]}
-          </Badge>
-          {/* Stated as a fact rather than offered: a restart-only field is
-              accepted by the API and takes effect on the next start.
+function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
+  const queryClient = useQueryClient()
+  const [draft, setDraft] = useState<Record<string, string>>(() => seedDraft(cfg))
+  const [reset, setReset] = useState<Set<string>>(() => new Set())
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
-              An environment value gets neither badge. It is technically
-              hot-reloadable — nothing captures it at construction — but an
-              environment variable cannot change under a running process, so
-              "hot" would promise a live edit that is impossible. The
-              environment chip already says the whole story. */}
-          {row.source !== "environment" &&
-            (row.hotReloadable ? (
-              <Badge variant="green">hot</Badge>
-            ) : (
-              <Badge variant="secondary">restart</Badge>
-            ))}
-        </span>
-      </div>
-    </div>
-  )
-}
+  const reseedFrom = (from: ConfigResponse) => {
+    setDraft(seedDraft(from))
+    setReset(new Set())
+    setErrors({})
+  }
 
-/** Everything the gateway is set to that this console cannot change, and
- *  where each value came from. §8.1 requires the source to be said at the
- *  point of display: an environment value needs a restart, a database one does
- *  not. */
-function ReadOnlySettings({ cfg }: { cfg: ConfigResponse }) {
-  const sections = readOnlyGroups(cfg)
-  if (sections.length === 0) return null
-  return (
-    <div className="mt-4 flex flex-col gap-4">
-      <div>
-        <h2 className="text-sm font-medium">Read-only configuration</h2>
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Stored in the database, read from the environment at startup, or left at
-          its built-in default — the badge on each row says which. The stored ones
-          can be written through the API; this screen does not offer editors for
-          them yet.
-        </p>
-      </div>
-      {sections.map(({ group, rows }) => {
-        const Icon = GROUP_ICON[group.id]
-        return (
-          <Card key={group.id} className="p-4">
-            <div className="mb-3 flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius)] bg-[hsl(var(--muted))]">
-                <Icon className="size-5" aria-hidden="true" />
-              </span>
-              <div>
-                <h3 className="font-medium">{group.title}</h3>
-                <p className="text-sm text-[hsl(var(--muted-foreground))]">{group.blurb}</p>
-              </div>
-            </div>
-            <div className="flex flex-col">
-              {rows.map((row) => (
-                <ReadOnlySetting key={row.field} row={row} />
-              ))}
-            </div>
-          </Card>
-        )
-      })}
-    </div>
-  )
-}
-
-function PolicySettings({ policy }: { policy: PolicyBlock }) {
-  const [draft, setDraft] = useState<Draft>(() => toDraft(policy))
-  const clean = toDraft(policy)
   // Reseeded whenever the server's answer changes, which is what a successful
   // save produces. Without this the bar never clears: Go normalises durations
   // on the way out (`Total.String()` turns a typed "10m" into "10m0s"), so the
   // draft and the saved value compare unequal forever and a live Save button
   // sits under a toast saying the settings were saved.
-  const [seededFrom, setSeededFrom] = useState(policy)
-  if (policy !== seededFrom) {
-    setSeededFrom(policy)
-    setDraft(toDraft(policy))
+  const [seededFrom, setSeededFrom] = useState(cfg)
+  if (cfg !== seededFrom) {
+    setSeededFrom(cfg)
+    reseedFrom(cfg)
   }
-  const dirty = Object.keys(clean).some((k) => draft[k] !== clean[k])
 
   const save = useApiMutation({
-    mutationFn: (body: PolicyWrite) => api.put("/api/policy", body),
-    success: "Settings saved",
-    invalidates: [keys.policy, keys.config],
+    mutationFn: async (patch: ConfigPatch) => {
+      try {
+        return await api.put<SaveResult>("/api/config", patch)
+      } catch (err) {
+        // A 400 is the registry's verdict on a value, and it names the keys it
+        // is about. Put it on those rows: a toast alone leaves the operator
+        // hunting the field across five cards.
+        if (err instanceof ApiError && err.status === 400) {
+          setErrors(fieldErrors(err.message, patchedKeys(patch)))
+        }
+        throw err
+      }
+    },
+    onSuccess: async (res) => {
+      // Only the good outcome toasts. A committed write the gateway could not
+      // republish is invalid configuration, and the refetch below reports it
+      // as such: the screen's own `config.valid` banner says so, with the same
+      // error and the same note about what is still serving.
+      if (res.valid) toast.success(savedMessage(res))
+      // The rows are durable in both 200 shapes, so the served answer is stale
+      // either way.
+      await queryClient.invalidateQueries({ queryKey: keys.config })
+      if (!res.valid) return
+      // Seeded from the refetched answer rather than from the `cfg` this
+      // render closed over, which is the pre-save one: reseeding from that
+      // flips every saved box back to its old value until the refetch lands,
+      // and leaves it there for good if the refetch fails.
+      //
+      // Reseeded at all -- rather than left to the guard above -- because a
+      // save can leave the answer byte-identical: /api/config reports the
+      // typed config, so a saved "10m" reads back as "10m0s" and Query shares
+      // that response structurally with the old one. The reference never
+      // changes, the guard never fires, and the draft would stay dirty
+      // against a value that is in fact stored.
+      reseedFrom(queryClient.getQueryData<ConfigResponse>(keys.config) ?? cfg)
+    },
   })
 
-  const groups = [
-    { id: "requests" as const, title: "Requests", blurb: "How long the router waits, and how many providers it will try." },
-    { id: "failure" as const, title: "Failure handling", blurb: "When a credential is taken out of rotation, and for how long." },
-  ]
+  const patch = settingsPatch(draft, reset, cfg)
+  const dirty = Object.keys(patch).length > 0
+
+  const change = (field: string, next: string) => {
+    setDraft((d) => ({ ...d, [field]: next }))
+    setErrors((e) => (field in e ? Object.fromEntries(Object.entries(e).filter(([k]) => k !== field)) : e))
+  }
+
+  /** In or out of the save's reset list. The draft is left alone: what the
+   *  row will do is said on the row, and emptying the box to say it turned a
+   *  stored `true` into an unchecked switch -- a different write entirely. */
+  const toggleReset = (field: string) =>
+    setReset((r) => {
+      const out = new Set(r)
+      if (!out.delete(field)) out.add(field)
+      return out
+    })
 
   return (
     <>
       <div className="flex flex-col gap-4">
-        {groups.map((group) => {
+        {settingGroups(cfg).map(({ group, rows }) => {
           const Icon = GROUP_ICON[group.id]
-          const fields = EDITABLE.filter((s) => s.group === group.id)
           return (
             <Card key={group.id} className="p-4">
               <div className="mb-3 flex items-start gap-3">
@@ -318,14 +237,19 @@ function PolicySettings({ policy }: { policy: PolicyBlock }) {
                 </div>
               </div>
               <div className="flex flex-col">
-                {fields.map((setting) => (
+                {rows.map((row) => (
                   <SettingField
-                    key={setting.field}
-                    setting={setting}
-                    value={draft[setting.field] ?? ""}
-                    onChange={(next) =>
-                      setDraft((d) => ({ ...d, [setting.field]: next }))
-                    }
+                    key={row.field}
+                    row={row}
+                    value={draft[row.field] ?? ""}
+                    onChange={(next) => change(row.field, next)}
+                    // Only a stored row has anything to delete; a key already
+                    // on its default would be a no-op the answer still reports
+                    // as a write.
+                    onReset={row.source === "database" ? () => toggleReset(row.field) : null}
+                    resetting={reset.has(row.field)}
+                    disabled={save.isPending}
+                    error={errors[row.field]}
                   />
                 ))}
               </div>
@@ -340,10 +264,10 @@ function PolicySettings({ policy }: { policy: PolicyBlock }) {
         <div className="sticky bottom-4 mt-4 flex items-center gap-2 rounded-[var(--radius)] border bg-[hsl(var(--card))] p-3 shadow-lg">
           <span className="text-sm">Unsaved changes</span>
           <div className="ml-auto flex gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setDraft(clean)}>
+            <Button size="sm" variant="ghost" onClick={() => reseedFrom(cfg)}>
               Discard
             </Button>
-            <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(toWrite(draft))}>
+            <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(patch)}>
               Save
             </Button>
           </div>
@@ -351,6 +275,16 @@ function PolicySettings({ policy }: { policy: PolicyBlock }) {
       )}
     </>
   )
+}
+
+/** A restart-only key is accepted rather than refused, so the toast has to say
+ *  the value is stored but not yet serving; silence there reads as applied. */
+function savedMessage(res: SaveResult): string {
+  const pending = res.restart_required ?? []
+  if (pending.length === 0) return "Settings saved"
+  return `Settings saved. ${pending.join(", ")} ${
+    pending.length === 1 ? "takes" : "take"
+  } effect after a restart.`
 }
 
 /** The caller's own session first, so the row that must not be revoked is
@@ -361,7 +295,6 @@ export function orderSessions(sessions: Session[]): Session[] {
 
 export function SettingsScreen() {
   const config = useConfig()
-  const policy = usePolicy()
   const sessions = useSessions()
   const queryClient = useQueryClient()
   const [passwordOpen, setPasswordOpen] = useState(false)
@@ -470,14 +403,6 @@ export function SettingsScreen() {
         </Card>
       )}
 
-      {policy.isError && (
-        <LoadError
-          what="The policy"
-          error={policy.error}
-          onRetry={() => void policy.refetch()}
-          className="mb-4"
-        />
-      )}
       {config.isError && (
         <LoadError
           what="The configuration"
@@ -486,13 +411,9 @@ export function SettingsScreen() {
           className="mb-4"
         />
       )}
-      {(policy.isPending || config.isPending) && !policy.isError && !config.isError && (
-        <LoadingRows rows={6} />
-      )}
+      {config.isPending && !config.isError && <LoadingRows rows={6} />}
 
-      {policy.data && <PolicySettings policy={policy.data} />}
-
-      {config.data && <ReadOnlySettings cfg={config.data} />}
+      {config.data && <SettingsForm cfg={config.data} />}
 
       <Card className="mt-4 p-4">
         <div className="flex flex-wrap items-start gap-3">
