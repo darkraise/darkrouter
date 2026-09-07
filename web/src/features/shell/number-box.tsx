@@ -35,6 +35,7 @@ export function NumberBox({
   disabled = false,
   retainValue = false,
   suffix,
+  describedBy,
   step,
   precision,
   className,
@@ -53,6 +54,8 @@ export function NumberBox({
   /** A unit that stays put. A placeholder saying "tokens" vanishes at the
    *  first keystroke, which is when the unit starts mattering. */
   suffix?: string
+  /** Id of the element describing this field, for `aria-describedby`. */
+  describedBy?: string
   step?: number
   /** 0 for a count. Left unset for a rate, so a typed `0.7` is not reformatted
    *  into `0.70` the moment the field loses focus. */
@@ -76,6 +79,7 @@ export function NumberBox({
       >
         <NumberInputField
           id={id}
+          aria-describedby={describedBy}
           placeholder={placeholder}
           className={dimmed ? "disabled:opacity-100" : undefined}
         />

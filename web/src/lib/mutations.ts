@@ -26,6 +26,9 @@ export function useApiMutation<TData, TVars>(opts: {
    *  Without it two writes to the same row are concurrent, and the row keeps
    *  whichever response the server happened to finish last. */
   scope?: MutationScope
+  /** Skip the failure toast. For a screen that shows a refusal itself -- and
+   *  which then owns saying so when it has nowhere to put the message. */
+  quietError?: boolean
   onSuccess?: UseMutationOptions<TData, Error, TVars>["onSuccess"]
 }) {
   const queryClient = useQueryClient()
@@ -55,6 +58,7 @@ export function useApiMutation<TData, TVars>(opts: {
       // sends the operator to the login screen. Toasting it too would say
       // "failed" beside a screen that is already explaining itself.
       if (err instanceof ApiError && err.status === 401) return
+      if (opts.quietError) return
       toast.error(err.message)
     },
   })

@@ -189,4 +189,23 @@ describe("SettingField", () => {
     )
     expect(screen.getByText(/must be at least 48h/)).toBeTruthy()
   })
+
+  it("points the control at the complaint for a screen reader", () => {
+    render(
+      <SettingField
+        row={row()}
+        value="1h"
+        onChange={vi.fn()}
+        onReset={null}
+        error="log.retention must be at least 48h, got 1h"
+      />,
+    )
+    const described = screen
+      .getByLabelText("Keep request records for")
+      .getAttribute("aria-describedby")
+    expect(described).toBeTruthy()
+    expect(document.getElementById(described as string)?.textContent).toMatch(
+      /must be at least 48h/,
+    )
+  })
 })

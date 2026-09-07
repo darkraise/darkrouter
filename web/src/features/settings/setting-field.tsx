@@ -40,6 +40,11 @@ export function SettingField({
   // An emptied box means the same thing as the Reset button: the store cannot
   // hold "" as a value distinct from absent, so the row has to say so rather
   // than letting an empty field read as a value of nothing.
+  // The message gets its own flex line rather than a place in the value
+  // column: a cross-key refusal runs to ~180 characters, and a column that
+  // cannot shrink grows to the width of the card to hold it, breaking the row
+  // onto two lines.
+  const errorId = error ? `${row.field}-error` : undefined
   const willReset = resetting || (row.editable && row.source === "database" && value.trim() === "")
   return (
     <div className="flex flex-wrap items-start gap-4 border-t py-3 first:border-t-0 first:pt-0">
@@ -58,7 +63,13 @@ export function SettingField({
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         {row.editable ? (
-          <Editor row={row} value={value} onChange={onChange} disabled={disabled || resetting} />
+          <Editor
+            row={row}
+            value={value}
+            onChange={onChange}
+            disabled={disabled || resetting}
+            describedBy={errorId}
+          />
         ) : (
           <span className="font-mono text-base font-medium tabular-nums">{row.display}</span>
         )}
@@ -97,8 +108,12 @@ export function SettingField({
             </Button>
           )}
         </span>
-        {error && <p className="text-sm text-[hsl(var(--destructive))]">{error}</p>}
       </div>
+      {error && (
+        <p id={errorId} className="basis-full text-sm text-[hsl(var(--destructive))]">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
@@ -108,11 +123,13 @@ function Editor({
   value,
   onChange,
   disabled,
+  describedBy,
 }: {
   row: SettingRow
   value: string
   onChange: (next: string) => void
   disabled: boolean
+  describedBy?: string
 }) {
   switch (row.kind) {
     case "bool":
@@ -123,6 +140,7 @@ function Editor({
         <Switch
           id={row.field}
           aria-label={row.meta.name}
+          aria-describedby={describedBy}
           checked={value === "true"}
           disabled={disabled}
           onCheckedChange={(next: boolean) => onChange(String(next))}
@@ -135,6 +153,7 @@ function Editor({
           value={value}
           onChange={onChange}
           disabled={disabled}
+          describedBy={describedBy}
           // A gated row is still a row being read: dimming its value to
           // placeholder grey would hide the number the operator is deciding
           // about. The border dims instead.
@@ -154,6 +173,7 @@ function Editor({
           value={value}
           onChange={onChange}
           disabled={disabled}
+          describedBy={describedBy}
           seed={seedBytes}
           emit={(text) => {
             const bytes = parseBytes(text)
@@ -168,6 +188,7 @@ function Editor({
           value={value}
           onChange={onChange}
           disabled={disabled}
+          describedBy={describedBy}
           seed={(v) => v}
           emit={(text) => text}
           placeholder={row.kind === "url" ? "llm.example.com" : undefined}
@@ -201,6 +222,7 @@ function DraftBox({
   value,
   onChange,
   disabled,
+  describedBy,
   seed,
   emit,
   placeholder,
@@ -209,6 +231,7 @@ function DraftBox({
   value: string
   onChange: (next: string) => void
   disabled: boolean
+  describedBy?: string
   /** The stored value as the box first shows it. */
   seed: (value: string, row: SettingRow) => string
   /** The typed text as the store spells it. */
@@ -226,6 +249,7 @@ function DraftBox({
     <Input
       id={row.field}
       value={text}
+      aria-describedby={describedBy}
       disabled={disabled}
       placeholder={placeholder}
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
