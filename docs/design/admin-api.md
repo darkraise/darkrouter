@@ -100,7 +100,8 @@ Route preview returns the ordered candidates and the skipped ones. There are
 **eight** skip reasons: `disabled`, `cooling`, `surface`, `capability`,
 `no_credential`, `removed_upstream`, `adapter_surface`, `unsanctioned`.
 
-A `PUT /api/config` naming a restart-only field is refused.
+A `PUT /api/config` naming a restart-only field is accepted, and the response
+names the written keys that take effect on restart.
 
 ## Observability
 

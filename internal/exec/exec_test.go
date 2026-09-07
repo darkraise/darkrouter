@@ -2176,7 +2176,7 @@ func newExecutorForModels(t testing.TB, kind, upstreamURL string, models []strin
 
 // newExecutorForTwo is newExecutorFor over two same-kind providers serving the
 // same model, "up" ahead of "second" at the given priority so failover order
-// is deterministic rather than relying on config file order.
+// is deterministic rather than relying on the order the store returns them in.
 func newExecutorForTwo(t testing.TB, kind, urlA, urlB string, priorityA int, deps Deps) *Executor {
 	t.Helper()
 	return newExecutorRaw(t, []providerSpec{

@@ -363,9 +363,10 @@ export const SOURCE_LABEL = {
  * their own editor. Everything else on the gateway has no write endpoint yet,
  * so listing it here would be a page of controls that refuse to move.
  *
- * `policy.timeout.connect` and `policy.timeout.first_byte` are absent for the
- * same reason: both configure the one shared transport built at startup, and
- * `PUT /api/policy` refuses a write that touches either.
+ * `policy.timeout.connect` and `policy.timeout.first_byte` are absent because
+ * both configure the one shared transport built at startup, so a save of
+ * either waits for a restart. The API accepts them; this screen does not offer
+ * them yet.
  */
 export type EditableSetting = {
   field: string

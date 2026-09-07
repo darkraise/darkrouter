@@ -161,8 +161,8 @@ describe("the editable set", () => {
   })
 
   it("leaves out the two timeouts a reload cannot apply", () => {
-    // Both configure the one shared transport built at startup, and
-    // PUT /api/policy refuses a write that touches either.
+    // Both configure the one shared transport built at startup, so a save of
+    // either waits for a restart and this screen does not offer it yet.
     const fields = EDITABLE.map((s) => s.field)
     expect(fields).not.toContain("policy.timeout.connect")
     expect(fields).not.toContain("policy.timeout.first_byte")

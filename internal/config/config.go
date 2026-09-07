@@ -5,78 +5,78 @@ package config
 import "time"
 
 type Config struct {
-	Server    ServerConfig     `yaml:"server"`
-	Providers []ProviderConfig `yaml:"providers"`
+	Server    ServerConfig
+	Providers []ProviderConfig
 	// Aliases map a friendly name to an ordered fallback chain. Order is the
 	// chain order, so a map of slices is the right shape: the values are
 	// ordered even though the keys are not.
-	Aliases    map[string][]string `yaml:"aliases"`
-	Policy     PolicyConfig        `yaml:"policy"`
-	Log        LogConfig           `yaml:"log"`
-	Capture    CaptureConfig       `yaml:"capture"`
-	Catalog    CatalogConfig       `yaml:"catalog"`
-	Media      MediaConfig         `yaml:"media"`
-	Playground PlaygroundConfig    `yaml:"playground"`
+	Aliases    map[string][]string
+	Policy     PolicyConfig
+	Log        LogConfig
+	Capture    CaptureConfig
+	Catalog    CatalogConfig
+	Media      MediaConfig
+	Playground PlaygroundConfig
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
-	// /healthz rather than rejecting the document. Broader than Skipped: a
+	// /healthz rather than rejecting the configuration. Broader than Skipped: a
 	// restart-pending notice lands here too, and that alone must not make the
 	// configuration report invalid.
-	Warnings []string `yaml:"-"`
+	Warnings []string
 	// Skipped names settings whose stored value could not be used and was
 	// reverted to its compiled default -- a bad parse, a broken cross-key
 	// rule, or the wholesale fallback. This, not Warnings, is what makes a
 	// configuration invalid: the process is running a value the operator did
 	// not choose.
-	Skipped []string `yaml:"-"`
+	Skipped []string
 }
 
 type ServerConfig struct {
-	ProxyListen string `yaml:"proxy_listen"`
-	AdminListen string `yaml:"admin_listen"`
+	ProxyListen string
+	AdminListen string
 	// PublicURL is the address clients outside the process reach the gateway
 	// at, which the process itself cannot derive: a published container port,
 	// a reverse proxy's hostname and a path prefix are all applied after the
 	// listener binds. Empty means the console falls back to guessing from the
 	// page it was served on.
-	PublicURL     string        `yaml:"public_url"`
-	ProxyToken    string        `yaml:"proxy_token"`
-	MaxBodyBytes  int64         `yaml:"max_body_bytes"`
-	ShutdownGrace time.Duration `yaml:"shutdown_grace"`
-	SSE           SSEConfig     `yaml:"sse"`
+	PublicURL     string
+	ProxyToken    string
+	MaxBodyBytes  int64
+	ShutdownGrace time.Duration
+	SSE           SSEConfig
 }
 
 type SSEConfig struct {
-	MaxLineBytes int `yaml:"max_line_bytes"`
+	MaxLineBytes int
 	// MaxPrecommitBytes bounds what one attempt may buffer before committing.
 	// The first_byte deadline alone is not enough: a provider can emit
 	// megabytes inside sixty seconds.
-	MaxPrecommitBytes int `yaml:"max_precommit_bytes"`
+	MaxPrecommitBytes int
 }
 
 type ProviderConfig struct {
-	ID   string `yaml:"id"`
-	Kind string `yaml:"kind"`
+	ID   string
+	Kind string
 	// Preset names the shipped catalog entry this provider is an instance of.
 	// It is how quirks, surfaces, model traits and the models.dev join key are
 	// reached at request time; without it a provider is a base URL and a key.
-	Preset   string   `yaml:"preset"`
-	BaseURL  string   `yaml:"base_url"`
-	APIKey   string   `yaml:"api_key"`
-	Priority int      `yaml:"priority"`
-	Models   []string `yaml:"models"`
+	Preset   string
+	BaseURL  string
+	APIKey   string
+	Priority int
+	Models   []string
 }
 
 type PolicyConfig struct {
-	Cooldown CooldownConfig `yaml:"cooldown"`
-	Retry    RetryConfig    `yaml:"retry"`
-	Timeout  TimeoutConfig  `yaml:"timeout"`
+	Cooldown CooldownConfig
+	Retry    RetryConfig
+	Timeout  TimeoutConfig
 }
 
 // RetryConfig carries only max_attempts: outcome classification is fixed
 // rather than configurable, so there is nothing else to tune.
 type RetryConfig struct {
-	MaxAttempts int `yaml:"max_attempts"`
+	MaxAttempts int
 }
 
 // CooldownConfig governs the circuit breaker. TripAfter counts consecutive
@@ -84,27 +84,27 @@ type RetryConfig struct {
 // traffic never fills. It is a pointer so that an explicit 0 can be rejected
 // rather than silently replaced by the default.
 type CooldownConfig struct {
-	TripAfter *int          `yaml:"trip_after"`
-	Max       time.Duration `yaml:"max"`
+	TripAfter *int
+	Max       time.Duration
 }
 
 type LogConfig struct {
-	Retention time.Duration `yaml:"retention"`
+	Retention time.Duration
 }
 
 // CaptureConfig controls request and response body capture, off by default
 // because bodies carry whatever the user sent.
 type CaptureConfig struct {
-	Bodies    bool          `yaml:"bodies"`
-	MaxBytes  int64         `yaml:"max_bytes"`
-	Retention time.Duration `yaml:"retention"`
+	Bodies    bool
+	MaxBytes  int64
+	Retention time.Duration
 }
 
 type TimeoutConfig struct {
-	Connect   time.Duration `yaml:"connect"`
-	FirstByte time.Duration `yaml:"first_byte"`
-	Total     time.Duration `yaml:"total"`
-	Idle      time.Duration `yaml:"idle"`
+	Connect   time.Duration
+	FirstByte time.Duration
+	Total     time.Duration
+	Idle      time.Duration
 }
 
 // RestartOnly names the fields a hot reload cannot apply. A reload changing one
@@ -175,33 +175,33 @@ func optionalBool(p *bool) [2]bool {
 // CatalogConfig governs the two background workers that keep the model catalog
 // current.
 type CatalogConfig struct {
-	ModelsDevURL string        `yaml:"models_dev_url"`
-	SyncInterval time.Duration `yaml:"sync_interval"`
-	SyncTimeout  time.Duration `yaml:"sync_timeout"`
+	ModelsDevURL string
+	SyncInterval time.Duration
+	SyncTimeout  time.Duration
 
 	// FreeCatalogURL is the curated free-tier list the import filter reads.
 	// Free-tier membership cannot be derived from prices, so it is somebody's
 	// hand-maintained list, and staying current with it means re-reading what
 	// they publish.
-	FreeCatalogURL      string        `yaml:"free_catalog_url"`
-	FreeCatalogInterval time.Duration `yaml:"free_catalog_interval"`
+	FreeCatalogURL      string
+	FreeCatalogInterval time.Duration
 	// FreeCatalogSync is a pointer so an explicit false is distinguishable
 	// from an absent key. An operator who does not want the gateway reaching
 	// GitHub on a schedule turns it off and keeps the catalogue its release
 	// shipped with.
-	FreeCatalogSync *bool `yaml:"free_catalog_sync"`
+	FreeCatalogSync *bool
 
 	// LiteLLMURL is the community price index. It prices models models.dev
 	// does not cover, and it is joined in memory rather than stored, so the
 	// only way to stay current with a rate change is to re-read it.
-	LiteLLMURL      string        `yaml:"litellm_url"`
-	LiteLLMInterval time.Duration `yaml:"litellm_interval"`
+	LiteLLMURL      string
+	LiteLLMInterval time.Duration
 	// LiteLLMSync is a pointer so an explicit false is distinguishable from an
 	// absent key. An operator who does not want the gateway reaching GitHub on
 	// a schedule turns it off and prices only from models.dev.
-	LiteLLMSync *bool `yaml:"litellm_sync"`
+	LiteLLMSync *bool
 
-	Discovery DiscoveryConfig `yaml:"discovery"`
+	Discovery DiscoveryConfig
 
 	// SeedFreeProviders adds a provider on first start for every preset that
 	// needs no credential, importing only their free models. A pointer so an
@@ -213,7 +213,7 @@ type CatalogConfig struct {
 	// Off does not remove anything already seeded. Deleting a seeded provider
 	// is how an operator declines one; the seeder records what it has offered
 	// and never offers it twice.
-	SeedFreeProviders *bool `yaml:"seed_free_providers"`
+	SeedFreeProviders *bool
 }
 
 // SeedFreeProvidersEnabled reports whether first-start seeding runs.
@@ -243,7 +243,7 @@ func (c CatalogConfig) LiteLLMSyncEnabled() bool {
 type MediaConfig struct {
 	// Inline is a pointer so an explicit false is distinguishable from an
 	// absent key, which is what lets the default be on.
-	Inline *bool `yaml:"inline"`
+	Inline *bool
 }
 
 // MediaInline reports the effective setting: absent means on.
@@ -258,9 +258,9 @@ func (c *Config) MediaInline() bool {
 // covered by it.
 type PlaygroundConfig struct {
 	// SaveConversations is a pointer for the same reason Discovery.Enabled is:
-	// the default is on, so an explicit false in the file has to be
-	// distinguishable from a key the file never mentioned.
-	SaveConversations *bool `yaml:"save_conversations"`
+	// the default is on, so an explicit false has to be distinguishable from a
+	// key with no stored row.
+	SaveConversations *bool
 }
 
 // SaveConversations reports the effective setting: absent means on.
@@ -273,10 +273,10 @@ type DiscoveryConfig struct {
 	// absent key, which is what lets the default be on. Discovery is outbound
 	// traffic the gateway initiates on the operator's behalf, so it needs an
 	// off switch that is not "delete every provider".
-	Enabled  *bool         `yaml:"enabled"`
-	Interval time.Duration `yaml:"interval"`
-	Timeout  time.Duration `yaml:"timeout"`
+	Enabled  *bool
+	Interval time.Duration
+	Timeout  time.Duration
 	// Concurrency is the cap across the whole discovery fleet, not per
 	// provider: forty providers must not open forty connections on boot.
-	Concurrency int `yaml:"concurrency"`
+	Concurrency int
 }
