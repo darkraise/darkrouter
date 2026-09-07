@@ -23,7 +23,7 @@ import { ConfirmButton } from "../shell/confirm-button"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useConfig, useModels, useProxyTokens } from "../../lib/queries"
 import { dateOnly, dateTime, zoneLabel } from "../../lib/format"
-import type { Model, ProxyToken } from "../../lib/api-types"
+import type { ConfigResponse, Model, ProxyToken } from "../../lib/api-types"
 import { EmptyState } from "../shell/empty-state"
 import { LoadError, LoadingRows } from "../shell/screen-state"
 import { baseUrlFor, snippetFor, TOOLS, type Tool } from "./snippets"
@@ -73,6 +73,11 @@ const TOOL_LABEL: Record<Tool, string> = {
  * does not leave the building.
  */
 export type ConnectOrigins = { lan: string; public?: string }
+
+/** The operator-stated public origin, or `""` when none is stored. */
+export function publicOrigin(cfg: Pick<ConfigResponse, "values">): string {
+  return cfg.values["server.public_url"] ?? ""
+}
 
 export function originsFor(
   location: Pick<Location, "origin" | "hostname" | "protocol">,
@@ -186,13 +191,13 @@ export function ConnectScreen() {
     invalidates: [keys.proxyTokens],
   })
 
-  const server = config.data?.blocks.server
-  const origins = server
+  const values = config.data?.values
+  const origins = values
     ? originsFor(
         window.location,
-        server.proxy_listen,
-        server.admin_listen,
-        server.public_url,
+        values["server.proxy_listen"] ?? "",
+        values["server.admin_listen"] ?? "",
+        publicOrigin({ values }),
       )
     : { lan: window.location.origin }
   // Defaults to the public address whenever there is one: it is the address
