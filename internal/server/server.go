@@ -521,6 +521,13 @@ func (s *Server) AdminHandler() http.Handler {
 			warnings = append(warnings, unclaimedWarning)
 		}
 
+		// Never null: a client cannot tell a JSON null from a field an older
+		// build did not serve.
+		pending := s.store.PendingRestart()
+		if pending == nil {
+			pending = []string{}
+		}
+
 		body := map[string]any{
 			// A skipped key is not a valid configuration. The process is
 			// running a default the operator did not choose. Keyed on
@@ -534,6 +541,11 @@ func (s *Server) AdminHandler() http.Handler {
 			// records, not tokens or dollars.
 			"log_records_dropped": s.logw.Dropped(),
 			"log_records_written": s.logw.Written(),
+			// Measured against the snapshot this process booted on, not
+			// against the previous reload: the consecutive diff that lands in
+			// warnings is cleared by the next unrelated save while the old
+			// value is still the one in force.
+			"pending_restart": pending,
 		}
 		if cfgErr != nil {
 			body["config_error"] = cfgErr.Error()

@@ -45,6 +45,7 @@ beforeEach(() => vi.unstubAllGlobals())
 const cfg = (): ConfigResponse => ({
   valid: true,
   warnings: [],
+  pending_restart: [],
   fields: {
     "log.retention": { source: "database", hot_reloadable: true },
     "catalog.discovery.interval": { source: "default", hot_reloadable: false },

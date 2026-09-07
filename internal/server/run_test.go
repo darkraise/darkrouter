@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -471,5 +473,62 @@ func TestDiscoveryCanBeDisabled(t *testing.T) {
 	}
 	if srv.Discoverer() != nil {
 		t.Error("a discoverer was built with discovery disabled")
+	}
+}
+
+// A restart-only edit stays on /healthz until the process is restarted.
+// restartOnlyWarnings, the consecutive-reload diff, is cleared by the next
+// unrelated save while the old value is still the one in force -- which is an
+// operator told to restart and then quietly told they need not.
+func TestHealthzReportsPendingRestartAcrossAnUnrelatedReload(t *testing.T) {
+	var mu sync.Mutex
+	live := testConfigOf(t, nil)
+	cfgStore, err := config.NewStoreFrom(func() (*config.Config, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return live, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgStore.MarkBoot()
+	s := serverBackedBy(t, cfgStore)
+
+	swap := func(tune func(*config.Config)) {
+		mu.Lock()
+		live = testConfigOf(t, tune)
+		mu.Unlock()
+		if err := cfgStore.Reload(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending := func() []string {
+		rr := httptest.NewRecorder()
+		s.AdminHandler().ServeHTTP(rr, httptest.NewRequest("GET", "/healthz", nil))
+		if rr.Code != 200 {
+			t.Fatalf("healthz = %d", rr.Code)
+		}
+		var body struct {
+			PendingRestart []string `json:"pending_restart"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.PendingRestart
+	}
+
+	if got := pending(); len(got) != 0 {
+		t.Fatalf("pending_restart = %v at boot, want none", got)
+	}
+	swap(func(c *config.Config) { c.Catalog.SyncInterval = 9 * time.Hour })
+	if got := pending(); !slices.Contains(got, "catalog.sync_interval") {
+		t.Fatalf("pending_restart = %v after a restart-only change, want catalog.sync_interval", got)
+	}
+	swap(func(c *config.Config) {
+		c.Catalog.SyncInterval = 9 * time.Hour
+		c.Log.Retention = 720 * time.Hour
+	})
+	if got := pending(); !slices.Contains(got, "catalog.sync_interval") {
+		t.Fatalf("pending_restart = %v after an unrelated save, want the notice still standing", got)
 	}
 }
