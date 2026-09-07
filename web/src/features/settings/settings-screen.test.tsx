@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "darkraise-ui"
@@ -48,6 +48,10 @@ const cfg = (): ConfigResponse => ({
   fields: {
     "log.retention": { source: "database", hot_reloadable: true },
     "catalog.discovery.interval": { source: "default", hot_reloadable: false },
+    // The API reports a listen address as hot-reloadable because nothing
+    // captures it at construction; it still cannot be changed from here.
+    "server.proxy_listen": { source: "environment", hot_reloadable: true },
+    "catalog.sync_timeout": { source: "database", hot_reloadable: false },
     aliases: { source: "database", hot_reloadable: true },
   },
   blocks: {
@@ -346,6 +350,23 @@ describe("the read-only section on the page", () => {
     expect(screen.getAllByText("default").length).toBeGreaterThan(0)
     // Whether changing it takes a restart, stated rather than discovered.
     expect(screen.getAllByText("restart").length).toBeGreaterThan(0)
+  })
+
+  it("gives an environment value no hot or restart badge", async () => {
+    // hot_reloadable is true for a listen address, and saying "hot" would
+    // promise a live edit an environment variable cannot take. The
+    // environment chip is the whole story for those fields.
+    stubSettingsFetch({})
+    mount(<SettingsScreen />)
+
+    const envRow = (await screen.findByText("server.proxy_listen")).closest(".border-t")
+    expect(envRow).not.toBeNull()
+    expect(within(envRow as HTMLElement).getByText("environment")).toBeInTheDocument()
+    expect(within(envRow as HTMLElement).queryByText("hot")).not.toBeInTheDocument()
+    expect(within(envRow as HTMLElement).queryByText("restart")).not.toBeInTheDocument()
+
+    const dbRow = screen.getByText("catalog.sync_timeout").closest(".border-t")
+    expect(within(dbRow as HTMLElement).getByText("restart")).toBeInTheDocument()
   })
 
   it("does not repeat a setting that is editable above it", async () => {

@@ -74,14 +74,38 @@ rather than told.
 It is validated at load: a host is required, and a query or fragment is
 refused. It is hot-reloadable, since nothing but the console reads it.
 
+## Bootstrap variables
+
+These are read from the environment before the database is open, so none is a
+row in `settings` and none can be changed from the console. A change takes a
+restart.
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `DARKROUTER_PROXY_LISTEN` | `:18080` | The proxy listen address. |
+| `DARKROUTER_ADMIN_LISTEN` | `:18081` | The admin and console listen address. |
+| `DARKROUTER_PROXY_TOKEN` | *empty* | Shared inbound secret. Never returned by any endpoint. |
+| `DARKROUTER_MASTER_KEY` | — | Encrypts every stored credential. The process refuses to start without one. |
+| `DARKROUTER_ADMIN_PASSWORD_HASH` | *empty* | A bcrypt hash that overrides the stored admin password on the next restart. |
+| `DARKROUTER_LOG_LEVEL` | `info` | |
+| `DARKROUTER_LOG_FORMAT` | text | `json` selects structured output. |
+| `DARKROUTER_DB` | `darkrouter.db` | The database path. `-db` overrides it. |
+
+The settings screen shows the two listen addresses with an `environment`
+source and no reload badge: the API reports them as hot-reloadable, since
+nothing captures them at construction, but an environment variable cannot
+change under a running process and a badge saying otherwise would promise an
+edit that is impossible.
+
 ## Keys
+
+Every key below is a row in `settings`, on its compiled default until
+something writes it.
+
 
 | Key | Default | Notes |
 |---|---|---|
-| `server.proxy_listen` | `:18080` | Restart-only. |
-| `server.admin_listen` | `:18081` | Restart-only. |
 | `server.public_url` | *empty* | The public domain clients reach the gateway at. A bare domain is assumed https. No query or fragment. Empty means the console shows only the LAN address. |
-| `server.proxy_token` | *empty* | Shared inbound secret, from `DARKROUTER_PROXY_TOKEN`. Restart-only. |
 | `server.max_body_bytes` | 33554432 | Applies on reload. |
 | `server.shutdown_grace` | `10s` | |
 | `server.sse.max_line_bytes` | 1048576 | |
