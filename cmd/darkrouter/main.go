@@ -104,14 +104,39 @@ func parseFlags(fs *flag.FlagSet, args []string) (dbPath, legacyConfig string, e
 	return *db, *legacy, nil
 }
 
-// warnIgnoredConfigFlag says once that -config no longer does anything. Silence
-// would leave an operator believing the file they passed is being read.
-func warnIgnoredConfigFlag(path string) {
-	if path == "" {
-		return
+// startupWarnings are the notices that explain state the stored settings
+// cannot: a file the process no longer reads, and a flag it now ignores. An
+// ignored flag with no notice would leave an operator believing the file
+// they passed is still being read.
+//
+// Returned rather than only logged. They reach admin.Deps.Warnings, and from
+// there /healthz and the settings screen — which is where an operator asking
+// why their settings reverted is looking, rather than in the container log.
+func startupWarnings(dbPath, legacyConfig string) []string {
+	var out []string
+
+	// The file stopped being read in this release. Saying so once is what
+	// turns "my settings reverted" into an obvious morning rather than a
+	// confusing one.
+	legacy := filepath.Join(filepath.Dir(dbPath), "darkrouter.yaml")
+	// dbPath is commonly a bare filename, which would otherwise name a path
+	// with no directory -- useless to an operator reading docker logs on a
+	// host they did not set up themselves.
+	if abs, err := filepath.Abs(legacy); err == nil {
+		legacy = abs
 	}
-	slog.Warn("-config is ignored; configuration now lives in the database",
-		"path", path)
+	if _, err := os.Stat(legacy); err == nil {
+		out = append(out, fmt.Sprintf(
+			"a configuration file is present at %s but no longer read; settings now live in the database and are changed in the console. Delete or rename it to silence this.",
+			legacy))
+	}
+
+	if legacyConfig != "" {
+		out = append(out, fmt.Sprintf(
+			"-config %s was ignored; configuration now lives in the database. Drop the flag from the command that starts the gateway.",
+			legacyConfig))
+	}
+	return out
 }
 
 func runServer(args []string) error {
@@ -127,22 +152,10 @@ func runServer(args []string) error {
 			dbPath = "darkrouter.db"
 		}
 	}
-	// The file stopped being read in this release. Saying so once is what
-	// turns "my settings reverted" into an obvious morning rather than a
-	// confusing one.
-	legacy := filepath.Join(filepath.Dir(dbPath), "darkrouter.yaml")
-	// dbPath is commonly a bare filename, which would otherwise log a path
-	// with no directory -- useless to an operator reading docker logs on a
-	// host they did not set up themselves.
-	if abs, err := filepath.Abs(legacy); err == nil {
-		legacy = abs
+	warnings := startupWarnings(dbPath, legacyConfig)
+	for _, w := range warnings {
+		slog.Warn("startup warning", "warning", w)
 	}
-	if _, err := os.Stat(legacy); err == nil {
-		slog.Warn("a configuration file is present but no longer read; "+
-			"settings now live in the database and are changed in the console",
-			"path", legacy)
-	}
-	warnIgnoredConfigFlag(legacyConfig)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -186,7 +199,6 @@ func runServer(args []string) error {
 	}
 
 	cfg := cfgStore.Current()
-	var warnings []string
 
 	// Seeded before the config overlay and the server: the providers it adds
 	// are ordinary rows, and everything downstream — the router's source, the
@@ -228,7 +240,10 @@ func runServer(args []string) error {
 	}
 
 	slog.Info("darkrouter listening", "version", server.Version, "proxy", cfg.Server.ProxyListen, "admin", cfg.Server.AdminListen)
-	for _, w := range append(warnings, cfg.Warnings...) {
+	// The startup warnings were logged when they were produced: they explain a
+	// failure that can happen before this point is reached, so waiting until
+	// the gateway is listening would lose them exactly when they matter most.
+	for _, w := range cfg.Warnings {
 		slog.Warn("config warning", "warning", w)
 	}
 
