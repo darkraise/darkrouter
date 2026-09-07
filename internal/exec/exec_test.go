@@ -7,9 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -397,40 +394,45 @@ func newExecutorRaw(t testing.TB, specs []providerSpec, apiKeySecret string,
 	aliases map[string][]string) *Executor {
 
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n"
-	for _, s := range specs {
-		body += "  - id: " + s.id + "\n    kind: " + s.kind + "\n    base_url: " + s.upstreamURL +
-			"\n    api_key: ${K}\n    models: [" + strings.Join(s.models, ", ") + "]\n"
-		if s.priority != 0 {
-			body += "    priority: " + strconv.Itoa(s.priority) + "\n"
+	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
+		for _, s := range specs {
+			c.Providers = append(c.Providers, config.ProviderConfig{
+				ID: s.id, Kind: s.kind, Preset: s.preset, BaseURL: s.upstreamURL,
+				APIKey: apiKeySecret, Priority: s.priority, Models: s.models,
+			})
 		}
-		if s.preset != "" {
-			body += "    preset: " + s.preset + "\n"
+		if total > 0 {
+			// connect and first_byte must be set alongside total: the budget
+			// gate refuses an attempt unless the remaining total covers
+			// connect + first_byte, so leaving the 70s defaults would mean a
+			// short total starts no attempt at all.
+			c.Policy.Timeout.Connect = 5 * time.Millisecond
+			c.Policy.Timeout.FirstByte = total / 4
+			c.Policy.Timeout.Total = total
 		}
-	}
-	if total > 0 {
-		// connect and first_byte must be set alongside total: the budget gate
-		// refuses an attempt unless the remaining total covers connect +
-		// first_byte, so leaving the 70s defaults would mean a short total
-		// starts no attempt at all.
-		body += "policy:\n  timeout:\n    connect: 5ms\n    first_byte: " +
-			(total / 4).String() + "\n    total: " + total.String() + "\n"
-	}
-	if len(aliases) > 0 {
-		body += "aliases:\n"
-		for name, targets := range aliases {
-			body += "  " + name + ": [" + strings.Join(targets, ", ") + "]\n"
+		if len(aliases) > 0 {
+			c.Aliases = aliases
 		}
-	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return apiKeySecret, true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	}))
 	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
+}
+
+// testConfig builds the configuration a fixture in this package serves from.
+// The listeners are ephemeral because no test in it binds a port.
+func testConfig(t testing.TB, tune func(*config.Config)) *config.Config {
+	t.Helper()
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Server.ProxyListen, c.Server.AdminListen = ":0", ":0"
+	if tune != nil {
+		tune(c)
+	}
+	// The same rules a stored configuration is held to, so a fixture cannot
+	// exercise a combination the running gateway would refuse.
+	if err := config.Validate(c); err != nil {
+		t.Fatal(err)
+	}
+	return c
 }
 
 func post(t *testing.T, e *Executor, body string) *httptest.ResponseRecorder {
@@ -918,18 +920,12 @@ func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
 	}))
 	defer up.Close()
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
-		"  - id: fake\n    kind: martian\n    base_url: " + up.URL +
-		"\n    api_key: ${K}\n    models: [m]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{{
+			ID: "fake", Kind: "martian", BaseURL: up.URL,
+			APIKey: "sk", Models: []string{"m"},
+		}}
+	}))
 	var rec captureLogger
 	e := New(cfgStore, provider.NewYAMLSource(cfgStore),
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: &rec})
@@ -968,16 +964,9 @@ func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
 // executorFor builds an executor over an arbitrary configuration body.
 // newExecutorWith cannot: it fixes the provider id, the kind, and the model
 // list, and the catalog cases need all three to vary.
-func executorFor(t *testing.T, body string, adapters map[string]adapter.Adapter, deps Deps) *Executor {
+func executorFor(t *testing.T, tune func(*config.Config), adapters map[string]adapter.Adapter, deps Deps) *Executor {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, tune))
 	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
 }
 
@@ -997,16 +986,11 @@ func TestExecutorUsesTheCatalogSnapshotWhenSupplied(t *testing.T) {
 		Surfaces: []ir.Surface{ir.SurfaceLLM},
 	}}, []string{"p"}))
 
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [known]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"known"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1027,16 +1011,11 @@ func TestExecutorFallsBackWithoutACatalog(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [known]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"known"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1096,16 +1075,11 @@ func TestTargetCarriesTheCatalogFacts(t *testing.T) {
 		Traits:          catalog.Traits{Adaptive: true, FreeSampling: false, Known: true},
 	}}, []string{"p"}))
 
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: capture
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [m]
-`, map[string]adapter.Adapter{"capture": capturing}, Deps{Catalog: cat})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "capture", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"capture": capturing}, Deps{Catalog: cat})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1133,16 +1107,11 @@ func TestTargetInfoIsZeroWithoutACatalogEntry(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: capture
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [m]
-`, map[string]adapter.Adapter{"capture": capturing}, Deps{})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "capture", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"capture": capturing}, Deps{})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1166,16 +1135,11 @@ func TestInferredCandidateProducesAWarning(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [local]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"local"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
@@ -1213,16 +1177,11 @@ func TestNoInferredWarningWhenNothingWasNeeded(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [local]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"local"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1251,16 +1210,11 @@ func TestKnownCapableCandidateProducesNoWarning(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [known]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"known"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
@@ -1295,21 +1249,12 @@ func TestEmptyStreamSucceedsWithoutFailover(t *testing.T) {
 	defer upstream.Close()
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: a
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [m]
-  - id: b
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [m]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: rec})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "a", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
+			{ID: "b", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1351,23 +1296,12 @@ func TestAnAbandonedAttemptsWarningsDoNotReachTheRecord(t *testing.T) {
 	rec := &captureLogger{}
 	// The anthropic adapter warns about a missing max_tokens; the openaicompat
 	// one does not. Attempt 1 therefore produces a warning and is abandoned.
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: first
-    kind: anthropic
-    base_url: `+upstream.URL+`
-    api_key: sk
-    priority: 10
-    models: [m]
-  - id: second
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    priority: 1
-    models: [m]
-`, map[string]adapter.Adapter{
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "first", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Priority: 10, Models: []string{"m"}},
+			{ID: "second", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Priority: 1, Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{
 		"anthropic":    anthropicadapter.New(),
 		"openaicompat": openaicompat.New(),
 	}, Deps{Log: rec})
@@ -1405,16 +1339,11 @@ func TestResolveRecordsTheTraceForEveryRoute(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: anthropic
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [chat-only]
-`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"chat-only"}},
+		}
+	}, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
 		Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
@@ -1445,16 +1374,11 @@ func TestACountThatRoutesToNothingRecordsItsSkips(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: anthropic
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [embed-only]
-`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"embed-only"}},
+		}
+	}, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
 		Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
@@ -1532,16 +1456,11 @@ func executorForOp(t *testing.T, url string, cat *catalog.Store) (*Executor, *ca
 	if cat != nil {
 		deps.Catalog = cat
 	}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: probe
-    base_url: `+url+`
-    api_key: sk
-    models: [m]
-`, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "probe", BaseURL: url, APIKey: "sk", Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
 	return e, rec
 }
 
@@ -1549,23 +1468,12 @@ providers:
 func executorForOpWithTwoProviders(t *testing.T, url string) (*Executor, *captureLogger) {
 	t.Helper()
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: probe
-    base_url: `+url+`
-    api_key: sk
-    priority: 10
-    models: [m]
-  - id: q
-    kind: probe
-    base_url: `+url+`
-    api_key: sk
-    priority: 1
-    models: [m]
-`, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Log: rec})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "probe", BaseURL: url, APIKey: "sk", Priority: 10, Models: []string{"m"}},
+			{ID: "q", Kind: "probe", BaseURL: url, APIKey: "sk", Priority: 1, Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Log: rec})
 	return e, rec
 }
 
@@ -1645,16 +1553,11 @@ func TestAnEmbeddingRequestSkipsAChatOnlyAdapter(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: anthropic
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [m]
-`, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
 		Deps{Catalog: cat, Log: rec})
 
 	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
@@ -1682,16 +1585,11 @@ func TestAChatRequestStillRoutesToAChatOnlyAdapter(t *testing.T) {
 	upstream := unaryUpstream()
 	defer upstream.Close()
 
-	e := executorFor(t, `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    base_url: `+upstream.URL+`
-    api_key: sk
-    models: [m]
-`, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
+		}
+	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1713,21 +1611,12 @@ func executorForPreset(t *testing.T, url, preset, model string, cat *catalog.Sto
 	if cat != nil {
 		deps.Catalog = cat
 	}
-	body := `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: probe
-`
-	if preset != "" {
-		body += "    preset: " + preset + "\n"
-	}
-	body += `    base_url: ` + url + `
-    api_key: sk
-    models: [` + model + `]
-`
-	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{{
+			ID: "p", Kind: "probe", Preset: preset, BaseURL: url,
+			APIKey: "sk", Models: []string{model},
+		}}
+	}, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
 	return e, rec
 }
 

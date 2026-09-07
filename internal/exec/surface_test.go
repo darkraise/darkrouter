@@ -108,27 +108,15 @@ func failoverPair(t *testing.T, urlA, aModel, urlB, bModel string,
 	}, []string{"bad", "good"}))
 
 	rec := &captureLogger{}
-	body := `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: bad
-    kind: probe
-    base_url: ` + urlA + `
-    api_key: sk
-    priority: 10
-    models: [` + aModel + `]
-  - id: good
-    kind: probe
-    base_url: ` + urlB + `
-    api_key: sk
-    priority: 1
-    models: [` + bModel + `]
-`
-	if aModel != bModel {
-		body += "aliases:\n  embed: [bad/" + aModel + ", good/" + bModel + "]\n"
-	}
-	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()},
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "bad", Kind: "probe", BaseURL: urlA, APIKey: "sk", Priority: 10, Models: []string{aModel}},
+			{ID: "good", Kind: "probe", BaseURL: urlB, APIKey: "sk", Priority: 1, Models: []string{bModel}},
+		}
+		if aModel != bModel {
+			c.Aliases = map[string][]string{"embed": {"bad/" + aModel, "good/" + bModel}}
+		}
+	}, map[string]adapter.Adapter{"probe": openaicompat.New()},
 		Deps{Catalog: cat, Log: rec})
 	return e, rec
 }
@@ -147,26 +135,12 @@ func failoverPairPreset(t *testing.T, urlA, urlB, preset, model string,
 	}, []string{"bad", "good"}))
 
 	rec := &captureLogger{}
-	body := `
-server:
-  proxy_listen: ":0"
-providers:
-  - id: bad
-    kind: probe
-    preset: ` + preset + `
-    base_url: ` + urlA + `
-    api_key: sk
-    priority: 10
-    models: [` + model + `]
-  - id: good
-    kind: probe
-    preset: ` + preset + `
-    base_url: ` + urlB + `
-    api_key: sk
-    priority: 1
-    models: [` + model + `]
-`
-	e := executorFor(t, body, map[string]adapter.Adapter{"probe": openaicompat.New()},
+	e := executorFor(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{
+			{ID: "bad", Kind: "probe", Preset: preset, BaseURL: urlA, APIKey: "sk", Priority: 10, Models: []string{model}},
+			{ID: "good", Kind: "probe", Preset: preset, BaseURL: urlB, APIKey: "sk", Priority: 1, Models: []string{model}},
+		}
+	}, map[string]adapter.Adapter{"probe": openaicompat.New()},
 		Deps{Catalog: cat, Log: rec})
 	return e, rec
 }

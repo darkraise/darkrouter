@@ -71,6 +71,16 @@ func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
 	return s, nil
 }
 
+// NewStoreOf builds a store over a fixed Config. Tests that used to write a
+// temporary YAML file to get a store use this instead; nothing in production
+// calls it.
+func NewStoreOf(c *Config) *Store {
+	s := &Store{load: func() (*Config, error) { return c, nil }}
+	s.cur.Store(c)
+	s.boot.Store(c)
+	return s
+}
+
 // NewStoreFrom builds a store over an injected loader instead of a file.
 func NewStoreFrom(load func() (*Config, error)) (*Store, error) {
 	s := &Store{load: load}

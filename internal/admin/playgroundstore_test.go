@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/config"
 )
 
 func TestPlaygroundPresetBlobIsOpaque(t *testing.T) {
@@ -361,7 +363,7 @@ func TestPlaygroundConversationsGateStopsWritesAndNotReads(t *testing.T) {
 	// Section 8.2: flipping the key stops the playground keeping anything new.
 	// It does not delete what is already there, and an operator who has just
 	// turned it off still needs to see and remove that.
-	s, db := testServerFullWithConfig(t, "playground:\n  save_conversations: false\n")
+	s, db := testServerFullWithConfig(t, func(c *config.Config) { off := false; c.Playground.SaveConversations = &off })
 	cookie, token := login(t, s)
 
 	existing, err := db.CreatePlaygroundConversation(

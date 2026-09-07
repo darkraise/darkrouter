@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,31 +21,27 @@ import (
 	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
-// configStoreFor writes a minimal config and opens a store over it. aliases is
-// raw YAML appended under an aliases: block, or empty for none.
-func configStoreFor(t *testing.T, aliases string) *config.Store {
+// configStoreFor opens a store over a minimal config carrying aliases.
+func configStoreFor(t *testing.T, aliases map[string][]string) *config.Store {
 	t.Helper()
-	return configStoreWith(t, aliases, "")
+	return configStoreWith(t, aliases, nil)
 }
 
-// configStoreWith adds arbitrary top-level YAML after the aliases, for a test
-// that needs a key the minimal document does not carry.
-func configStoreWith(t *testing.T, aliases, extra string) *config.Store {
+// configStoreWith lets a test change a key the minimal config leaves on its
+// default.
+func configStoreWith(t *testing.T, aliases map[string][]string, tune func(*config.Config)) *config.Store {
 	t.Helper()
-	body := "server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\n"
-	if aliases != "" {
-		body += "aliases:\n" + aliases
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Server.ProxyListen, c.Server.AdminListen = ":0", ":0"
+	c.Aliases = aliases
+	if tune != nil {
+		tune(c)
 	}
-	body += extra
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := config.Validate(c); err != nil {
 		t.Fatal(err)
 	}
-	s, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+	return config.NewStoreOf(c)
 }
 
 // testServerFull is testServer with every collaborator the provider endpoints
@@ -55,29 +49,29 @@ func configStoreWith(t *testing.T, aliases, extra string) *config.Store {
 // reload, a breaker, and a config store for the alias lookups.
 func testServerFull(t *testing.T) (*Server, *store.DB) {
 	t.Helper()
-	return testServerFullWithAliases(t, "")
+	return testServerFullWithAliases(t, nil)
 }
 
-func testServerFullWithAliases(t *testing.T, aliases string) (*Server, *store.DB) {
+func testServerFullWithAliases(t *testing.T, aliases map[string][]string) (*Server, *store.DB) {
 	t.Helper()
-	return testServerFullWith(t, aliases, "")
+	return testServerFullWith(t, aliases, nil)
 }
 
-// testServerFullWithConfig is testServerFull with extra top-level YAML in the
-// config document, for a test that turns a key off.
-func testServerFullWithConfig(t *testing.T, extra string) (*Server, *store.DB) {
+// testServerFullWithConfig is testServerFull with one setting changed, for a
+// test that turns a key off.
+func testServerFullWithConfig(t *testing.T, tune func(*config.Config)) (*Server, *store.DB) {
 	t.Helper()
-	return testServerFullWith(t, "", extra)
+	return testServerFullWith(t, nil, tune)
 }
 
-func testServerFullWith(t *testing.T, aliases, extra string) (*Server, *store.DB) {
+func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*config.Config)) (*Server, *store.DB) {
 	t.Helper()
 	db := storetest.Migrated(t)
 	key, err := store.OpenKeyring(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := configStoreWith(t, aliases, extra)
+	cfg := configStoreWith(t, aliases, tune)
 	// Mirrors cmd/darkrouter: aliases and policy are overlaid from SQLite, so
 	// a test that writes through the API sees the same snapshot a request
 	// would. Without it the write lands in the database and nowhere else.
@@ -171,7 +165,7 @@ func catalogFixture() *catalog.Store {
 }
 
 // testServerWithCatalog is testServerFull carrying catalogFixture.
-func testServerWithCatalog(t *testing.T, aliases string) (*Server, *store.DB) {
+func testServerWithCatalog(t *testing.T, aliases map[string][]string) (*Server, *store.DB) {
 	t.Helper()
 	s, db := testServerFullWithAliases(t, aliases)
 	s.deps.Catalog = catalogFixture()
@@ -195,17 +189,12 @@ func testServerWithExecutorLog(t *testing.T, upstreamURL, model string, logger e
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\nproviders:\n" +
-		"  - id: p\n    kind: openaicompat\n    base_url: " + upstreamURL +
-		"\n    api_key: sk\n    models: [" + model + "]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := configStoreWith(t, nil, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{{
+			ID: "p", Kind: "openaicompat", BaseURL: upstreamURL,
+			APIKey: "sk", Models: []string{model},
+		}}
+	})
 	cat := &catalog.Store{}
 	cat.Set(catalog.NewSnapshot([]catalog.Model{{
 		ProviderID: "p", ModelID: model, State: catalog.StateLive,

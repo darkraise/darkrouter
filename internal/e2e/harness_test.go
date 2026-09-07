@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -82,20 +81,18 @@ func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gatewa
 		t.Fatal(err)
 	}
 
-	cfgPath := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	// Ephemeral, so a test never contends for a real port.
+	c.Server.ProxyListen, c.Server.AdminListen = ":0", ":0"
 	// Discovery and the models.dev sync are switched off: neither is what
 	// these tests exercise, and a phase 9 test that runs the server's worker
 	// loop otherwise races its own seeding against a background rebuild, and
 	// makes a live internet call on every run.
-	cfg := "server:\n  proxy_listen: \":0\"\n  admin_listen: \":0\"\n" +
-		"catalog:\n  discovery:\n    enabled: false\n  models_dev_url: \"http://127.0.0.1:1/\"\n"
-	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(cfgPath, func(string) (string, bool) { return "", false })
-	if err != nil {
-		t.Fatal(err)
-	}
+	off := false
+	c.Catalog.Discovery.Enabled = &off
+	c.Catalog.ModelsDevURL = "http://127.0.0.1:1/"
+	cfgStore := config.NewStoreOf(c)
 
 	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", passwordHash())
 	srv, err := server.New(cfgStore, db, key, nil, opts...)

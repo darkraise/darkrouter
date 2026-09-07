@@ -33,18 +33,11 @@ func freePort(t *testing.T) string {
 
 func serverOn(t *testing.T, proxyAddr, adminAddr string) *Server {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: " + proxyAddr + "\n  admin_listen: " + adminAddr +
-		"\n  shutdown_grace: 1s\nproviders:\n  - id: fake\n    kind: openaicompat\n" +
-		"    base_url: https://up.example/v1\n    api_key: ${K}\n    models: [m]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfigOf(t, func(c *config.Config) {
+		c.Server.ProxyListen, c.Server.AdminListen = proxyAddr, adminAddr
+		c.Server.ShutdownGrace = time.Second
+		c.Providers = []config.ProviderConfig{fakeProvider}
+	}))
 	return serverBackedBy(t, cfgStore)
 }
 
@@ -110,27 +103,15 @@ func TestRunClosesSurvivingServerWhenOneListenerFails(t *testing.T) {
 	_ = l.Close()
 }
 
-func TestRunSurfacesWatcherFailureOnHealthz(t *testing.T) {
-	// A watcher on a directory that disappears records its error rather than
-	// leaving hot reload silently dead.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: " + freePort(t) + "\n  admin_listen: " + freePort(t) +
-		"\nproviders:\n  - id: fake\n    kind: openaicompat\n" +
-		"    base_url: https://up.example/v1\n    api_key: ${K}\n    models: [m]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	// RecordError is the mechanism Run uses; assert it reaches LastError.
-	store.RecordError(errWatcherDead)
+func TestAnOutOfBandFailureSurfacesOnHealthz(t *testing.T) {
+	// Rehydration and the other startup steps report through RecordError
+	// rather than Reload, and a failure there would otherwise be invisible.
+	store := config.NewStoreOf(testConfigOf(t, nil))
+	store.RecordError(errRehydrationFailed)
 	if store.LastError() == nil {
-		t.Fatal("a watcher failure must be visible through LastError")
+		t.Fatal("an out-of-band failure must be visible through LastError")
 	}
-	if !strings.Contains(store.LastError().Error(), "watcher") {
+	if !strings.Contains(store.LastError().Error(), "rehydration") {
 		t.Fatalf("unexpected error %v", store.LastError())
 	}
 }
@@ -150,11 +131,36 @@ func waitListening(t *testing.T, addr string) {
 	t.Fatalf("%s never started listening", addr)
 }
 
-var errWatcherDead = errWatcher{}
+var errRehydrationFailed = errRehydration{}
 
-type errWatcher struct{}
+type errRehydration struct{}
 
-func (errWatcher) Error() string { return "watcher: could not start" }
+func (errRehydration) Error() string { return "health rehydration: could not read" }
+
+// fakeProvider is the one upstream most fixtures in this package declare. It
+// is never called: the tests exercise the wiring around it.
+var fakeProvider = config.ProviderConfig{
+	ID: "fake", Kind: "openaicompat", BaseURL: "https://up.example/v1",
+	APIKey: "sk", Models: []string{"m"},
+}
+
+// testConfigOf builds a defaulted configuration on ephemeral listeners, then
+// lets the caller change what its own case is about.
+func testConfigOf(t *testing.T, tune func(*config.Config)) *config.Config {
+	t.Helper()
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Server.ProxyListen, c.Server.AdminListen = ":0", ":0"
+	if tune != nil {
+		tune(c)
+	}
+	// The rules a stored configuration is held to, so a fixture cannot
+	// exercise a combination the running gateway would refuse.
+	if err := config.Validate(c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
 
 // serverBackedBy builds a Server on a temporary database, so every test in this
 // package exercises the real persistence wiring.
@@ -186,23 +192,14 @@ func serverBackedBy(t *testing.T, cfgStore *config.Store) *Server {
 	return s
 }
 
-func testConfigStore(t *testing.T, dir string) *config.Store {
+func testConfigStore(t *testing.T) *config.Store {
 	t.Helper()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "", false })
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfgStore
+	return config.NewStoreOf(testConfigOf(t, nil))
 }
 
 func TestHealthzReportsDroppedRecordsAndWarnings(t *testing.T) {
 	dir := t.TempDir()
-	cfgStore := testConfigStore(t, dir)
+	cfgStore := testConfigStore(t)
 
 	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
 	if err != nil {
@@ -250,7 +247,7 @@ func TestHealthzReportsDroppedRecordsAndWarnings(t *testing.T) {
 
 func TestMetricsReportsCounters(t *testing.T) {
 	dir := t.TempDir()
-	cfgStore := testConfigStore(t, dir)
+	cfgStore := testConfigStore(t)
 	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +329,7 @@ func TestCooldownSurvivesAGracefulRestart(t *testing.T) {
 
 func TestRequestRowRecordsTheCandidateChain(t *testing.T) {
 	dir := t.TempDir()
-	cfgStore := testConfigStore(t, dir)
+	cfgStore := testConfigStore(t)
 	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
 	if err != nil {
 		t.Fatal(err)

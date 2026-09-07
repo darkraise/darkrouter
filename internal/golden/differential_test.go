@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -66,17 +65,14 @@ type pathResult struct {
 // forward is false every adapter is wrapped so none can forward.
 func executorFor(t *testing.T, kind, upstreamURL string, forward bool, cap *capture) *exec.Executor {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
-		"  - id: up\n    kind: " + kind + "\n    base_url: " + upstreamURL +
-		"\n    api_key: ${K}\n    models: [target-model]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk-upstream", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Server.ProxyListen, c.Server.AdminListen = ":0", ":0"
+	c.Providers = []config.ProviderConfig{{
+		ID: "up", Kind: kind, BaseURL: upstreamURL,
+		APIKey: "sk-upstream", Models: []string{"target-model"},
+	}}
+	cfgStore := config.NewStoreOf(c)
 	ads := map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),

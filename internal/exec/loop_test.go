@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -62,22 +60,14 @@ func status(code int) http.HandlerFunc {
 }
 
 func loopExecutor(t *testing.T, up *httptest.Server, fleet []provider.Provider,
-	logger *captureLogger, extraCfg string) (*Executor, *health.Breaker) {
+	logger *captureLogger, tune func(*config.Config)) (*Executor, *health.Breaker) {
 
 	t.Helper()
 	for i := range fleet {
 		fleet[i].BaseURL = up.URL
 		fleet[i].Kind = "openaicompat"
 	}
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" + extraCfg
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "", false })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, tune))
 	b := health.New(3, 15*time.Minute)
 	e := New(cfgStore, &fleetSource{ps: fleet},
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{
@@ -114,7 +104,7 @@ func TestLoop429RotatesToTheSecondCredential(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, nil)
 	rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 	if rec.Code != 200 {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
@@ -143,7 +133,7 @@ func TestLoop5xxSkipsTheProvidersRemainingCredentials(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -162,7 +152,7 @@ func TestLoopFatalProducesExactlyOneAttempt(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 
 	if got := sc.order(); len(got) != 1 {
@@ -182,7 +172,7 @@ func TestLoop404AdvancesWithoutCoolingTheProvider(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, b := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, b := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -203,7 +193,7 @@ func TestLoopExhaustionReturnsTheLastError(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 	if rec.Code < 500 {
 		t.Errorf("status = %d, want an upstream error", rec.Code)
@@ -230,7 +220,7 @@ func TestLoopHonoursMaxAttempts(t *testing.T) {
 
 	logger := &captureLogger{}
 	e, _ := loopExecutor(t, up, twoProviderFleet(), logger,
-		"policy:\n  retry:\n    max_attempts: 2\n")
+		func(c *config.Config) { c.Policy.Retry.MaxAttempts = 2 })
 
 	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 	if got := sc.order(); len(got) != 2 {
@@ -243,7 +233,7 @@ func TestLoopMarksCredentialsUsedAtAttemptStart(t *testing.T) {
 	up := httptest.NewServer(sc)
 	defer up.Close()
 
-	e, b := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, "")
+	e, b := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, nil)
 	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 
 	lu := b.LastUsedSnapshot()
@@ -263,7 +253,7 @@ func TestLoopUnroutableModelMakesNoAttempt(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, nil)
 	rec := post(t, e, `{"model":"nope","messages":[]}`)
 	if rec.Code != 404 {
 		t.Errorf("status = %d, want 404", rec.Code)
@@ -288,7 +278,7 @@ func TestLoopRecordsSkipsOnTheTrace(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, b := loopExecutor(t, up, twoKeyFleet(), logger, "")
+	e, b := loopExecutor(t, up, twoKeyFleet(), logger, nil)
 	// Cool g1 before the request so the router skips it at snapshot time.
 	for i := 0; i < 3; i++ {
 		b.Record(health.Key{ProviderID: "groq", KeyID: "g1", Model: "m"},
@@ -321,7 +311,7 @@ func TestLoopUnknownModel400AdvancesToTheNextProvider(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -347,7 +337,7 @@ func TestLoopMalformed400StaysFatal(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
 
 	// This request is passthrough-eligible, so spec §9's same-candidate IR

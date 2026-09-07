@@ -3,8 +3,6 @@ package exec
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +20,7 @@ import (
 // enough to expire inside a test, so the half-open probe can be exercised
 // without a fake clock.
 func breakerExecutor(t *testing.T, up *httptest.Server, fleet []provider.Provider,
-	deps Deps, extraCfg string) (*Executor, *health.Breaker) {
+	deps Deps, tune func(*config.Config)) (*Executor, *health.Breaker) {
 
 	t.Helper()
 	for i := range fleet {
@@ -31,15 +29,7 @@ func breakerExecutor(t *testing.T, up *httptest.Server, fleet []provider.Provide
 			fleet[i].Kind = "openaicompat"
 		}
 	}
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" + extraCfg
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "", false })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, tune))
 	b := health.New(3, 20*time.Millisecond)
 	deps.Health, deps.Fleet = b, b
 	e := New(cfgStore, &fleetSource{ps: fleet}, map[string]adapter.Adapter{
@@ -80,7 +70,7 @@ func TestACredentialFailureOnTheProbeReleasesIt(t *testing.T) {
 	}}
 	e, b := breakerExecutor(t, up, fleet, Deps{
 		Log: &captureLogger{}, Auth: failingResolver{providerID: "groq"},
-	}, "")
+	}, nil)
 
 	tripKey(b, groqKey)
 	time.Sleep(40 * time.Millisecond)
@@ -119,7 +109,7 @@ func TestAnUnparseable200TripsTheBreaker(t *testing.T) {
 	defer up.Close()
 
 	e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}},
-		"policy:\n  cooldown:\n    max: 1h\n")
+		func(c *config.Config) { c.Policy.Cooldown.Max = time.Hour })
 	for i := 0; i < 3; i++ {
 		if rec := postAnthropic(t, e, anthropicPing); rec.Code == 200 {
 			t.Fatalf("request %d: an unparseable body was served as 200", i)
@@ -141,7 +131,7 @@ func TestATruncated200OnThePassthroughPathTripsTheBreaker(t *testing.T) {
 	up := httptest.NewServer(sc)
 	defer up.Close()
 
-	e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, "")
+	e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, nil)
 	for i := 0; i < 3; i++ {
 		if rec := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); rec.Code == 200 {
 			t.Fatalf("request %d: a truncated body was served as 200", i)
@@ -159,7 +149,7 @@ func TestAHealthy200StillResetsTheLadder(t *testing.T) {
 	up := httptest.NewServer(sc)
 	defer up.Close()
 
-	e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, "")
+	e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, nil)
 	b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
 	b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
 	if rec := postAnthropic(t, e, anthropicPing); rec.Code != 200 {

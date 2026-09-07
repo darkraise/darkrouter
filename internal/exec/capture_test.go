@@ -3,11 +3,10 @@ package exec
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
@@ -18,18 +17,15 @@ import (
 
 func capturingExecutor(t *testing.T, upstream string, maxBytes int) (*Executor, *captureLogger) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" +
-		"capture:\n  bodies: true\n  max_bytes: " + itoa(maxBytes) + "\n  retention: 1h\n" +
-		"providers:\n  - id: groq\n    kind: openaicompat\n    base_url: " + upstream +
-		"\n    api_key: ${K}\n    models: [m]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
+		c.Capture.Bodies = true
+		c.Capture.MaxBytes = int64(maxBytes)
+		c.Capture.Retention = time.Hour
+		c.Providers = []config.ProviderConfig{{
+			ID: "groq", Kind: "openaicompat", BaseURL: upstream,
+			APIKey: "sk", Models: []string{"m"},
+		}}
+	}))
 	log := &captureLogger{}
 	e := New(cfgStore, provider.NewYAMLSource(cfgStore),
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: log})

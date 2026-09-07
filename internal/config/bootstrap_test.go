@@ -2,6 +2,12 @@ package config
 
 import "testing"
 
+// env turns a map into a LookupEnv, so a test declares the variables it sets
+// rather than mutating the process environment.
+func env(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+}
+
 func TestBootstrapFallsBackToDefaults(t *testing.T) {
 	b := BootstrapFrom(env(nil))
 	if b.ProxyListen != ":18080" || b.AdminListen != ":18081" {
