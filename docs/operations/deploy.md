@@ -7,8 +7,8 @@ treat the whole directory as a secret.
 
 There is no configuration file. Settings — body and streaming limits, log and
 capture retention, the catalogue sync — live in the database's `settings`
-table alongside providers and aliases; every key has a working default, and a
-key nothing has set stays on it. A small bootstrap set comes from `.env`
+table; every key has a working default, and a key nothing has set stays on it.
+Providers and aliases are database-owned too, each in its own tables. A small bootstrap set comes from `.env`
 instead, because the process needs it before the database is open.
 
 ## Production
@@ -181,8 +181,12 @@ than half-applying it.
 Settings are read from the database and most keys apply without a restart. The
 keys that need one are listed in [`../design/configuration.md`](../design/configuration.md).
 The Settings screen marks them and, once a save changes one, shows a "Waiting
-for a restart" banner that survives later saves; the same notice is in the
-config API's `warnings` array and in `/healthz`.
+for a restart" banner. What backs that banner is `pending_restart`, measured
+against the snapshot the process booted on and served by both `GET /api/config`
+and `/healthz`; it survives later saves, so it is the field to script against.
+The `warnings` array names the key too, but only at the save that changed it:
+it is the diff between consecutive snapshots, and the next save or reload
+clears it while the stale value is still in force.
 
 Providers, aliases and policy are owned by the database and edited in the
 console.

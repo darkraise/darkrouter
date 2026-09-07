@@ -30,7 +30,7 @@ bcrypt verifications in flight.
 
 | Route | Returns |
 |---|---|
-| `GET /healthz` | `config_valid`, `warnings`, `uptime`, `version`, `log_records_dropped`, `log_records_written`. |
+| `GET /healthz` | `config_valid`, `warnings`, `pending_restart`, `uptime`, `version`, `log_records_dropped`, `log_records_written`. |
 | `GET /readyz` | `ok\n` as `text/plain`, or 503 naming the database or configuration fault. |
 | `GET /metrics` | Prometheus text, including `darkrouter_breaker_open{provider,model}`. |
 
