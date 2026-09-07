@@ -237,49 +237,12 @@ func validate(c *Config) error {
 	if err := ValidateAliases(c.Aliases); err != nil {
 		return err
 	}
-
-	seen := make(map[string]bool, len(c.Providers))
-	models := make(map[string][]string)
-	order := []string{}
-	for _, p := range c.Providers {
-		if p.ID == "" {
-			return fmt.Errorf("provider: id is required")
-		}
-		if seen[p.ID] {
-			return fmt.Errorf("provider %q: duplicate id", p.ID)
-		}
-		seen[p.ID] = true
-		if p.BaseURL == "" {
-			return fmt.Errorf("provider %q: base_url is required", p.ID)
-		}
-		u, err := url.Parse(p.BaseURL)
-		if err != nil || !u.IsAbs() {
-			return fmt.Errorf("provider %q: base_url must be an absolute URL", p.ID)
-		}
-		if p.Kind == "" {
-			return fmt.Errorf("provider %q: kind is required", p.ID)
-		}
-		for _, m := range p.Models {
-			if _, ok := models[m]; !ok {
-				order = append(order, m)
-			}
-			models[m] = append(models[m], p.ID)
-		}
-	}
-	// Ambiguity is the useful case, not an error: phase 3 turns it into a
-	// fallback chain. Name it so the resolution is never a surprise.
-	for _, m := range order {
-		if ids := models[m]; len(ids) > 1 {
-			c.Warnings = append(c.Warnings,
-				fmt.Sprintf("model %q is offered by %s; the highest-priority provider wins", m, strings.Join(ids, ", ")))
-		}
-	}
 	return nil
 }
 
 // ValidateAliases applies the shape rules an alias chain must satisfy wherever
-// it arrives from. Exported so the admin API enforces the same rules as the
-// file rather than a second, drifting copy of them.
+// it arrives from. Exported so the admin API enforces the same rules the
+// loader does rather than a second, drifting copy of them.
 func ValidateAliases(aliases map[string][]string) error {
 	for name, targets := range aliases {
 		if name == "" {

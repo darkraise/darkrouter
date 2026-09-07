@@ -137,43 +137,6 @@ func TestValidateAcceptsAnAliasNamingAnUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsADuplicateProviderID(t *testing.T) {
-	c := defaultConfig()
-	c.Providers = []ProviderConfig{
-		{ID: "groq", Kind: "openaicompat", BaseURL: "https://api.groq.com/openai/v1"},
-		{ID: "groq", Kind: "openaicompat", BaseURL: "https://example.com/v1"},
-	}
-	err := Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("expected a duplicate-id error, got %v", err)
-	}
-}
-
-func TestValidateRejectsARelativeBaseURL(t *testing.T) {
-	c := defaultConfig()
-	c.Providers = []ProviderConfig{{ID: "groq", Kind: "openaicompat", BaseURL: "/v1"}}
-	err := Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "absolute") {
-		t.Fatalf("expected an absolute-URL error, got %v", err)
-	}
-}
-
-func TestValidateWarnsOnADuplicateModelAcrossProviders(t *testing.T) {
-	c := defaultConfig()
-	c.Providers = []ProviderConfig{
-		{ID: "groq", Kind: "openaicompat", BaseURL: "https://api.groq.com/openai/v1",
-			Models: []string{"llama-3.3-70b-versatile"}},
-		{ID: "cerebras", Kind: "openaicompat", BaseURL: "https://api.cerebras.ai/v1",
-			Models: []string{"llama-3.3-70b-versatile"}},
-	}
-	if err := Validate(c); err != nil {
-		t.Fatal(err)
-	}
-	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "llama-3.3-70b-versatile") {
-		t.Fatalf("warnings = %v", c.Warnings)
-	}
-}
-
 func TestCatalogDefaults(t *testing.T) {
 	c := defaultConfig()
 	if c.Catalog.ModelsDevURL != "https://models.dev/api.json" {
@@ -385,5 +348,19 @@ func TestTimeoutBudgetFailureNamesItsKeys(t *testing.T) {
 	want := []string{"policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"}
 	if !slices.Equal(re.Keys, want) {
 		t.Errorf("Keys = %v, want %v", re.Keys, want)
+	}
+}
+
+// The one validator is about settings. Providers have their own tables, their
+// own encryption and their own endpoints, and a rule here could only produce a
+// message the loader cannot attribute to any key -- which reverts all of them.
+func TestValidateHasNoProviderRules(t *testing.T) {
+	c := &Config{}
+	ApplyDefaults(c)
+	if err := Validate(c); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(c.Warnings) != 0 {
+		t.Errorf("Warnings = %v, want none", c.Warnings)
 	}
 }

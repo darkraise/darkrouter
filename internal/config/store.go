@@ -107,7 +107,8 @@ func NewStoreOf(c *Config) *Store {
 	return s
 }
 
-// NewStoreFrom builds a store over an injected loader instead of a file.
+// NewStoreFrom builds a store over an injected loader rather than reading one
+// itself.
 func NewStoreFrom(load func() (*Config, error)) (*Store, error) {
 	s := &Store{load: load}
 	c, err := load()
