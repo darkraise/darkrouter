@@ -208,4 +208,41 @@ describe("SettingField", () => {
       /must be at least 48h/,
     )
   })
+
+  it("placeholders the public URL with a bare domain", () => {
+    render(
+      <SettingField
+        row={row({
+          field: "server.public_url", kind: "url", value: "", display: "",
+          meta: { name: "Public URL", description: "", group: "server" },
+        })}
+        value=""
+        onChange={vi.fn()}
+        onReset={null}
+      />,
+    )
+    expect(screen.getByLabelText("Public URL")).toHaveAttribute("placeholder", "llm.example.com")
+  })
+
+  it("does not offer a bare-domain placeholder on a catalogue URL", () => {
+    // Only server.public_url normalises a bare domain to https; the write
+    // path accepts a bare domain on the others and fails only at fetch time,
+    // so their placeholder must not suggest one is safe to type.
+    render(
+      <SettingField
+        row={row({
+          field: "catalog.models_dev_url", kind: "url", value: "", display: "",
+          meta: { name: "models.dev catalogue URL", description: "", group: "catalogue" },
+        })}
+        value=""
+        onChange={vi.fn()}
+        onReset={null}
+      />,
+    )
+    const placeholder = screen
+      .getByLabelText("models.dev catalogue URL")
+      .getAttribute("placeholder")
+    expect(placeholder).not.toBe("llm.example.com")
+    expect(placeholder).toMatch(/^https?:\/\//)
+  })
 })

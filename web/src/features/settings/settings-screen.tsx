@@ -212,6 +212,7 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
       // The rows are durable in both 200 shapes, so the served answer is stale
       // either way.
       await queryClient.invalidateQueries({ queryKey: keys.config })
+      await queryClient.invalidateQueries({ queryKey: keys.policy })
       if (!res.valid) return
       // Seeded from the refetched answer rather than from the `cfg` this
       // render closed over, which is the pre-save one: reseeding from that

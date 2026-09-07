@@ -69,11 +69,9 @@ const cfg = (): ConfigResponse =>
       "catalog.discovery.interval": { source: "default", hot_reloadable: false, kind: "duration" },
       "catalog.sync_timeout": { source: "database", hot_reloadable: false, kind: "duration" },
       "policy.retry.max_attempts": { source: "database", hot_reloadable: true, kind: "int" },
-      // The API reports a listen address as hot-reloadable because nothing
-      // captures it at construction; it still cannot be changed from here.
       "server.proxy_listen": {
         source: "env",
-        hot_reloadable: true,
+        hot_reloadable: false,
         kind: "string",
         env: "DARKROUTER_PROXY_LISTEN",
       },

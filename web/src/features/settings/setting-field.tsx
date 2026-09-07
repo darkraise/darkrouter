@@ -191,7 +191,13 @@ function Editor({
           describedBy={describedBy}
           seed={(v) => v}
           emit={(text) => text}
-          placeholder={row.kind === "url" ? "llm.example.com" : undefined}
+          placeholder={
+            row.kind === "url"
+              ? row.field === "server.public_url"
+                ? "llm.example.com"
+                : "https://example.com/api.json"
+              : undefined
+          }
         />
       )
   }

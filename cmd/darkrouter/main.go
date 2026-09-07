@@ -127,7 +127,7 @@ func startupWarnings(dbPath, legacyConfig string) []string {
 	}
 	if _, err := os.Stat(legacy); err == nil {
 		out = append(out, fmt.Sprintf(
-			"a configuration file is present at %s but no longer read; settings now live in the database and are changed in the console. Delete or rename it to silence this.",
+			"a configuration file is present at %s but no longer read; settings now live in the database and are changed in the console. Delete or rename it to silence this on the next start.",
 			legacy))
 	}
 
