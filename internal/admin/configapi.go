@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -245,24 +244,6 @@ type policyWrite struct {
 	} `json:"timeout"`
 }
 
-// restartOnlyIn names the fields a write touched that a running process cannot
-// apply. Refused rather than accepted-with-a-warning: a file reload is an
-// operator editing a file the process watches, while this is an API answering
-// a request it can either honour or cannot.
-func restartOnlyIn(w *policyWrite) []string {
-	var out []string
-	if w == nil || w.Timeout == nil {
-		return nil
-	}
-	if w.Timeout.Connect != nil {
-		out = append(out, "policy.timeout.connect")
-	}
-	if w.Timeout.FirstByte != nil {
-		out = append(out, "policy.timeout.first_byte")
-	}
-	return out
-}
-
 func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Config == nil || s.deps.DB == nil {
 		writeError(w, http.StatusServiceUnavailable, "no configuration store")
@@ -334,19 +315,6 @@ func restartRequired(written []string) []string {
 	return out
 }
 
-// mergedPolicy overlays a write onto the running policy and validates the
-// result, so a partial write is judged as the whole it produces.
-func (s *Server) mergedPolicy(w *policyWrite) (config.PolicyConfig, error) {
-	next := s.deps.Config.Current().Policy
-	if err := applyPolicyWrite(&next, w); err != nil {
-		return config.PolicyConfig{}, err
-	}
-	if err := validatePolicy(next); err != nil {
-		return config.PolicyConfig{}, err
-	}
-	return next, nil
-}
-
 // aliasTargetsExist rejects a chain naming a provider that is not configured.
 // The file loader cannot make this check -- at load time the providers block
 // may not have been imported yet -- but the API can, because by then the
@@ -368,40 +336,6 @@ func (s *Server) aliasTargetsExist(ctx context.Context, aliases map[string][]str
 			if qualified && !known[id] {
 				return fmt.Errorf("alias %q: no provider named %q", name, id)
 			}
-		}
-	}
-	return nil
-}
-
-func applyPolicyWrite(p *config.PolicyConfig, w *policyWrite) error {
-	dur := func(dst *time.Duration, v *string, field string) error {
-		if v == nil {
-			return nil
-		}
-		d, err := time.ParseDuration(*v)
-		if err != nil {
-			return fmt.Errorf("%s: %w", field, err)
-		}
-		*dst = d
-		return nil
-	}
-	if w.Cooldown != nil {
-		if w.Cooldown.TripAfter != nil {
-			p.Cooldown.TripAfter = w.Cooldown.TripAfter
-		}
-		if err := dur(&p.Cooldown.Max, w.Cooldown.Max, "policy.cooldown.max"); err != nil {
-			return err
-		}
-	}
-	if w.Retry != nil && w.Retry.MaxAttempts != nil {
-		p.Retry.MaxAttempts = *w.Retry.MaxAttempts
-	}
-	if w.Timeout != nil {
-		if err := dur(&p.Timeout.Total, w.Timeout.Total, "policy.timeout.total"); err != nil {
-			return err
-		}
-		if err := dur(&p.Timeout.Idle, w.Timeout.Idle, "policy.timeout.idle"); err != nil {
-			return err
 		}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAliasWritesAreVisibleThroughBothSurfaces(t *testing.T) {
@@ -44,15 +45,21 @@ func TestAliasWriteRejectsAnUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestPolicyWriteRefusesARestartOnlyField(t *testing.T) {
-	// Same rule and same message as PUT /api/config: one endpoint accepting
-	// what the other refuses would be worse than either behaviour.
+func TestPolicyWriteCarriesEveryFieldItNames(t *testing.T) {
+	// first_byte and cooldown.max are the two keys no other test writes, and
+	// a key policyPatch forgets is silently dropped rather than refused.
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)
-	w := do(t, s, cookie, token, "PUT", "/api/policy",
-		`{"timeout":{"first_byte":"30s"}}`)
-	if w.Code != 400 {
-		t.Fatalf("PUT /api/policy = %d, want 400: %s", w.Code, w.Body.String())
+	if w := do(t, s, cookie, token, "PUT", "/api/policy",
+		`{"cooldown":{"max":"7m"},"timeout":{"first_byte":"30s"}}`); w.Code != 200 {
+		t.Fatalf("PUT /api/policy = %d: %s", w.Code, w.Body.String())
+	}
+	p := s.deps.Config.Current().Policy
+	if p.Cooldown.Max != 7*time.Minute {
+		t.Errorf("cooldown.max = %s, want 7m", p.Cooldown.Max)
+	}
+	if p.Timeout.FirstByte != 30*time.Second {
+		t.Errorf("timeout.first_byte = %s, want 30s", p.Timeout.FirstByte)
 	}
 }
 
