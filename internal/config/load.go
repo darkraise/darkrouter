@@ -260,6 +260,11 @@ type RuleError struct {
 func (e RuleError) Error() string { return e.Err.Error() }
 func (e RuleError) Unwrap() error { return e.Err }
 
+// Validate runs every rule against an assembled Config. The database loader
+// needs it, and it is the one validator: the write path calls it too, so a
+// value refused on save is never a value a later load would accept.
+func Validate(c *Config) error { return validate(c) }
+
 func validate(c *Config) error {
 	// Dereferencing TripAfter is safe: Parse runs applyDefaults first.
 	if *c.Policy.Cooldown.TripAfter < 1 {
