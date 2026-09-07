@@ -213,3 +213,31 @@ func TestASingleBadKeyDoesNotRevertTheOthers(t *testing.T) {
 		t.Errorf("skipped = %v; log.retention was never reverted", c.Skipped)
 	}
 }
+
+// strconv and time.ParseDuration quote the offending value into their error,
+// so a substring match on the warning reverted whichever other key that value
+// happened to spell -- one bad row silently taking a good one with it.
+func TestAnUnparseableValueRevertsOnlyItsOwnKey(t *testing.T) {
+	d := migrated(t)
+	ctx := context.Background()
+	if err := putSetting(ctx, d.Write, "log.retention", "1000h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := putSetting(ctx, d.Write, "capture.max_bytes", "log.retention"); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := LoadConfig(ctx, d, config.Bootstrap{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Log.Retention; got != 1000*time.Hour {
+		t.Errorf("log.retention = %v, want the stored 1000h: its own row parses fine", got)
+	}
+	if slices.Contains(c.Skipped, "log.retention") {
+		t.Errorf("skipped = %v, want log.retention absent", c.Skipped)
+	}
+	if !slices.Contains(c.Skipped, "capture.max_bytes") {
+		t.Errorf("skipped = %v, want the unparseable capture.max_bytes in it", c.Skipped)
+	}
+}

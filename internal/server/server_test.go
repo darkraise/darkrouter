@@ -630,3 +630,17 @@ func TestTheUnclaimedWarningClearsOnceAPasswordIsSet(t *testing.T) {
 		t.Error("the console still warns it is unclaimed after a password was set")
 	}
 }
+
+// The fail-closed half of the same rule, at the endpoint: a token made only of
+// whitespace is still a configured secret, and an unauthenticated request must
+// not be admitted because it looks empty. No client can present it -- every
+// dialect trims what it reads -- which is the safe way for a misconfigured
+// secret to behave.
+func TestAWhitespaceProxyTokenStillRejects(t *testing.T) {
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "  " })
+	rec := httptest.NewRecorder()
+	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code = %d, want 401: a whitespace secret is still a secret", rec.Code)
+	}
+}

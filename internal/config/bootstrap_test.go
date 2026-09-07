@@ -42,3 +42,17 @@ func TestBootstrapTreatsAnEmptyListenAsUnset(t *testing.T) {
 		t.Errorf("ProxyListen = %q, want the default", b.ProxyListen)
 	}
 }
+
+// The empty-means-unset rule is right for a listen address and dangerous for
+// the secret: an unset proxy token turns proxy authentication off, so a
+// whitespace-only value trimmed to "" would open the gateway rather than close
+// it. The token is read raw for exactly that reason.
+func TestBootstrapDoesNotTreatAWhitespaceTokenAsUnset(t *testing.T) {
+	b := BootstrapFrom(env(map[string]string{"DARKROUTER_PROXY_TOKEN": "  "}))
+	if b.ProxyToken == "" {
+		t.Error("ProxyToken = empty for a whitespace-only value, which switches proxy authentication off")
+	}
+	if b.ProxyToken != "  " {
+		t.Errorf("ProxyToken = %q, want the raw value", b.ProxyToken)
+	}
+}
