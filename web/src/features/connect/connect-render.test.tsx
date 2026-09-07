@@ -8,13 +8,13 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ConnectScreen } from "./connect-screen"
+import { ConnectScreen, publicOrigin } from "./connect-screen"
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function mount(tokens: unknown[], server: Record<string, unknown> = {}) {
+function mount(tokens: unknown[], values: Record<string, string> = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -27,12 +27,11 @@ function mount(tokens: unknown[], server: Record<string, unknown> = {}) {
                 valid: true,
                 warnings: [],
                 fields: {},
-                blocks: {
-                  server: {
-                    proxy_listen: ":18080",
-                    admin_listen: ":18081",
-                    ...server,
-                  },
+                pending_restart: [],
+                values: {
+                  "server.proxy_listen": ":18080",
+                  "server.admin_listen": ":18081",
+                  ...values,
                 },
               }
             : {}
@@ -83,7 +82,7 @@ describe("the connect screen", () => {
   it("shows both addresses once a public one is configured", async () => {
     // The point of configuring a domain is not to replace the LAN address:
     // the gateway still answers on both, and the page has to say so.
-    mount([], { public_url: "https://llm.example.com" })
+    mount([], { "server.public_url": "https://llm.example.com" })
     expect(await screen.findByText("https://llm.example.com/v1")).toBeInTheDocument()
     expect(screen.getByText("http://localhost:18080/v1")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Public" })).toBeInTheDocument()
@@ -110,7 +109,7 @@ describe("the connect screen", () => {
   })
 
   it("writes snippets against the public address by default", async () => {
-    mount([], { public_url: "https://llm.example.com" })
+    mount([], { "server.public_url": "https://llm.example.com" })
     expect(
       await screen.findByText(/ANTHROPIC_BASE_URL=https:\/\/llm\.example\.com/),
     ).toBeInTheDocument()
@@ -120,7 +119,7 @@ describe("the connect screen", () => {
     // A snippet naming the wrong side of the router is the exact failure this
     // screen exists to prevent, so the choice has to reach the snippet text.
     const user = userEvent.setup()
-    mount([], { public_url: "https://llm.example.com" })
+    mount([], { "server.public_url": "https://llm.example.com" })
     await user.click(await screen.findByRole("button", { name: "This network" }))
     expect(
       await screen.findByText(/ANTHROPIC_BASE_URL=http:\/\/localhost:18080/),
@@ -131,5 +130,26 @@ describe("the connect screen", () => {
     mount([])
     expect(await screen.findByLabelText("Name")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "This network" })).not.toBeInTheDocument()
+  })
+})
+
+describe("publicOrigin", () => {
+  it("reads the public URL from the flat values map", () => {
+    // The block tree is gone; a screen still walking it would render the LAN
+    // address as though no public URL were set, which is the one state this
+    // page exists to distinguish.
+    const cfg = {
+      valid: true,
+      warnings: [],
+      values: { "server.public_url": "https://llm.example.test" },
+      fields: {},
+      pending_restart: [],
+    }
+    expect(publicOrigin(cfg)).toBe("https://llm.example.test")
+  })
+
+  it("is empty when no public URL is stored", () => {
+    const cfg = { valid: true, warnings: [], values: {}, fields: {}, pending_restart: [] }
+    expect(publicOrigin(cfg)).toBe("")
   })
 })

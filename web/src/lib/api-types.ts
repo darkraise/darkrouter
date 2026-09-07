@@ -487,13 +487,19 @@ export type SavedView = { name: string; filters: Record<string, string> }
 
 // --- config ---
 
-/** Where a value came from. `database` means editing the YAML has no effect,
- *  which §8.1 requires the config view to say at the point of display. */
-export type ConfigSource = "environment" | "database" | "default"
+/** Where a value came from. `env` is read at startup and needs a restart;
+ *  `database` is what the console writes; `default` is not set anywhere. */
+export type ConfigSource = "env" | "database" | "default"
+
+/** The typed spelling of a stored value, matching Go's `store.ConfigKind`. */
+export type ConfigKind = "duration" | "bytes" | "int" | "bool" | "string" | "url"
 
 export type ConfigFieldMeta = {
   source: ConfigSource
   hot_reloadable: boolean
+  kind: ConfigKind
+  /** The variable that owns a bootstrap key; absent for a stored one. */
+  env?: string
 }
 
 export type PolicyBlock = {
@@ -502,38 +508,16 @@ export type PolicyBlock = {
   timeout: { connect: string; first_byte: string; total: string; idle: string }
 }
 
-export type ConfigBlocks = {
-  server: {
-    proxy_listen: string
-    admin_listen: string
-    // Absent from a gateway older than the key, and empty whenever the
-    // operator has not set one.
-    public_url?: string
-    max_body_bytes: number
-    shutdown_grace: string
-    sse: { max_line_bytes: number; max_precommit_bytes: number }
-  }
-  log: { retention: string }
-  capture: { bodies: boolean; max_bytes: number; retention: string }
-  catalog: {
-    models_dev_url: string
-    sync_interval: string
-    sync_timeout: string
-    discovery: { enabled: boolean; interval: string }
-  }
-  playground: { save_conversations: boolean }
-  media: { inline: boolean }
-  aliases: Aliases
-  policy: PolicyBlock
-}
-
+/** GET /api/config. `values` holds the stored spelling of every key --
+ *  `"10m0s"`, `"33554432"`, `"true"` -- which is what the write path parses
+ *  back, not a display form. */
 export type ConfigResponse = {
   valid: boolean
   warnings: string[]
-  blocks: ConfigBlocks
+  values: Record<string, string>
   fields: Record<string, ConfigFieldMeta>
   /** Restart-only keys whose stored value differs from the one this process
-   *  booted on. Nothing renders it yet; phase 3 owns that surface. */
+   *  booted on. */
   pending_restart: string[]
   error?: string
   serving?: string
