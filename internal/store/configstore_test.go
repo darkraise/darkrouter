@@ -84,9 +84,7 @@ func TestOverlayConfigReplacesAliasesOnly(t *testing.T) {
 	if err := db.PutAliases(ctx, map[string][]string{"db": {"groq/x"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.PutPolicy(ctx, config.PolicyConfig{
-		Retry: config.RetryConfig{MaxAttempts: 6},
-	}); err != nil {
+	if err := putSetting(ctx, db.Write, "policy.retry.max_attempts", "6"); err != nil {
 		t.Fatal(err)
 	}
 

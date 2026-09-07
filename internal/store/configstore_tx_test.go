@@ -4,38 +4,28 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
-func TestPutConfigWritesBothBlocksOrNeither(t *testing.T) {
-	db := migrated(t)
-	ctx := context.Background()
-	trip := 3
-	policy := config.PolicyConfig{
-		Cooldown: config.CooldownConfig{TripAfter: &trip, Max: time.Minute},
-		Retry:    config.RetryConfig{MaxAttempts: 2},
-	}
-	if err := db.PutConfig(ctx, map[string][]string{"fast": {"a/m"}}, &policy); err != nil {
-		t.Fatal(err)
+// Both blocks or neither. The write path is where this lives now; the check
+// stays because a half-applied save is the failure, not the function that
+// used to make it.
+func TestWriteConfigWritesBothBlocksOrNeither(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Aliases: map[string][]string{"fast": {"groq/llama"}},
+		Set:     map[string]string{"policy.retry.max_attempts": "20"},
+	})
+	if err == nil {
+		t.Fatal("WriteConfig accepted a retry count past the cap")
 	}
 	aliases, err := db.Aliases(ctx)
-	if err != nil || len(aliases["fast"]) != 1 {
-		t.Fatalf("aliases = %v, %v", aliases, err)
-	}
-	attempts, _, err := getSetting(ctx, db.Read, "policy.retry.max_attempts")
-	if err != nil || attempts != "2" {
-		t.Fatalf("policy.retry.max_attempts = %q, %v", attempts, err)
-	}
-	// A nil block leaves what is there.
-	if err := db.PutConfig(ctx, nil, &config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 5}}); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	aliases, _ = db.Aliases(ctx)
-	attempts, _, _ = getSetting(ctx, db.Read, "policy.retry.max_attempts")
-	if len(aliases["fast"]) != 1 || attempts != "5" {
-		t.Errorf("after a policy-only write: aliases %v, max_attempts %q", aliases, attempts)
+	if len(aliases) != 0 {
+		t.Errorf("the alias half of a refused write landed: %v", aliases)
 	}
 }
 

@@ -8,9 +8,9 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
-// configField is one stored key. It generalises policyField from the policy
-// block to the whole Config, so there is one table describing how every
-// setting serialises rather than one per block.
+// configField is one stored key: the whole of how it serialises, in one
+// table, so reading and writing cannot drift apart and a new setting is one
+// entry.
 //
 // Durations serialise the way time.ParseDuration reads them, not as a
 // nanosecond count: an operator reads these in the settings screen and writes
