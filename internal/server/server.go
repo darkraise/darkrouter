@@ -656,13 +656,6 @@ func (s *Server) Run(ctx context.Context) error {
 		startWorker("litellm price sync", s.litellmSync.Run)
 	}
 
-	startWorker("config watcher", func(c context.Context) error {
-		// A watcher that cannot start leaves hot reload silently dead, so the
-		// failure has to reach /healthz rather than being discarded.
-		s.store.RecordError(s.store.Watch(c))
-		return nil
-	})
-
 	cfg := s.store.Current()
 
 	// The lifecycle context is handed to every request. It is deliberately not

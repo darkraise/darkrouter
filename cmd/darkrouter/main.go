@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -90,18 +89,24 @@ func main() {
 
 func runServer(args []string) error {
 	fs := flag.NewFlagSet("darkrouter", flag.ExitOnError)
-	path := fs.String("config", "darkrouter.yaml", "path to the configuration file")
-	dbPath := fs.String("db", "", "path to the database file (default: darkrouter.db beside the config)")
+	// Accepted and ignored for one release. An operator who overrode the
+	// container's command still passes it, and flag.ExitOnError would
+	// otherwise refuse to start with a message explaining nothing.
+	legacyConfig := fs.String("config", "", "deprecated; configuration now lives in the database")
+	dbPath := fs.String("db", "", "path to the database file (default: darkrouter.db in the working directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *dbPath == "" {
-		*dbPath = filepath.Join(filepath.Dir(*path), "darkrouter.db")
+		if v, ok := os.LookupEnv("DARKROUTER_DB"); ok && strings.TrimSpace(v) != "" {
+			*dbPath = v
+		} else {
+			*dbPath = "darkrouter.db"
+		}
 	}
-
-	cfgStore, err := config.NewStore(*path, os.LookupEnv)
-	if err != nil {
-		return fmt.Errorf("config: %w", err)
+	if *legacyConfig != "" {
+		slog.Warn("-config is ignored; configuration now lives in the database",
+			"path", *legacyConfig)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -129,16 +134,24 @@ func runServer(args []string) error {
 		return err
 	}
 
+	// Before the first load, so a row an earlier release stored that now only
+	// repeats the compiled default does not read back as an operator's choice.
+	if n, err := store.ReconcileConfig(context.Background(), db); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Info("dropped stored settings that matched the default", "count", n)
+	}
+
+	boot := config.BootstrapFrom(os.LookupEnv)
+	cfgStore, err := config.NewStoreFrom(func() (*config.Config, error) {
+		return store.LoadConfig(context.Background(), db, boot)
+	})
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
 	cfg := cfgStore.Current()
 	var warnings []string
-
-	res, err := store.ImportFromConfig(context.Background(), db, key, cfg)
-	if err != nil {
-		return err
-	}
-	if res.Imported {
-		slog.Info("imported providers into the database", "count", res.Providers, "file", *path)
-	}
 
 	// Seeded before the config overlay and the server: the providers it adds
 	// are ordinary rows, and everything downstream — the router's source, the
@@ -154,31 +167,19 @@ func runServer(args []string) error {
 		}
 	}
 
-	cfgRes, err := store.ImportConfigOnce(context.Background(), db, cfg)
-	if err != nil {
-		return err
-	}
-	if cfgRes.Imported {
-		slog.Info("imported aliases and policy into the database; edit them through the admin API from now on", "aliases", cfgRes.Aliases, "policy_settings", cfgRes.Policy, "file", *path)
-	}
-
 	// Installed before the reload below, so the first snapshot any request can
-	// see already carries the database's aliases and policy rather than the
-	// file's.
+	// see already carries the database's aliases.
 	cfgStore.SetOverlay(func(c *config.Config) error {
 		return store.OverlayConfig(context.Background(), db, c)
 	})
 	if err := cfgStore.Reload(); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	// The constructor captured its snapshot before SetOverlay, so until this
+	// runs "pending restart" is measured against a config the process never
+	// ran.
+	cfgStore.MarkBoot()
 	cfg = cfgStore.Current()
-	stale, err := store.StaleBlockWarning(context.Background(), db, cfg)
-	if err != nil {
-		return err
-	}
-	if stale != "" {
-		warnings = append(warnings, stale)
-	}
 
 	srv, err := server.New(cfgStore, db, key, warnings)
 	if err != nil {
