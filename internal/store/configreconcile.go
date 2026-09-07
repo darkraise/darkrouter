@@ -30,7 +30,7 @@ func ReconcileConfig(ctx context.Context, d *DB) (int, error) {
 	// configRows is already filtered to the registry. The loop below does not
 	// rely on that: it rejects an unknown key on its own, so the filter is a
 	// narrowing rather than the thing keeping foreign rows alive.
-	stored, err := configRows(ctx, d)
+	stored, err := configRows(ctx, d.Read)
 	if err != nil {
 		return 0, err
 	}

@@ -136,7 +136,7 @@ func TestLoadConfigIgnoresForeignRows(t *testing.T) {
 	// Asserted on configRows rather than on the warnings LoadConfig produces:
 	// ApplyConfigRows walks the registry, not the rows, so a foreign row is
 	// silent either way and only this can see the filter disappear.
-	rows, err := configRows(ctx, db)
+	rows, err := configRows(ctx, db.Read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,5 +239,56 @@ func TestAnUnparseableValueRevertsOnlyItsOwnKey(t *testing.T) {
 	}
 	if !slices.Contains(c.Skipped, "capture.max_bytes") {
 		t.Errorf("skipped = %v, want the unparseable capture.max_bytes in it", c.Skipped)
+	}
+}
+
+// The write path builds its base from the rows inside its own transaction, so
+// the assembly has to be reachable without a database. This is that seam.
+func TestBuildConfigRevertsAKeyItCannotParse(t *testing.T) {
+	c, warnings, skipped, err := buildConfig(
+		map[string]string{"log.retention": "not-a-duration", "capture.max_bytes": "4096"},
+		config.Bootstrap{}, nil)
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if len(skipped) != 1 || skipped[0] != "log.retention" {
+		t.Fatalf("skipped = %v, want just log.retention", skipped)
+	}
+	if len(warnings) != 1 {
+		t.Errorf("warnings = %v, want one", warnings)
+	}
+	if c.Log.Retention != 720*time.Hour {
+		t.Errorf("log.retention = %s, want the compiled default", c.Log.Retention)
+	}
+	// The unrelated row still applies. A bad key reverts itself, not the save.
+	if c.Capture.MaxBytes != 4096 {
+		t.Errorf("capture.max_bytes = %d, want 4096", c.Capture.MaxBytes)
+	}
+}
+
+func TestBuildConfigTakesItsListenAddressesFromTheBootstrap(t *testing.T) {
+	c, _, _, err := buildConfig(nil, config.Bootstrap{
+		ProxyListen: "127.0.0.1:1", AdminListen: "127.0.0.1:2", ProxyToken: "sekrit",
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if c.Server.ProxyListen != "127.0.0.1:1" || c.Server.AdminListen != "127.0.0.1:2" {
+		t.Errorf("listen = %q/%q, want the bootstrap's", c.Server.ProxyListen, c.Server.AdminListen)
+	}
+	if c.Server.ProxyToken != "sekrit" {
+		t.Errorf("ProxyToken = %q, want the bootstrap's", c.Server.ProxyToken)
+	}
+}
+
+// Aliases are validated with everything else when they are supplied. Nothing
+// can revert them, so a broken set exhausts the loop and comes back as the
+// error the caller must not paper over -- which is why the write path checks
+// them before it gets here.
+func TestBuildConfigFailsOnAnAliasSetNoKeyCanFix(t *testing.T) {
+	_, _, _, err := buildConfig(nil, config.Bootstrap{},
+		map[string][]string{"fast": {}})
+	if err == nil {
+		t.Fatal("buildConfig accepted an alias chain with no targets")
 	}
 }
