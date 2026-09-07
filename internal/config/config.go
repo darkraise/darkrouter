@@ -121,8 +121,6 @@ var restartOnlyFields = []struct {
 	// since two reloads produce different pointers to the same bool.
 	value func(*Config) any
 }{
-	{"server.proxy_listen", func(c *Config) any { return c.Server.ProxyListen }},
-	{"server.admin_listen", func(c *Config) any { return c.Server.AdminListen }},
 	{"policy.timeout.connect", func(c *Config) any { return c.Policy.Timeout.Connect }},
 	{"policy.timeout.first_byte", func(c *Config) any { return c.Policy.Timeout.FirstByte }},
 	{"catalog.models_dev_url", func(c *Config) any { return c.Catalog.ModelsDevURL }},
@@ -134,6 +132,8 @@ var restartOnlyFields = []struct {
 	{"catalog.litellm_interval", func(c *Config) any { return c.Catalog.LiteLLMInterval }},
 	{"catalog.litellm_url", func(c *Config) any { return c.Catalog.LiteLLMURL }},
 	{"catalog.litellm_sync", func(c *Config) any { return optionalBool(c.Catalog.LiteLLMSync) }},
+	// Whether the free-provider seed runs at all is read once at startup.
+	{"catalog.seed_free_providers", func(c *Config) any { return optionalBool(c.Catalog.SeedFreeProviders) }},
 	{"catalog.discovery.interval", func(c *Config) any { return c.Catalog.Discovery.Interval }},
 	// The sweeper builds its HTTP client from the timeout and sizes its
 	// semaphore from the concurrency, both once, when it is constructed.

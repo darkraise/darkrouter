@@ -11,8 +11,6 @@ import (
 // teaching the warning generator about it fails here rather than in production,
 // where the operator gets a successful reload and stale behaviour.
 var mutations = map[string]func(*Config){
-	"server.proxy_listen":           func(c *Config) { c.Server.ProxyListen = ":19090" },
-	"server.admin_listen":           func(c *Config) { c.Server.AdminListen = ":19091" },
 	"policy.timeout.connect":        func(c *Config) { c.Policy.Timeout.Connect = 3 * time.Second },
 	"policy.timeout.first_byte":     func(c *Config) { c.Policy.Timeout.FirstByte = 7 * time.Second },
 	"catalog.models_dev_url":        func(c *Config) { c.Catalog.ModelsDevURL = "https://example.invalid/api.json" },
@@ -24,6 +22,7 @@ var mutations = map[string]func(*Config){
 	"catalog.litellm_interval":      func(c *Config) { c.Catalog.LiteLLMInterval = 9 * time.Hour },
 	"catalog.litellm_url":           func(c *Config) { c.Catalog.LiteLLMURL = "https://example.invalid/litellm.json" },
 	"catalog.litellm_sync":          func(c *Config) { f := false; c.Catalog.LiteLLMSync = &f },
+	"catalog.seed_free_providers":   func(c *Config) { f := false; c.Catalog.SeedFreeProviders = &f },
 	"catalog.discovery.interval":    func(c *Config) { c.Catalog.Discovery.Interval = 13 * time.Minute },
 	"catalog.discovery.enabled":     func(c *Config) { f := false; c.Catalog.Discovery.Enabled = &f },
 	"catalog.discovery.timeout":     func(c *Config) { c.Catalog.Discovery.Timeout = 21 * time.Second },
@@ -96,5 +95,28 @@ func TestRestartOnlyNamesTheWorkerConstructionInputs(t *testing.T) {
 		if !found {
 			t.Errorf("%s is captured at startup but RestartOnly does not name it", field)
 		}
+	}
+}
+
+func TestRestartOnlyCoversWhatTheDatabaseCanChange(t *testing.T) {
+	got := map[string]bool{}
+	for _, f := range restartOnlyFields {
+		got[f.name] = true
+	}
+	// An environment variable cannot change under a running process, so
+	// warning that it needs a restart is noise about an impossible event.
+	for _, gone := range []string{"server.proxy_listen", "server.admin_listen"} {
+		if got[gone] {
+			t.Errorf("%s is bootstrap-only and must leave the table", gone)
+		}
+	}
+	// Consumed once at startup (cmd/darkrouter/main.go), so a change to it
+	// genuinely does need a restart, and the console would otherwise offer it
+	// as hot.
+	if !got["catalog.seed_free_providers"] {
+		t.Error("catalog.seed_free_providers is decided once at startup and must be restart-only")
+	}
+	if len(restartOnlyFields) != 17 {
+		t.Errorf("restartOnlyFields holds %d entries, want 17", len(restartOnlyFields))
 	}
 }
