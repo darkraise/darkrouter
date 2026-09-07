@@ -88,28 +88,50 @@ func main() {
 	}
 }
 
+// parseFlags reads the command line into the two values the process acts on.
+//
+// The flag set is the caller's so a test can parse without ExitOnError taking
+// the process down on a bad argument.
+func parseFlags(fs *flag.FlagSet, args []string) (dbPath, legacyConfig string, err error) {
+	// -config is accepted and ignored for one release. An operator who
+	// overrode the container's command still passes it, and an unknown flag
+	// would otherwise refuse to start with a message explaining nothing.
+	legacy := fs.String("config", "", "deprecated; configuration now lives in the database")
+	db := fs.String("db", "", "path to the database file (default: darkrouter.db in the working directory)")
+	if err := fs.Parse(args); err != nil {
+		return "", "", err
+	}
+	return *db, *legacy, nil
+}
+
+// warnIgnoredConfigFlag says once that -config no longer does anything. Silence
+// would leave an operator believing the file they passed is being read.
+func warnIgnoredConfigFlag(path string) {
+	if path == "" {
+		return
+	}
+	slog.Warn("-config is ignored; configuration now lives in the database",
+		"path", path)
+}
+
 func runServer(args []string) error {
 	fs := flag.NewFlagSet("darkrouter", flag.ExitOnError)
-	// Accepted and ignored for one release. An operator who overrode the
-	// container's command still passes it, and flag.ExitOnError would
-	// otherwise refuse to start with a message explaining nothing.
-	legacyConfig := fs.String("config", "", "deprecated; configuration now lives in the database")
-	dbPath := fs.String("db", "", "path to the database file (default: darkrouter.db in the working directory)")
-	if err := fs.Parse(args); err != nil {
+	dbPath, legacyConfig, err := parseFlags(fs, args)
+	if err != nil {
 		return err
 	}
-	if *dbPath == "" {
+	if dbPath == "" {
 		if v, ok := os.LookupEnv("DARKROUTER_DB"); ok && strings.TrimSpace(v) != "" {
-			*dbPath = v
+			dbPath = v
 		} else {
-			*dbPath = "darkrouter.db"
+			dbPath = "darkrouter.db"
 		}
 	}
 	// The file stopped being read in this release. Saying so once is what
 	// turns "my settings reverted" into an obvious morning rather than a
 	// confusing one.
-	legacy := filepath.Join(filepath.Dir(*dbPath), "darkrouter.yaml")
-	// *dbPath is commonly a bare filename, which would otherwise log a path
+	legacy := filepath.Join(filepath.Dir(dbPath), "darkrouter.yaml")
+	// dbPath is commonly a bare filename, which would otherwise log a path
 	// with no directory -- useless to an operator reading docker logs on a
 	// host they did not set up themselves.
 	if abs, err := filepath.Abs(legacy); err == nil {
@@ -120,10 +142,7 @@ func runServer(args []string) error {
 			"settings now live in the database and are changed in the console",
 			"path", legacy)
 	}
-	if *legacyConfig != "" {
-		slog.Warn("-config is ignored; configuration now lives in the database",
-			"path", *legacyConfig)
-	}
+	warnIgnoredConfigFlag(legacyConfig)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -132,10 +151,10 @@ func runServer(args []string) error {
 	// Before SQLite, whose error for this names neither the directory nor the
 	// uid: a bind-mounted data directory owned by the wrong user is the first
 	// thing a container deployment can get wrong.
-	if err := store.CheckWritable(*dbPath); err != nil {
+	if err := store.CheckWritable(dbPath); err != nil {
 		return err
 	}
-	db, err := store.Open(*dbPath)
+	db, err := store.Open(dbPath)
 	if err != nil {
 		return err
 	}
