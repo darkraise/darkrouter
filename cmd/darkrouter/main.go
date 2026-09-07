@@ -109,6 +109,12 @@ func runServer(args []string) error {
 	// turns "my settings reverted" into an obvious morning rather than a
 	// confusing one.
 	legacy := filepath.Join(filepath.Dir(*dbPath), "darkrouter.yaml")
+	// *dbPath is commonly a bare filename, which would otherwise log a path
+	// with no directory -- useless to an operator reading docker logs on a
+	// host they did not set up themselves.
+	if abs, err := filepath.Abs(legacy); err == nil {
+		legacy = abs
+	}
 	if _, err := os.Stat(legacy); err == nil {
 		slog.Warn("a configuration file is present but no longer read; "+
 			"settings now live in the database and are changed in the console",

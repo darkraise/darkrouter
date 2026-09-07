@@ -523,9 +523,10 @@ func (s *Server) AdminHandler() http.Handler {
 
 		body := map[string]any{
 			// A skipped key is not a valid configuration. The process is
-			// running a default the operator did not choose, and warnings is
-			// the only place that fact appears.
-			"config_valid": cfgErr == nil && len(cfg.Warnings) == 0,
+			// running a default the operator did not choose. Keyed on
+			// Skipped rather than Warnings: a restart-pending notice lands
+			// in Warnings too, and nothing about it is invalid.
+			"config_valid": cfgErr == nil && len(cfg.Skipped) == 0,
 			"warnings":     warnings,
 			"uptime":       time.Since(s.started).Round(time.Second).String(),
 			"version":      Version,

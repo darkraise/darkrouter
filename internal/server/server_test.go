@@ -48,12 +48,15 @@ func TestHealthzReportsConfigValidity(t *testing.T) {
 	}
 }
 
-// Reporting a config as valid while the process quietly substituted three
-// defaults makes the field useless. It is the only signal that a stored value
+// Reporting a config as valid while the process quietly substituted a
+// default makes the field useless. It is the only signal that a stored value
 // is being ignored, because nothing else about a skipped key is visible.
 func TestHealthzReportsASkippedKeyAsInvalid(t *testing.T) {
 	c := &config.Config{}
 	config.ApplyDefaults(c)
+	// A real skipped key always carries both: store.LoadConfig appends the
+	// key to Skipped and the explanation to Warnings from the same revert.
+	c.Skipped = []string{"log.retention"}
 	c.Warnings = []string{"stored log.retention is unusable (bad duration); using the default"}
 	s := testServerWithConfig(t, c)
 
@@ -76,13 +79,42 @@ func TestHealthzReportsASkippedKeyAsInvalid(t *testing.T) {
 	}
 }
 
+// A restart-pending notice lands in Warnings exactly like a skipped key's
+// explanation does, but nothing was reverted: PUT /api/policy writes
+// straight through and Reload appends this warning to every config that
+// changed a restart-only field. Tying config_valid to Warnings instead of
+// Skipped would flip an operator's console edit to invalid until the next
+// restart, for a value that is neither missing nor wrong.
+func TestHealthzReportsARestartPendingWarningAsValid(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Warnings = []string{"policy.timeout.connect changed; takes effect on restart"}
+	s := testServerWithConfig(t, c)
+
+	r := httptest.NewRequest("GET", "/healthz", nil)
+	w := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(w, r)
+
+	var body struct {
+		ConfigValid bool     `json:"config_valid"`
+		Warnings    []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.ConfigValid {
+		t.Error("config_valid = false from a restart-pending warning alone")
+	}
+	if len(body.Warnings) == 0 {
+		t.Error("the restart-pending notice must still reach the caller")
+	}
+}
+
 // A clean load still reports valid, or the field means nothing in the
 // direction that matters. Both requests share one server and one Config
-// pointer, with only cfg.Warnings changed between them, so the assertion is
+// pointer, with only cfg.Skipped changed between them, so the assertion is
 // tied to that field rather than coincidentally true under any config_valid
-// expression that ignores it -- the first half alone would pass under both
-// "cfgErr == nil" and "cfgErr == nil && len(cfg.Warnings) == 0", since a
-// clean load makes both conjuncts true.
+// expression that ignores it.
 func TestHealthzReportsACleanLoadAsValid(t *testing.T) {
 	c := &config.Config{}
 	config.ApplyDefaults(c)
@@ -102,7 +134,7 @@ func TestHealthzReportsACleanLoadAsValid(t *testing.T) {
 		t.Error("config_valid = false on a clean load")
 	}
 
-	c.Warnings = []string{"stored log.retention is unusable (bad duration); using the default"}
+	c.Skipped = []string{"log.retention"}
 	w2 := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(w2, httptest.NewRequest("GET", "/healthz", nil))
 	var body2 struct {
@@ -112,7 +144,7 @@ func TestHealthzReportsACleanLoadAsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	if body2.ConfigValid {
-		t.Error("config_valid stayed true after Warnings was set on the same config")
+		t.Error("config_valid stayed true after Skipped was set on the same config")
 	}
 }
 

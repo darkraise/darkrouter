@@ -39,6 +39,10 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 
 	skip := map[string]bool{}
 	c, warnings := build(skip)
+	// skipped names every key actually reverted, as distinct from warnings:
+	// a restart-pending notice lands in warnings too, and must not make the
+	// configuration report invalid the way a reverted key does.
+	var skipped []string
 
 	// Parse failures first: the pass above reported every key that would not
 	// parse, and this one rebuilds without them. Rule failures are handled
@@ -48,8 +52,9 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 			for _, k := range ConfigKeys() {
 				// ApplyConfigRows builds each warning from the key itself, so
 				// naming it is what identifies the key to drop.
-				if strings.Contains(w, k) {
+				if strings.Contains(w, k) && !skip[k] {
 					skip[k] = true
+					skipped = append(skipped, k)
 				}
 			}
 		}
@@ -65,21 +70,26 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 		err := config.Validate(c)
 		if err == nil {
 			c.Warnings = append(c.Warnings, warnings...)
+			c.Skipped = append(c.Skipped, skipped...)
 			return c, nil
 		}
 
 		var re config.RuleError
-		if errors.As(err, &re) && addAny(skip, re.Keys) {
-			warnings = append(warnings,
-				fmt.Sprintf("stored %v broke the %s rule; all of them reverted to their defaults", re.Keys, re.Rule))
-			c, _ = build(skip)
-			continue
+		if errors.As(err, &re) {
+			if added := addAny(skip, re.Keys); len(added) > 0 {
+				warnings = append(warnings,
+					fmt.Sprintf("stored %v broke the %s rule; all of them reverted to their defaults", re.Keys, re.Rule))
+				skipped = append(skipped, added...)
+				c, _ = build(skip)
+				continue
+			}
 		}
 		// A single-key rule. Every message validate produces for one names the
 		// setting it is about, so the key to revert can be read out of it
 		// rather than guessed.
 		if k, ok := keyNamedIn(err.Error(), skip); ok {
 			skip[k] = true
+			skipped = append(skipped, k)
 			warnings = append(warnings,
 				fmt.Sprintf("stored %s is unusable (%v); using the default", k, err))
 			c, _ = build(skip)
@@ -87,7 +97,9 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 		}
 		// Nothing identifiable, or a rule whose keys are all reverted already.
 		// Everything goes rather than the process refusing to start.
-		skip = allKeys()
+		if added := addAny(skip, ConfigKeys()); len(added) > 0 {
+			skipped = append(skipped, added...)
+		}
 		c, _ = build(skip)
 		warnings = append(warnings,
 			fmt.Sprintf("stored configuration is unusable (%v); every key reverted to its default", err))
@@ -100,18 +112,22 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 		return nil, fmt.Errorf("compiled defaults do not validate: %w", err)
 	}
 	c.Warnings = append(c.Warnings, warnings...)
+	c.Skipped = append(c.Skipped, skipped...)
 	return c, nil
 }
 
-// addAny marks every key not already skipped, reporting whether it changed
-// anything. A pass that retires no new key would loop until the bound with the
-// same failure, so it is the caller's signal to stop narrowing.
-func addAny(skip map[string]bool, keys []string) bool {
-	added := false
+// addAny marks every key not already skipped, returning the ones that were
+// newly added. An empty result means the pass retired no new key, which
+// would otherwise loop until the bound with the same failure -- the caller's
+// signal to stop narrowing. The keys are also what the caller reports as
+// skipped, so a rule reverting a key already marked by an earlier pass is not
+// double-counted.
+func addAny(skip map[string]bool, keys []string) []string {
+	var added []string
 	for _, k := range keys {
 		if !skip[k] {
 			skip[k] = true
-			added = true
+			added = append(added, k)
 		}
 	}
 	return added
@@ -141,14 +157,6 @@ func keyNamedIn(msg string, skip map[string]bool) (string, bool) {
 		}
 	}
 	return best, best != ""
-}
-
-func allKeys() map[string]bool {
-	m := make(map[string]bool, len(configRegistry))
-	for _, f := range configRegistry {
-		m[f.key] = true
-	}
-	return m
 }
 
 // StoredConfigKeys names the registry keys the database actually carries, so a

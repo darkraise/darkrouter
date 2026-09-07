@@ -19,8 +19,16 @@ type Config struct {
 	Playground PlaygroundConfig    `yaml:"playground"`
 
 	// Warnings are non-fatal findings from validation. They are surfaced on
-	// /healthz rather than rejecting the document.
+	// /healthz rather than rejecting the document. Broader than Skipped: a
+	// restart-pending notice lands here too, and that alone must not make the
+	// configuration report invalid.
 	Warnings []string `yaml:"-"`
+	// Skipped names settings whose stored value could not be used and was
+	// reverted to its compiled default -- a bad parse, a broken cross-key
+	// rule, or the wholesale fallback. This, not Warnings, is what makes a
+	// configuration invalid: the process is running a value the operator did
+	// not choose.
+	Skipped []string `yaml:"-"`
 }
 
 type ServerConfig struct {
