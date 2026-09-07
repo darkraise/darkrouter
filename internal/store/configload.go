@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,10 +18,34 @@ import (
 // warning. Only a database that cannot be read is an error, because that is
 // not something an operator can fix from the console either way.
 func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Config, error) {
-	rows, err := configRows(ctx, d)
+	rows, err := configRows(ctx, d.Read)
 	if err != nil {
 		return nil, err
 	}
+	// nil aliases: the alias table reaches a snapshot through OverlayConfig,
+	// after this runs. The write path is the caller that has them in hand.
+	c, warnings, skipped, err := buildConfig(rows, boot, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.Warnings = append(c.Warnings, warnings...)
+	c.Skipped = append(c.Skipped, skipped...)
+	return c, nil
+}
+
+// buildConfig assembles a Config from stored rows and reports what it could
+// not use: the warnings to surface and the keys it reverted to their compiled
+// defaults.
+//
+// Separated from LoadConfig because the write path needs the same assembly
+// against the rows inside its own transaction. A base built from the running
+// snapshot is what lets two concurrent saves each pass the cross-key rule and
+// together commit a state the next load refuses.
+//
+// The only error it returns is the compiled defaults failing validation, which
+// is a bug in the defaults rather than in anything an operator stored.
+func buildConfig(rows map[string]string, boot config.Bootstrap,
+	aliases map[string][]string) (*config.Config, []string, []string, error) {
 
 	build := func(skip map[string]bool) (*config.Config, []string) {
 		c := &config.Config{}
@@ -28,6 +53,7 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 		c.Server.ProxyListen = boot.ProxyListen
 		c.Server.AdminListen = boot.AdminListen
 		c.Server.ProxyToken = boot.ProxyToken
+		c.Aliases = aliases
 		use := make(map[string]string, len(rows))
 		for k, v := range rows {
 			if !skip[k] {
@@ -71,9 +97,7 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 	for attempt := 0; attempt <= len(configRegistry); attempt++ {
 		err := config.Validate(c)
 		if err == nil {
-			c.Warnings = append(c.Warnings, warnings...)
-			c.Skipped = append(c.Skipped, skipped...)
-			return c, nil
+			return c, warnings, skipped, nil
 		}
 
 		var re config.RuleError
@@ -111,11 +135,9 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 	// which is a bug in the defaults rather than in anything an operator
 	// stored. Only that is allowed to fail a start.
 	if err := config.Validate(c); err != nil {
-		return nil, fmt.Errorf("compiled defaults do not validate: %w", err)
+		return nil, nil, nil, fmt.Errorf("compiled defaults do not validate: %w", err)
 	}
-	c.Warnings = append(c.Warnings, warnings...)
-	c.Skipped = append(c.Skipped, skipped...)
-	return c, nil
+	return c, warnings, skipped, nil
 }
 
 // addAny marks every key not already skipped, returning the ones that were
@@ -167,7 +189,7 @@ func keyNamedIn(msg string, skip map[string]bool) (string, bool) {
 // row that happens to equal the default parses to the same value as no row at
 // all.
 func StoredConfigKeys(ctx context.Context, d *DB) (map[string]bool, error) {
-	rows, err := configRows(ctx, d)
+	rows, err := configRows(ctx, d.Read)
 	if err != nil {
 		return nil, err
 	}
@@ -178,12 +200,19 @@ func StoredConfigKeys(ctx context.Context, d *DB) (map[string]bool, error) {
 	return out, nil
 }
 
+// rowsQueryer is the part of *sql.DB and *sql.Tx a settings read needs. The
+// write path reads its rows inside its own transaction, which is the whole
+// point of its critical section, so this cannot be pinned to d.Read.
+type rowsQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // configRows reads only the keys this binary knows. The settings table is
 // shared with the keyring, the CSRF secret and the import markers, so a
 // SELECT * would hand foreign rows to the registry.
-func configRows(ctx context.Context, d *DB) (map[string]string, error) {
+func configRows(ctx context.Context, q rowsQueryer) (map[string]string, error) {
 	out := map[string]string{}
-	rows, err := d.Read.QueryContext(ctx, `SELECT key, value FROM settings`)
+	rows, err := q.QueryContext(ctx, `SELECT key, value FROM settings`)
 	if err != nil {
 		return nil, fmt.Errorf("read stored configuration: %w", err)
 	}
