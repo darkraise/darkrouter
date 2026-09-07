@@ -161,3 +161,53 @@ func TestApplyConfigRowsLeavesAnUnrelatedKeyAlone(t *testing.T) {
 		t.Errorf("log.retention = %s, want 96h", c.Log.Retention)
 	}
 }
+
+// The console picks an editor from this, so a key with no kind is a key that
+// renders as a text box whatever it actually holds.
+func TestEveryRegistryKeyDeclaresAKind(t *testing.T) {
+	for _, key := range ConfigKeys() {
+		kind, ok := ConfigKindOf(key)
+		if !ok {
+			t.Errorf("%s declares no kind", key)
+			continue
+		}
+		switch kind {
+		case KindDuration, KindBytes, KindInt, KindBool, KindString, KindURL:
+		default:
+			t.Errorf("%s declares unknown kind %q", key, kind)
+		}
+	}
+}
+
+func TestConfigKindOfNamesTheKindsThatDifferFromTheirGoType(t *testing.T) {
+	// Bytes are an int64 in Go and a size to a person; the console formats and
+	// parses them differently from a count.
+	for key, want := range map[string]ConfigKind{
+		"server.max_body_bytes":     KindBytes,
+		"capture.max_bytes":         KindBytes,
+		"server.sse.max_line_bytes": KindBytes,
+		// A URL is a string in Go, but this one takes a bare domain and
+		// normalises it, which the editor has to say.
+		"server.public_url":         KindURL,
+		"catalog.models_dev_url":    KindURL,
+		"policy.timeout.total":      KindDuration,
+		"policy.retry.max_attempts": KindInt,
+		"capture.bodies":            KindBool,
+		"catalog.discovery.enabled": KindBool,
+	} {
+		got, ok := ConfigKindOf(key)
+		if !ok {
+			t.Errorf("%s declares no kind", key)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s kind = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestConfigKindOfRejectsAnUnknownKey(t *testing.T) {
+	if _, ok := ConfigKindOf("server.nonsense"); ok {
+		t.Error("ConfigKindOf accepted a key the registry does not carry")
+	}
+}

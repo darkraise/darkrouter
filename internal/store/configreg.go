@@ -8,6 +8,21 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
+// ConfigKind is what a key holds, as the console needs to know it. It is
+// coarser than the Go type in one direction and finer in another: bytes and a
+// count are both int64 and are not the same control, while a URL and a name
+// are both strings and are not either.
+type ConfigKind string
+
+const (
+	KindDuration ConfigKind = "duration"
+	KindBytes    ConfigKind = "bytes"
+	KindInt      ConfigKind = "int"
+	KindBool     ConfigKind = "bool"
+	KindString   ConfigKind = "string"
+	KindURL      ConfigKind = "url"
+)
+
 // configField is one stored key: the whole of how it serialises, in one
 // table, so reading and writing cannot drift apart and a new setting is one
 // entry.
@@ -27,6 +42,10 @@ type configField struct {
 	// the loader did not would let a row into the database that every later
 	// start silently accepted.
 	validate func(*config.Config) error
+	// kind is what the console builds an editor from. It lives here rather
+	// than being guessed from the key's suffix, because a guess is a second
+	// table that drifts from this one.
+	kind ConfigKind
 }
 
 // maxRetryAttempts bounds policy.retry.max_attempts. Past ten, a failing
@@ -39,15 +58,17 @@ var configRegistry = buildConfigRegistry()
 func buildConfigRegistry() []configField {
 	str := func(key string, ref func(*config.Config) *string) configField {
 		return configField{
-			key: key,
-			get: func(c *config.Config) string { return *ref(c) },
-			set: func(c *config.Config, v string) error { *ref(c) = v; return nil },
+			key:  key,
+			kind: KindString,
+			get:  func(c *config.Config) string { return *ref(c) },
+			set:  func(c *config.Config, v string) error { *ref(c) = v; return nil },
 		}
 	}
 	duration := func(key string, ref func(*config.Config) *time.Duration) configField {
 		return configField{
-			key: key,
-			get: func(c *config.Config) string { return ref(c).String() },
+			key:  key,
+			kind: KindDuration,
+			get:  func(c *config.Config) string { return ref(c).String() },
 			set: func(c *config.Config, v string) error {
 				d, err := time.ParseDuration(v)
 				if err != nil {
@@ -60,8 +81,9 @@ func buildConfigRegistry() []configField {
 	}
 	integer := func(key string, ref func(*config.Config) *int) configField {
 		return configField{
-			key: key,
-			get: func(c *config.Config) string { return strconv.Itoa(*ref(c)) },
+			key:  key,
+			kind: KindInt,
+			get:  func(c *config.Config) string { return strconv.Itoa(*ref(c)) },
 			set: func(c *config.Config, v string) error {
 				n, err := strconv.Atoi(v)
 				if err != nil {
@@ -74,8 +96,9 @@ func buildConfigRegistry() []configField {
 	}
 	integer64 := func(key string, ref func(*config.Config) *int64) configField {
 		return configField{
-			key: key,
-			get: func(c *config.Config) string { return strconv.FormatInt(*ref(c), 10) },
+			key:  key,
+			kind: KindBytes,
+			get:  func(c *config.Config) string { return strconv.FormatInt(*ref(c), 10) },
 			set: func(c *config.Config, v string) error {
 				n, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
@@ -88,8 +111,9 @@ func buildConfigRegistry() []configField {
 	}
 	boolean := func(key string, ref func(*config.Config) *bool) configField {
 		return configField{
-			key: key,
-			get: func(c *config.Config) string { return strconv.FormatBool(*ref(c)) },
+			key:  key,
+			kind: KindBool,
+			get:  func(c *config.Config) string { return strconv.FormatBool(*ref(c)) },
 			set: func(c *config.Config, v string) error {
 				b, err := strconv.ParseBool(v)
 				if err != nil {
@@ -105,7 +129,8 @@ func buildConfigRegistry() []configField {
 	// the compiled default the caller has already applied.
 	optBool := func(key string, ref func(*config.Config) **bool) configField {
 		return configField{
-			key: key,
+			key:  key,
+			kind: KindBool,
 			get: func(c *config.Config) string {
 				if p := *ref(c); p != nil {
 					return strconv.FormatBool(*p)
@@ -124,7 +149,8 @@ func buildConfigRegistry() []configField {
 	}
 	optInt := func(key string, ref func(*config.Config) **int) configField {
 		return configField{
-			key: key,
+			key:  key,
+			kind: KindInt,
 			get: func(c *config.Config) string {
 				if p := *ref(c); p != nil {
 					return strconv.Itoa(*p)
@@ -148,8 +174,23 @@ func buildConfigRegistry() []configField {
 	// refuses.
 	domain := func(key string, ref func(*config.Config) *string) configField {
 		f := str(key, ref)
+		f.kind = KindURL
 		set := f.set
 		f.set = func(c *config.Config, v string) error { return set(c, config.NormalizeDomain(v)) }
+		return f
+	}
+
+	// bytes is integer for a value an operator reads as a size. The SSE limits
+	// are declared int in Go and are still sizes to a person.
+	bytes := func(key string, ref func(*config.Config) *int) configField {
+		f := integer(key, ref)
+		f.kind = KindBytes
+		return f
+	}
+
+	urlOf := func(key string, ref func(*config.Config) *string) configField {
+		f := str(key, ref)
+		f.kind = KindURL
 		return f
 	}
 
@@ -162,8 +203,8 @@ func buildConfigRegistry() []configField {
 		domain("server.public_url", func(c *config.Config) *string { return &c.Server.PublicURL }),
 		integer64("server.max_body_bytes", func(c *config.Config) *int64 { return &c.Server.MaxBodyBytes }),
 		duration("server.shutdown_grace", func(c *config.Config) *time.Duration { return &c.Server.ShutdownGrace }),
-		integer("server.sse.max_line_bytes", func(c *config.Config) *int { return &c.Server.SSE.MaxLineBytes }),
-		integer("server.sse.max_precommit_bytes", func(c *config.Config) *int { return &c.Server.SSE.MaxPrecommitBytes }),
+		bytes("server.sse.max_line_bytes", func(c *config.Config) *int { return &c.Server.SSE.MaxLineBytes }),
+		bytes("server.sse.max_precommit_bytes", func(c *config.Config) *int { return &c.Server.SSE.MaxPrecommitBytes }),
 
 		optInt("policy.cooldown.trip_after", func(c *config.Config) **int { return &c.Policy.Cooldown.TripAfter }),
 		duration("policy.cooldown.max", func(c *config.Config) *time.Duration { return &c.Policy.Cooldown.Max }),
@@ -186,13 +227,13 @@ func buildConfigRegistry() []configField {
 		integer64("capture.max_bytes", func(c *config.Config) *int64 { return &c.Capture.MaxBytes }),
 		duration("capture.retention", func(c *config.Config) *time.Duration { return &c.Capture.Retention }),
 
-		str("catalog.models_dev_url", func(c *config.Config) *string { return &c.Catalog.ModelsDevURL }),
+		urlOf("catalog.models_dev_url", func(c *config.Config) *string { return &c.Catalog.ModelsDevURL }),
 		duration("catalog.sync_interval", func(c *config.Config) *time.Duration { return &c.Catalog.SyncInterval }),
 		duration("catalog.sync_timeout", func(c *config.Config) *time.Duration { return &c.Catalog.SyncTimeout }),
-		str("catalog.free_catalog_url", func(c *config.Config) *string { return &c.Catalog.FreeCatalogURL }),
+		urlOf("catalog.free_catalog_url", func(c *config.Config) *string { return &c.Catalog.FreeCatalogURL }),
 		duration("catalog.free_catalog_interval", func(c *config.Config) *time.Duration { return &c.Catalog.FreeCatalogInterval }),
 		optBool("catalog.free_catalog_sync", func(c *config.Config) **bool { return &c.Catalog.FreeCatalogSync }),
-		str("catalog.litellm_url", func(c *config.Config) *string { return &c.Catalog.LiteLLMURL }),
+		urlOf("catalog.litellm_url", func(c *config.Config) *string { return &c.Catalog.LiteLLMURL }),
 		duration("catalog.litellm_interval", func(c *config.Config) *time.Duration { return &c.Catalog.LiteLLMInterval }),
 		optBool("catalog.litellm_sync", func(c *config.Config) **bool { return &c.Catalog.LiteLLMSync }),
 		optBool("catalog.seed_free_providers", func(c *config.Config) **bool { return &c.Catalog.SeedFreeProviders }),
@@ -224,6 +265,16 @@ func ConfigKeys() []string {
 }
 
 func ConfigKeyKnown(key string) bool { _, ok := configByKey[key]; return ok }
+
+// ConfigKindOf reports what a key holds. The console builds its editor from
+// this, so it is the registry that decides, not a guess from the key's name.
+func ConfigKindOf(key string) (ConfigKind, bool) {
+	f, ok := configByKey[key]
+	if !ok {
+		return "", false
+	}
+	return f.kind, true
+}
 
 // ConfigRowsFor serialises every key, whether or not it differs from the
 // default. Callers that only want the differences compare against a defaulted
