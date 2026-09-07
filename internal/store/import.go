@@ -119,24 +119,3 @@ func importWithHook(ctx context.Context, d *DB, key *crypto.Key, cfg *config.Con
 
 	return ImportResult{Imported: true, Providers: len(cfg.Providers), At: now}, nil
 }
-
-// StaleBlockWarning returns the warning to show when darkrouter.yaml still
-// carries a providers block that is no longer the source of truth. Editing it
-// and expecting effect is the obvious mistake, and silence is the wrong answer.
-func StaleBlockWarning(ctx context.Context, d *DB, cfg *config.Config) (string, error) {
-	if len(cfg.Providers) == 0 {
-		return "", nil
-	}
-	at, ok, err := ImportedAt(ctx, d)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", nil
-	}
-	return fmt.Sprintf(
-		"providers were imported into the database on %s; the providers: block in "+
-			"darkrouter.yaml is now ignored and can be deleted. Manage providers "+
-			"through the database instead",
-		at.Format("2006-01-02")), nil
-}
