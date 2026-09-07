@@ -85,6 +85,14 @@ func NewStoreFrom(load func() (*Config, error)) (*Store, error) {
 
 func (s *Store) Current() *Config { return s.cur.Load() }
 
+// MarkBoot rebases the pending-restart baseline onto the current snapshot.
+//
+// The constructor cannot do this itself: the overlay that merges database-owned
+// blocks is installed after construction, so the snapshot a constructor sees is
+// not the one the process goes on to run. Called once, after the first
+// successful Reload, it makes "pending restart" mean "differs from what this
+// process is actually running".
+func (s *Store) MarkBoot() { s.boot.Store(s.cur.Load()) }
 
 // PendingRestart names every restart-only field whose stored value differs
 // from the one this process started with.
