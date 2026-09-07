@@ -9,9 +9,6 @@
 #   .env    the settings (.env.example is the template)
 #   data/   a directory the container owns; it holds the database
 #
-# data/darkrouter.yaml is optional and only tunes defaults; see
-# docs/operations/deploy.md.
-#
 # data/ needs nothing done to it. The container runs as root, so the directory
 # Docker creates for the bind mount is writable as it stands -- with every
 # capability dropped, the root filesystem read-only and no-new-privileges set,
@@ -42,18 +39,17 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-    # Everything in .env reaches the container, so a ${VAR} written into
-    # darkrouter.yaml resolves without editing this file — a provider key
-    # under any name, not a fixed list. Raw means values are passed through
-    # verbatim: a bcrypt hash is pasted as it was printed, and nothing needs
-    # a dollar sign escaped.
+    # Everything in .env reaches the container, so a variable a provider
+    # expects resolves without editing this file — under any name, not a
+    # fixed list. Raw means values are passed through verbatim: a bcrypt hash
+    # is pasted as it was printed, and nothing needs a dollar sign escaped.
     env_file:
       - path: .env
         format: raw
 
     volumes:
-      # Carries darkrouter.yaml, darkrouter.db and its WAL. The database holds
-      # encrypted credentials, so this directory is as sensitive as .env.
+      # Carries darkrouter.db and its WAL. The database holds encrypted
+      # credentials, so this directory is as sensitive as .env.
       - ./data:/data
       # Where `auggie login` keeps its session. The Augment provider runs the
       # bundled CLI under the operator's own Augment account, and darkrouter
