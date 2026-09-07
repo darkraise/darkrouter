@@ -53,10 +53,13 @@ func TestDocumentedRestartOnlyListMatchesTheCode(t *testing.T) {
 // thing under test.
 func restartOnlyBlock(md, doc string) ([]string, error) {
 	const anchor = "Restart-only, because each is captured once"
-	i := strings.Index(md, anchor)
-	if i < 0 {
+	switch n := strings.Count(md, anchor); {
+	case n == 0:
 		return nil, fmt.Errorf("the sentence %q is missing from %s; this test anchors its search on it", anchor, doc)
+	case n > 1:
+		return nil, fmt.Errorf("the sentence %q appears %d times in %s; this test anchors its search on it and cannot tell which fence is the list", anchor, n, doc)
 	}
+	i := strings.Index(md, anchor)
 	fence := regexp.MustCompile("(?s)```[A-Za-z]*\n(.*?)```")
 	m := fence.FindStringSubmatch(md[i:])
 	if m == nil {

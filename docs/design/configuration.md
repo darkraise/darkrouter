@@ -60,10 +60,12 @@ media.inline
 That list is checked against `config.RestartOnly` by a test in
 `internal/config/docs_test.go`, because it has drifted from the code twice. The
 test locates the block by searching for the sentence above it rather than by
-taking the first fence in the file, so the opening words `Restart-only, because
-each is captured once` are part of the fixture: reword them and the test fails
-saying which sentence it wanted. The rest of that sentence, and the order of
-the keys inside the block, are free.
+taking the first fence in the file, so that sentence's opening words — up to
+`each is captured once` — are part of the fixture: reword them and the test
+fails saying which sentence it wanted. It also fails if those words come to
+appear more than once in this file, because then it cannot tell which fence is
+the list. The rest of that sentence, and the order of the keys inside the
+block, are free.
 
 The listen addresses are **not** on it. They come from the environment, and a
 variable cannot change under a running process, so there is no reload that
