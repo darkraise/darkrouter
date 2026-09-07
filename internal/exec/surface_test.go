@@ -13,6 +13,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/router"
 )
 
@@ -108,15 +109,18 @@ func failoverPair(t *testing.T, urlA, aModel, urlB, bModel string,
 	}, []string{"bad", "good"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "bad", Kind: "probe", BaseURL: urlA, APIKey: "sk", Priority: 10, Models: []string{aModel}},
-			{ID: "good", Kind: "probe", BaseURL: urlB, APIKey: "sk", Priority: 1, Models: []string{bModel}},
-		}
-		if aModel != bModel {
+	pBad := providertest.Keyed("bad", "probe", urlA, "sk", aModel)
+	pBad.Priority = 10
+	pGood := providertest.Keyed("good", "probe", urlB, "sk", bModel)
+	pGood.Priority = 1
+	var tune func(*config.Config)
+	if aModel != bModel {
+		tune = func(c *config.Config) {
 			c.Aliases = map[string][]string{"embed": {"bad/" + aModel, "good/" + bModel}}
 		}
-	}, map[string]adapter.Adapter{"probe": openaicompat.New()},
+	}
+	e := executorFor(t, tune, providertest.NewSource(pBad, pGood),
+		map[string]adapter.Adapter{"probe": openaicompat.New()},
 		Deps{Catalog: cat, Log: rec})
 	return e, rec
 }
@@ -135,12 +139,12 @@ func failoverPairPreset(t *testing.T, urlA, urlB, preset, model string,
 	}, []string{"bad", "good"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "bad", Kind: "probe", Preset: preset, BaseURL: urlA, APIKey: "sk", Priority: 10, Models: []string{model}},
-			{ID: "good", Kind: "probe", Preset: preset, BaseURL: urlB, APIKey: "sk", Priority: 1, Models: []string{model}},
-		}
-	}, map[string]adapter.Adapter{"probe": openaicompat.New()},
+	pBad := providertest.Keyed("bad", "probe", urlA, "sk", model)
+	pBad.Preset, pBad.Priority = preset, 10
+	pGood := providertest.Keyed("good", "probe", urlB, "sk", model)
+	pGood.Preset, pGood.Priority = preset, 1
+	e := executorFor(t, nil, providertest.NewSource(pBad, pGood),
+		map[string]adapter.Adapter{"probe": openaicompat.New()},
 		Deps{Catalog: cat, Log: rec})
 	return e, rec
 }

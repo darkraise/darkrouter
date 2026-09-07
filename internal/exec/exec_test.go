@@ -29,6 +29,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -395,12 +396,6 @@ func newExecutorRaw(t testing.TB, specs []providerSpec, apiKeySecret string,
 
 	t.Helper()
 	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
-		for _, s := range specs {
-			c.Providers = append(c.Providers, config.ProviderConfig{
-				ID: s.id, Kind: s.kind, Preset: s.preset, BaseURL: s.upstreamURL,
-				APIKey: apiKeySecret, Priority: s.priority, Models: s.models,
-			})
-		}
 		if total > 0 {
 			// connect and first_byte must be set alongside total: the budget
 			// gate refuses an attempt unless the remaining total covers
@@ -414,7 +409,14 @@ func newExecutorRaw(t testing.TB, specs []providerSpec, apiKeySecret string,
 			c.Aliases = aliases
 		}
 	}))
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
+	providers := make([]provider.Provider, 0, len(specs))
+	for _, s := range specs {
+		p := providertest.Keyed(s.id, s.kind, s.upstreamURL, apiKeySecret, s.models...)
+		p.Preset = s.preset
+		p.Priority = s.priority
+		providers = append(providers, p)
+	}
+	return New(cfgStore, providertest.NewSource(providers...), adapters, deps)
 }
 
 // testConfig builds the configuration a fixture in this package serves from.
@@ -920,14 +922,10 @@ func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
 	}))
 	defer up.Close()
 
-	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{{
-			ID: "fake", Kind: "martian", BaseURL: up.URL,
-			APIKey: "sk", Models: []string{"m"},
-		}}
-	}))
+	cfgStore := config.NewStoreOf(testConfig(t, nil))
+	src := providertest.NewSource(providertest.Keyed("fake", "martian", up.URL, "sk", "m"))
 	var rec captureLogger
-	e := New(cfgStore, provider.NewYAMLSource(cfgStore),
+	e := New(cfgStore, src,
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: &rec})
 
 	w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
@@ -961,13 +959,15 @@ func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
 	}
 }
 
-// executorFor builds an executor over an arbitrary configuration body.
-// newExecutorWith cannot: it fixes the provider id, the kind, and the model
-// list, and the catalog cases need all three to vary.
-func executorFor(t *testing.T, tune func(*config.Config), adapters map[string]adapter.Adapter, deps Deps) *Executor {
+// executorFor builds an executor over an arbitrary configuration body and a
+// fixed provider set. newExecutorWith cannot: it fixes the provider id, the
+// kind, and the model list, and the catalog cases need all three to vary.
+func executorFor(t *testing.T, tune func(*config.Config), src provider.Source,
+	adapters map[string]adapter.Adapter, deps Deps) *Executor {
+
 	t.Helper()
 	cfgStore := config.NewStoreOf(testConfig(t, tune))
-	return New(cfgStore, provider.NewYAMLSource(cfgStore), adapters, deps)
+	return New(cfgStore, src, adapters, deps)
 }
 
 func TestExecutorUsesTheCatalogSnapshotWhenSupplied(t *testing.T) {
@@ -986,11 +986,9 @@ func TestExecutorUsesTheCatalogSnapshotWhenSupplied(t *testing.T) {
 		Surfaces: []ir.Surface{ir.SurfaceLLM},
 	}}, []string{"p"}))
 
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"known"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat})
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstream.URL, "sk", "known"))
+	e := executorFor(t, nil, src,
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1011,11 +1009,9 @@ func TestExecutorFallsBackWithoutACatalog(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"known"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstream.URL, "sk", "known"))
+	e := executorFor(t, nil, src,
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1075,11 +1071,8 @@ func TestTargetCarriesTheCatalogFacts(t *testing.T) {
 		Traits:          catalog.Traits{Adaptive: true, FreeSampling: false, Known: true},
 	}}, []string{"p"}))
 
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "capture", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"capture": capturing}, Deps{Catalog: cat})
+	src := providertest.NewSource(providertest.Keyed("p", "capture", upstream.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"capture": capturing}, Deps{Catalog: cat})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1107,11 +1100,8 @@ func TestTargetInfoIsZeroWithoutACatalogEntry(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "capture", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"capture": capturing}, Deps{})
+	src := providertest.NewSource(providertest.Keyed("p", "capture", upstream.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"capture": capturing}, Deps{})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1135,11 +1125,8 @@ func TestInferredCandidateProducesAWarning(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"local"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstream.URL, "sk", "local"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
@@ -1177,11 +1164,8 @@ func TestNoInferredWarningWhenNothingWasNeeded(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"local"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstream.URL, "sk", "local"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1210,11 +1194,8 @@ func TestKnownCapableCandidateProducesNoWarning(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"known"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstream.URL, "sk", "known"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
@@ -1249,12 +1230,11 @@ func TestEmptyStreamSucceedsWithoutFailover(t *testing.T) {
 	defer upstream.Close()
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "a", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
-			{ID: "b", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: rec})
+	src := providertest.NewSource(
+		providertest.Keyed("a", "openaicompat", upstream.URL, "sk", "m"),
+		providertest.Keyed("b", "openaicompat", upstream.URL, "sk", "m"),
+	)
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: rec})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1296,12 +1276,11 @@ func TestAnAbandonedAttemptsWarningsDoNotReachTheRecord(t *testing.T) {
 	rec := &captureLogger{}
 	// The anthropic adapter warns about a missing max_tokens; the openaicompat
 	// one does not. Attempt 1 therefore produces a warning and is abandoned.
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "first", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Priority: 10, Models: []string{"m"}},
-			{ID: "second", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Priority: 1, Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{
+	pFirst := providertest.Keyed("first", "anthropic", upstream.URL, "sk", "m")
+	pFirst.Priority = 10
+	pSecond := providertest.Keyed("second", "openaicompat", upstream.URL, "sk", "m")
+	pSecond.Priority = 1
+	e := executorFor(t, nil, providertest.NewSource(pFirst, pSecond), map[string]adapter.Adapter{
 		"anthropic":    anthropicadapter.New(),
 		"openaicompat": openaicompat.New(),
 	}, Deps{Log: rec})
@@ -1339,11 +1318,8 @@ func TestResolveRecordsTheTraceForEveryRoute(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"chat-only"}},
-		}
-	}, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+	src := providertest.NewSource(providertest.Keyed("p", "anthropic", upstream.URL, "sk", "chat-only"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
 		Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
@@ -1374,11 +1350,8 @@ func TestACountThatRoutesToNothingRecordsItsSkips(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"embed-only"}},
-		}
-	}, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+	src := providertest.NewSource(providertest.Keyed("p", "anthropic", upstream.URL, "sk", "embed-only"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
 		Deps{Catalog: cat, Log: rec})
 
 	w := httptest.NewRecorder()
@@ -1456,11 +1429,8 @@ func executorForOp(t *testing.T, url string, cat *catalog.Store) (*Executor, *ca
 	if cat != nil {
 		deps.Catalog = cat
 	}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "probe", BaseURL: url, APIKey: "sk", Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	src := providertest.NewSource(providertest.Keyed("p", "probe", url, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
 	return e, rec
 }
 
@@ -1468,12 +1438,12 @@ func executorForOp(t *testing.T, url string, cat *catalog.Store) (*Executor, *ca
 func executorForOpWithTwoProviders(t *testing.T, url string) (*Executor, *captureLogger) {
 	t.Helper()
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "probe", BaseURL: url, APIKey: "sk", Priority: 10, Models: []string{"m"}},
-			{ID: "q", Kind: "probe", BaseURL: url, APIKey: "sk", Priority: 1, Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Log: rec})
+	pp := providertest.Keyed("p", "probe", url, "sk", "m")
+	pp.Priority = 10
+	pq := providertest.Keyed("q", "probe", url, "sk", "m")
+	pq.Priority = 1
+	src := providertest.NewSource(pp, pq)
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"probe": openaicompat.New()}, Deps{Log: rec})
 	return e, rec
 }
 
@@ -1553,11 +1523,8 @@ func TestAnEmbeddingRequestSkipsAChatOnlyAdapter(t *testing.T) {
 	}}, []string{"p"}))
 
 	rec := &captureLogger{}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "anthropic", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
+	src := providertest.NewSource(providertest.Keyed("p", "anthropic", upstream.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"anthropic": anthropicadapter.New()},
 		Deps{Catalog: cat, Log: rec})
 
 	op := &probeOp{q: router.Query{Model: "m", Surface: ir.SurfaceEmbedding}}
@@ -1585,11 +1552,8 @@ func TestAChatRequestStillRoutesToAChatOnlyAdapter(t *testing.T) {
 	upstream := unaryUpstream()
 	defer upstream.Close()
 
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{
-			{ID: "p", Kind: "openaicompat", BaseURL: upstream.URL, APIKey: "sk", Models: []string{"m"}},
-		}
-	}, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstream.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -1611,12 +1575,10 @@ func executorForPreset(t *testing.T, url, preset, model string, cat *catalog.Sto
 	if cat != nil {
 		deps.Catalog = cat
 	}
-	e := executorFor(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{{
-			ID: "p", Kind: "probe", Preset: preset, BaseURL: url,
-			APIKey: "sk", Models: []string{model},
-		}}
-	}, map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
+	p := providertest.Keyed("p", "probe", url, "sk", model)
+	p.Preset = preset
+	e := executorFor(t, nil, providertest.NewSource(p),
+		map[string]adapter.Adapter{"probe": openaicompat.New()}, deps)
 	return e, rec
 }
 
