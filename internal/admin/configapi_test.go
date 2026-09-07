@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ type configBody struct {
 	Warnings []string             `json:"warnings"`
 	Blocks   map[string]any       `json:"blocks"`
 	Fields   map[string]fieldMeta `json:"fields"`
+
+	PendingRestart []string `json:"pending_restart"`
 }
 
 func getConfig(t *testing.T, s *Server) configBody {
@@ -348,5 +351,39 @@ func TestConfigIsNotValidWhenAKeyWasReverted(t *testing.T) {
 	body := getConfig(t, s)
 	if body.Valid {
 		t.Errorf("valid = true with a reverted key; warnings %v", body.Warnings)
+	}
+}
+
+// Pending-restart is boot versus current. The consecutive-reload diff that
+// lands in warnings is cleared by the next unrelated save, which leaves an
+// operator running an old value with nothing on screen saying so.
+func TestConfigReportsPendingRestartAcrossAnUnrelatedReload(t *testing.T) {
+	s, db := testServerFull(t)
+	if got := getConfig(t, s).PendingRestart; len(got) != 0 {
+		t.Fatalf("pending_restart = %v at boot, want none", got)
+	}
+
+	storeSetting(t, db, "policy.timeout.connect", "3s")
+	if err := s.deps.Config.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := getConfig(t, s).PendingRestart; !slices.Contains(got, "policy.timeout.connect") {
+		t.Fatalf("pending_restart = %v after a restart-only change, want policy.timeout.connect", got)
+	}
+
+	storeSetting(t, db, "log.retention", "720h")
+	if err := s.deps.Config.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := getConfig(t, s).PendingRestart; !slices.Contains(got, "policy.timeout.connect") {
+		t.Fatalf("pending_restart = %v after an unrelated save, want the notice still standing", got)
+	}
+}
+
+func storeSetting(t *testing.T, db *store.DB, key, value string) {
+	t.Helper()
+	if _, err := db.Write.ExecContext(context.Background(),
+		`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, key, value); err != nil {
+		t.Fatal(err)
 	}
 }

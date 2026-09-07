@@ -532,6 +532,9 @@ export type ConfigResponse = {
   warnings: string[]
   blocks: ConfigBlocks
   fields: Record<string, ConfigFieldMeta>
+  /** Restart-only keys whose stored value differs from the one this process
+   *  booted on. Nothing renders it yet; phase 3 owns that surface. */
+  pending_restart: string[]
   error?: string
   serving?: string
 }

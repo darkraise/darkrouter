@@ -95,6 +95,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": true, "warnings": []string{},
 			"blocks": map[string]any{}, "fields": map[string]fieldMeta{},
+			"pending_restart": []string{},
 		})
 		return
 	}
@@ -122,6 +123,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Never null: a client cannot tell a JSON null from a field an older build
+	// did not serve. Measured against the snapshot this process booted on, so
+	// an unrelated save cannot clear a notice whose old value is still live.
+	pending := s.deps.Config.PendingRestart()
+	if pending == nil {
+		pending = []string{}
+	}
+
 	body := map[string]any{
 		// The same expression /healthz keys config_valid on. A skipped key is
 		// a default the operator did not choose, and the settings banner reads
@@ -129,6 +138,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"valid":    cfgErr == nil && len(cfg.Skipped) == 0,
 		"warnings": append(append([]string{}, s.deps.Warnings...), cfg.Warnings...),
 		"fields":   fields,
+		// Carried, not rendered: phase 3 owns the console surface for it.
+		"pending_restart": pending,
 		"blocks": map[string]any{
 			// server.proxy_token is deliberately absent: it is a shared secret
 			// and no endpoint returns credential material.
