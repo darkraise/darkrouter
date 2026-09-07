@@ -281,3 +281,36 @@ func TestConcurrentReloadsPublishTheLatestFile(t *testing.T) {
 		t.Fatalf("published provider = %q", s.Current().Providers[0].ID)
 	}
 }
+
+// restartOnlyWarnings diffs consecutive snapshots, so the next unrelated save
+// clears the warning while the process is still running the old value. The
+// pending set has to be measured against boot, not against the last reload.
+func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
+	writeFile(t, path, "catalog:\n  sync_interval: 12h\n")
+	s, err := NewStore(path, env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.PendingRestart(); len(got) != 0 {
+		t.Fatalf("PendingRestart = %v at boot, want none", got)
+	}
+
+	writeFile(t, path, "catalog:\n  sync_interval: 6h\n")
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.PendingRestart(); len(got) != 1 || got[0] != "catalog.sync_interval" {
+		t.Fatalf("PendingRestart = %v, want [catalog.sync_interval]", got)
+	}
+
+	// An unrelated hot-reloadable change must not clear it: the process is
+	// still running the sync interval it booted with.
+	writeFile(t, path, "catalog:\n  sync_interval: 6h\nlog:\n  retention: 100h\n")
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.PendingRestart(); len(got) != 1 || got[0] != "catalog.sync_interval" {
+		t.Fatalf("PendingRestart = %v after an unrelated save, want it still pending", got)
+	}
+}
