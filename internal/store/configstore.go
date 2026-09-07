@@ -358,34 +358,23 @@ func ConfigImportedAt(ctx context.Context, d *DB) (time.Time, bool, error) {
 	return t, true, nil
 }
 
-// OverlayConfig replaces a loaded Config's aliases and policy with the
-// database's, leaving every other block exactly as the file set it.
+// OverlayConfig replaces a loaded Config's aliases with the database's,
+// leaving every other block as the loader built it.
 //
 // Installed on config.Store as its overlay, so router, exec, server and admin
-// keep reading both through the snapshot they already take.
+// keep reading aliases through the snapshot they already take. It exists
+// because LoadConfig reads the 32 scalar keys from the registry and not the
+// alias table, which is a table rather than a settings row.
+//
+// It deliberately does not apply policy. The registry reads the same seven
+// policy.* rows PolicyOverrides does, so doing it here a second time would at
+// best repeat the loader's work and at worst undo it: a policy set LoadConfig
+// reverted for a cross-key rule failure would be reinstated with nothing left
+// to revalidate it.
 func OverlayConfig(ctx context.Context, d *DB, cfg *config.Config) error {
 	aliases, err := d.Aliases(ctx)
 	if err != nil {
 		return err
-	}
-	overrides, err := d.PolicyOverrides(ctx)
-	if err != nil {
-		return err
-	}
-	// One key at a time, and a failure is a warning rather than an error.
-	// LoadConfig has already reverted a row it could not parse and said so;
-	// failing here on that same row would turn a value the loader deliberately
-	// tolerated into a process that refuses to start.
-	for key, value := range overrides {
-		// Onto a copy, committed only on success: a policyFields setter
-		// assigns before it reports a parse error, so applying a bad row in
-		// place would leave the field zeroed rather than untouched.
-		trial := cfg.Policy
-		if err := ApplyPolicy(&trial, map[string]string{key: value}); err != nil {
-			cfg.Warnings = append(cfg.Warnings, err.Error())
-			continue
-		}
-		cfg.Policy = trial
 	}
 	cfg.Aliases = aliases
 	return nil
