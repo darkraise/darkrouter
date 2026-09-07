@@ -395,6 +395,26 @@ func TestUpdateWithoutAWriterIsRefused(t *testing.T) {
 	}
 }
 
+// The other half of Update's contract. A refusal must reach the handler as a
+// RejectedError so it can answer 400, and must report no committed keys: the
+// write is one transaction, so an error means nothing landed.
+func TestUpdateReportsNoKeysWhenTheWriteIsRefused(t *testing.T) {
+	c := &Config{}
+	ApplyDefaults(c)
+	s := NewStoreOf(c)
+	s.SetWriter(func(context.Context, Patch) ([]string, error) {
+		return []string{"log.retention"}, Rejected("log.retention: no")
+	})
+	written, err := s.Update(context.Background(), Patch{})
+	var rejected RejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("err = %v, want a RejectedError", err)
+	}
+	if written != nil {
+		t.Errorf("written = %v, want nil: a refused write commits nothing", written)
+	}
+}
+
 // Reload publishes what load returns. Returning the same pointer every time
 // mutates the snapshot an in-flight request is already using.
 func TestNewStoreOfPublishesAFreshSnapshotPerReload(t *testing.T) {
