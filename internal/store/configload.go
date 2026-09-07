@@ -104,7 +104,8 @@ func buildConfig(rows map[string]string, boot config.Bootstrap,
 		if errors.As(err, &re) {
 			if added := addAny(skip, re.Keys); len(added) > 0 {
 				warnings = append(warnings,
-					fmt.Sprintf("stored %v broke the %s rule; all of them reverted to their defaults", re.Keys, re.Rule))
+					fmt.Sprintf("stored %v broke the %s rule (%v); all of them reverted to their defaults",
+						re.Keys, re.Rule, re.Err))
 				skipped = append(skipped, added...)
 				c, _ = build(skip)
 				continue

@@ -136,6 +136,11 @@ func TestWriteConfigRefusesABrokenCrossKeyRule(t *testing.T) {
 	if !strings.Contains(err.Error(), "policy.timeout.total") {
 		t.Errorf("the refusal does not name the rule it broke: %v", err)
 	}
+	// The margin as well as the rule. An operator told only which rule broke
+	// has to work out what to set the value to.
+	if !strings.Contains(err.Error(), "must be at least connect + first_byte") {
+		t.Errorf("the refusal does not say by how much: %v", err)
+	}
 }
 
 // The bug this phase exists to close. Both writes pass against a snapshot
@@ -307,8 +312,8 @@ func TestWriteConfigRefusesAValueThatBreaksARuleWithAStoredNeighbour(t *testing.
 
 // The pre-check exists because buildConfig reverts keys until the config
 // validates and no key can fix a broken chain, so an unchecked bad set comes
-// back as "compiled defaults do not validate" -- a message naming nothing an
-// operator can act on.
+// back as a "compiled defaults do not validate" server fault -- a 500 naming
+// nothing an operator can act on, for something they typed and can fix.
 func TestWriteConfigRefusesABrokenAliasChain(t *testing.T) {
 	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
@@ -321,11 +326,28 @@ func TestWriteConfigRefusesABrokenAliasChain(t *testing.T) {
 	if !strings.Contains(err.Error(), "fast") {
 		t.Errorf("the refusal does not name the alias: %v", err)
 	}
-	// The guard's whole contribution, now that the loader judges the rest: the
-	// same patch without it comes back as "compiled defaults do not validate",
-	// which names nothing an operator can act on.
-	if strings.Contains(err.Error(), "compiled defaults") {
-		t.Errorf("the refusal is the loader's unactionable message: %v", err)
+}
+
+// refusalFor matches warnings the loader's way, by prefix, because a stored
+// value is quoted into its own warning. Here a row that was already unusable
+// quotes the key this save is writing, and a substring match would answer with
+// that row's reason rather than the operator's own.
+func TestWriteConfigRefusalNamesTheKeyItRefused(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	if err := putSetting(ctx, db.Write, "server.max_body_bytes", "policy.retry.max_attempts"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Set: map[string]string{"policy.retry.max_attempts": "20"},
+	})
+	if err == nil {
+		t.Fatal("WriteConfig accepted an out-of-range retry count")
+	}
+	if !strings.Contains(err.Error(), "between 1 and 10") {
+		t.Errorf("the refusal does not give the reason the save was refused: %v", err)
+	}
+	if strings.Contains(err.Error(), "server.max_body_bytes") {
+		t.Errorf("the refusal answers with an untouched row's message: %v", err)
 	}
 }
 

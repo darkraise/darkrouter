@@ -74,9 +74,14 @@ func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Pat
 	// the compiled default for the key being written, so a value that broke a
 	// cross-key rule with its stored neighbour could pass here and be reverted
 	// on the next load, with nothing said to the person who wrote it.
+	//
+	// Unwrapped: buildConfig fails only when the compiled defaults themselves
+	// do not validate, which is a bug in this binary rather than anything the
+	// operator wrote. It must reach the caller as a server fault, not as a
+	// refusal they could act on.
 	_, warnings, skipped, err := buildConfig(next, boot, aliases)
 	if err != nil {
-		return nil, config.RejectedError{Msg: err.Error()}
+		return nil, err
 	}
 	// A key this save touched that the loader would revert is a refusal: a
 	// person is waiting and can be told. A key it did not touch was already
@@ -184,14 +189,26 @@ func sortedFlags(m map[string]bool) []string {
 // explains why a key cannot be used and then says it fell back to the default;
 // a write has a person waiting, so the reason is kept and the fallback dropped.
 func refusalFor(key string, warnings []string) string {
-	for _, w := range warnings {
-		if !strings.Contains(w, key) {
-			continue
-		}
+	trim := func(w string) string {
 		if i := strings.Index(w, "; "); i >= 0 {
 			w = w[:i]
 		}
 		return strings.TrimPrefix(w, "stored ")
+	}
+	// The loader's own shape, matched the loader's own way: a prefix, because
+	// a stored value quoted into another key's message would otherwise claim
+	// this one's refusal.
+	for _, w := range warnings {
+		if strings.HasPrefix(w, "stored "+key+" ") {
+			return trim(w)
+		}
+	}
+	// A rule warning carries its keys inside brackets rather than at the
+	// front, so the prefix cannot reach it.
+	for _, w := range warnings {
+		if strings.Contains(w, key) {
+			return trim(w)
+		}
 	}
 	return key + " cannot be used with the rest of the configuration"
 }
