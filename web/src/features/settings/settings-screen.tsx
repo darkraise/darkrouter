@@ -179,16 +179,27 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
   }
 
   const save = useApiMutation({
+    // The toast is this screen's to raise: a refusal naming a key is already
+    // shown on that key's row, and saying it twice reads as two complaints
+    // about one refusal.
+    quietError: true,
     mutationFn: async (patch: ConfigPatch) => {
       try {
         return await api.put<SaveResult>("/api/config", patch)
       } catch (err) {
+        // A 401 is handled globally by the unauthorized listener.
+        if (err instanceof ApiError && err.status === 401) throw err
         // A 400 is the registry's verdict on a value, and it names the keys it
         // is about. Put it on those rows: a toast alone leaves the operator
         // hunting the field across five cards.
-        if (err instanceof ApiError && err.status === 400) {
-          setErrors(fieldErrors(err.message, patchedKeys(patch)))
-        }
+        const mapped =
+          err instanceof ApiError && err.status === 400
+            ? fieldErrors(err.message, patchedKeys(patch))
+            : {}
+        setErrors(mapped)
+        // A refusal that named no key -- a database failure, an alias problem
+        // -- landed on no row, so the toast is the only place it can be said.
+        if (Object.keys(mapped).length === 0) toast.error((err as Error).message)
         throw err
       }
     },

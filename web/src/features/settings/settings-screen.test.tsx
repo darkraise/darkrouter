@@ -490,6 +490,33 @@ describe("the settings form", () => {
     expect(
       await within(row as HTMLElement).findByText(/must be at least 48h/),
     ).toBeInTheDocument()
+    // Once, not twice: the row already says it, and a toast saying the same
+    // 180 characters in the corner reads as a second, separate refusal.
+    expect(
+      screen.queryAllByRole("status").some((s) => /must be at least 48h/.test(s.textContent ?? "")),
+    ).toBe(false)
+  })
+
+  it("toasts a refusal that names no field", async () => {
+    // fieldErrors only attaches a message to keys the message names, so a
+    // refusal about none of them -- a database failure, an alias problem --
+    // has nowhere to land on the form and would otherwise be silent.
+    stubSettingsFetch({
+      save: { status: 500, body: { error: "writing the settings failed: database is locked" } },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() =>
+      expect(
+        screen.queryAllByRole("status").some((s) => /database is locked/.test(s.textContent ?? "")),
+      ).toBe(true),
+    )
   })
 
   it("shows one banner for a committed write whose republish failed, not two", async () => {
