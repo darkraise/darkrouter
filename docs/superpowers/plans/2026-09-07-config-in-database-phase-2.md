@@ -2839,3 +2839,67 @@ State what was checked and what was seen. If a screen is wrong, that is a findin
 **Type consistency:** `config.Patch`, `config.RejectedError`, `config.PublishError`, `config.BootstrapVar`, `(*config.Store).SetWriter`, `(*config.Store).Update`, `store.WriteConfig`, `buildConfig`, `configRows(ctx, q)`, `rowsQueryer`, `configField.validate`, `commitConfig`, `restartRequired`, `policyPatch`, `providertest.NewSource`, `providertest.Keyed` — each is defined in exactly one task and used with the same signature everywhere after it.
 
 **Rule S:** every task has `files + spec + coupling <= 3` and `spec <= 2`. No task scores 3 on spec completeness.
+
+---
+
+## What phase 3 inherits
+
+Recorded here rather than in the execution ledger, which is scratch and does
+not survive the branch. Phase 1's ledger was deleted with its branch and its
+findings had to be reconstructed from memory; this section exists so that does
+not happen twice.
+
+### Deferred to phase 3 by design
+
+- `sourceOf` still returns `"environment"`, and `databaseOwned` still exists.
+  Spec §4 retires both, but `web/src/lib/api-types.ts` and the settings badge
+  read those strings, so they move with their reader.
+- The console has no editors for the 25 non-policy stored settings. They render
+  read-only; the API writes them.
+- Nine catalogue keys are in the registry but not in `configapi.go`'s
+  `configFields`, so the console still cannot show them — including
+  `catalog.seed_free_providers`, which a stored row can change.
+- `pending_restart` is served by `/healthz` and `GET /api/config` and rendered
+  by nothing.
+
+### Live behaviour phase 3 should decide about
+
+- **An emptied duration box saves as a reset.** `toWrite` in
+  `settings-screen.tsx` always sends `cooldown.max`, `timeout.total` and
+  `timeout.idle`, as `""` when the box is empty. That used to be a 400; it is
+  now a delete, so the value silently reverts to the compiled default under a
+  "Settings saved" toast. The field repopulates with the default, so the
+  operator sees the outcome. The count fields already guard against this shape
+  (`wholeNumber` omits an empty value); the duration fields do not.
+- **Console saves re-materialise three default-valued rows.** The same
+  always-send shape writes `cooldown.max`, `timeout.total` and `timeout.idle`
+  at whatever the boxes hold, so those keys report source `database` until the
+  next start's `ReconcileConfig` deletes them. This is a narrower version of
+  the flip that retiring `putPolicyTx` fixed. The sender is the right place to
+  fix it; alternatively `WriteConfig` could delete a value that parses equal to
+  the compiled default.
+
+### Findings outside this phase's scope
+
+- **`server.New`'s `startupWarnings` channel has no producer.**
+  `cmd/darkrouter/main.go` declares `var warnings []string` and nothing appends
+  to it, so `/healthz`'s `warnings`, `GET /api/config`'s `warnings` and
+  `admin.Deps.Warnings` carry only `cfg.Warnings`. The leftover-`darkrouter.yaml`
+  notice and the ignored `-config` flag reach `slog.Warn` only. Spec §7 says a
+  leftover file is called out; it is called out in the container log, not where
+  an operator looks. Three lines in `main.go`, and it was left alone here
+  because it changes what the console renders.
+- `refusalFor` in `configwrite.go` falls back to a substring match for rule
+  warnings, so a hand-written row whose value spells another key's name can
+  lend its explanatory text to a refusal. The refusal names the right key; only
+  the reason is borrowed. Gating the fallback on the `"stored ["` prefix that
+  only rule warnings carry is the one-line fix.
+- A hand-inserted invalid alias row refuses every settings-only save until a
+  valid `PUT /api/aliases` replaces it, because the write path validates the
+  alias set while the loader does not. Reachable only by editing the table
+  directly.
+- `PutAliases` has no production caller and bypasses the critical section. It
+  survives for test fixtures and is documented as such.
+- `docs/design/configuration.md:94` still documents the retry cap as an
+  admin-side rule; it is now a registry rule enforced on both paths. Phase 4
+  owns that document.
