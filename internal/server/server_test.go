@@ -177,9 +177,9 @@ func TestAnthropicAuthUsesItsOwnCredentialForm(t *testing.T) {
 
 // serverWithCatalog builds a server and pins its catalog, so the listing tests
 // do not depend on discovery having run.
-func serverWithCatalog(t *testing.T, body string, models []catalog.Model) *Server {
+func serverWithCatalog(t *testing.T, tune func(*config.Config), models []catalog.Model) *Server {
 	t.Helper()
-	db, key, cfgStore := serverFixtureWith(t, body)
+	db, key, cfgStore := serverFixtureWith(t, tune)
 	srv, err := New(cfgStore, db, key, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -189,19 +189,10 @@ func serverWithCatalog(t *testing.T, body string, models []catalog.Model) *Serve
 }
 
 func TestModelsListsAliasesFirstThenTheCatalog(t *testing.T) {
-	srv := serverWithCatalog(t, `
-server:
-  proxy_listen: "127.0.0.1:0"
-  admin_listen: "127.0.0.1:0"
-catalog:
-  models_dev_url: http://127.0.0.1:1/api.json
-  sync_timeout: 200ms
-  discovery:
-    enabled: false
-aliases:
-  fast: [p/quick]
-  smart: [p/deep]
-`, []catalog.Model{
+	srv := serverWithCatalog(t, func(c *config.Config) {
+		offlineCatalog(c)
+		c.Aliases = map[string][]string{"fast": {"p/quick"}, "smart": {"p/deep"}}
+	}, []catalog.Model{
 		{ProviderID: "p", ModelID: "deep", State: catalog.StateLive, Surfaces: []ir.Surface{ir.SurfaceLLM}},
 		{ProviderID: "p", ModelID: "quick", State: catalog.StateLive, Surfaces: []ir.Surface{ir.SurfaceLLM}},
 		{ProviderID: "p", ModelID: "retired", State: catalog.StateRemovedUpstream, Surfaces: []ir.Surface{ir.SurfaceLLM}},
@@ -260,16 +251,7 @@ aliases:
 }
 
 func TestGeminiModelsReadsTheCatalog(t *testing.T) {
-	srv := serverWithCatalog(t, `
-server:
-  proxy_listen: "127.0.0.1:0"
-  admin_listen: "127.0.0.1:0"
-catalog:
-  models_dev_url: http://127.0.0.1:1/api.json
-  sync_timeout: 200ms
-  discovery:
-    enabled: false
-`, []catalog.Model{
+	srv := serverWithCatalog(t, offlineCatalog, []catalog.Model{
 		{ProviderID: "p", ModelID: "gemini-2.5-pro", State: catalog.StateLive,
 			Surfaces: []ir.Surface{ir.SurfaceLLM}, ContextWindow: 1048576, MaxOutputTokens: 65536},
 		{ProviderID: "p", ModelID: "retired", State: catalog.StateRemovedUpstream,

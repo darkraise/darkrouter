@@ -1,76 +1,11 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"net/url"
-	"os"
-	"regexp"
-	"sort"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
-
-var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-
-// Load reads and parses path. lookup resolves ${ENV} references; pass
-// os.LookupEnv in production.
-//
-// A path that does not exist loads the defaults rather than failing. The file
-// is a tuning document: every setting has one, providers and aliases are owned
-// by the database after the first import, and proxy authentication is issued
-// in the console -- so a deployment with nothing to say in it was being made to
-// copy one anyway, and to crash when it forgot.
-//
-// A file that exists and does not parse still fails. Defaults applied over an
-// edit an operator did write would discard it with nothing on screen to say
-// so, which is worse than refusing to start.
-func Load(path string, lookup func(string) (string, bool)) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		c, perr := Parse([]byte("{}"), lookup)
-		if perr != nil {
-			return nil, perr
-		}
-		// Surfaced on /healthz and the settings screen. Absent is a legitimate
-		// state, but it is indistinguishable from a volume mounted at the
-		// wrong path until something says which one this is.
-		c.Warnings = append(c.Warnings,
-			fmt.Sprintf("no configuration file at %s; every setting is on its default", path))
-		return c, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return Parse(data, lookup)
-}
-
-func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
-	if lookup == nil {
-		lookup = func(string) (string, bool) { return "", false }
-	}
-	var c Config
-	dec := yaml.NewDecoder(strings.NewReader(string(data)))
-	dec.KnownFields(true) // unknown keys are a validation failure
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-	// Collected before defaults are applied, from a second pass over the raw
-	// document: the struct cannot answer "was this written?" afterwards.
-	c.FileKeys = documentKeys(data)
-	applyDefaults(&c)
-	c.Server.PublicURL = normalizeDomain(c.Server.PublicURL)
-	if err := interpolate(&c, lookup); err != nil {
-		return nil, err
-	}
-	if err := validate(&c); err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
 
 // ApplyDefaults fills every unset field with its compiled default. The
 // database loader starts from a zero Config and calls this before overlaying
@@ -186,40 +121,6 @@ func applyDefaults(c *Config) {
 	}
 }
 
-// resolve replaces ${VAR} references. It reports the names it could not resolve
-// so the caller can decide whether the field was required.
-func resolve(s string, lookup func(string) (string, bool)) (string, []string) {
-	var missing []string
-	out := envRef.ReplaceAllStringFunc(s, func(ref string) string {
-		name := ref[2 : len(ref)-1]
-		if v, ok := lookup(name); ok {
-			return v
-		}
-		missing = append(missing, name)
-		return ""
-	})
-	return out, missing
-}
-
-func interpolate(c *Config, lookup func(string) (string, bool)) error {
-	// proxy_token is optional: an unset variable means authentication is off,
-	// not a broken config. The shipped example references it.
-	if v, missing := resolve(c.Server.ProxyToken, lookup); len(missing) > 0 {
-		c.Server.ProxyToken = ""
-	} else {
-		c.Server.ProxyToken = v
-	}
-	for i := range c.Providers {
-		v, missing := resolve(c.Providers[i].APIKey, lookup)
-		if len(missing) > 0 {
-			return fmt.Errorf("provider %q: unresolved environment reference %s",
-				c.Providers[i].ID, strings.Join(missing, ", "))
-		}
-		c.Providers[i].APIKey = v
-	}
-	return nil
-}
-
 // normalizeDomain turns a bare domain into the URL the rest of the system
 // expects. An operator setting this is naming the address the outside world
 // uses, and writes it the way it is spoken -- "llm.example.com", not a scheme
@@ -266,7 +167,7 @@ func (e RuleError) Unwrap() error { return e.Err }
 func Validate(c *Config) error { return validate(c) }
 
 func validate(c *Config) error {
-	// Dereferencing TripAfter is safe: Parse runs applyDefaults first.
+	// Dereferencing TripAfter is safe: every caller runs applyDefaults first.
 	if *c.Policy.Cooldown.TripAfter < 1 {
 		return fmt.Errorf("policy.cooldown.trip_after must be at least 1")
 	}
@@ -366,33 +267,6 @@ func validate(c *Config) error {
 		}
 	}
 	return nil
-}
-
-// documentKeys flattens a YAML document to the dotted key paths it carries.
-// Sequences are leaves: a list's indices are not configuration keys, and the
-// config API reports a block like providers: as one source, not one per entry.
-func documentKeys(data []byte) []string {
-	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil
-	}
-	var out []string
-	var walk func(prefix string, node map[string]any)
-	walk = func(prefix string, node map[string]any) {
-		for k, v := range node {
-			path := k
-			if prefix != "" {
-				path = prefix + "." + k
-			}
-			out = append(out, path)
-			if child, ok := v.(map[string]any); ok {
-				walk(path, child)
-			}
-		}
-	}
-	walk("", raw)
-	sort.Strings(out)
-	return out
 }
 
 // ValidateAliases applies the shape rules an alias chain must satisfy wherever
