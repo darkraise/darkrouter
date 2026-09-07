@@ -8,9 +8,9 @@ import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
  * for a model to start answering", and a screen that only prints the key makes
  * every reader translate it themselves, every time.
  *
- * The key is still shown, in mono, beneath the name — it is what the YAML file
- * and every error message use, so hiding it would break the trail from this
- * screen to the file being edited.
+ * The key is still shown, in mono, beneath the name — it is what the settings
+ * table and every error message use, so hiding it would break the trail from
+ * this screen to the stored value.
  */
 export type SettingMeta = {
   name: string
@@ -254,9 +254,9 @@ export type SettingRow = {
   meta: SettingMeta
   /** What the value is, as a person reads it. */
   display: string
-  /** The literal the configuration file carries, when it differs from the
-   *  display — a duration of 720h0m0s reads as 30 days, and the file still
-   *  says the first. Empty when the two are the same. */
+  /** The literal the stored value carries, when it differs from the display
+   *  — a duration of 720h0m0s reads as 30 days, and the store still says the
+   *  first. Empty when the two are the same. */
   literal: string
   source: ConfigFieldMeta["source"]
   hotReloadable: boolean
@@ -343,16 +343,12 @@ function groupForPrefix(field: string): GroupId {
 }
 
 export const SOURCE_NOTE = {
-  file: "Read from darkrouter.yaml",
   environment: "Read from the environment at startup; a restart applies a change",
-  // §8.1 requires the config view to say this at the point of display: after
-  // the first run, editing the file has no effect on these.
-  database: "Stored in the database — the file is no longer read for this",
+  database: "Stored in the database, where the console reads and writes it",
   default: "Not set anywhere; this is the built-in default",
 } as const
 
 export const SOURCE_LABEL = {
-  file: "file",
   environment: "environment",
   database: "database",
   default: "default",
@@ -363,9 +359,8 @@ export const SOURCE_LABEL = {
  *
  * Only `policy` and `aliases` are writable at all -- both moved into the
  * database after the first run -- and aliases are a routing concept with
- * their own editor. Everything else on the gateway comes from
- * darkrouter.yaml and has no write endpoint, so listing it here would be a
- * page of controls that refuse to move.
+ * their own editor. Everything else on the gateway has no write endpoint yet,
+ * so listing it here would be a page of controls that refuse to move.
  *
  * `policy.timeout.connect` and `policy.timeout.first_byte` are absent for the
  * same reason: both configure the one shared transport built at startup, and

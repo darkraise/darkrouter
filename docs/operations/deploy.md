@@ -5,11 +5,11 @@ on the host: `compose.prod.yml` and `.env`. `data/` holds the database, which
 stores every provider credential encrypted under `DARKROUTER_MASTER_KEY` —
 treat the whole directory as a secret.
 
-`data/darkrouter.yaml` is optional. It tunes body and streaming limits, log and
-capture retention, and the catalogue sync; every key has a working default,
-providers and aliases are owned by the database after the first import, and
-proxy tokens are issued in the console. Without it the gateway runs on defaults
-and says so on `/healthz`.
+There is no configuration file. Settings — body and streaming limits, log and
+capture retention, the catalogue sync — live in the database's `settings`
+table alongside providers and aliases; every key has a working default, and a
+key nothing has set stays on it. A small bootstrap set comes from `.env`
+instead, because the process needs it before the database is open.
 
 ## Production
 
@@ -19,9 +19,11 @@ docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
 
-To tune something later, drop `darkrouter.example.yaml` in as
-`data/darkrouter.yaml` and edit it — the file is watched, so it is picked up
-without a restart for every key that reloads live.
+Settings are changed in the console. Policy and aliases have write endpoints
+today; the rest are shown read-only on the Settings screen, which says where
+each value came from and which need a restart. A `darkrouter.yaml` left over
+from an older deployment is ignored — the process warns about it at startup
+and reads nothing from it.
 
 `.env` needs one value to start: `DARKROUTER_MASTER_KEY`. Everything else in
 `.env.example` is commented out and has a working default, and providers are
@@ -40,10 +42,15 @@ Setting a password closes setup for good. `DARKROUTER_ADMIN_PASSWORD_HASH`
 still works and still overrides the stored password on the next restart, which
 is how a lost password is recovered — see below.
 
-> **Upgrading a deployment made before these changes**, two one-time fixes:
+> **Upgrading a deployment made before these changes**, three one-time fixes:
 >
 > The bcrypt hash used to need every `$` doubled. It no longer does, and a
 > doubled hash now refuses a correct password — `sed -i 's/\$\$/$/g' .env`.
+>
+> Settings that lived only in `data/darkrouter.yaml` are gone. The `server`,
+> `log`, `capture`, `catalog`, `media` and `playground` blocks were file-only,
+> so those revert to their defaults and are re-entered later; providers,
+> aliases and policy were already in the database and are unaffected.
 >
 > The container used to run as uid 10001 and `data/` was chowned to match. It
 > now runs as root, and root with every capability dropped cannot write a
@@ -60,9 +67,9 @@ docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
   hash-password -password 'yours'
 ```
 
-The whole of `.env` is passed to the container, so a `${SOME_KEY}` written
-into `data/darkrouter.yaml` resolves from it under any name, without touching
-`compose.prod.yml`.
+The whole of `.env` is passed to the container, so a bootstrap variable is set
+there under its own name without touching `compose.prod.yml`. Nothing is
+interpolated: values are read exactly as written.
 
 The container runs as root, read-only, with all capabilities dropped and a 1 GB
 memory and 512 pid ceiling. It needs nothing writable beyond `/data` and a
@@ -158,12 +165,12 @@ than half-applying it.
 
 ## Configuration changes without a redeploy
 
-`data/darkrouter.yaml` is watched and most keys reload live. The keys that need
-a restart are listed in [`../design/configuration.md`](../design/configuration.md),
+Settings are read from the database and most keys apply without a restart. The
+keys that need one are listed in [`../design/configuration.md`](../design/configuration.md),
 and are marked in the console's Settings screen and in the startup log.
 
-Providers, aliases and policy are imported from the file once on first run and
-owned by the database from then on — edit them in the console.
+Providers, aliases and policy are owned by the database and edited in the
+console.
 
 ## Exposure
 

@@ -2,35 +2,34 @@
 
 ## Precedence
 
-Five steps, in order:
+Four steps, in order:
 
 1. **Defaults**, compiled in.
-2. **The file** — one path, `-config`, defaulting to `darkrouter.yaml`. There
-   is no search chain. Unknown keys are rejected, so a typo is an error rather
-   than a silently ignored setting. `${VAR}` is interpolated in exactly two
-   string fields: `server.proxy_token` and a provider's `api_key`.
+2. **The environment**, for the bootstrap set the process needs before the
+   database is open, or in order to be reachable at all:
+   `DARKROUTER_PROXY_LISTEN` and `DARKROUTER_ADMIN_LISTEN` (defaults `:18080`
+   and `:18081`), `DARKROUTER_PROXY_TOKEN`, `DARKROUTER_MASTER_KEY`,
+   `DARKROUTER_ADMIN_PASSWORD_HASH`, `DARKROUTER_LOG_LEVEL`,
+   `DARKROUTER_LOG_FORMAT`, and the database path (`-db`, or `DARKROUTER_DB`,
+   defaulting to `darkrouter.db` in the working directory). None of these is a
+   row in `settings`, and a change to one takes a restart.
+3. **The database** — the `settings` table for scalar keys, and the provider,
+   alias and policy tables for those blocks. This is the source of truth for
+   everything else, and a key absent from it is on its compiled default.
+4. **Restart-only warnings**, for fields that changed but cannot take effect.
 
-   The file is optional: a path that does not exist loads step 1 and warns,
-   because every key has a default and the blocks that do not are owned by
-   step 3. A path that exists and does not parse is still fatal — falling back
-   to defaults there would discard an operator's settings silently, which is
-   worse than refusing to start.
-3. **The database overlay**, for `providers`, `aliases` and `policy` — applied
-   *before* a snapshot is published, not after.
-4. **Hot reload**, on a debounced file watch. The whole document is validated
-   before any of it is published.
-5. **Restart-only warnings**, for fields that changed but cannot take effect.
+There is **no configuration file.** `-config` is accepted and ignored for one
+release, and a `darkrouter.yaml` left beside the database is warned about at
+startup and never read.
 
-An unresolved `${VAR}` in `server.proxy_token` means no token, with a warning.
-An unresolved one in a provider's `api_key` is a hard error.
-
-`DARKROUTER_MASTER_KEY` and `DARKROUTER_ADMIN_PASSWORD_HASH` are read directly
-from the environment and are not part of the configuration document.
+A reload re-reads the database and republishes the whole snapshot; it is
+validated before any of it is published, and a load that fails leaves the
+previous snapshot serving.
 
 ## Reload versus restart
 
-A **file reload** that changes a restart-only field *warns*: the operator has
-already made the change, and a warning is the only honest answer. A **`PUT` to
+A **reload** that picks up a changed restart-only field *warns*: the value is
+already stored, and a warning is the only honest answer. A **`PUT` to
 the API** that names one is *refused*, because a request can be rejected
 before anything happens.
 
@@ -82,7 +81,7 @@ refused. It is hot-reloadable, since nothing but the console reads it.
 | `server.proxy_listen` | `:18080` | Restart-only. |
 | `server.admin_listen` | `:18081` | Restart-only. |
 | `server.public_url` | *empty* | The public domain clients reach the gateway at. A bare domain is assumed https. No query or fragment. Empty means the console shows only the LAN address. |
-| `server.proxy_token` | *empty* | Shared inbound secret. Interpolated. |
+| `server.proxy_token` | *empty* | Shared inbound secret, from `DARKROUTER_PROXY_TOKEN`. Restart-only. |
 | `server.max_body_bytes` | 33554432 | Applies on reload. |
 | `server.shutdown_grace` | `10s` | |
 | `server.sse.max_line_bytes` | 1048576 | |
@@ -91,7 +90,7 @@ refused. It is hot-reloadable, since nothing but the console reads it.
 | `aliases` | — | Ordered chains. Overlaid from the database. |
 | `policy.cooldown.trip_after` | 3 | |
 | `policy.cooldown.max` | `15m` | |
-| `policy.retry.max_attempts` | 4 | The file loader enforces only `>= 1`; the admin API additionally caps it at 10. |
+| `policy.retry.max_attempts` | 4 | The loader enforces only `>= 1`; the admin API additionally caps it at 10. |
 | `policy.timeout.connect` | `10s` | Restart-only. |
 | `policy.timeout.first_byte` | `60s` | Restart-only. |
 | `policy.timeout.total` | `10m` | Must be at least `connect + first_byte`. |
@@ -118,8 +117,8 @@ refused. It is hot-reloadable, since nothing but the console reads it.
 | `playground.save_conversations` | `true` | |
 
 There is **no `policy.concurrency` block.** Earlier documentation described
-one; it never existed, and because unknown keys are rejected, a configuration
-copied from that documentation failed to parse.
+one; it never existed.
 
-`darkrouter.example.yaml` at the repository root is the annotated reference
-copy and is kept in step with this table.
+There is no example file to keep in step with this table: every key here is a
+row in `settings`, written by the console where a write endpoint exists and
+left at its default where one does not.

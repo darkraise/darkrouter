@@ -46,7 +46,7 @@ const cfg = (): ConfigResponse => ({
   valid: true,
   warnings: [],
   fields: {
-    "log.retention": { source: "file", hot_reloadable: true },
+    "log.retention": { source: "database", hot_reloadable: true },
     "catalog.discovery.interval": { source: "default", hot_reloadable: false },
     aliases: { source: "database", hot_reloadable: true },
   },
@@ -103,16 +103,16 @@ describe("the read-only configuration", () => {
   })
 
   it("carries each field's source and reloadability", () => {
-    // §8.1: after the first run, editing these in the file has no effect, and
-    // the view has to say so at the point of display.
+    // §8.1: the view has to say where a value came from at the point of
+    // display, since the console cannot write these.
     const rows = readOnlyGroups(cfg()).flatMap((g) => g.rows)
-    expect(rows.find((r) => r.field === "log.retention")?.source).toBe("file")
+    expect(rows.find((r) => r.field === "log.retention")?.source).toBe("database")
     expect(rows.find((r) => r.field === "catalog.discovery.interval")?.source).toBe("default")
     expect(rows.find((r) => r.field === "catalog.discovery.interval")?.hotReloadable).toBe(false)
     expect(rows.find((r) => r.field === "log.retention")?.hotReloadable).toBe(true)
   })
 
-  it("renders the value a person reads and keeps the file's own spelling", () => {
+  it("renders the value a person reads and keeps the stored spelling", () => {
     const rows = readOnlyGroups(cfg()).flatMap((g) => g.rows)
     const retention = rows.find((r) => r.field === "log.retention")
     expect(retention?.display).toBe("3 days")
@@ -155,7 +155,7 @@ describe("the revocation notice", () => {
 })
 
 describe("the reload result", () => {
-  it("reports an invalid file without claiming the gateway stopped", () => {
+  it("reports an invalid reload without claiming the gateway stopped", () => {
     expect(
       reloadMessage({ valid: false, error: "yaml: bad", serving: "the previous configuration is still serving" }),
     ).toMatch(/previous configuration is still serving/)
@@ -236,7 +236,7 @@ describe("a failed reload", () => {
     await user.click(await screen.findByRole("button", { name: /^reload$/i }))
 
     expect(await screen.findByText(/the reloaded configuration is invalid/i)).toBeInTheDocument()
-    expect(screen.queryByText(/^the configuration file is invalid\.$/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^the configuration is invalid$/i)).not.toBeInTheDocument()
     // Only the initial load fetched it; the failed reload did not trigger a
     // second GET for the same answer.
     await waitFor(() => expect(configFetches()).toBe(1))
@@ -308,7 +308,7 @@ describe("the policy write", () => {
 
   it("leaves attempts out when the box was emptied", () => {
     // Number("") is 0, and the store reads 0 as "no override" and deletes the
-    // setting — reverting to the file default under a success toast.
+    // setting — reverting to the built-in default under a success toast.
     expect(toWrite({ ...draft, "policy.retry.max_attempts": "" }).retry).toBeUndefined()
   })
 
@@ -334,15 +334,15 @@ describe("the read-only section on the page", () => {
     stubSettingsFetch({})
     mount(<SettingsScreen />)
 
-    // The humanised value once, with the file's own spelling on its title
-    // rather than printed as a second value.
+    // The humanised value once, with the stored spelling on its title rather
+    // than printed as a second value.
     const value = await screen.findByText("3 days")
     expect(value).toHaveAttribute("title", "72h")
     expect(screen.queryByText("72h")).not.toBeInTheDocument()
-    // The dotted key, which is what the YAML file and every error message use.
+    // The dotted key, which is what the settings table and every error message use.
     expect(screen.getByText("log.retention")).toBeInTheDocument()
     // §8.1: where the value came from, said at the point of display.
-    expect(screen.getAllByText("file").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("database").length).toBeGreaterThan(0)
     expect(screen.getAllByText("default").length).toBeGreaterThan(0)
     // Whether changing it takes a restart, stated rather than discovered.
     expect(screen.getAllByText("restart").length).toBeGreaterThan(0)

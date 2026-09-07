@@ -489,7 +489,7 @@ export type SavedView = { name: string; filters: Record<string, string> }
 
 /** Where a value came from. `database` means editing the YAML has no effect,
  *  which §8.1 requires the config view to say at the point of display. */
-export type ConfigSource = "file" | "environment" | "database" | "default"
+export type ConfigSource = "environment" | "database" | "default"
 
 export type ConfigFieldMeta = {
   source: ConfigSource

@@ -21,10 +21,10 @@ const cfg = (over: Partial<ConfigResponse> = {}): ConfigResponse =>
       catalog: { discovery: { enabled: true } },
     },
     fields: {
-      "server.max_body_bytes": { source: "file", hot_reloadable: false },
+      "server.max_body_bytes": { source: "database", hot_reloadable: false },
       "log.retention": { source: "default", hot_reloadable: true },
-      "capture.bodies": { source: "file", hot_reloadable: true },
-      "capture.max_bytes": { source: "file", hot_reloadable: true },
+      "capture.bodies": { source: "database", hot_reloadable: true },
+      "capture.max_bytes": { source: "database", hot_reloadable: true },
       "policy.retry.max_attempts": { source: "database", hot_reloadable: true },
       "policy.timeout.first_byte": { source: "database", hot_reloadable: true },
       "catalog.discovery.enabled": { source: "default", hot_reloadable: true },
@@ -78,8 +78,8 @@ describe("settingRow", () => {
   })
 
   it("shows the literal beside a reformatted duration", () => {
-    // The file still says 720h0m0s, and the trail from screen to file has to
-    // survive the friendlier reading.
+    // The stored value is still 720h0m0s, and the trail from screen to store
+    // has to survive the friendlier reading.
     const row = settingRow(cfg(), "log.retention", SETTINGS["log.retention"]!)
     expect(row.display).toBe("30 days")
     expect(row.literal).toBe("720h0m0s")
@@ -110,7 +110,7 @@ describe("settingRow", () => {
 
   it("carries the source and whether it reloads hot", () => {
     const row = settingRow(cfg(), "server.max_body_bytes", SETTINGS["server.max_body_bytes"]!)
-    expect(row.source).toBe("file")
+    expect(row.source).toBe("database")
     expect(row.hotReloadable).toBe(false)
   })
 
@@ -136,7 +136,7 @@ describe("settingGroups", () => {
     const groups = settingGroups(
       cfg({
         fields: {
-          "policy.something_new": { source: "file", hot_reloadable: true },
+          "policy.something_new": { source: "database", hot_reloadable: true },
         },
       } as Partial<ConfigResponse>),
     )
