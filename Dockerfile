@@ -119,4 +119,4 @@ EXPOSE 18080 18081
 # is not usable, which is the state an orchestrator should route away from.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget -qO- http://127.0.0.1:18081/readyz || exit 1
-ENTRYPOINT ["darkrouter", "-config", "/data/darkrouter.yaml"]
+ENTRYPOINT ["darkrouter"]
