@@ -72,6 +72,11 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	return &c, nil
 }
 
+// ApplyDefaults fills every unset field with its compiled default. The
+// database loader starts from a zero Config and calls this before overlaying
+// stored rows, which is what makes an absent row mean "the default".
+func ApplyDefaults(c *Config) { applyDefaults(c) }
+
 func applyDefaults(c *Config) {
 	if c.Server.ProxyListen == "" {
 		c.Server.ProxyListen = ":18080"
