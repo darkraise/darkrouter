@@ -33,8 +33,8 @@ is scheduled; all are worth doing.
   it deliberately. Two adapter subpackages import the catalogue.
 - **Native token counting for Bedrock and Vertex-Anthropic**, which speak a
   counting dialect the gateway already implements for another kind.
-- **A standing dangling-alias warning**, computed against the effective
-  provider set rather than the file's.
+- **A standing dangling-alias warning**, recomputed against the effective
+  provider set rather than only refused on the write path.
 
 ## Not planned
 

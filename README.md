@@ -205,7 +205,7 @@ Nine destinations cover operations and configuration: **Overview**,
 **Requests**, **Usage**, **Providers**, **Models**, **Routing**,
 **Playground**, **Connect**, and **Settings**. Provider accounts and
 credentials are managed under Providers; model overrides, aliases, and policy
-are editable in the console, with file-owned and restart-only settings marked
+are editable in the console, with environment-owned and restart-only settings marked
 where they are shown. Playground provides persistent Chat, side-by-side
 Compare, Token Count, and the six auxiliary request tools.
 
