@@ -227,6 +227,18 @@ func normalizeDomain(v string) string {
 	return "https://" + v
 }
 
+// RuleError is a validation failure that no single key caused. It carries every
+// key that took part, because reverting one of them at load time is a choice
+// that has to be made from the whole set rather than guessed from a message.
+type RuleError struct {
+	Rule string
+	Keys []string
+	Err  error
+}
+
+func (e RuleError) Error() string { return e.Err.Error() }
+func (e RuleError) Unwrap() error { return e.Err }
+
 func validate(c *Config) error {
 	// Dereferencing TripAfter is safe: Parse runs applyDefaults first.
 	if *c.Policy.Cooldown.TripAfter < 1 {
@@ -280,8 +292,12 @@ func validate(c *Config) error {
 	// The budget gate refuses to start an attempt unless the remaining total
 	// covers connect + first_byte, so a smaller total would start nothing.
 	if t.Total < t.Connect+t.FirstByte {
-		return fmt.Errorf("policy.timeout.total (%s) must be at least connect + first_byte (%s)",
-			t.Total, t.Connect+t.FirstByte)
+		return RuleError{
+			Rule: "timeout budget",
+			Keys: []string{"policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"},
+			Err: fmt.Errorf("policy.timeout.total (%s) must be at least connect + first_byte (%s)",
+				t.Total, t.Connect+t.FirstByte),
+		}
 	}
 	if err := ValidateAliases(c.Aliases); err != nil {
 		return err
