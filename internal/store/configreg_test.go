@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -96,5 +97,20 @@ func TestConfigRegistryHasNoDuplicateKeys(t *testing.T) {
 	}
 	if len(seen) != 32 {
 		t.Errorf("registry holds %d keys, want the 32 the spec enumerates", len(seen))
+	}
+}
+
+// LoadConfig identifies which key a warning names with strings.Contains, so a
+// key that is a substring of another would silently revert both. Nothing about
+// that failure is visible at the call site, which is why the invariant is
+// asserted here rather than left to review.
+func TestConfigKeysAreNotSubstringsOfEachOther(t *testing.T) {
+	keys := ConfigKeys()
+	for _, a := range keys {
+		for _, b := range keys {
+			if a != b && strings.Contains(b, a) {
+				t.Errorf("key %q is a substring of %q; LoadConfig's warning matching would revert both", a, b)
+			}
+		}
 	}
 }
