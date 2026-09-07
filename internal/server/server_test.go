@@ -18,17 +18,13 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func newTestServer(t *testing.T, tune func(*config.Config)) *Server {
 	t.Helper()
-	return serverBackedBy(t, config.NewStoreOf(testConfigOf(t, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{fakeProvider}
-		if tune != nil {
-			tune(c)
-		}
-	})))
+	return serverBackedBy(t, config.NewStoreOf(testConfigOf(t, tune)), fakeProvider)
 }
 
 func TestHealthzReportsConfigValidity(t *testing.T) {
@@ -488,13 +484,12 @@ func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
 		n := tripAfter
 		return testConfigOf(t, func(c *config.Config) {
 			c.Policy.Cooldown.TripAfter = &n
-			c.Providers = []config.ProviderConfig{fakeProvider}
 		}), nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := serverBackedBy(t, cfgStore)
+	s := serverBackedBy(t, cfgStore, fakeProvider)
 
 	k := health.Key{ProviderID: "fake", KeyID: "k", Model: "m"}
 	fail := health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503}
@@ -562,13 +557,10 @@ func TestTheSyncedLiteLLMIndexReachesTheRoutedCatalog(t *testing.T) {
 
 	cfgStore := config.NewStoreOf(testConfigOf(t, func(c *config.Config) {
 		c.Catalog.LiteLLMURL = idx.URL
-		c.Providers = []config.ProviderConfig{{
-			ID: "groq", Preset: "groq", Kind: "openaicompat",
-			BaseURL: "https://api.groq.com/openai/v1", APIKey: "sk",
-			Models: []string{model},
-		}}
 	}))
-	s := serverBackedBy(t, cfgStore)
+	groq := providertest.Keyed("groq", "openaicompat", "https://api.groq.com/openai/v1", "sk", model)
+	groq.Preset = "groq"
+	s := serverBackedBy(t, cfgStore, groq)
 
 	ctx := context.Background()
 	if err := s.db.RecordDiscoverySuccess(ctx, "groq",

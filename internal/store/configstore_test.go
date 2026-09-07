@@ -89,10 +89,9 @@ func TestOverlayConfigReplacesAliasesOnly(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Aliases:   map[string][]string{"preloaded": {"openai/y"}},
-		Policy:    config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 2}},
-		Providers: []config.ProviderConfig{{ID: "groq"}},
-		Log:       config.LogConfig{Retention: 72 * time.Hour},
+		Aliases: map[string][]string{"preloaded": {"openai/y"}},
+		Policy:  config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 2}},
+		Log:     config.LogConfig{Retention: 72 * time.Hour},
 	}
 	if err := OverlayConfig(ctx, db, cfg); err != nil {
 		t.Fatal(err)
@@ -111,7 +110,7 @@ func TestOverlayConfigReplacesAliasesOnly(t *testing.T) {
 		t.Errorf("max_attempts = %d; the overlay must leave policy alone",
 			cfg.Policy.Retry.MaxAttempts)
 	}
-	if len(cfg.Providers) != 1 || cfg.Log.Retention != 72*time.Hour {
+	if cfg.Log.Retention != 72*time.Hour {
 		t.Error("the overlay touched a block that is not its own")
 	}
 }
