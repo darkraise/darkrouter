@@ -3,12 +3,14 @@ package admin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // fieldMeta annotates one config value with where it came from and whether a
@@ -19,9 +21,10 @@ type fieldMeta struct {
 	HotReloadable bool   `json:"hot_reloadable"`
 }
 
-// databaseOwned names the blocks that live in SQLite after the first-run
-// import. Editing either in the file has no effect, and §8.1 requires the
-// config view to say so at the point of display.
+// databaseOwned names the blocks that live in SQLite whether or not a row has
+// been written for them: the console is where they are edited, and there is
+// nowhere else they could have come from. Every other key is reported as
+// stored or not from what the database actually carries.
 var databaseOwned = []string{"aliases", "policy"}
 
 // bootstrapOwned names the keys the process reads from its environment before
@@ -62,7 +65,10 @@ var configFields = []string{
 	"aliases",
 }
 
-func sourceOf(field string) string {
+// sourceOf says where one value came from. stored names the registry keys the
+// database carries; a key absent from it is on its compiled default, which is
+// the distinction the settings screen exists to show.
+func sourceOf(field string, stored map[string]bool) string {
 	for _, owned := range databaseOwned {
 		if field == owned || strings.HasPrefix(field, owned+".") {
 			return "database"
@@ -70,6 +76,9 @@ func sourceOf(field string) string {
 	}
 	if slices.Contains(bootstrapOwned, field) {
 		return "environment"
+	}
+	if stored[field] {
+		return "database"
 	}
 	return "default"
 }
@@ -89,10 +98,21 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// with an error attached, or an invalid one with none.
 	cfgErr := s.deps.Config.LastError()
 
+	// A read failure degrades the label to "default" rather than failing the
+	// screen: an operator who cannot see their settings at all is worse off
+	// than one seeing a source annotation that is too modest.
+	var stored map[string]bool
+	if s.deps.DB != nil {
+		var err error
+		if stored, err = store.StoredConfigKeys(r.Context(), s.deps.DB); err != nil {
+			slog.Warn("config view could not read which settings are stored", "err", err)
+		}
+	}
+
 	fields := make(map[string]fieldMeta, len(configFields))
 	for _, f := range configFields {
 		fields[f] = fieldMeta{
-			Source:        sourceOf(f),
+			Source:        sourceOf(f, stored),
 			HotReloadable: !slices.Contains(config.RestartOnly, f),
 		}
 	}

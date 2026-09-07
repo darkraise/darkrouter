@@ -117,14 +117,23 @@ func addAny(skip map[string]bool, keys []string) bool {
 	return added
 }
 
-// keyNamedIn finds the registry key a validation message is about. The longest
-// match wins, so a message naming policy.timeout.total is not attributed to a
-// key whose name is a prefix of it. A key already reverted is not a candidate:
-// returning it would revert nothing and the retry would fail identically.
+// keyNamedIn finds the registry key a validation message is about.
+//
+// A prefix rather than a substring, because every single-key message validate
+// produces opens with its key and two of them go on to quote the stored value
+// with %q. A stored URL whose host happened to spell a longer key name would,
+// under a substring match, revert that key instead of the one at fault. The
+// longest match still wins so a key that is a prefix of another cannot claim
+// its message.
+//
+// A key already reverted is not a candidate: returning it would revert nothing
+// and the retry would fail identically. A message naming no key at all -- a
+// provider or alias rule -- returns false, and the caller falls back to
+// reverting everything.
 func keyNamedIn(msg string, skip map[string]bool) (string, bool) {
 	best := ""
 	for _, f := range configRegistry {
-		if skip[f.key] || !strings.Contains(msg, f.key) {
+		if skip[f.key] || !strings.HasPrefix(msg, f.key) {
 			continue
 		}
 		if len(f.key) > len(best) {
@@ -140,6 +149,23 @@ func allKeys() map[string]bool {
 		m[f.key] = true
 	}
 	return m
+}
+
+// StoredConfigKeys names the registry keys the database actually carries, so a
+// caller can tell a value an operator stored from one that is merely the
+// compiled default. The two are indistinguishable in a loaded Config: a stored
+// row that happens to equal the default parses to the same value as no row at
+// all.
+func StoredConfigKeys(ctx context.Context, d *DB) (map[string]bool, error) {
+	rows, err := configRows(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(rows))
+	for k := range rows {
+		out[k] = true
+	}
+	return out, nil
 }
 
 // configRows reads only the keys this binary knows. The settings table is

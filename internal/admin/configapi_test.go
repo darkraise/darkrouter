@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -136,6 +137,35 @@ func TestConfigNamesTheSourceOfEachValue(t *testing.T) {
 	}
 	if got := body.Fields["aliases"].Source; got != "database" {
 		t.Errorf("aliases source = %q, want database", got)
+	}
+}
+
+// A stored value reported as a built-in default is worse than no annotation:
+// the screen says "not set anywhere" about a row the loader read. Nothing but
+// the database can answer which of the two a value is, because a stored row
+// equal to the default parses identically to no row at all.
+func TestConfigReportsAStoredKeyAsComingFromTheDatabase(t *testing.T) {
+	s, db := testServerFullWithConfig(t, func(c *config.Config) {
+		c.Log.Retention = 1000 * time.Hour
+	})
+	// The fixture wrote the row; assert that rather than trusting it, since
+	// the whole test turns on the key really being stored.
+	stored, err := store.StoredConfigKeys(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored["log.retention"] {
+		t.Fatal("the fixture did not store log.retention, so this proves nothing")
+	}
+
+	body := getConfig(t, s)
+	if got := body.Fields["log.retention"].Source; got != "database" {
+		t.Errorf("log.retention source = %q, want database; it is stored", got)
+	}
+	// Its neighbour in the same block is untouched, so the answer has to come
+	// from the row rather than from the block the key sits in.
+	if got := body.Fields["capture.retention"].Source; got != "default" {
+		t.Errorf("capture.retention source = %q, want default; nothing stored it", got)
 	}
 }
 
