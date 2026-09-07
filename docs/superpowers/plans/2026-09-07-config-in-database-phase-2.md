@@ -553,7 +553,7 @@ The write handle is capped at one connection, so the competing writer is the syn
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `internal/store/db_test.go`. Check its imports for `context`, `time` and `testing`, and for how it opens a database — reuse the helper already there rather than writing a second one.
+Append to `internal/store/db_test.go`. Add `time` to its imports if it is not already there.
 
 ```go
 // The configuration write path reads its rows and then replaces them inside
@@ -562,7 +562,7 @@ Append to `internal/store/db_test.go`. Check its imports for `context`, `time` a
 // a busy error no timeout waits out. Beginning immediately makes the other
 // writer wait instead.
 func TestAWriteTransactionIsNotOvertakenMidway(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 
 	tx, err := db.Write.BeginTx(ctx, nil)
@@ -595,7 +595,6 @@ func TestAWriteTransactionIsNotOvertakenMidway(t *testing.T) {
 }
 ```
 
-If `storetest.Migrated` is not already imported in this file, add `"github.com/darkraise/darkrouter/internal/store/storetest"`. If `db_test.go` is in package `store` and `storetest` imports `store`, use whatever helper the existing tests in that file use instead.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -1059,14 +1058,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
-	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 func TestWriteConfigStoresAKeyAndReportsIt(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	written, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"log.retention": "96h"},
 	})
@@ -1088,7 +1085,7 @@ func TestWriteConfigStoresAKeyAndReportsIt(t *testing.T) {
 // An absent row is what makes reset-to-default work, so a reset deletes rather
 // than writing the current default into the table.
 func TestWriteConfigResetDeletesTheRow(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"log.retention": "96h"},
 	}); err != nil {
@@ -1111,7 +1108,7 @@ func TestWriteConfigResetDeletesTheRow(t *testing.T) {
 // The settings table would store "" happily and it would read back as a value
 // the operator chose.
 func TestWriteConfigTreatsAnEmptyValueAsAReset(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"server.public_url": "https://example.test"},
 	}); err != nil {
@@ -1132,7 +1129,7 @@ func TestWriteConfigTreatsAnEmptyValueAsAReset(t *testing.T) {
 }
 
 func TestWriteConfigRefusesABootstrapKeyByName(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"server.proxy_token": "sekrit"},
 	})
@@ -1146,7 +1143,7 @@ func TestWriteConfigRefusesABootstrapKeyByName(t *testing.T) {
 }
 
 func TestWriteConfigRefusesAnUnknownKey(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"server.nonsense": "1"},
 	})
@@ -1159,7 +1156,7 @@ func TestWriteConfigRefusesAnUnknownKey(t *testing.T) {
 // Refused whole. A person is waiting and can be told what is wrong, which is
 // the whole difference between this path and the loader's.
 func TestWriteConfigCommitsNothingWhenOneKeyIsBad(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{
 			"log.retention":     "96h",
@@ -1179,7 +1176,7 @@ func TestWriteConfigCommitsNothingWhenOneKeyIsBad(t *testing.T) {
 }
 
 func TestWriteConfigRefusesABrokenCrossKeyRule(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"policy.timeout.total": "5s"},
 	})
@@ -1196,7 +1193,7 @@ func TestWriteConfigRefusesABrokenCrossKeyRule(t *testing.T) {
 // taken before either ran; only a base read inside the transaction sees the
 // other one land.
 func TestConcurrentWritesCannotBreakTheTimeoutBudgetTogether(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -1236,7 +1233,7 @@ func TestConcurrentWritesCannotBreakTheTimeoutBudgetTogether(t *testing.T) {
 }
 
 func TestWriteConfigWritesAliasesInTheSameTransaction(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Aliases: map[string][]string{"fast": {"groq/llama"}},
 		Set:     map[string]string{"log.retention": "96h"},
@@ -1255,7 +1252,7 @@ func TestWriteConfigWritesAliasesInTheSameTransaction(t *testing.T) {
 // A save that breaks nothing must not be refused because of a row that was
 // already unusable before it ran.
 func TestWriteConfigIgnoresAnUnusableRowItDoesNotTouch(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	if err := putSetting(ctx, db.Write, "capture.retention", "not-a-duration"); err != nil {
 		t.Fatal(err)
 	}
@@ -1278,7 +1275,7 @@ func TestWriteConfigIgnoresAnUnusableRowItDoesNotTouch(t *testing.T) {
 }
 
 func TestWriteConfigRefusesAKeySetAndResetAtOnce(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set:   map[string]string{"log.retention": "96h"},
 		Reset: []string{"log.retention"},
@@ -1291,7 +1288,7 @@ func TestWriteConfigRefusesAKeySetAndResetAtOnce(t *testing.T) {
 
 // The per-key validator from the registry, on the path a person is waiting on.
 func TestWriteConfigRefusesAnOutOfRangeRetryCount(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"policy.retry.max_attempts": "20"},
 	})
@@ -1307,7 +1304,7 @@ func TestWriteConfigRefusesAnOutOfRangeRetryCount(t *testing.T) {
 // A bare domain is how an operator writes this setting; the registry
 // normalises it on the way into the Config, and the row keeps what was typed.
 func TestWriteConfigAcceptsABareDomainForThePublicURL(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Set: map[string]string{"server.public_url": "llm.example.test"},
 	}); err != nil {
@@ -1325,11 +1322,7 @@ func TestWriteConfigAcceptsABareDomainForThePublicURL(t *testing.T) {
 		t.Errorf("public_url = %q, want the normalised URL", c.Server.PublicURL)
 	}
 }
-
-var _ = time.Second
 ```
-
-Drop the `var _ = time.Second` line and the `time` import if nothing else in the file needs them.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -2204,7 +2197,7 @@ In `internal/store/configstore_tx_test.go`, replace `TestPutConfigWritesBothBloc
 // stays because a half-applied save is the failure, not the function that
 // used to make it.
 func TestWriteConfigWritesBothBlocksOrNeither(t *testing.T) {
-	db, ctx := storetest.Migrated(t), context.Background()
+	db, ctx := migrated(t), context.Background()
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
 		Aliases: map[string][]string{"fast": {"groq/llama"}},
 		Set:     map[string]string{"policy.retry.max_attempts": "20"},
