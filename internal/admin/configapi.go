@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -219,12 +220,13 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
 }
 
-// configWrite is the accepted shape of PUT /api/config. Only the two blocks
-// that live in SQLite are writable; everything else is the file's, and an
-// endpoint that pretended otherwise would accept a write it cannot keep.
+// configWrite is the accepted shape of PUT /api/config. Set and Reset are two
+// collections rather than one map because a save has three intents per key and
+// a map cannot express the third: a key in neither is untouched.
 type configWrite struct {
+	Set     map[string]string   `json:"set"`
+	Reset   []string            `json:"reset"`
 	Aliases map[string][]string `json:"aliases"`
-	Policy  *policyWrite        `json:"policy"`
 }
 
 type policyWrite struct {
@@ -270,39 +272,66 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, 64<<10, &body) {
 		return
 	}
-	if cold := restartOnlyIn(body.Policy); len(cold) > 0 {
-		writeError(w, http.StatusBadRequest,
-			joinFields(cold)+" takes effect on restart and cannot be written here")
-		return
+	s.commitConfig(w, r, config.Patch{
+		Set: body.Set, Reset: body.Reset, Aliases: body.Aliases,
+	})
+}
+
+// commitConfig is the one place a configuration write is committed. The alias
+// and policy endpoints are shapes over it rather than paths of their own, so a
+// value refused on one is refused on all three and there is a single critical
+// section to reason about.
+func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.Patch) {
+	if p.Aliases != nil {
+		// Admin-side because it needs provider rows. The loader cannot make
+		// this check and internal/store's write path has no business reading
+		// a table that belongs to another part of the console.
+		if err := s.aliasTargetsExist(r.Context(), p.Aliases); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
-	ctx := r.Context()
-	if body.Aliases != nil {
-		if err := config.ValidateAliases(body.Aliases); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := s.aliasTargetsExist(ctx, body.Aliases); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	var policy *config.PolicyConfig
-	if body.Policy != nil {
-		next, err := s.mergedPolicy(body.Policy)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		policy = &next
-	}
-	// One transaction for both blocks: a save that wrote its aliases and
-	// then failed on its policy would leave the screen half-applied.
-	if err := s.deps.DB.PutConfig(ctx, body.Aliases, policy); err != nil {
+	// WithoutCancel: the write is about to become durable, and a client that
+	// disconnects mid-commit must not leave the gateway serving a snapshot
+	// that predates rows it now holds.
+	written, err := s.deps.Config.Update(afterCommit(r), p)
+	var rejected config.RejectedError
+	var publish config.PublishError
+	switch {
+	case errors.As(err, &rejected):
+		writeError(w, http.StatusBadRequest, rejected.Error())
+	case errors.As(err, &publish):
+		// 200 rather than 500: the write was performed and its outcome is the
+		// answer. The rows are durable; what failed is the republish, and the
+		// previous configuration is still serving.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"valid": false, "error": publish.Error(),
+			"serving": "the previous configuration is still serving",
+		})
+	case err != nil:
 		internalError(w, r, err)
-		return
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"valid": true, "restart_required": restartRequired(written),
+		})
 	}
-	s.republish(w)
+}
+
+// restartRequired names the written keys a running process cannot apply. They
+// are accepted rather than refused: the value belongs in the database either
+// way, and refusing it would leave an operator no way to set it at all.
+//
+// Never nil: a client cannot tell a JSON null from a field an older build did
+// not serve.
+func restartRequired(written []string) []string {
+	out := []string{}
+	for _, k := range written {
+		if slices.Contains(config.RestartOnly, k) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // mergedPolicy overlays a write onto the running policy and validates the

@@ -97,6 +97,9 @@ func storeOverDatabase(t *testing.T, db *store.DB, aliases map[string][]string,
 	cfg.SetOverlay(func(c *config.Config) error {
 		return store.OverlayConfig(ctx, db, c)
 	})
+	cfg.SetWriter(func(ctx context.Context, p config.Patch) ([]string, error) {
+		return store.WriteConfig(ctx, db, boot, p)
+	})
 	if err := cfg.Reload(); err != nil {
 		t.Fatal(err)
 	}

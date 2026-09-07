@@ -207,6 +207,12 @@ func runServer(args []string) error {
 	cfgStore.SetOverlay(func(c *config.Config) error {
 		return store.OverlayConfig(context.Background(), db, c)
 	})
+	// Installed with the overlay, before the first reload: the admin API is
+	// reachable as soon as the server starts, and a write that arrived with no
+	// writer installed would be refused for a reason nobody could act on.
+	cfgStore.SetWriter(func(ctx context.Context, p config.Patch) ([]string, error) {
+		return store.WriteConfig(ctx, db, boot, p)
+	})
 	if err := cfgStore.Reload(); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
