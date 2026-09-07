@@ -166,3 +166,29 @@ func TestAStoredBareDomainLoadsAsAURL(t *testing.T) {
 		t.Errorf("warnings = %v; a bare domain is a supported spelling, not a fault", c.Warnings)
 	}
 }
+
+// A single-key rule failure must cost that key, not every key. Reverting all 32
+// discards an operator's whole configuration over one bad value, and the loader
+// already knows which key the message names.
+func TestASingleBadKeyDoesNotRevertTheOthers(t *testing.T) {
+	d := migrated(t)
+	// Absolute, so the registry's normalisation leaves it alone, and refused by
+	// validate because it carries a query.
+	seedSetting(t, d, "server.public_url", "https://api.example.com?key=x")
+	seedSetting(t, d, "log.retention", "1000h")
+
+	c, err := LoadConfig(context.Background(), d, config.Bootstrap{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Server.PublicURL != "" {
+		t.Errorf("public_url = %q, want the default after its rule failed", c.Server.PublicURL)
+	}
+	if c.Log.Retention != 1000*time.Hour {
+		t.Errorf("log.retention = %v, want the stored 1000h; one bad key must not "+
+			"revert an unrelated one", c.Log.Retention)
+	}
+	if len(c.Warnings) == 0 {
+		t.Error("a reverted key must say so")
+	}
+}
