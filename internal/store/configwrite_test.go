@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
 )
@@ -174,9 +175,20 @@ func TestConcurrentWritesCannotBreakTheTimeoutBudgetTogether(t *testing.T) {
 		t.Errorf("total %s does not cover connect %s plus first_byte %s",
 			c.Policy.Timeout.Total, c.Policy.Timeout.Connect, c.Policy.Timeout.FirstByte)
 	}
-	// One of them had to lose, or the rule was never enforced.
+	// One of them had to lose, or the rule was never enforced -- and the loser
+	// must have been refused for the rule rather than for a database failure,
+	// which is the difference between a 400 an operator can act on and a 500.
 	if errs[0] == nil && errs[1] == nil {
 		t.Error("both writes committed a pair that together breaks the rule")
+	}
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		var rejected config.RejectedError
+		if !errors.As(err, &rejected) {
+			t.Errorf("errs[%d] = %v, want a RejectedError", i, err)
+		}
 	}
 }
 
@@ -246,6 +258,74 @@ func TestWriteConfigRefusesAnOutOfRangeRetryCount(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "between 1 and 10") {
 		t.Errorf("the refusal does not state the bound: %v", err)
+	}
+}
+
+// The defect this construction exists to prevent: a save judged against the
+// compiled default of the key it is writing, rather than against the value
+// that will sit beside it. Both stored timeouts are usable together, and the
+// new first_byte is not.
+func TestWriteConfigRefusesAValueThatBreaksARuleWithAStoredNeighbour(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Set: map[string]string{
+			"policy.timeout.total":      "40s",
+			"policy.timeout.first_byte": "30s",
+		},
+	}); err != nil {
+		t.Fatalf("the starting pair is valid: %v", err)
+	}
+
+	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Set: map[string]string{"policy.timeout.first_byte": "35s"},
+	})
+	var rejected config.RejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("err = %v, want a RejectedError", err)
+	}
+
+	rows, err := configRows(ctx, db.Read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows["policy.timeout.first_byte"] != "30s" {
+		t.Errorf("first_byte = %q, want the refused write to have changed nothing", rows["policy.timeout.first_byte"])
+	}
+	// What the rejection is for: the pair that would have been stored must not
+	// be one the next load throws away.
+	c, _, skipped, err := buildConfig(rows, config.Bootstrap{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("the stored rows do not load: %v", skipped)
+	}
+	if c.Policy.Timeout.Total != 40*time.Second {
+		t.Errorf("total = %s, want the stored 40s", c.Policy.Timeout.Total)
+	}
+}
+
+// The pre-check exists because buildConfig reverts keys until the config
+// validates and no key can fix a broken chain, so an unchecked bad set comes
+// back as "compiled defaults do not validate" -- a message naming nothing an
+// operator can act on.
+func TestWriteConfigRefusesABrokenAliasChain(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Aliases: map[string][]string{"fast": {""}},
+	})
+	var rejected config.RejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("err = %v, want a RejectedError", err)
+	}
+	if !strings.Contains(err.Error(), "fast") {
+		t.Errorf("the refusal does not name the alias: %v", err)
+	}
+	// The guard's whole contribution, now that the loader judges the rest: the
+	// same patch without it comes back as "compiled defaults do not validate",
+	// which names nothing an operator can act on.
+	if strings.Contains(err.Error(), "compiled defaults") {
+		t.Errorf("the refusal is the loader's unactionable message: %v", err)
 	}
 }
 
