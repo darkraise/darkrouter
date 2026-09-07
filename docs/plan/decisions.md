@@ -278,10 +278,15 @@ exists because of it.*
 the reverse closes a cycle. This is why the alias and policy overlay lives in
 store and is injected as a function.
 
-**A `PUT` refuses a restart-only field; a file reload only warns.** A reload
-is an operator editing a file the process watches — the change is already
-made, and a warning is the only honest answer. An API request can be refused
-before anything happens.
+**A `PUT` naming a restart-only field is accepted; a reload that finds one
+changed only warns.** This reverses the original decision, which refused the
+`PUT` on the reasoning that an API request can be refused before anything
+happens whereas a file edit is already made. Configuration now lives in the
+database and there is no file, so the API is the only way to set the value at
+all — refusing would leave a restart-only key permanently unsettable. The
+write is accepted and the response lists the affected keys in
+`restart_required`; a reload still only warns, because by then the value is
+already stored.
 
 **The database overlay is applied before a snapshot is published, not
 after.**
