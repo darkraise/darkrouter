@@ -8,6 +8,15 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
+// seedSetting stores one row, so a test names the key and value it cares about
+// rather than the plumbing.
+func seedSetting(t *testing.T, d *DB, key, value string) {
+	t.Helper()
+	if err := putSetting(context.Background(), d.Write, key, value); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func boot() config.Bootstrap {
 	return config.Bootstrap{ProxyListen: ":18080", AdminListen: ":18081", ProxyToken: "sekrit"}
 }
@@ -135,5 +144,25 @@ func TestLoadConfigIgnoresForeignRows(t *testing.T) {
 	}
 	if len(c.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none for a foreign row", c.Warnings)
+	}
+}
+
+// A stored bare domain is how an operator writes server.public_url; validate
+// demands an absolute URL. Normalising on the way out of the registry is what
+// keeps the two from disagreeing -- and a disagreement here is not a rejected
+// field, it is the whole configuration reverting.
+func TestAStoredBareDomainLoadsAsAURL(t *testing.T) {
+	d := migrated(t)
+	seedSetting(t, d, "server.public_url", "llm.example.com")
+
+	c, err := LoadConfig(context.Background(), d, config.Bootstrap{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Server.PublicURL != "https://llm.example.com" {
+		t.Errorf("public_url = %q, want https://llm.example.com", c.Server.PublicURL)
+	}
+	if len(c.Warnings) != 0 {
+		t.Errorf("warnings = %v; a bare domain is a supported spelling, not a fault", c.Warnings)
 	}
 }

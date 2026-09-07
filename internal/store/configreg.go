@@ -129,8 +129,19 @@ func buildConfigRegistry() []configField {
 		}
 	}
 
+	// domain is str for a value an operator writes as a hostname. The stored
+	// string is normalised on the way in, so "llm.example.com" reaches
+	// validation as the URL it means rather than as a value validation
+	// refuses.
+	domain := func(key string, ref func(*config.Config) *string) configField {
+		f := str(key, ref)
+		set := f.set
+		f.set = func(c *config.Config, v string) error { return set(c, config.NormalizeDomain(v)) }
+		return f
+	}
+
 	return []configField{
-		str("server.public_url", func(c *config.Config) *string { return &c.Server.PublicURL }),
+		domain("server.public_url", func(c *config.Config) *string { return &c.Server.PublicURL }),
 		integer64("server.max_body_bytes", func(c *config.Config) *int64 { return &c.Server.MaxBodyBytes }),
 		duration("server.shutdown_grace", func(c *config.Config) *time.Duration { return &c.Server.ShutdownGrace }),
 		integer("server.sse.max_line_bytes", func(c *config.Config) *int { return &c.Server.SSE.MaxLineBytes }),
