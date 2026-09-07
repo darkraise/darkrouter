@@ -121,6 +121,14 @@ func applyDefaults(c *Config) {
 	}
 }
 
+// NormalizeDomain is normalizeDomain for a value arriving from outside this
+// package. The database loader calls it on a stored server.public_url before
+// validation runs: a bare domain is how an operator writes the setting, and
+// validate demands an absolute URL, so without this step a stored
+// "llm.example.com" would be refused and take the whole configuration down
+// with it.
+func NormalizeDomain(v string) string { return normalizeDomain(v) }
+
 // normalizeDomain turns a bare domain into the URL the rest of the system
 // expects. An operator setting this is naming the address the outside world
 // uses, and writes it the way it is spoken -- "llm.example.com", not a scheme
