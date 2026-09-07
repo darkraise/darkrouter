@@ -637,3 +637,73 @@ func TestAConfigFileAppearingLaterIsPickedUp(t *testing.T) {
 		t.Errorf("Log.Retention = %s, want the file's 48h", s.Current().Log.Retention)
 	}
 }
+
+// server.public_url is how a deployment tells the console where clients reach
+// it, and nothing else in the process can know: the value describes what a
+// published port or a reverse proxy did on the far side of the listener.
+func TestPublicURLIsCarriedThrough(t *testing.T) {
+	c, err := Parse([]byte("server:\n  public_url: https://api.example.com/darkrouter\n"), nil)
+	if err != nil {
+		t.Fatalf("an absolute public_url must load: %v", err)
+	}
+	if c.Server.PublicURL != "https://api.example.com/darkrouter" {
+		t.Errorf("PublicURL = %q, want the file's value", c.Server.PublicURL)
+	}
+}
+
+func TestPublicURLDefaultsToEmpty(t *testing.T) {
+	c, err := Parse([]byte("server:\n  proxy_listen: \":18080\"\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty is what tells the console to fall back to guessing. A default
+	// here would be a guess baked in one layer lower, where it cannot be seen.
+	if c.Server.PublicURL != "" {
+		t.Errorf("PublicURL = %q, want empty when unset", c.Server.PublicURL)
+	}
+}
+
+// A bare domain is how an operator says the address out loud, so it is what
+// they write. https is supplied because a domain reachable from outside this
+// machine has TLS terminated in front of it, and guessing http would put a
+// client's token on the wire in the clear.
+func TestPublicURLAcceptsABareDomain(t *testing.T) {
+	for _, tc := range []struct{ name, value, want string }{
+		{"domain", "llm.example.com", "https://llm.example.com"},
+		{"domain and port", "llm.example.com:8443", "https://llm.example.com:8443"},
+		{"domain and path", "example.com/darkrouter", "https://example.com/darkrouter"},
+		{"surrounding space", "  llm.example.com  ", "https://llm.example.com"},
+		{"scheme already written", "http://llm.example.com", "http://llm.example.com"},
+		{"https already written", "https://llm.example.com", "https://llm.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse([]byte("server:\n  public_url: \""+tc.value+"\"\n"), nil)
+			if err != nil {
+				t.Fatalf("public_url %q must load: %v", tc.value, err)
+			}
+			if c.Server.PublicURL != tc.want {
+				t.Errorf("PublicURL = %q, want %q", c.Server.PublicURL, tc.want)
+			}
+		})
+	}
+}
+
+// A value that is not a usable base URL has to fail at load, where the file
+// that carries it is named. Pasted into a client instead, it fails as that
+// client's connection error, one layer away from the mistake.
+func TestPublicURLRejectsWhatAClientCannotUse(t *testing.T) {
+	for _, tc := range []struct{ name, value string }{
+		{"scheme relative", "//api.example.com"},
+		{"scheme with no host", "https://"},
+		{"path only", "/v1"},
+		{"query", "https://api.example.com?key=x"},
+		{"fragment", "https://api.example.com#v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte("server:\n  public_url: \""+tc.value+"\"\n"), nil)
+			if err == nil {
+				t.Fatalf("public_url %q must be refused at load", tc.value)
+			}
+		})
+	}
+}

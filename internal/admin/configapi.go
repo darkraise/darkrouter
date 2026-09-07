@@ -31,6 +31,7 @@ var databaseOwned = []string{"aliases", "policy"}
 var configFields = []string{
 	"server.proxy_listen",
 	"server.admin_listen",
+	"server.public_url",
 	"server.max_body_bytes",
 	"server.shutdown_grace",
 	"server.sse.max_line_bytes",
@@ -101,6 +102,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"server": map[string]any{
 				"proxy_listen":   cfg.Server.ProxyListen,
 				"admin_listen":   cfg.Server.AdminListen,
+				"public_url":     cfg.Server.PublicURL,
 				"max_body_bytes": cfg.Server.MaxBodyBytes,
 				"shutdown_grace": cfg.Server.ShutdownGrace.String(),
 				"sse": map[string]any{

@@ -49,12 +49,39 @@ Restart-only, because each is captured once when something is constructed:
 configure a shared HTTP transport built once. `max_body_bytes` deliberately is
 **not**: the executor reads it from a per-request snapshot.
 
+### `server.public_url`
+
+The listen addresses say what the process binds. They stop describing what a
+client dials the moment anything sits in between, and everything that does is
+invisible from inside the process: `-p 8090:18080` renumbers the port, a
+reverse proxy replaces the host and scheme, a prefix route prepends a path.
+`server.public_url` is how a deployment states the answer, because no amount of
+inspection can recover it.
+
+A bare domain is the expected form — `llm.example.com` — and https is supplied
+for it, because a domain reachable from outside this machine has TLS terminated
+in front of it and guessing http would put a client's token on the wire in the
+clear. Write the scheme out to override that, and add a port or a path prefix
+where one exists; both are carried through as written.
+
+The Connect page then lists **both** addresses: the configured public one and
+the LAN one it works out from the page's own address plus `proxy_listen`'s
+port. A gateway with a domain still answers on the LAN, and a client inside the
+network usually wants the address that does not leave it. The client snippets
+default to the public address and carry a toggle for the other. With nothing
+configured the page shows the LAN address alone, and says it was worked out
+rather than told.
+
+It is validated at load: a host is required, and a query or fragment is
+refused. It is hot-reloadable, since nothing but the console reads it.
+
 ## Keys
 
 | Key | Default | Notes |
 |---|---|---|
 | `server.proxy_listen` | `:18080` | Restart-only. |
 | `server.admin_listen` | `:18081` | Restart-only. |
+| `server.public_url` | *empty* | The public domain clients reach the gateway at. A bare domain is assumed https. No query or fragment. Empty means the console shows only the LAN address. |
 | `server.proxy_token` | *empty* | Shared inbound secret. Interpolated. |
 | `server.max_body_bytes` | 33554432 | Applies on reload. |
 | `server.shutdown_grace` | `10s` | |

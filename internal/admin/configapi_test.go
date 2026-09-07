@@ -55,6 +55,47 @@ func TestConfigReturnsEveryBlock(t *testing.T) {
 	}
 }
 
+// The Connect page reads server.public_url to decide whether to hand out a
+// configured address or guess one from the page it was served on, so the block
+// has to carry the key whether or not a value was set.
+func TestConfigServesPublicURL(t *testing.T) {
+	// The extra YAML is indented and lands directly after admin_listen, so it
+	// continues the server mapping rather than opening a second one.
+	s, _ := testServerFullWithConfig(t, "  public_url: \"https://api.example.com/dr\"\n")
+	server, ok := getConfig(t, s).Blocks["server"].(map[string]any)
+	if !ok {
+		t.Fatalf("server block is %T, want an object", getConfig(t, s).Blocks["server"])
+	}
+	if got := server["public_url"]; got != "https://api.example.com/dr" {
+		t.Errorf("server.public_url = %v, want the configured address", got)
+	}
+}
+
+func TestConfigServesAnEmptyPublicURLWhenUnset(t *testing.T) {
+	s, _ := testServerFull(t)
+	server := getConfig(t, s).Blocks["server"].(map[string]any)
+	got, present := server["public_url"]
+	if !present {
+		t.Fatal("server.public_url missing; the Connect page cannot tell unset from a stale build")
+	}
+	if got != "" {
+		t.Errorf("server.public_url = %v, want empty when nothing configured it", got)
+	}
+}
+
+// Nothing in the process reads public_url, so a change to it must not be
+// reported as needing a restart the way the listen addresses do.
+func TestPublicURLIsHotReloadable(t *testing.T) {
+	s, _ := testServerFull(t)
+	f, ok := getConfig(t, s).Fields["server.public_url"]
+	if !ok {
+		t.Fatal("server.public_url missing from fields; the settings screen cannot show it")
+	}
+	if !f.HotReloadable {
+		t.Error("server.public_url marked restart-only, but no listener depends on it")
+	}
+}
+
 func TestConfigMarksRestartOnlyFieldsAsCold(t *testing.T) {
 	s, _ := testServerFull(t)
 	body := getConfig(t, s)

@@ -11,6 +11,17 @@
 server:
   proxy_listen: :18080
   admin_listen: :18081
+  # The domain clients outside this machine reach the gateway at. The listen
+  # addresses above are what the process binds, which stops being the answer
+  # the moment a container republishes the port or a reverse proxy fronts it --
+  # and the process cannot see either.
+  #
+  # A bare domain is enough and https is assumed; write the scheme out for
+  # plain HTTP, and add a port or a path prefix when there is one. Set it and
+  # the Connect page lists this address alongside the LAN one, so a client on
+  # either side of the router gets a URL that works. Leave it out and the page
+  # shows only the LAN address it worked out for itself.
+  #public_url: llm.example.com
   # Optional. An unset variable means proxy authentication is off, which is why
   # this file loads on a machine that has never set it.
   proxy_token: ${DARKROUTER_PROXY_TOKEN}

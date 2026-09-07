@@ -29,8 +29,14 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	ProxyListen   string        `yaml:"proxy_listen"`
-	AdminListen   string        `yaml:"admin_listen"`
+	ProxyListen string `yaml:"proxy_listen"`
+	AdminListen string `yaml:"admin_listen"`
+	// PublicURL is the address clients outside the process reach the gateway
+	// at, which the process itself cannot derive: a published container port,
+	// a reverse proxy's hostname and a path prefix are all applied after the
+	// listener binds. Empty means the console falls back to guessing from the
+	// page it was served on.
+	PublicURL     string        `yaml:"public_url"`
 	ProxyToken    string        `yaml:"proxy_token"`
 	MaxBodyBytes  int64         `yaml:"max_body_bytes"`
 	ShutdownGrace time.Duration `yaml:"shutdown_grace"`
