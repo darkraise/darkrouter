@@ -50,9 +50,11 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 	if len(warnings) > 0 {
 		for _, w := range warnings {
 			for _, k := range ConfigKeys() {
-				// ApplyConfigRows builds each warning from the key itself, so
-				// naming it is what identifies the key to drop.
-				if strings.Contains(w, k) && !skip[k] {
+				// A prefix, in the exact shape ApplyConfigRows builds. Under a
+				// substring match a stored value spelling another key's name
+				// reverted that key too, because strconv and ParseDuration
+				// quote the offending value into the message.
+				if strings.HasPrefix(w, "stored "+k+" ") && !skip[k] {
 					skip[k] = true
 					skipped = append(skipped, k)
 				}
