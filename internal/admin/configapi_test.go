@@ -224,32 +224,126 @@ func TestPutConfigRejectsAnUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestPutConfigRefusesARestartOnlyField(t *testing.T) {
-	// Refused, not accepted-with-a-warning. A file reload is an operator
-	// editing a file the process watches; this is an API accepting a request
-	// it can honour or cannot.
-	s, _ := testServerFull(t)
+func TestPutConfigWritesASettingAndItTakesEffect(t *testing.T) {
+	s, db := testServerFull(t)
 	cookie, token := login(t, s)
 	w := do(t, s, cookie, token, "PUT", "/api/config",
-		`{"policy":{"timeout":{"connect":"5s"}}}`)
-	if w.Code != 400 {
-		t.Fatalf("PUT = %d, want 400: %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "restart") {
-		t.Errorf("the refusal does not say why: %s", w.Body.String())
-	}
-}
-
-func TestPutConfigWritesAHotReloadablePolicyField(t *testing.T) {
-	s, _ := testServerFull(t)
-	cookie, token := login(t, s)
-	w := do(t, s, cookie, token, "PUT", "/api/config",
-		`{"policy":{"retry":{"max_attempts":5}}}`)
+		`{"set":{"log.retention":"96h"}}`)
 	if w.Code != 200 {
 		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
 	}
-	if got := s.deps.Config.Current().Policy.Retry.MaxAttempts; got != 5 {
-		t.Errorf("max_attempts = %d, want 5", got)
+	if got := s.deps.Config.Current().Log.Retention; got != 96*time.Hour {
+		t.Errorf("log.retention = %s, want 96h", got)
+	}
+	stored, err := store.StoredConfigKeys(t.Context(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored["log.retention"] {
+		t.Error("the row is not in the database")
+	}
+}
+
+// Accepted, and the answer says so. The value belongs in the database whether
+// or not this process can apply it; refusing it would leave the operator no
+// way to set it at all.
+func TestPutConfigAcceptsARestartOnlyFieldAndNamesIt(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"set":{"policy.timeout.connect":"5s"}}`)
+	if w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Valid           bool     `json:"valid"`
+		RestartRequired []string `json:"restart_required"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Valid {
+		t.Fatalf("valid = false: %s", w.Body.String())
+	}
+	if len(body.RestartRequired) != 1 || body.RestartRequired[0] != "policy.timeout.connect" {
+		t.Errorf("restart_required = %v", body.RestartRequired)
+	}
+}
+
+// Never null: a client cannot tell a JSON null from a field an older build did
+// not serve.
+func TestPutConfigRestartRequiredIsAlwaysAnArray(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"set":{"log.retention":"96h"}}`)
+	if !strings.Contains(w.Body.String(), `"restart_required":[]`) {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestPutConfigResetsAKeyToItsDefault(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"set":{"log.retention":"96h"}}`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"reset":["log.retention"]}`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	stored, err := store.StoredConfigKeys(t.Context(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored["log.retention"] {
+		t.Error("the row survived a reset")
+	}
+	if got := s.deps.Config.Current().Log.Retention; got != 720*time.Hour {
+		t.Errorf("log.retention = %s, want the compiled default", got)
+	}
+}
+
+func TestPutConfigRefusesABootstrapKey(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"set":{"server.proxy_token":"sekrit"}}`)
+	if w.Code != 400 {
+		t.Fatalf("PUT = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "DARKROUTER_PROXY_TOKEN") {
+		t.Errorf("the refusal does not name the variable: %s", w.Body.String())
+	}
+}
+
+func TestPutConfigRefusesAValueTheLoaderWouldReject(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"set":{"log.retention":"1h"}}`)
+	if w.Code != 400 {
+		t.Fatalf("PUT = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	stored, err := store.StoredConfigKeys(t.Context(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored["log.retention"] {
+		t.Error("a refused write left a row behind")
+	}
+}
+
+// The one endpoint that must never echo credential material, on the path that
+// now accepts writes for everything else.
+func TestPutConfigNeverEchoesTheProxyToken(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "PUT", "/api/config",
+		`{"set":{"server.proxy_token":"sekrit"}}`)
+	if strings.Contains(w.Body.String(), "sekrit") {
+		t.Errorf("the response echoed the value: %s", w.Body.String())
 	}
 }
 

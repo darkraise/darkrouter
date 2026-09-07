@@ -62,7 +62,7 @@ func TestPutConfigWritesNothingWhenThePolicyIsInvalid(t *testing.T) {
 	_ = do(t, s, cookie, token, "POST", "/api/providers",
 		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
 	w := do(t, s, cookie, token, "PUT", "/api/config",
-		`{"aliases":{"fast":["p1/m"]},"policy":{"retry":{"max_attempts":0}}}`)
+		`{"aliases":{"fast":["p1/m"]},"set":{"policy.retry.max_attempts":"0"}}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
@@ -81,7 +81,7 @@ func TestPutConfigWritesBothBlocksTogether(t *testing.T) {
 	_ = do(t, s, cookie, token, "POST", "/api/providers",
 		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`)
 	w := do(t, s, cookie, token, "PUT", "/api/config",
-		`{"aliases":{"fast":["p1/m"]},"policy":{"retry":{"max_attempts":4}}}`)
+		`{"aliases":{"fast":["p1/m"]},"set":{"policy.retry.max_attempts":"4"}}`)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"valid":true`) {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
