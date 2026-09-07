@@ -2,8 +2,6 @@ package catalog
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,28 +61,17 @@ func TestOrphanWarningsAreDeterministic(t *testing.T) {
 	}
 }
 
-func TestAYAMLProviderWithAnUnknownPresetIsAnOrphan(t *testing.T) {
-	// The warning already existed; nothing configured in YAML could ever
-	// trigger it, because the preset name was dropped between the file and
+func TestAConfiguredProviderWithAnUnknownPresetIsAnOrphan(t *testing.T) {
+	// The warning already existed; nothing a configured provider carried could
+	// ever trigger it, because the preset name was dropped on the way to
 	// provider.Provider. This is the whole chain, not just the last link.
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	if err := os.WriteFile(path, []byte(`
-server:
-  proxy_listen: ":0"
-providers:
-  - id: p
-    kind: openaicompat
-    preset: not-a-real-preset
-    base_url: https://x/v1
-    api_key: sk
-    models: [m]
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Providers = []config.ProviderConfig{{
+		ID: "p", Kind: "openaicompat", Preset: "not-a-real-preset",
+		BaseURL: "https://x/v1", APIKey: "sk", Models: []string{"m"},
+	}}
+	cfgStore := config.NewStoreOf(c)
 	ps, err := provider.NewYAMLSource(cfgStore).Providers(context.Background())
 	if err != nil {
 		t.Fatal(err)

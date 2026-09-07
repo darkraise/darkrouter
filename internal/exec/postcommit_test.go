@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/config"
 )
 
 // A provider that commits and then fails must not produce a second response.
@@ -25,7 +27,7 @@ func TestPostCommitFailureBecomesAnInStreamError(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	rec := post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
 
 	body := rec.Body.String()
@@ -68,8 +70,12 @@ func TestCommittedStreamOutlivesTheTotalBudget(t *testing.T) {
 	up := httptest.NewServer(sc)
 	defer up.Close()
 
-	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{},
-		"policy:\n  timeout:\n    connect: 5ms\n    first_byte: 300ms\n    total: 400ms\n    idle: 5s\n")
+	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 300 * time.Millisecond
+		c.Policy.Timeout.Total = 400 * time.Millisecond
+		c.Policy.Timeout.Idle = 5 * time.Second
+	})
 
 	rec := post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
 	body := rec.Body.String()
@@ -92,8 +98,12 @@ func TestCommittedStreamIsCutAtIdle(t *testing.T) {
 	up := httptest.NewServer(sc)
 	defer up.Close()
 
-	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{},
-		"policy:\n  timeout:\n    connect: 5ms\n    first_byte: 1s\n    total: 10s\n    idle: 200ms\n")
+	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = time.Second
+		c.Policy.Timeout.Total = 10 * time.Second
+		c.Policy.Timeout.Idle = 200 * time.Millisecond
+	})
 
 	done := make(chan string, 1)
 	go func() {
@@ -121,7 +131,12 @@ func TestASlowUnaryBodyIsBoundedByIdleNotFirstByte(t *testing.T) {
 		time.Sleep(600 * time.Millisecond)
 		_, _ = w.Write([]byte(`{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
 	}
-	cfg := "policy:\n  timeout:\n    connect: 5ms\n    first_byte: 300ms\n    total: 5s\n    idle: 5s\n"
+	cfg := func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 300 * time.Millisecond
+		c.Policy.Timeout.Total = 5 * time.Second
+		c.Policy.Timeout.Idle = 5 * time.Second
+	}
 	for _, tc := range []struct {
 		name string
 		post func(*testing.T, *Executor, string) *httptest.ResponseRecorder

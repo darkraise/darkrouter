@@ -3,9 +3,6 @@ package exec
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -31,23 +28,14 @@ type fleetProvider struct {
 
 func fleetExecutor(t *testing.T, ps []fleetProvider) *Executor {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-
-	var b strings.Builder
-	b.WriteString("server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n")
-	for _, p := range ps {
-		b.WriteString("  - id: " + p.id + "\n    kind: " + p.kind +
-			"\n    base_url: " + p.baseURL + "\n    api_key: ${K}\n    priority: " +
-			strconv.Itoa(p.prio) + "\n    models: [m]\n")
-	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
+		for _, p := range ps {
+			c.Providers = append(c.Providers, config.ProviderConfig{
+				ID: p.id, Kind: p.kind, BaseURL: p.baseURL, APIKey: "sk",
+				Priority: p.prio, Models: []string{"m"},
+			})
+		}
+	}))
 	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),

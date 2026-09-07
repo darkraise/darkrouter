@@ -24,6 +24,11 @@ type fieldMeta struct {
 // config view to say so at the point of display.
 var databaseOwned = []string{"aliases", "policy"}
 
+// bootstrapOwned names the keys the process reads from its environment before
+// the database is open. They cannot be stored, so reporting them as a database
+// value would send an operator to a screen that cannot change them.
+var bootstrapOwned = []string{"server.proxy_listen", "server.admin_listen"}
+
 // configFields is every key the settings screen can show. Listed rather than
 // reflected: reflection would expose whatever the struct happens to carry,
 // including server.proxy_token, and phase 7 §4.1 forbids returning credential
@@ -57,14 +62,14 @@ var configFields = []string{
 	"aliases",
 }
 
-func sourceOf(field string, cfg *config.Config) string {
+func sourceOf(field string) string {
 	for _, owned := range databaseOwned {
 		if field == owned || strings.HasPrefix(field, owned+".") {
 			return "database"
 		}
 	}
-	if slices.Contains(cfg.FileKeys, field) {
-		return "file"
+	if slices.Contains(bootstrapOwned, field) {
+		return "environment"
 	}
 	return "default"
 }
@@ -87,7 +92,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	fields := make(map[string]fieldMeta, len(configFields))
 	for _, f := range configFields {
 		fields[f] = fieldMeta{
-			Source:        sourceOf(f, cfg),
+			Source:        sourceOf(f),
 			HotReloadable: !slices.Contains(config.RestartOnly, f),
 		}
 	}

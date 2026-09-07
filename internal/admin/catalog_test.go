@@ -40,7 +40,7 @@ func getCatalog(t *testing.T, s *Server, query string) catalogBody {
 }
 
 func TestTheCatalogListsModelsAcrossProviders(t *testing.T) {
-	s, _ := testServerWithCatalog(t, "")
+	s, _ := testServerWithCatalog(t, nil)
 	body := getCatalog(t, s, "")
 
 	var shared bool
@@ -65,7 +65,7 @@ func TestTheCatalogMarksInferredMetadata(t *testing.T) {
 	// Master design §6.4 routes a guessed model with a warning. An operator
 	// reading the catalog needs to see which rows are guesses, or a guessed
 	// row that refuses tool calls looks like a Darkrouter bug.
-	s, _ := testServerWithCatalog(t, "")
+	s, _ := testServerWithCatalog(t, nil)
 	body := getCatalog(t, s, "")
 
 	var found bool
@@ -86,7 +86,7 @@ func TestTheCatalogMarksInferredMetadata(t *testing.T) {
 }
 
 func TestTheCatalogFiltersBySurface(t *testing.T) {
-	s, _ := testServerWithCatalog(t, "")
+	s, _ := testServerWithCatalog(t, nil)
 	body := getCatalog(t, s, "?surface=embedding")
 
 	if len(body.Models) != 1 || body.Models[0].Model != "guessed-model" {
@@ -95,7 +95,7 @@ func TestTheCatalogFiltersBySurface(t *testing.T) {
 }
 
 func TestTheCatalogSearchesBySubstring(t *testing.T) {
-	s, _ := testServerWithCatalog(t, "")
+	s, _ := testServerWithCatalog(t, nil)
 	body := getCatalog(t, s, "?q=guess")
 
 	if len(body.Models) != 1 || body.Models[0].Model != "guessed-model" {
@@ -104,7 +104,7 @@ func TestTheCatalogSearchesBySubstring(t *testing.T) {
 }
 
 func TestTheCatalogFiltersByContextWindow(t *testing.T) {
-	s, _ := testServerWithCatalog(t, "")
+	s, _ := testServerWithCatalog(t, nil)
 	body := getCatalog(t, s, "?min_context=100000")
 
 	if len(body.Models) != 1 || body.Models[0].Model != "shared-model" {
@@ -116,7 +116,7 @@ func TestTheCatalogReportsWhatEachAliasResolvesTo(t *testing.T) {
 	// The chain lives in the configuration and the catalog lives in the
 	// database. Joining them in the browser would duplicate resolution rules
 	// the router already owns.
-	s, _ := testServerWithCatalog(t, "  fast:\n    - a/shared-model\n    - b/shared-model\n")
+	s, _ := testServerWithCatalog(t, map[string][]string{"fast": {"a/shared-model", "b/shared-model"}})
 	body := getCatalog(t, s, "")
 
 	if len(body.Aliases) != 1 || body.Aliases[0].Name != "fast" {

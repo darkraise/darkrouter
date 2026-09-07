@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/darkraise/darkrouter/internal/config"
 )
 
 func sseOK(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +38,7 @@ func TestStreamFailsOverOnAnInStreamErrorBeforeCommit(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
 	rec := post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
 
 	body := rec.Body.String()
@@ -57,7 +59,7 @@ func TestStreamReplaysPreCommitEventsExactlyOnce(t *testing.T) {
 	up := httptest.NewServer(sc)
 	defer up.Close()
 
-	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, "")
+	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, nil)
 	rec := post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
 
 	body := rec.Body.String()
@@ -89,7 +91,7 @@ func TestStreamPayloadFloodFailsTheAttempt(t *testing.T) {
 
 	logger := &captureLogger{}
 	e, _ := loopExecutor(t, up, twoProviderFleet(), logger,
-		"  sse:\n    max_precommit_bytes: 4096\n")
+		func(c *config.Config) { c.Server.SSE.MaxPrecommitBytes = 4096 })
 
 	rec := post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
 	if !strings.Contains(rec.Body.String(), `"content":"hi"`) {
@@ -114,7 +116,7 @@ func TestStreamRecordsTTFTAndUsage(t *testing.T) {
 	defer up.Close()
 
 	logger := &captureLogger{}
-	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, "")
+	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, nil)
 	post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
 
 	r := logger.only(t)

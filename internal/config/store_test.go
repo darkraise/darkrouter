@@ -1,70 +1,63 @@
 package config
 
 import (
-	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-func writeFile(t *testing.T, path, body string) {
+// storeOver returns a store whose loader hands back a copy of stored, so a
+// test can change what the next reload sees the way an admin edit changes what
+// the database answers.
+func storeOver(t *testing.T, stored *Config) *Store {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func newTestStore(t *testing.T, body string) (*Store, string) {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	writeFile(t, path, body)
-	s, err := NewStore(path, env(map[string]string{"GROQ_KEY": "sk-x"}))
+	s, err := NewStoreFrom(func() (*Config, error) {
+		next := *stored
+		return &next, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, path
+	return s
+}
+
+// defaulted is the compiled default configuration, the starting point every
+// fixture in this file edits.
+func defaulted() *Config {
+	c := &Config{}
+	applyDefaults(c)
+	return c
 }
 
 func TestStoreServesCurrentConfig(t *testing.T) {
-	s, _ := newTestStore(t, minimal)
-	if s.Current().Providers[0].ID != "groq" {
-		t.Fatal("unexpected config")
+	c := defaulted()
+	c.Providers = []ProviderConfig{{ID: "groq"}}
+	if got := NewStoreOf(c).Current().Providers[0].ID; got != "groq" {
+		t.Fatalf("provider = %q, want groq", got)
 	}
 }
 
 func TestReloadAppliesValidChange(t *testing.T) {
-	s, path := newTestStore(t, minimal)
-	writeFile(t, path, strings.Replace(minimal, "id: groq", "id: renamed", 1))
+	stored := defaulted()
+	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	s := storeOver(t, stored)
+
+	stored.Providers = []ProviderConfig{{ID: "renamed"}}
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if s.Current().Providers[0].ID != "renamed" {
-		t.Fatal("reload did not apply")
-	}
-}
-
-func TestReloadRejectsInvalidAndKeepsPrevious(t *testing.T) {
-	s, path := newTestStore(t, minimal)
-	writeFile(t, path, "server:\n  nonsense: true\n")
-	if err := s.Reload(); err == nil {
-		t.Fatal("expected reload to fail")
-	}
-	if s.Current().Providers[0].ID != "groq" {
-		t.Fatal("a rejected reload must leave the previous config live")
-	}
-	if s.LastError() == nil {
-		t.Fatal("expected LastError to record the rejection")
+	if got := s.Current().Providers[0].ID; got != "renamed" {
+		t.Fatalf("provider = %q; the reload did not apply", got)
 	}
 }
 
 func TestReloadWarnsOnRestartOnlyChange(t *testing.T) {
-	s, path := newTestStore(t, minimal)
-	writeFile(t, path, strings.Replace(minimal, "proxy_listen: :8080", "proxy_listen: :9090", 1))
+	stored := defaulted()
+	s := storeOver(t, stored)
+
+	stored.Server.ProxyListen = ":9090"
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,40 +69,6 @@ func TestReloadWarnsOnRestartOnlyChange(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected a restart-required warning, got %v", s.Current().Warnings)
-	}
-}
-
-// Editors that save by rename deliver a rename event for the old inode and
-// nothing for the new file. Watching the file itself silently stops working
-// after the first save, so the watcher must watch the parent directory.
-func TestWatchDetectsRenameStyleSave(t *testing.T) {
-	s, path := newTestStore(t, minimal)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ready := make(chan struct{})
-	go func() { _ = s.watch(ctx, ready) }()
-	select {
-	case <-ready:
-	case <-time.After(3 * time.Second):
-		t.Fatal("watcher did not start")
-	}
-
-	tmp := path + ".tmp"
-	writeFile(t, tmp, strings.Replace(minimal, "id: groq", "id: vimstyle", 1))
-	if err := os.Rename(tmp, path); err != nil {
-		t.Fatal(err)
-	}
-
-	deadline := time.After(3 * time.Second)
-	for {
-		if s.Current().Providers[0].ID == "vimstyle" {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("watcher did not observe a rename-style save")
-		case <-time.After(20 * time.Millisecond):
-		}
 	}
 }
 
@@ -134,24 +93,25 @@ func TestRestartOnlyNamesTheWorkerIntervals(t *testing.T) {
 
 func TestReloadWarnsOnWorkerIntervalChange(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		body  string
-		match string
+		name   string
+		change func(*Config)
+		match  string
 	}{
 		{
-			name:  "sync interval",
-			body:  minimal + "\ncatalog:\n  sync_interval: 3h\n",
-			match: "catalog.sync_interval",
+			name:   "sync interval",
+			change: func(c *Config) { c.Catalog.SyncInterval = 3 * time.Hour },
+			match:  "catalog.sync_interval",
 		},
 		{
-			name:  "discovery interval",
-			body:  minimal + "\ncatalog:\n  discovery:\n    interval: 3h\n",
-			match: "catalog.discovery.interval",
+			name:   "discovery interval",
+			change: func(c *Config) { c.Catalog.Discovery.Interval = 3 * time.Hour },
+			match:  "catalog.discovery.interval",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, path := newTestStore(t, minimal)
-			writeFile(t, path, tc.body)
+			stored := defaulted()
+			s := storeOver(t, stored)
+			tc.change(stored)
 			if err := s.Reload(); err != nil {
 				t.Fatal(err)
 			}
@@ -166,10 +126,12 @@ func TestReloadWarnsOnWorkerIntervalChange(t *testing.T) {
 }
 
 func TestOverlayAppliesOnEveryReload(t *testing.T) {
-	// A reload that dropped the overlay would silently restore the file's
+	// A reload that dropped the overlay would silently restore the loader's
 	// aliases until the next restart, which is the whole failure the overlay
 	// exists to prevent.
-	s, path := newTestStore(t, minimal)
+	stored := defaulted()
+	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	s := storeOver(t, stored)
 	s.SetOverlay(func(c *Config) error {
 		c.Aliases = map[string][]string{"from-db": {"groq/llama"}}
 		return nil
@@ -181,7 +143,7 @@ func TestOverlayAppliesOnEveryReload(t *testing.T) {
 		t.Fatalf("overlay did not reach the first reload: %v", s.Current().Aliases)
 	}
 
-	writeFile(t, path, strings.Replace(minimal, "id: groq", "id: renamed", 1))
+	stored.Providers = []ProviderConfig{{ID: "renamed"}}
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -189,12 +151,14 @@ func TestOverlayAppliesOnEveryReload(t *testing.T) {
 		t.Fatalf("overlay was dropped by a later reload: %v", s.Current().Aliases)
 	}
 	if s.Current().Providers[0].ID != "renamed" {
-		t.Fatal("the overlay swallowed the file's own change")
+		t.Fatal("the overlay swallowed the loader's own change")
 	}
 }
 
 func TestOverlayFailureKeepsThePreviousConfig(t *testing.T) {
-	s, _ := newTestStore(t, minimal)
+	stored := defaulted()
+	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	s := storeOver(t, stored)
 	s.SetOverlay(func(*Config) error { return errors.New("database unreachable") })
 	if err := s.Reload(); err == nil {
 		t.Fatal("expected the reload to fail")
@@ -207,67 +171,14 @@ func TestOverlayFailureKeepsThePreviousConfig(t *testing.T) {
 	}
 }
 
-// Kubernetes projects a ConfigMap as a symlink to a versioned directory and
-// swaps that symlink atomically on update. The file the store watches is
-// never written; the entry beside it changes.
-func TestWatchDetectsASymlinkSwap(t *testing.T) {
-	dir := t.TempDir()
-	v1, v2 := filepath.Join(dir, "v1"), filepath.Join(dir, "v2")
-	for _, d := range []string{v1, v2} {
-		if err := os.Mkdir(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeFile(t, filepath.Join(v1, "darkrouter.yaml"), minimal)
-	writeFile(t, filepath.Join(v2, "darkrouter.yaml"), strings.Replace(minimal, "id: groq", "id: swapped", 1))
-	data := filepath.Join(dir, "..data")
-	if err := os.Symlink("v1", data); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "darkrouter.yaml")
-	if err := os.Symlink(filepath.Join("..data", "darkrouter.yaml"), path); err != nil {
-		t.Fatal(err)
-	}
-	s, err := NewStore(path, env(map[string]string{"GROQ_KEY": "sk-x"}))
-	if err != nil {
-		t.Fatal(err)
-	}
+// The admin API and a background reload both call Reload; two at once must not
+// interleave a stale snapshot over a newer one.
+func TestConcurrentReloadsPublishTheLatest(t *testing.T) {
+	stored := defaulted()
+	stored.Providers = []ProviderConfig{{ID: "groq"}}
+	s := storeOver(t, stored)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ready := make(chan struct{})
-	go func() { _ = s.watch(ctx, ready) }()
-	select {
-	case <-ready:
-	case <-time.After(3 * time.Second):
-		t.Fatal("watcher did not start")
-	}
-
-	tmp := filepath.Join(dir, "..data_tmp")
-	if err := os.Symlink("v2", tmp); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, data); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(3 * time.Second)
-	for {
-		if s.Current().Providers[0].ID == "swapped" {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("watcher did not observe the symlink swap")
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-}
-
-// The watcher and the admin API both call Reload; two at once must not
-// interleave a stale parse over a newer one.
-func TestConcurrentReloadsPublishTheLatestFile(t *testing.T) {
-	s, path := newTestStore(t, minimal)
-	writeFile(t, path, strings.Replace(minimal, "id: groq", "id: latest", 1))
+	stored.Providers = []ProviderConfig{{ID: "latest"}}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -282,13 +193,20 @@ func TestConcurrentReloadsPublishTheLatestFile(t *testing.T) {
 	}
 }
 
-// restartOnlyWarnings diffs consecutive snapshots, so the next unrelated save
+// restartOnlyWarnings diffs consecutive snapshots, so the next unrelated write
 // clears the warning while the process is still running the old value. The
 // pending set has to be measured against boot, not against the last reload.
 func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	writeFile(t, path, "catalog:\n  sync_interval: 12h\n")
-	s, err := NewStore(path, env(nil))
+	// What the loader returns next. Mutated between reloads, the way an edit
+	// through the admin API changes what the database answers.
+	stored := &Config{}
+	applyDefaults(stored)
+	stored.Catalog.SyncInterval = 12 * time.Hour
+
+	s, err := NewStoreFrom(func() (*Config, error) {
+		next := *stored
+		return &next, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +214,7 @@ func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
 		t.Fatalf("PendingRestart = %v at boot, want none", got)
 	}
 
-	writeFile(t, path, "catalog:\n  sync_interval: 6h\n")
+	stored.Catalog.SyncInterval = 6 * time.Hour
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -305,13 +223,15 @@ func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
 	}
 
 	// An unrelated hot-reloadable change must not clear it: the process is
-	// still running the sync interval it booted with.
-	writeFile(t, path, "catalog:\n  sync_interval: 6h\nlog:\n  retention: 100h\n")
+	// still running the sync interval it booted with. The sync interval is
+	// deliberately left where the previous reload put it, so the only thing
+	// that can keep it pending is the comparison against boot.
+	stored.Log.Retention = 100 * time.Hour
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.PendingRestart(); len(got) != 1 || got[0] != "catalog.sync_interval" {
-		t.Fatalf("PendingRestart = %v after an unrelated save, want it still pending", got)
+		t.Fatalf("PendingRestart = %v after an unrelated write, want it still pending", got)
 	}
 }
 

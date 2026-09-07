@@ -344,6 +344,7 @@ function groupForPrefix(field: string): GroupId {
 
 export const SOURCE_NOTE = {
   file: "Read from darkrouter.yaml",
+  environment: "Read from the environment at startup; a restart applies a change",
   // §8.1 requires the config view to say this at the point of display: after
   // the first run, editing the file has no effect on these.
   database: "Stored in the database — the file is no longer read for this",
@@ -352,6 +353,7 @@ export const SOURCE_NOTE = {
 
 export const SOURCE_LABEL = {
   file: "file",
+  environment: "environment",
   database: "database",
   default: "default",
 } as const

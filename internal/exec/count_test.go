@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,18 +21,11 @@ import (
 // countExecutor builds an executor over one provider of the given kind.
 func countExecutor(t *testing.T, kind, upstreamURL string) *Executor {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\nproviders:\n" +
-		"  - id: fake\n    kind: " + kind + "\n    base_url: " + upstreamURL +
-		"\n    api_key: ${K}\n    models: [m]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{{
+			ID: "fake", Kind: kind, BaseURL: upstreamURL, APIKey: "sk", Models: []string{"m"},
+		}}
+	}))
 	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropic.New(),
@@ -128,23 +119,19 @@ func TestHandleCountReportsAnUnknownModel(t *testing.T) {
 
 // countExecutorWith is countExecutor with collaborators, a preset and a
 // timeout policy, for the paths the native count shares with the loop.
-func countExecutorWith(t *testing.T, kind, upstreamURL, preset string, deps Deps, extraCfg string) *Executor {
+func countExecutorWith(t *testing.T, kind, upstreamURL, preset string, deps Deps,
+	tune func(*config.Config)) *Executor {
+
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" + extraCfg + "providers:\n" +
-		"  - id: fake\n    kind: " + kind + "\n    base_url: " + upstreamURL +
-		"\n    api_key: ${K}\n    models: [m]\n"
-	if preset != "" {
-		body += "    preset: " + preset + "\n"
-	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{{
+			ID: "fake", Kind: kind, Preset: preset, BaseURL: upstreamURL,
+			APIKey: "sk", Models: []string{"m"},
+		}}
+		if tune != nil {
+			tune(c)
+		}
+	}))
 	return New(cfgStore, provider.NewYAMLSource(cfgStore), map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropic.New(),
@@ -162,8 +149,11 @@ func TestHandleCountGivesUpAtTheAttemptDeadline(t *testing.T) {
 	}))
 	defer up.Close()
 
-	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{},
-		"policy:\n  timeout:\n    connect: 5ms\n    first_byte: 200ms\n    total: 1s\n")
+	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{}, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 200 * time.Millisecond
+		c.Policy.Timeout.Total = time.Second
+	})
 	start := time.Now()
 	rec := postCount(t, e, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
 	if rec.Code != 200 || rec.Header().Get("X-Darkrouter-Estimated") != "true" {
@@ -184,7 +174,7 @@ func TestHandleCountSkipsACoolingTargetAndRecordsFailures(t *testing.T) {
 	defer up.Close()
 
 	b := health.New(3, time.Hour)
-	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{Health: b, Fleet: b}, "")
+	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{Health: b, Fleet: b}, nil)
 	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
 	for i := 0; i < 3; i++ {
 		if rec := postCount(t, e, "anthropic", body); rec.Code != 200 {
@@ -222,7 +212,7 @@ func TestHandleCountAppliesTheAuthorizer(t *testing.T) {
 	}))
 	defer up.Close()
 
-	e := countExecutorWith(t, "anthropic", up.URL, "anthropic-oauth", Deps{Auth: headerResolver{}}, "")
+	e := countExecutorWith(t, "anthropic", up.URL, "anthropic-oauth", Deps{Auth: headerResolver{}}, nil)
 	rec := postCount(t, e, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "7") {
 		t.Fatalf("code = %d body = %s", rec.Code, rec.Body.String())

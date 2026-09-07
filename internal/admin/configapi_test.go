@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/store"
 	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
@@ -61,7 +62,7 @@ func TestConfigReturnsEveryBlock(t *testing.T) {
 func TestConfigServesPublicURL(t *testing.T) {
 	// The extra YAML is indented and lands directly after admin_listen, so it
 	// continues the server mapping rather than opening a second one.
-	s, _ := testServerFullWithConfig(t, "  public_url: \"https://api.example.com/dr\"\n")
+	s, _ := testServerFullWithConfig(t, func(c *config.Config) { c.Server.PublicURL = "https://api.example.com/dr" })
 	server, ok := getConfig(t, s).Blocks["server"].(map[string]any)
 	if !ok {
 		t.Fatalf("server block is %T, want an object", getConfig(t, s).Blocks["server"])
@@ -123,11 +124,13 @@ func TestConfigNamesTheSourceOfEachValue(t *testing.T) {
 	s, _ := testServerFull(t)
 	body := getConfig(t, s)
 
-	if got := body.Fields["server.proxy_listen"].Source; got != "file" {
-		t.Errorf("server.proxy_listen source = %q, want file", got)
+	// The listen addresses are read from the environment before the database
+	// is open, so the settings screen cannot offer to change them.
+	if got := body.Fields["server.proxy_listen"].Source; got != "environment" {
+		t.Errorf("server.proxy_listen source = %q, want environment", got)
 	}
-	// Never written in the fixture's YAML, so it is whatever applyDefaults
-	// chose -- reporting it as "file" would be a lie the console repeats.
+	// Nothing stored it, so it is whatever applyDefaults chose -- reporting a
+	// source the operator never chose would be a lie the console repeats.
 	if got := body.Fields["capture.max_bytes"].Source; got != "default" {
 		t.Errorf("capture.max_bytes source = %q, want default", got)
 	}

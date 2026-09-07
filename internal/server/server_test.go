@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,25 +19,18 @@ import (
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-func newTestServer(t *testing.T, extraServer string) *Server {
+func newTestServer(t *testing.T, tune func(*config.Config)) *Server {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" + extraServer +
-		"providers:\n  - id: fake\n    kind: openaicompat\n" +
-		"    base_url: https://up.example/v1\n    api_key: ${K}\n    models: [m]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	return serverBackedBy(t, cfgStore)
+	return serverBackedBy(t, config.NewStoreOf(testConfigOf(t, func(c *config.Config) {
+		c.Providers = []config.ProviderConfig{fakeProvider}
+		if tune != nil {
+			tune(c)
+		}
+	})))
 }
 
 func TestHealthzReportsConfigValidity(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
 	if rec.Code != 200 {
@@ -58,7 +49,7 @@ func TestHealthzReportsConfigValidity(t *testing.T) {
 }
 
 func TestReadyzReturns200(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
 	if rec.Code != 200 {
@@ -67,7 +58,7 @@ func TestReadyzReturns200(t *testing.T) {
 }
 
 func TestModelsListsProviderModels(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
 	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
 	if !strings.Contains(rec.Body.String(), `"m"`) {
@@ -76,7 +67,7 @@ func TestModelsListsProviderModels(t *testing.T) {
 }
 
 func TestProxyTokenIsEnforcedWhenConfigured(t *testing.T) {
-	s := newTestServer(t, "  proxy_token: secret\n")
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "secret" })
 	rec := httptest.NewRecorder()
 	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -93,7 +84,7 @@ func TestProxyTokenIsEnforcedWhenConfigured(t *testing.T) {
 }
 
 func TestProxyTokenIsOptional(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
 	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
 	if rec.Code != 200 {
@@ -102,7 +93,7 @@ func TestProxyTokenIsOptional(t *testing.T) {
 }
 
 func TestProxyTokenRejectsWrongToken(t *testing.T) {
-	s := newTestServer(t, "  proxy_token: secret\n")
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "secret" })
 	r := httptest.NewRequest("GET", "/v1/models", nil)
 	r.Header.Set("Authorization", "Bearer wrong")
 	rec := httptest.NewRecorder()
@@ -113,7 +104,7 @@ func TestProxyTokenRejectsWrongToken(t *testing.T) {
 }
 
 func TestProxyHandlerRoutesEveryDialect(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	h := s.ProxyHandler()
 
 	cases := []struct {
@@ -140,7 +131,7 @@ func TestProxyHandlerRoutesEveryDialect(t *testing.T) {
 }
 
 func TestGeminiListingIsServed(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
 	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1beta/models", nil))
 	if rec.Code != 200 {
@@ -152,7 +143,7 @@ func TestGeminiListingIsServed(t *testing.T) {
 }
 
 func TestGeminiAuthUsesItsOwnCredentialForm(t *testing.T) {
-	s := newTestServer(t, "  proxy_token: secret\n")
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "secret" })
 	rec := httptest.NewRecorder()
 	s.ProxyHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/v1beta/models?key=secret", nil))
 	if rec.Code == 401 {
@@ -170,7 +161,7 @@ func TestGeminiAuthUsesItsOwnCredentialForm(t *testing.T) {
 }
 
 func TestAnthropicAuthUsesItsOwnCredentialForm(t *testing.T) {
-	s := newTestServer(t, "  proxy_token: secret\n")
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "secret" })
 	r := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"nope","max_tokens":1,"messages":[]}`))
 	r.Header.Set("x-api-key", "wrong")
@@ -308,7 +299,7 @@ func TestTheProxyPortIgnoresASessionCookie(t *testing.T) {
 	// logged-in operator's browser would be an authenticated proxy client for
 	// any page they visited. Nothing reads cookies here today; this is what
 	// keeps it that way.
-	s := newTestServer(t, "  proxy_token: secret\n")
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "secret" })
 
 	r := httptest.NewRequest("GET", "/v1/models", nil)
 	r.AddCookie(&http.Cookie{Name: "darkrouter_session", Value: "a-valid-looking-session"})
@@ -322,7 +313,7 @@ func TestTheProxyPortIgnoresASessionCookie(t *testing.T) {
 
 func TestTheProxyPortStillAcceptsItsBearerToken(t *testing.T) {
 	// The other half: refusing the cookie must not refuse the token.
-	s := newTestServer(t, "  proxy_token: secret\n")
+	s := newTestServer(t, func(c *config.Config) { c.Server.ProxyToken = "secret" })
 
 	r := httptest.NewRequest("GET", "/v1/models", nil)
 	r.Header.Set("Authorization", "Bearer secret")
@@ -337,7 +328,7 @@ func TestTheProxyPortStillAcceptsItsBearerToken(t *testing.T) {
 
 func TestTheAdminPortServesTheAPIClosed(t *testing.T) {
 	// One request proves both that the API is mounted and that it is closed.
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/overview", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -349,7 +340,7 @@ func TestHealthEndpointsStayUnauthenticated(t *testing.T) {
 	// A container orchestrator and a Prometheus scraper read these. Putting
 	// them behind a session breaks both, and the admin mux is mounted at the
 	// root so nothing else may shadow their exact paths.
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
 		rec := httptest.NewRecorder()
 		s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
@@ -364,7 +355,7 @@ func TestAMissingPasswordHashWarnsRatherThanFailingStartup(t *testing.T) {
 	// dashboard has no password would take a working proxy down over a feature
 	// the operator may not use.
 	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", "")
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
@@ -393,7 +384,7 @@ func TestALoginWorksAgainstAConfiguredHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", hash)
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 
 	r := httptest.NewRequest("POST", "/api/auth/login",
 		strings.NewReader(`{"password":"hunter2"}`))
@@ -408,19 +399,14 @@ func TestALoginWorksAgainstAConfiguredHash(t *testing.T) {
 // policy.cooldown is hot-editable, and the edit has to reach the breaker
 // without a restart.
 func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	write := func(tripAfter string) {
-		body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" +
-			"policy:\n  cooldown:\n    trip_after: " + tripAfter + "\n" +
-			"providers:\n  - id: fake\n    kind: openaicompat\n" +
-			"    base_url: https://up.example/v1\n    api_key: ${K}\n    models: [m]\n"
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("3")
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
+	tripAfter := 3
+	cfgStore, err := config.NewStoreFrom(func() (*config.Config, error) {
+		n := tripAfter
+		return testConfigOf(t, func(c *config.Config) {
+			c.Policy.Cooldown.TripAfter = &n
+			c.Providers = []config.ProviderConfig{fakeProvider}
+		}), nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +419,7 @@ func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
 		t.Fatal("one 5xx cooled the target under trip_after 3")
 	}
 
-	write("1")
+	tripAfter = 1
 	if err := cfgStore.Reload(); err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +430,7 @@ func TestACooldownEditReachesTheBreakerWithoutARestart(t *testing.T) {
 }
 
 func TestReadyzReports503WhenTheConfigIsInvalid(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	s.store.RecordError(errors.New("bad edit"))
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
@@ -457,7 +443,7 @@ func TestReadyzReports503WhenTheConfigIsInvalid(t *testing.T) {
 }
 
 func TestReadyzReports503WhenTheDatabaseIsGone(t *testing.T) {
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	_ = s.db.Close()
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
@@ -490,20 +476,14 @@ func TestTheSyncedLiteLLMIndexReachesTheRoutedCatalog(t *testing.T) {
 	}))
 	defer idx.Close()
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "darkrouter.yaml")
-	body := "server:\n  proxy_listen: :0\n  admin_listen: :0\n" +
-		"catalog:\n  litellm_url: " + idx.URL + "\n" +
-		"providers:\n  - id: groq\n    preset: groq\n    kind: openaicompat\n" +
-		"    base_url: https://api.groq.com/openai/v1\n    api_key: ${K}\n" +
-		"    models: [" + model + "]\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfigOf(t, func(c *config.Config) {
+		c.Catalog.LiteLLMURL = idx.URL
+		c.Providers = []config.ProviderConfig{{
+			ID: "groq", Preset: "groq", Kind: "openaicompat",
+			BaseURL: "https://api.groq.com/openai/v1", APIKey: "sk",
+			Models: []string{model},
+		}}
+	}))
 	s := serverBackedBy(t, cfgStore)
 
 	ctx := context.Background()
@@ -555,7 +535,7 @@ func warnsAboutSetup(t *testing.T, s *Server) bool {
 // fine.
 func TestTheUnclaimedWarningClearsOnceAPasswordIsSet(t *testing.T) {
 	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", "")
-	s := newTestServer(t, "")
+	s := newTestServer(t, nil)
 	if !warnsAboutSetup(t, s) {
 		t.Fatal("an unclaimed console does not say so")
 	}

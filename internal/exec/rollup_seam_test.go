@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -57,15 +55,7 @@ func TestRollupSeesTokensTheExecutorActuallyLogged(t *testing.T) {
 		Credentials: []provider.Credential{{ID: "k1", Secret: "k1", Enabled: true}},
 	}}
 
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	if err := os.WriteFile(path,
-		[]byte("server:\n  proxy_listen: :0\n  admin_listen: :0\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "", false })
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfgStore := config.NewStoreOf(testConfig(t, nil))
 	b := health.New(3, 15*time.Minute)
 	e := New(cfgStore, &fleetSource{ps: fleet},
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{

@@ -110,7 +110,7 @@ func serverWithRedirectStyle(t *testing.T, redirect catalog.Redirect) (
 	}
 	s, err := New(Deps{
 		DB: db, PasswordHash: testHash(),
-		Config: configStoreFor(t, ""), Key: key,
+		Config: configStoreFor(t, nil), Key: key,
 		Presets: oauthPresets(srv.URL, redirect),
 		Src:     provider.NewSQLSource(db, key),
 		Breaker: health.New(3, time.Minute),
