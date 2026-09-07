@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -705,5 +707,23 @@ func TestPublicURLRejectsWhatAClientCannotUse(t *testing.T) {
 				t.Fatalf("public_url %q must be refused at load", tc.value)
 			}
 		})
+	}
+}
+
+func TestTimeoutBudgetFailureNamesItsKeys(t *testing.T) {
+	// The loader has to know which keys to revert when a stored pair is
+	// unusable. A bare error message names no culprit, and reverting the
+	// wrong key produces a config the operator did not ask for either.
+	_, err := Parse([]byte("policy:\n  timeout:\n    connect: 30s\n    first_byte: 60s\n    total: 40s\n"), nil)
+	if err == nil {
+		t.Fatal("a total below connect + first_byte must be refused")
+	}
+	var re RuleError
+	if !errors.As(err, &re) {
+		t.Fatalf("error is %T, want a RuleError naming the keys", err)
+	}
+	want := []string{"policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"}
+	if !slices.Equal(re.Keys, want) {
+		t.Errorf("Keys = %v, want %v", re.Keys, want)
 	}
 }
