@@ -188,40 +188,6 @@ var policyFields = []policyField{
 	},
 }
 
-// PolicyOverrides returns only the policy keys the database actually carries.
-//
-// Only what is set: a caller has to tell "not overridden" from "set to zero",
-// which is what lets the config screen name the source of each value.
-func (d *DB) PolicyOverrides(ctx context.Context) (map[string]string, error) {
-	rows, err := d.Read.QueryContext(ctx,
-		`SELECT key, value FROM settings WHERE key LIKE 'policy.%'`)
-	if err != nil {
-		return nil, fmt.Errorf("read policy overrides: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	known := make(map[string]bool, len(policyFields))
-	for _, f := range policyFields {
-		known[f.key] = true
-	}
-	out := map[string]string{}
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, fmt.Errorf("scan policy override: %w", err)
-		}
-		// Only the keys this binary reads. A row an older or newer build wrote
-		// under the prefix is not an override it can apply.
-		if known[k] {
-			out[k] = v
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read policy overrides: %w", err)
-	}
-	return out, nil
-}
-
 // PutPolicy writes every set field of p, and removes the keys it leaves unset
 // so clearing a value in the console restores the file's.
 func (d *DB) PutPolicy(ctx context.Context, p config.PolicyConfig) error {
@@ -283,80 +249,11 @@ func putPolicyTx(ctx context.Context, tx *sql.Tx, p config.PolicyConfig) error {
 	return nil
 }
 
-// ApplyPolicy overlays stored overrides onto a loaded policy, leaving any
-// field the database does not carry exactly as the file set it.
-func ApplyPolicy(p *config.PolicyConfig, overrides map[string]string) error {
-	for _, f := range policyFields {
-		v, ok := overrides[f.key]
-		if !ok {
-			continue
-		}
-		if err := f.set(p, v); err != nil {
-			return fmt.Errorf("stored %s is unusable: %w", f.key, err)
-		}
-	}
-	return nil
-}
-
-// settingConfigImportedAt marks that the YAML aliases and policy blocks have
-// been taken. It is what separates "never imported" from "imported, then
-// emptied through the console" -- an emptiness check alone would silently
-// reimport a set the operator deliberately cleared.
+// settingConfigImportedAt is the marker the retired YAML import left behind.
+// The import is gone; the constant stays because ReconcileConfig deletes the
+// row on every start, and an orphan row in a table this package owns is what
+// it exists to clear.
 const settingConfigImportedAt = "config.imported_at"
-
-// ConfigImportResult reports what the first-run import took, so the caller can
-// log it. Spec §8.1 requires the import to say what it moved: an operator who
-// later edits the file to no effect needs that line to find.
-type ConfigImportResult struct {
-	Imported bool
-	Aliases  int
-	Policy   int
-}
-
-// ImportConfigOnce moves the YAML aliases and policy blocks into SQLite, once.
-//
-// After it has run the file has stopped being authoritative for either, in
-// exactly the way it already has for providers.
-func ImportConfigOnce(ctx context.Context, d *DB, cfg *config.Config) (ConfigImportResult, error) {
-	if _, ok, err := getSetting(ctx, d.Read, settingConfigImportedAt); err != nil {
-		return ConfigImportResult{}, err
-	} else if ok {
-		return ConfigImportResult{}, nil
-	}
-
-	if err := d.PutAliases(ctx, cfg.Aliases); err != nil {
-		return ConfigImportResult{}, err
-	}
-	if err := d.PutPolicy(ctx, cfg.Policy); err != nil {
-		return ConfigImportResult{}, err
-	}
-	stored, err := d.PolicyOverrides(ctx)
-	if err != nil {
-		return ConfigImportResult{}, err
-	}
-	if err := putSetting(ctx, d.Write, settingConfigImportedAt,
-		time.Now().UTC().Format(time.RFC3339)); err != nil {
-		return ConfigImportResult{}, err
-	}
-	return ConfigImportResult{
-		Imported: true,
-		Aliases:  len(cfg.Aliases),
-		Policy:   len(stored),
-	}, nil
-}
-
-// ConfigImportedAt reports when the aliases and policy import ran, if it has.
-func ConfigImportedAt(ctx context.Context, d *DB) (time.Time, bool, error) {
-	raw, ok, err := getSetting(ctx, d.Read, settingConfigImportedAt)
-	if err != nil || !ok {
-		return time.Time{}, false, err
-	}
-	t, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}, false, fmt.Errorf("stored config import marker is not a timestamp: %w", err)
-	}
-	return t, true, nil
-}
 
 // OverlayConfig replaces a loaded Config's aliases with the database's,
 // leaving every other block as the loader built it.
@@ -366,9 +263,9 @@ func ConfigImportedAt(ctx context.Context, d *DB) (time.Time, bool, error) {
 // because LoadConfig reads the 32 scalar keys from the registry and not the
 // alias table, which is a table rather than a settings row.
 //
-// It deliberately does not apply policy. The registry reads the same seven
-// policy.* rows PolicyOverrides does, so doing it here a second time would at
-// best repeat the loader's work and at worst undo it: a policy set LoadConfig
+// It deliberately does not apply policy. The registry already reads the seven
+// policy.* rows, so doing it here a second time would at best repeat the
+// loader's work and at worst undo it: a policy set LoadConfig
 // reverted for a cross-key rule failure would be reinstated with nothing left
 // to revalidate it.
 func OverlayConfig(ctx context.Context, d *DB, cfg *config.Config) error {

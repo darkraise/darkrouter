@@ -24,18 +24,18 @@ func TestPutConfigWritesBothBlocksOrNeither(t *testing.T) {
 	if err != nil || len(aliases["fast"]) != 1 {
 		t.Fatalf("aliases = %v, %v", aliases, err)
 	}
-	overrides, err := db.PolicyOverrides(ctx)
-	if err != nil || overrides["policy.retry.max_attempts"] != "2" {
-		t.Fatalf("overrides = %v, %v", overrides, err)
+	attempts, _, err := getSetting(ctx, db.Read, "policy.retry.max_attempts")
+	if err != nil || attempts != "2" {
+		t.Fatalf("policy.retry.max_attempts = %q, %v", attempts, err)
 	}
 	// A nil block leaves what is there.
 	if err := db.PutConfig(ctx, nil, &config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 5}}); err != nil {
 		t.Fatal(err)
 	}
 	aliases, _ = db.Aliases(ctx)
-	overrides, _ = db.PolicyOverrides(ctx)
-	if len(aliases["fast"]) != 1 || overrides["policy.retry.max_attempts"] != "5" {
-		t.Errorf("after a policy-only write: aliases %v, overrides %v", aliases, overrides)
+	attempts, _, _ = getSetting(ctx, db.Read, "policy.retry.max_attempts")
+	if len(aliases["fast"]) != 1 || attempts != "5" {
+		t.Errorf("after a policy-only write: aliases %v, max_attempts %q", aliases, attempts)
 	}
 }
 
