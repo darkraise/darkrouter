@@ -19,11 +19,12 @@ docker compose -f compose.prod.yml pull
 docker compose -f compose.prod.yml up -d
 ```
 
-Settings are changed in the console. Policy and aliases have write endpoints
-today; the rest are shown read-only on the Settings screen, which says where
-each value came from and which need a restart. A `darkrouter.yaml` left over
-from an older deployment is ignored — the process warns about it at startup
-and reads nothing from it.
+Settings are changed in the console. The Settings screen edits every stored
+setting, says where each value came from — the database, the environment, or a
+compiled default — offers a reset to the default, and names the keys whose
+change waits for a restart. A `darkrouter.yaml` left over from an older
+deployment is ignored: the process warns about it at startup, in the log and on
+the Settings screen, and reads nothing from it.
 
 `.env` needs one value to start: `DARKROUTER_MASTER_KEY`. Everything else in
 `.env.example` is commented out and has a working default, and providers are
@@ -39,8 +40,10 @@ docker compose -f compose.prod.yml logs | grep 'setup token'
 ```
 
 Setting a password closes setup for good. `DARKROUTER_ADMIN_PASSWORD_HASH`
-still works and still overrides the stored password on the next restart, which
-is how a lost password is recovered — see below.
+still works, but it only overrides the stored password when its value has
+changed since the console password was last set; left unchanged, the stored
+password survives every restart. Changing it is how a lost password is
+recovered — see below.
 
 > **Upgrading a deployment made before these changes**, three one-time fixes:
 >
