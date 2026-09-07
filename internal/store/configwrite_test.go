@@ -214,6 +214,27 @@ func TestWriteConfigWritesAliasesInTheSameTransaction(t *testing.T) {
 	}
 }
 
+// Nil means "leave the alias table alone", which is what lets a settings-only
+// save share the one write path without touching a block it never mentioned.
+func TestWriteConfigWithNilAliasesLeavesTheTableAlone(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	if err := db.PutAliases(ctx, map[string][]string{"fast": {"groq/llama"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Set: map[string]string{"log.retention": "96h"},
+	}); err != nil {
+		t.Fatalf("WriteConfig: %v", err)
+	}
+	stored, err := db.Aliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored["fast"]) != 1 {
+		t.Errorf("aliases = %v, want the untouched chain", stored)
+	}
+}
+
 // A save that breaks nothing must not be refused because of a row that was
 // already unusable before it ran.
 func TestWriteConfigIgnoresAnUnusableRowItDoesNotTouch(t *testing.T) {

@@ -45,7 +45,56 @@ func TestAliasWriteRejectsAnUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestPolicyWriteCarriesEveryFieldItNames(t *testing.T) {
+// An empty map means delete every alias, where nil would mean leave the table
+// alone. The two shapes are the difference between an operator clearing their
+// last chain and a save that quietly changes nothing.
+func TestPutAliasesWithAnEmptyMapDeletesEveryAlias(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	if w := do(t, s, cookie, token, "PUT", "/api/aliases",
+		`{"fast":["groq/llama"]}`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PUT", "/api/aliases", `{}`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	stored, err := db.Aliases(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Errorf("aliases = %v, want none", stored)
+	}
+	if got := s.deps.Config.Current().Aliases; len(got) != 0 {
+		t.Errorf("the live config still carries %v", got)
+	}
+}
+
+// A null body is the one shape that reaches the handler's nil normalisation:
+// encoding/json decodes {} to a non-nil empty map, so only null arrives as nil,
+// and nil means "leave the alias table alone" by the time it reaches the store.
+func TestPutAliasesWithANullBodyDeletesEveryAlias(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	if w := do(t, s, cookie, token, "PUT", "/api/aliases",
+		`{"fast":["groq/llama"]}`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PUT", "/api/aliases", `null`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+	stored, err := db.Aliases(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Errorf("aliases = %v, want none", stored)
+	}
+}
+
+func TestPolicyWriteCarriesFirstByteAndCooldownMax(t *testing.T) {
 	// first_byte and cooldown.max are the two keys no other test writes, and
 	// a key policyPatch forgets is silently dropped rather than refused.
 	s, _ := testServerFull(t)
