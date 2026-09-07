@@ -63,13 +63,15 @@ stays ineligible until someone deliberately writes its builder.
 
 ## Startup
 
-1. Load and validate configuration; an unknown key is an error.
+1. Read and validate configuration from the store; a row naming an unknown
+   key is ignored and a row that fails validation is skipped with a warning.
+   Settings content never fails startup.
 2. Open the store, run migrations forward, refuse a database newer than the
    binary.
 3. Derive the encryption key from the master key and verify it against a
    stored verifier.
-4. Overlay database-held providers, aliases and policy onto the file
-   configuration, then publish the first snapshot.
+4. Overlay database-held providers, aliases and policy onto the defaults and
+   the environment bootstrap set, then publish the first snapshot.
 5. Construct the adapters, the executor's shared transport, and the router.
 6. Start the background workers.
 7. Bind both listeners.
@@ -110,11 +112,12 @@ health persistence for the life of the process.
 
 ## Configuration
 
-Five steps, in order: defaults, then the file (rejecting unknown keys and
-interpolating `${VAR}`), then the database overlay for providers, aliases and
-policy, then hot reload on a debounced file watch, then warnings for
-restart-only fields that changed. See
-[`configuration.md`](configuration.md).
+Four steps, in order: defaults, then the environment for the bootstrap set,
+then the database — `settings` for every registry key, and the providers and
+aliases tables for those two blocks — then warnings for restart-only fields
+that changed. There is no configuration file. See
+[`configuration.md`](configuration.md) for the precedence in full, the
+restart-only list, and what a reload republishes.
 
 ## Console
 

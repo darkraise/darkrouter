@@ -83,10 +83,10 @@ Carried forward, each verified as still true on 2026-09-04.
     Known and accepted — **do not re-litigate**.
 12. The overview's cooling tile counts credential-level cooldowns only, so a
     provider cooling at the triple level does not show as cooling.
-13. A dangling alias created by deleting a provider in the console is reported
-    once and then invisible, because the warning is computed at parse time
-    against the file's provider block, which is ignored once providers are in
-    the database.
+13. A dangling alias created by deleting a provider in the console is
+    invisible afterwards. The only check is the write-path refusal of an alias
+    naming an unconfigured provider; nothing recomputes the warning against the
+    effective provider set once the chain is already stored.
 
 **Structure**
 

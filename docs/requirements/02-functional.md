@@ -66,7 +66,7 @@ Identifiers are stable and never reused. `plan/status.md` says which are met.
 | FR-ADM-5 | Expose request history, per-request traces, usage rollups and health. |
 | FR-ADM-6 | Preview a route without sending a request, agreeing exactly with what the router would resolve. |
 | FR-ADM-7 | Run a request from the console against a chosen provider and model, on any supported surface. |
-| FR-ADM-8 | Refuse a configuration write that names a restart-only field, and warn — rather than refuse — when a file reload changes one. |
+| FR-ADM-8 | Accept a configuration write that names a restart-only field, naming the affected keys in the response, and warn — rather than refuse — when a reload finds one changed. |
 | FR-ADM-9 | Serve unauthenticated liveness, readiness and metrics endpoints. |
 
 ## Console — `FR-CON`
