@@ -70,6 +70,15 @@ docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
   hash-password -password 'yours'
 ```
 
+> On a database that has a console password but has never checked its
+> environment hash against one before, the first restart after setting the
+> hash silently does nothing but adopt it as the new baseline — the old,
+> forgotten password still works, and the log stays quiet. A log line reading
+> `DARKROUTER_ADMIN_PASSWORD_HASH changed since the password was last set in
+> the console; the environment's hash is now in effect` is the tell that the
+> hash took effect; its absence means this was the adopting restart. Set a
+> different hash again and restart once more to actually recover it.
+
 The whole of `.env` is passed to the container, so a bootstrap variable is set
 there under its own name without touching `compose.prod.yml`. Nothing is
 interpolated: values are read exactly as written.
@@ -140,9 +149,10 @@ cmp /tmp/served.js internal/admin/dist/assets/index-*.js && echo "deploy matches
 ```
 
 The console needs a password. On this machine it is in `.uat-credentials` at
-the repository root, which is gitignored and stays that way: the console checks
-a password against the bcrypt hash in `.env`, and the hash is what is committed
-so the plaintext never is.
+the repository root, which is gitignored and stays that way: the console
+checks the password set in the console once one has been set, and the bcrypt
+hash in `.env` otherwise — either way the hash is what is committed so the
+plaintext never is.
 
 ## Backup and restore
 
@@ -169,8 +179,10 @@ than half-applying it.
 ## Configuration changes without a redeploy
 
 Settings are read from the database and most keys apply without a restart. The
-keys that need one are listed in [`../design/configuration.md`](../design/configuration.md),
-and are marked in the console's Settings screen and in the startup log.
+keys that need one are listed in [`../design/configuration.md`](../design/configuration.md).
+The Settings screen marks them and, once a save changes one, shows a "Waiting
+for a restart" banner that survives later saves; the same notice is in the
+config API's `warnings` array and in `/healthz`.
 
 Providers, aliases and policy are owned by the database and edited in the
 console.
