@@ -25,6 +25,12 @@ type Store struct {
 	lastErr atomic.Pointer[error]
 	overlay atomic.Pointer[func(*Config) error]
 
+	// boot is the snapshot the process is actually running restart-only values
+	// from. Pending-restart is boot versus current, never the diff between two
+	// consecutive reloads: that diff is cleared by the next unrelated save
+	// while the old value is still in force.
+	boot atomic.Pointer[Config]
+
 	// reloadMu serialises Reload. The watcher and the admin API both call it,
 	// and two parses racing to publish could land the older one last.
 	reloadMu sync.Mutex
@@ -56,10 +62,27 @@ func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
 		return nil, err
 	}
 	s.cur.Store(c)
+	s.boot.Store(c)
 	return s, nil
 }
 
 func (s *Store) Current() *Config { return s.cur.Load() }
+
+// PendingRestart names every restart-only field whose stored value differs
+// from the one this process started with.
+func (s *Store) PendingRestart() []string {
+	boot, cur := s.boot.Load(), s.cur.Load()
+	if boot == nil || cur == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range restartOnlyFields {
+		if f.value(boot) != f.value(cur) {
+			out = append(out, f.name)
+		}
+	}
+	return out
+}
 
 // Path reports the file the store watches. Tests rewrite it to exercise a
 // reload; nothing on the request path needs it.
