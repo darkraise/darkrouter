@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { copyToClipboard, liveSurfaces, originFor } from "./connect-screen"
+import { copyToClipboard, liveSurfaces, originsFor } from "./connect-screen"
 import type { Model } from "../../lib/api-types"
 
 const model = (id: string): Model => ({
@@ -33,42 +33,77 @@ describe("live surfaces", () => {
   })
 })
 
-describe("originFor", () => {
+describe("originsFor", () => {
+  const lan = { origin: "http://gateway:18081", hostname: "gateway", protocol: "http:" }
+
   it("uses the page origin when the proxy and admin ports match", () => {
-    // A single combined listener behind a reverse proxy should not be
-    // second-guessed by rewriting a port the operator already fronted.
+    // Two bind addresses sharing a port. The page origin already names that
+    // host and port, without an explicit :80 or :443 the swap would add.
     expect(
-      originFor(
-        { origin: "http://gateway:8080", hostname: "gateway", protocol: "http:" },
-        ":8080",
-        ":8080",
+      originsFor(
+        { origin: "http://gateway:18080", hostname: "gateway", protocol: "http:" },
+        ":18080",
+        ":18080",
       ),
-    ).toBe("http://gateway:8080")
+    ).toEqual({ lan: "http://gateway:18080" })
   })
 
   it("swaps in the proxy port when the two listeners differ", () => {
     // The console is served from the admin port, but a client needs the
     // proxy port — the whole reason this function exists rather than a
     // bare `window.location.origin` reference in the component.
-    expect(
-      originFor(
-        { origin: "http://gateway:8081", hostname: "gateway", protocol: "http:" },
-        ":8080",
-        ":8081",
-      ),
-    ).toBe("http://gateway:8080")
+    expect(originsFor(lan, ":18080", ":18081")).toEqual({
+      lan: "http://gateway:18080",
+    })
   })
 
   it("carries the page's own scheme rather than hardcoding http", () => {
     // A console served over https behind a reverse proxy with split
     // admin/proxy ports must not emit an http:// URL for a client to copy.
     expect(
-      originFor(
-        { origin: "https://gateway:8081", hostname: "gateway", protocol: "https:" },
-        ":8080",
-        ":8081",
+      originsFor(
+        { origin: "https://gateway:18081", hostname: "gateway", protocol: "https:" },
+        ":18080",
+        ":18081",
       ),
-    ).toBe("https://gateway:8080")
+    ).toEqual({ lan: "https://gateway:18080" })
+  })
+
+  it("keeps the LAN address alongside a configured public one", () => {
+    // Both, never one: a gateway with a domain still answers on the LAN, and
+    // an operator standing on that LAN wants the address that stays local.
+    expect(originsFor(lan, ":18080", ":18081", "https://llm.example.com")).toEqual({
+      lan: "http://gateway:18080",
+      public: "https://llm.example.com",
+    })
+  })
+
+  it("keeps a path prefix, which the LAN guess cannot express at all", () => {
+    expect(
+      originsFor(lan, ":18080", ":18081", "https://example.com/darkrouter"),
+    ).toEqual({
+      lan: "http://gateway:18080",
+      public: "https://example.com/darkrouter",
+    })
+  })
+
+  it("strips a trailing slash so the dialect suffix does not double it", () => {
+    // baseUrlFor appends "/v1"; a public URL ending in "/" would otherwise
+    // produce "https://example.com//v1", which some clients normalize and
+    // some send verbatim.
+    expect(originsFor(lan, ":18080", ":18081", "https://example.com/").public).toBe(
+      "https://example.com",
+    )
+  })
+
+  it("reports no public address when the value is blank or whitespace", () => {
+    // The API sends "" for an unset key rather than omitting it, and a
+    // half-filled field in an editor is whitespace, not empty.
+    for (const blank of [undefined, "", "   "]) {
+      expect(originsFor(lan, ":18080", ":18081", blank)).toEqual({
+        lan: "http://gateway:18080",
+      })
+    }
   })
 })
 

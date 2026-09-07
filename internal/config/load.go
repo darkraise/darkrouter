@@ -62,6 +62,7 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	// document: the struct cannot answer "was this written?" afterwards.
 	c.FileKeys = documentKeys(data)
 	applyDefaults(&c)
+	c.Server.PublicURL = normalizeDomain(c.Server.PublicURL)
 	if err := interpolate(&c, lookup); err != nil {
 		return nil, err
 	}
@@ -198,6 +199,34 @@ func interpolate(c *Config, lookup func(string) (string, bool)) error {
 	return nil
 }
 
+// normalizeDomain turns a bare domain into the URL the rest of the system
+// expects. An operator setting this is naming the address the outside world
+// uses, and writes it the way it is spoken -- "llm.example.com", not a scheme
+// and a trailing slash -- so the scheme is supplied here rather than demanded
+// of them.
+//
+// https, because a domain reachable from outside this machine is behind
+// something terminating TLS, and the one guess that is dangerous to get wrong
+// is the one that sends a client's token in the clear. A deployment that
+// really is plain HTTP writes the scheme out.
+//
+// The test for "already a URL" is the separator, not url.Parse: Parse reads
+// "llm.example.com:8443" as scheme "llm.example.com" with an opaque body, so
+// asking it whether a scheme is present answers yes for a host and a port.
+func normalizeDomain(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.Contains(v, "://") {
+		return v
+	}
+	// Anything that cannot be a hostname is left alone for validate to name:
+	// silently prefixing "/v1" would turn a wrong value into a valid URL
+	// pointing somewhere nobody asked for.
+	if strings.HasPrefix(v, "/") {
+		return v
+	}
+	return "https://" + v
+}
+
 func validate(c *Config) error {
 	// Dereferencing TripAfter is safe: Parse runs applyDefaults first.
 	if *c.Policy.Cooldown.TripAfter < 1 {
@@ -223,6 +252,19 @@ func validate(c *Config) error {
 	}
 	if c.Server.ShutdownGrace <= 0 {
 		return fmt.Errorf("server.shutdown_grace must be positive")
+	}
+	if c.Server.PublicURL != "" {
+		u, err := url.Parse(c.Server.PublicURL)
+		// A scheme-relative or path-only value would be pasted straight into a
+		// client's base_url and fail there instead, one layer further from the
+		// mistake. A bare domain is not in that group -- normalizeDomain has
+		// already turned it into a URL by the time this runs.
+		if err != nil || !u.IsAbs() || u.Host == "" {
+			return fmt.Errorf("server.public_url must be a domain or an absolute URL, got %q", c.Server.PublicURL)
+		}
+		if u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("server.public_url must not carry a query or fragment, got %q", c.Server.PublicURL)
+		}
 	}
 	t := c.Policy.Timeout
 	for _, d := range []struct {

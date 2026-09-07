@@ -163,6 +163,12 @@ export const SETTINGS: Record<string, SettingMeta> = {
     description: "Where this console is served.",
     group: "server",
   },
+  "server.public_url": {
+    name: "Public domain",
+    description:
+      "The domain clients outside this machine reach the gateway at, which it cannot work out for itself once a published port, a reverse proxy or a path prefix sits in front of it. A bare domain is assumed https. Set it and the Connect page lists this address alongside the LAN one; leave it empty and only the LAN address is shown.",
+    group: "server",
+  },
   "server.max_body_bytes": {
     name: "Largest request accepted",
     description: "A request bigger than this is refused before it reaches a provider.",

@@ -56,21 +56,42 @@ const TOOL_LABEL: Record<Tool, string> = {
 }
 
 /**
- * The origin a client should be pointed at, which is not necessarily the
- * origin the console itself was loaded from: the console is served from
- * admin_listen, but a client needs proxy_listen. Equal ports mean the
- * operator put one listener in front of both, so the page's own origin is
- * trusted rather than rewritten.
+ * The two addresses this gateway answers on, which are not the same question.
+ *
+ * `lan` is where the console itself was reached, with proxy_listen's port
+ * swapped in. It is a guess, and the port is the part that is guessed: what a
+ * container published or a proxy rewrote is invisible from inside the process.
+ * It is still worth showing, because the plain LAN deployment is the common
+ * one and there the guess is right.
+ *
+ * `public` is server.public_url, and it is present only when an operator set
+ * one. It is not derived from anything -- it is the operator stating what the
+ * outside world dials, which is the only way that can be known.
+ *
+ * Both are returned rather than one chosen, because a gateway with a domain
+ * still answers on the LAN, and an operator on the LAN wants the address that
+ * does not leave the building.
  */
-export function originFor(
+export type ConnectOrigins = { lan: string; public?: string }
+
+export function originsFor(
   location: Pick<Location, "origin" | "hostname" | "protocol">,
   proxyListen: string,
   adminListen: string,
-): string {
+  publicURL?: string,
+): ConnectOrigins {
   const portOf = (listen: string) => listen.slice(listen.lastIndexOf(":") + 1)
-  return portOf(proxyListen) === portOf(adminListen)
-    ? location.origin
-    : `${location.protocol}//${location.hostname}:${portOf(proxyListen)}`
+  // Matching ports cannot be one listener in front of both -- the process
+  // binds each separately and the second bind would fail -- so this is two
+  // bind addresses sharing a port. The page origin is then the same host and
+  // port the swap below would build, minus an explicit :80 or :443 that
+  // location.origin already omits.
+  const lan =
+    portOf(proxyListen) === portOf(adminListen)
+      ? location.origin
+      : `${location.protocol}//${location.hostname}:${portOf(proxyListen)}`
+  const configured = publicURL?.trim().replace(/\/+$/, "")
+  return configured ? { lan, public: configured } : { lan }
 }
 
 /**
@@ -96,6 +117,32 @@ export function liveSurfaces(models: Model[]): string[] {
   return [...seen].sort()
 }
 
+// The LAN row is derived, never configured, so the caveat belongs beside it
+// permanently rather than only while nothing else is set.
+const LAN_NOTE =
+  "Worked out from this page's address and the gateway's listen port."
+
+function DialectRows({ origin }: { origin: string }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {DIALECTS.map((dialect) => {
+        const url = baseUrlFor(origin, dialect)
+        return (
+          <div key={dialect} className="flex items-center gap-3">
+            <span className="w-24 shrink-0 text-sm text-[hsl(var(--muted-foreground))]">
+              {DIALECT_LABEL[dialect]}
+            </span>
+            <code className="flex-1 overflow-x-auto rounded bg-[hsl(var(--muted))] px-2 py-1 font-mono text-sm">
+              {url}
+            </code>
+            <CopyButton text={url} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function CopyButton({ text }: { text: string }) {
   return (
     <Button
@@ -117,6 +164,10 @@ function CopyButton({ text }: { text: string }) {
 export function ConnectScreen() {
   const [name, setName] = useState("")
   const [minted, setMinted] = useState<ProxyToken | null>(null)
+  // Which of the two addresses the snippets are written against. Only ever
+  // offered when there are two; a copied snippet that names the wrong side of
+  // the router is the failure this whole screen exists to prevent.
+  const [scope, setScope] = useState<"public" | "lan">("public")
   const tokens = useProxyTokens()
   const config = useConfig()
   const models = useModels()
@@ -136,9 +187,19 @@ export function ConnectScreen() {
   })
 
   const server = config.data?.blocks.server
-  const origin = server
-    ? originFor(window.location, server.proxy_listen, server.admin_listen)
-    : window.location.origin
+  const origins = server
+    ? originsFor(
+        window.location,
+        server.proxy_listen,
+        server.admin_listen,
+        server.public_url,
+      )
+    : { lan: window.location.origin }
+  // Defaults to the public address whenever there is one: it is the address
+  // an operator went out of their way to configure, and the one that works
+  // from both sides of the router.
+  const origin = origins.public ?? origins.lan
+  const snippetOrigin = origins.public && scope === "lan" ? origins.lan : origin
 
   // A prefix, never a secret: the store holds a digest and cannot reproduce
   // one, so this is the same "…" the token table already shows.
@@ -151,22 +212,37 @@ export function ConnectScreen() {
     <>
       <Card className="mb-6 p-4">
         <h2 className="mb-3 text-sm font-medium">Base URLs</h2>
-        <div className="flex flex-col gap-2">
-          {DIALECTS.map((dialect) => {
-            const url = baseUrlFor(origin, dialect)
-            return (
-              <div key={dialect} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 text-sm text-[hsl(var(--muted-foreground))]">
-                  {DIALECT_LABEL[dialect]}
-                </span>
-                <code className="flex-1 overflow-x-auto rounded bg-[hsl(var(--muted))] px-2 py-1 font-mono text-sm">
-                  {url}
-                </code>
-                <CopyButton text={url} />
-              </div>
-            )
-          })}
-        </div>
+        {origins.public ? (
+          <div className="flex flex-col gap-5">
+            <div>
+              <h3 className="mb-2 text-sm font-medium">
+                Public
+              </h3>
+              <DialectRows origin={origins.public} />
+            </div>
+            <div>
+              <h3 className="mb-2 text-sm font-medium">
+                On this network
+              </h3>
+              <DialectRows origin={origins.lan} />
+              <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
+                {LAN_NOTE} If the gateway's port is published under a different
+                number, use the public address above instead.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <DialectRows origin={origins.lan} />
+            <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">
+              {LAN_NOTE} If a published container port, a reverse proxy or a
+              path prefix sits in front of the gateway, these are wrong — set{" "}
+              <code className="font-mono">server.public_url</code> in{" "}
+              <code className="font-mono">data/darkrouter.yaml</code> to the
+              domain clients actually use.
+            </p>
+          </>
+        )}
       </Card>
 
       <Card className="mb-6 p-4">
@@ -176,6 +252,29 @@ export function ConnectScreen() {
             ? "Snippets show only the token's prefix, never the secret — the full value was shown once, at creation. Paste your own token in its place."
             : "No client token exists yet, so snippets show a placeholder. Create one under New client token, below, and paste it in."}
         </p>
+        {origins.public && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-[hsl(var(--muted-foreground))]">
+              Written for
+            </span>
+            {(
+              [
+                ["public", "Public"],
+                ["lan", "This network"],
+              ] as const
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={scope === value ? "secondary" : "ghost"}
+                aria-pressed={scope === value}
+                onClick={() => setScope(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        )}
         <Tabs defaultValue={TOOLS[0]}>
           <TabsList>
             {TOOLS.map((tool) => (
@@ -187,7 +286,7 @@ export function ConnectScreen() {
           {TOOLS.map((tool) => {
             const snippet = snippetFor(
               tool,
-              baseUrlFor(origin, DIALECT_OF[tool]),
+              baseUrlFor(snippetOrigin, DIALECT_OF[tool]),
               tokenPrefix,
             )
             return (

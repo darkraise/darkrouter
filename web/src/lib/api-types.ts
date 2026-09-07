@@ -506,6 +506,9 @@ export type ConfigBlocks = {
   server: {
     proxy_listen: string
     admin_listen: string
+    // Absent from a gateway older than the key, and empty whenever the
+    // operator has not set one.
+    public_url?: string
     max_body_bytes: number
     shutdown_grace: string
     sse: { max_line_bytes: number; max_precommit_bytes: number }
