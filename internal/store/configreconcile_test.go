@@ -53,10 +53,9 @@ func TestReconcileLeavesForeignRowsAlone(t *testing.T) {
 	if err := putSetting(ctx, db.Write, "csrf_secret", "keep-me"); err != nil {
 		t.Fatal(err)
 	}
-	// An empty value is what a foreign key holding no data looks like, and it
-	// is also what a registry lookup returns for a key the registry does not
-	// own. A pass that read the table unfiltered would find them equal and
-	// delete this row, so it is the row that proves the filter is there.
+	// An empty value is what a registry lookup returns for a key the registry
+	// does not own. A pass that read the table unfiltered and compared with a
+	// single-value lookup would find them equal and delete this row.
 	if err := putSetting(ctx, db.Write, "admin.password_env_fingerprint", ""); err != nil {
 		t.Fatal(err)
 	}
