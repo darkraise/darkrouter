@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -74,6 +75,9 @@ func TestLoadConfigSurvivesAnUnparseableRow(t *testing.T) {
 	if len(c.Warnings) == 0 {
 		t.Error("a skipped key must warn; silence makes it undiagnosable")
 	}
+	if !slices.Contains(c.Skipped, "log.retention") {
+		t.Errorf("skipped = %v, want log.retention -- this is what makes /healthz report invalid", c.Skipped)
+	}
 }
 
 // A cross-key rule names no single culprit, so every key in it reverts
@@ -108,6 +112,11 @@ func TestLoadConfigRevertsEveryKeyInAFailedRule(t *testing.T) {
 	}
 	if len(c.Warnings) == 0 {
 		t.Error("a reverted rule must warn")
+	}
+	for _, k := range []string{"policy.timeout.connect", "policy.timeout.first_byte", "policy.timeout.total"} {
+		if !slices.Contains(c.Skipped, k) {
+			t.Errorf("skipped = %v, want all three reverted keys named", c.Skipped)
+		}
 	}
 }
 
@@ -145,6 +154,9 @@ func TestLoadConfigIgnoresForeignRows(t *testing.T) {
 	if len(c.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none for a foreign row", c.Warnings)
 	}
+	if len(c.Skipped) != 0 {
+		t.Errorf("skipped = %v, want none for a foreign row", c.Skipped)
+	}
 }
 
 // A stored bare domain is how an operator writes server.public_url; validate
@@ -164,6 +176,9 @@ func TestAStoredBareDomainLoadsAsAURL(t *testing.T) {
 	}
 	if len(c.Warnings) != 0 {
 		t.Errorf("warnings = %v; a bare domain is a supported spelling, not a fault", c.Warnings)
+	}
+	if len(c.Skipped) != 0 {
+		t.Errorf("skipped = %v; a bare domain is a supported spelling, not a fault", c.Skipped)
 	}
 }
 
@@ -190,5 +205,11 @@ func TestASingleBadKeyDoesNotRevertTheOthers(t *testing.T) {
 	}
 	if len(c.Warnings) == 0 {
 		t.Error("a reverted key must say so")
+	}
+	if !slices.Contains(c.Skipped, "server.public_url") {
+		t.Errorf("skipped = %v, want server.public_url", c.Skipped)
+	}
+	if slices.Contains(c.Skipped, "log.retention") {
+		t.Errorf("skipped = %v; log.retention was never reverted", c.Skipped)
 	}
 }
