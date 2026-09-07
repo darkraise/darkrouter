@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -270,10 +271,14 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 		}
 	}
 
-	// WithoutCancel: the write is about to become durable, and a client that
-	// disconnects mid-commit must not leave the gateway serving a snapshot
-	// that predates rows it now holds.
-	written, err := s.deps.Config.Update(afterCommit(r), p)
+	// Detached from the request so a client that disconnects mid-commit cannot
+	// abort a write about to become durable, but bounded: BeginTx waits on the
+	// single write connection with no deadline of its own, and this call holds
+	// the reload lock while it waits. Without a ceiling, one stuck write would
+	// queue every later save and reload behind it forever.
+	ctx, cancel := context.WithTimeout(afterCommit(r), 30*time.Second)
+	defer cancel()
+	written, err := s.deps.Config.Update(ctx, p)
 	var rejected config.RejectedError
 	var publish config.PublishError
 	switch {
