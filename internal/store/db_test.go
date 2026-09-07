@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func openTest(t *testing.T) *DB {
@@ -101,6 +102,44 @@ func TestSyncHandleRunsFullSynchronous(t *testing.T) {
 	}
 	if s != 1 {
 		t.Errorf("write handle synchronous = %d, want 1 (NORMAL)", s)
+	}
+}
+
+// The configuration write path reads its rows and then replaces them inside
+// one transaction. A deferred transaction takes its snapshot at the read and
+// its lock at the write, so another handle committing in between kills it with
+// a busy error no timeout waits out. Beginning immediately makes the other
+// writer wait instead.
+func TestAWriteTransactionIsNotOvertakenMidway(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	tx, err := db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// The read that would take the snapshot.
+	if _, _, err := getSetting(ctx, tx, "absent"); err != nil {
+		t.Fatalf("read inside the transaction: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- putSetting(ctx, db.Sync, "other", "value") }()
+	// Long enough for the other writer to reach the lock. With an immediate
+	// transaction it waits there; with a deferred one it commits, and the
+	// write below is the one that fails.
+	time.Sleep(50 * time.Millisecond)
+
+	if err := putSetting(ctx, tx, "mine", "value"); err != nil {
+		t.Fatalf("write after read in the same transaction: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("the interleaved write never landed: %v", err)
 	}
 }
 
