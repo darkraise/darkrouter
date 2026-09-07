@@ -13,9 +13,10 @@ Four steps, in order:
    `DARKROUTER_LOG_FORMAT`, and the database path (`-db`, or `DARKROUTER_DB`,
    defaulting to `darkrouter.db` in the working directory). None of these is a
    row in `settings`, and a change to one takes a restart.
-3. **The database** — the `settings` table for scalar keys, and the provider,
-   alias and policy tables for those blocks. This is the source of truth for
-   everything else, and a key absent from it is on its compiled default.
+3. **The database** — the `settings` table for every key in the table below,
+   and the providers and aliases tables for those two blocks. This is the
+   source of truth for everything else, and a key absent from `settings` is on
+   its compiled default.
 4. **Restart-only warnings**, for fields that changed but cannot take effect.
 
 There is **no configuration file.** `-config` is accepted and ignored for one
@@ -29,23 +30,42 @@ previous snapshot serving.
 ## Reload versus restart
 
 A **reload** that picks up a changed restart-only field *warns*: the value is
-already stored, and a warning is the only honest answer. A **`PUT` to
-the API** that names one is *refused*, because a request can be rejected
-before anything happens.
+already stored, and a warning is the only honest answer. A **`PUT` to the API**
+that names one is *accepted*, and the response lists the written keys that take
+effect on restart — the value belongs in the database either way, and refusing
+it would leave no way to set it at all.
 
 Restart-only, because each is captured once when something is constructed:
 
-`server.proxy_listen`, `server.admin_listen`, `policy.timeout.connect`,
-`policy.timeout.first_byte`, `catalog.models_dev_url`,
-`catalog.sync_interval`, `catalog.sync_timeout`,
-`catalog.free_catalog_url`, `catalog.free_catalog_interval`,
-`catalog.free_catalog_sync`, `catalog.litellm_url`,
-`catalog.litellm_interval`, `catalog.litellm_sync`,
-`catalog.discovery.enabled`, `catalog.discovery.interval`,
-`catalog.discovery.timeout`, `catalog.discovery.concurrency`, `media.inline`.
+```
+policy.timeout.connect
+policy.timeout.first_byte
+catalog.models_dev_url
+catalog.sync_interval
+catalog.sync_timeout
+catalog.free_catalog_interval
+catalog.free_catalog_url
+catalog.free_catalog_sync
+catalog.litellm_interval
+catalog.litellm_url
+catalog.litellm_sync
+catalog.seed_free_providers
+catalog.discovery.interval
+catalog.discovery.timeout
+catalog.discovery.concurrency
+catalog.discovery.enabled
+media.inline
+```
 
-`policy.timeout.connect` and `first_byte` are on that list because they
-configure a shared HTTP transport built once. `max_body_bytes` deliberately is
+That list is checked against `config.RestartOnly` by a test, because it has
+drifted from the code twice.
+
+The listen addresses are **not** on it. They come from the environment, and a
+variable cannot change under a running process, so there is no reload that
+could warn about one — the settings screen says `environment` instead.
+
+`policy.timeout.connect` and `first_byte` are on it because they configure a
+shared HTTP transport built once. `server.max_body_bytes` deliberately is
 **not**: the executor reads it from a per-request snapshot.
 
 ### `server.public_url`
@@ -86,22 +106,31 @@ restart.
 | `DARKROUTER_ADMIN_LISTEN` | `:18081` | The admin and console listen address. |
 | `DARKROUTER_PROXY_TOKEN` | *empty* | Shared inbound secret. Never returned by any endpoint. |
 | `DARKROUTER_MASTER_KEY` | — | Encrypts every stored credential. The process refuses to start without one. |
-| `DARKROUTER_ADMIN_PASSWORD_HASH` | *empty* | A bcrypt hash that overrides the stored admin password on the next restart. |
+| `DARKROUTER_ADMIN_PASSWORD_HASH` | *empty* | A bcrypt hash used until a password is set in the console. After that the stored one wins, until this variable's value *changes* — a changed hash takes over on the next restart, which is how a lost password is recovered. |
 | `DARKROUTER_LOG_LEVEL` | `info` | |
 | `DARKROUTER_LOG_FORMAT` | text | `json` selects structured output. |
 | `DARKROUTER_DB` | `darkrouter.db` | The database path. `-db` overrides it. |
 
-The settings screen shows the two listen addresses with an `environment`
-source and no reload badge: the API reports them as hot-reloadable, since
-nothing captures them at construction, but an environment variable cannot
-change under a running process and a badge saying otherwise would promise an
-edit that is impossible.
+The settings screen shows the two listen addresses read-only, with an
+`environment` source badge and a chip naming the variable that owns each. The
+API reports them as not hot-reloadable — nothing captures them at construction,
+but a variable cannot change under a running process, so calling them hot would
+promise an edit that is impossible.
 
 ## Keys
 
 Every key below is a row in `settings`, on its compiled default until
 something writes it.
 
+The converse does not hold: `settings` also carries rows that are not
+configuration — the keyring's salt and verifier, the CSRF secret, the admin
+password hash — which is why the loader reads only the keys the registry
+names rather than the whole table.
+
+Providers and aliases are not in this table. Each has its own tables — providers
+carry encrypted credentials, aliases are ordered chains — and `store.OverlayConfig`
+merges the alias set onto every published snapshot. They are edited on the
+Providers and Routing screens rather than in Settings.
 
 | Key | Default | Notes |
 |---|---|---|
@@ -110,11 +139,9 @@ something writes it.
 | `server.shutdown_grace` | `10s` | |
 | `server.sse.max_line_bytes` | 1048576 | |
 | `server.sse.max_precommit_bytes` | 1048576 | |
-| `providers[]` | — | id, kind, preset, base_url, api_key, priority, models. Overlaid from the database. |
-| `aliases` | — | Ordered chains. Overlaid from the database. |
 | `policy.cooldown.trip_after` | 3 | |
 | `policy.cooldown.max` | `15m` | |
-| `policy.retry.max_attempts` | 4 | The loader enforces only `>= 1`; the admin API additionally caps it at 10. |
+| `policy.retry.max_attempts` | 4 | Between 1 and 10. The registry enforces it, so a save and a later load agree. |
 | `policy.timeout.connect` | `10s` | Restart-only. |
 | `policy.timeout.first_byte` | `60s` | Restart-only. |
 | `policy.timeout.total` | `10m` | Must be at least `connect + first_byte`. |
@@ -132,7 +159,7 @@ something writes it.
 | `catalog.litellm_url` | upstream index | Restart-only. |
 | `catalog.litellm_interval` | `24h` | Restart-only. |
 | `catalog.litellm_sync` | `true` | Restart-only. |
-| `catalog.seed_free_providers` | `true` | Consumed once at startup, but **not** on the restart-only list, so a reload accepts a change that cannot take effect. Known gap. |
+| `catalog.seed_free_providers` | `true` | Restart-only: the seed runs once at startup. Adds a provider for every hosted preset that needs no credential. |
 | `catalog.discovery.enabled` | `true` | Restart-only. |
 | `catalog.discovery.interval` | `15m` | Restart-only. |
 | `catalog.discovery.timeout` | `15s` | Restart-only. |
@@ -144,5 +171,5 @@ There is **no `policy.concurrency` block.** Earlier documentation described
 one; it never existed.
 
 There is no example file to keep in step with this table: every key here is a
-row in `settings`, written by the console where a write endpoint exists and
-left at its default where one does not.
+row in `settings`, edited on the Settings screen, and absent from the table in
+the database until something writes it.
