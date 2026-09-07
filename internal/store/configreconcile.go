@@ -19,13 +19,17 @@ import (
 // set, so it will float if a later release changes that default. The
 // alternative is carrying a "set to the default on purpose" flag through the
 // registry, the API and the console to serve a case nobody has asked for.
+//
+// The returned count covers the redundant setting rows only; the import marker
+// is deleted unconditionally and is not counted.
 func ReconcileConfig(ctx context.Context, d *DB) (int, error) {
 	defaults := &config.Config{}
 	config.ApplyDefaults(defaults)
 	want := ConfigRowsFor(defaults)
 
-	// configRows is filtered to the registry, so nothing another subsystem
-	// stores in this shared table can reach the DELETE below.
+	// configRows is already filtered to the registry. The loop below does not
+	// rely on that: it rejects an unknown key on its own, so the filter is a
+	// narrowing rather than the thing keeping foreign rows alive.
 	stored, err := configRows(ctx, d)
 	if err != nil {
 		return 0, err
@@ -39,10 +43,14 @@ func ReconcileConfig(ctx context.Context, d *DB) (int, error) {
 
 	deleted := 0
 	for key, value := range stored {
-		if want[key] != value {
+		w, known := want[key]
+		if !known || w != value {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key); err != nil {
+		// Keyed on the value as well as the key: the read above ran on d.Read,
+		// outside this transaction, so the value is a precondition rather than
+		// a fact.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ? AND value = ?`, key, value); err != nil {
 			return 0, fmt.Errorf("delete redundant setting %q: %w", key, err)
 		}
 		deleted++
