@@ -24,6 +24,10 @@ func (d *DB) Aliases(ctx context.Context) (map[string][]string, error) {
 // Replace rather than merge: a chain the operator deleted has to disappear,
 // and a partial write would leave one chain half-rewritten with its fallback
 // order silently changed.
+//
+// No production caller: tests use it to build alias state directly, while
+// production writes aliases through WriteConfig, inside the one transaction
+// that judges the whole configuration.
 func (d *DB) PutAliases(ctx context.Context, aliases map[string][]string) error {
 	tx, err := d.Write.BeginTx(ctx, nil)
 	if err != nil {

@@ -154,8 +154,9 @@ describe("settingGroups", () => {
 
 describe("the editable set", () => {
   it("holds only settings the API will accept a write for", () => {
-    // policy and aliases are the only writable blocks, and aliases have their
-    // own editor on Routing. Anything else would be a control that refuses to
+    // Every stored setting is writable through the API now; this screen just
+    // offers a control only for policy, with aliases living in their own
+    // editor on Routing. Anything else would be a control that refuses to
     // move.
     expect(EDITABLE.every((s) => s.field.startsWith("policy."))).toBe(true)
   })
