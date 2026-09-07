@@ -44,6 +44,66 @@ func configStoreWith(t *testing.T, aliases map[string][]string, tune func(*confi
 	return config.NewStoreOf(c)
 }
 
+// storeOverDatabase builds the config store the way cmd/darkrouter does: over
+// store.LoadConfig, with the alias overlay on top. A test that writes a setting
+// through the API then reads it back off the snapshot is exercising the path
+// the running gateway uses, which a store over a fixed Config cannot show.
+//
+// The tune describes a configuration, and the database is where one now lives,
+// so every key it moved off its default is written as a row first.
+func storeOverDatabase(t *testing.T, db *store.DB, aliases map[string][]string,
+	tune func(*config.Config)) *config.Store {
+
+	t.Helper()
+	ctx := context.Background()
+
+	want := &config.Config{}
+	config.ApplyDefaults(want)
+	if tune != nil {
+		tune(want)
+	}
+	base := &config.Config{}
+	config.ApplyDefaults(base)
+	defaults := store.ConfigRowsFor(base)
+	for k, v := range store.ConfigRowsFor(want) {
+		if defaults[k] == v {
+			continue
+		}
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if aliases != nil {
+		if err := db.PutAliases(ctx, aliases); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Ephemeral listeners, because nothing in this package binds a port.
+	boot := config.BootstrapFrom(func(name string) (string, bool) {
+		switch name {
+		case "DARKROUTER_PROXY_LISTEN", "DARKROUTER_ADMIN_LISTEN":
+			return ":0", true
+		}
+		return "", false
+	})
+	cfg, err := config.NewStoreFrom(func() (*config.Config, error) {
+		return store.LoadConfig(ctx, db, boot)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetOverlay(func(c *config.Config) error {
+		return store.OverlayConfig(ctx, db, c)
+	})
+	if err := cfg.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.MarkBoot()
+	return cfg
+}
+
 // testServerFull is testServer with every collaborator the provider endpoints
 // need: a keyring to encrypt with, the shipped presets, a SQL provider source to
 // reload, a breaker, and a config store for the alias lookups.
@@ -71,19 +131,7 @@ func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*co
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := configStoreWith(t, aliases, tune)
-	// Mirrors cmd/darkrouter: aliases and policy are overlaid from SQLite, so
-	// a test that writes through the API sees the same snapshot a request
-	// would. Without it the write lands in the database and nowhere else.
-	if _, err := store.ImportConfigOnce(context.Background(), db, cfg.Current()); err != nil {
-		t.Fatal(err)
-	}
-	cfg.SetOverlay(func(c *config.Config) error {
-		return store.OverlayConfig(context.Background(), db, c)
-	})
-	if err := cfg.Reload(); err != nil {
-		t.Fatal(err)
-	}
+	cfg := storeOverDatabase(t, db, aliases, tune)
 	src := provider.NewSQLSource(db, key)
 	cat := catalog.NewStore(db, src)
 	breaker := health.New(3, time.Minute)

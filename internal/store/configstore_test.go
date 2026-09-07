@@ -231,7 +231,7 @@ func TestImportConfigOnceDoesNotReimportAnEmptiedSet(t *testing.T) {
 	}
 }
 
-func TestOverlayConfigReplacesAliasesAndPolicyOnly(t *testing.T) {
+func TestOverlayConfigReplacesAliasesOnly(t *testing.T) {
 	ctx := context.Background()
 	db := migrated(t)
 	if err := db.PutAliases(ctx, map[string][]string{"db": {"groq/x"}}); err != nil {
@@ -259,8 +259,12 @@ func TestOverlayConfigReplacesAliasesAndPolicyOnly(t *testing.T) {
 	if len(cfg.Aliases["db"]) != 1 {
 		t.Errorf("aliases = %v, want the database's", cfg.Aliases)
 	}
-	if cfg.Policy.Retry.MaxAttempts != 6 {
-		t.Errorf("max_attempts = %d, want 6", cfg.Policy.Retry.MaxAttempts)
+	// Policy is the registry's, not the overlay's. Reapplying the same seven
+	// rows here would reinstate a set LoadConfig had reverted for a cross-key
+	// rule failure, with nothing left to revalidate it.
+	if cfg.Policy.Retry.MaxAttempts != 2 {
+		t.Errorf("max_attempts = %d; the overlay must leave policy alone",
+			cfg.Policy.Retry.MaxAttempts)
 	}
 	if len(cfg.Providers) != 1 || cfg.Log.Retention != 72*time.Hour {
 		t.Error("the overlay touched a block that is not its own")
