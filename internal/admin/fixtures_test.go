@@ -17,6 +17,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/store"
 	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
@@ -240,19 +241,15 @@ func testServerWithExecutorLog(t *testing.T, upstreamURL, model string, logger e
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := configStoreWith(t, nil, func(c *config.Config) {
-		c.Providers = []config.ProviderConfig{{
-			ID: "p", Kind: "openaicompat", BaseURL: upstreamURL,
-			APIKey: "sk", Models: []string{model},
-		}}
-	})
+	cfg := configStoreWith(t, nil, nil)
+	src := providertest.NewSource(providertest.Keyed("p", "openaicompat", upstreamURL, "sk", model))
 	cat := &catalog.Store{}
 	cat.Set(catalog.NewSnapshot([]catalog.Model{{
 		ProviderID: "p", ModelID: model, State: catalog.StateLive,
 		Surfaces: []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding},
 	}}, []string{"p"}))
 
-	ex := exec.New(cfg, provider.NewYAMLSource(cfg),
+	ex := exec.New(cfg, src,
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()},
 		exec.Deps{Catalog: cat, Log: logger})
 

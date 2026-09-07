@@ -16,6 +16,8 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -37,9 +39,8 @@ func serverOn(t *testing.T, proxyAddr, adminAddr string) *Server {
 	cfgStore := config.NewStoreOf(testConfigOf(t, func(c *config.Config) {
 		c.Server.ProxyListen, c.Server.AdminListen = proxyAddr, adminAddr
 		c.Server.ShutdownGrace = time.Second
-		c.Providers = []config.ProviderConfig{fakeProvider}
 	}))
-	return serverBackedBy(t, cfgStore)
+	return serverBackedBy(t, cfgStore, fakeProvider)
 }
 
 func TestRunReturnsOnContextCancelAndReleasesPorts(t *testing.T) {
@@ -140,10 +141,7 @@ func (errRehydration) Error() string { return "health rehydration: could not rea
 
 // fakeProvider is the one upstream most fixtures in this package declare. It
 // is never called: the tests exercise the wiring around it.
-var fakeProvider = config.ProviderConfig{
-	ID: "fake", Kind: "openaicompat", BaseURL: "https://up.example/v1",
-	APIKey: "sk", Models: []string{"m"},
-}
+var fakeProvider = providertest.Keyed("fake", "openaicompat", "https://up.example/v1", "sk", "m")
 
 // testConfigOf builds a defaulted configuration on ephemeral listeners, then
 // lets the caller change what its own case is about.
@@ -163,15 +161,16 @@ func testConfigOf(t *testing.T, tune func(*config.Config)) *config.Config {
 	return c
 }
 
-// seedProviders materialises a fixture's declared providers into the database.
+// seedProviders materialises a fixed provider set into the database.
 //
-// Providers have lived in SQLite since phase 2, so a Config that declares them
-// describes nothing the server can serve until the rows exist. The first-run
-// YAML importer used to do this; it is gone, and this is the test-side
-// replacement rather than a reason to keep production code alive for fixtures.
-func seedProviders(t *testing.T, ctx context.Context, db *store.DB, key *crypto.Key, cfg *config.Config) {
+// Providers have lived in SQLite since phase 2, so a provider set describes
+// nothing the server can serve until the rows exist. The first-run YAML
+// importer used to do this; it is gone, and this is the test-side
+// replacement rather than a reason to keep production code alive for
+// fixtures.
+func seedProviders(t *testing.T, ctx context.Context, db *store.DB, key *crypto.Key, ps []provider.Provider) {
 	t.Helper()
-	for _, p := range cfg.Providers {
+	for _, p := range ps {
 		if err := db.CreateProvider(ctx, store.ProviderRow{
 			ID: p.ID, Name: p.ID, Preset: p.Preset, Kind: p.Kind,
 			BaseURL: p.BaseURL, Priority: p.Priority, Enabled: true,
@@ -185,9 +184,13 @@ func seedProviders(t *testing.T, ctx context.Context, db *store.DB, key *crypto.
 				t.Fatal(err)
 			}
 		}
+		secret := ""
+		if len(p.Credentials) > 0 {
+			secret = p.Credentials[0].Secret
+		}
 		if _, err := db.AddCredential(ctx, key, store.Credential{
 			ProviderID: p.ID, Label: "imported", Kind: "static",
-			Secret: p.APIKey, Enabled: true,
+			Secret: secret, Enabled: true,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +199,7 @@ func seedProviders(t *testing.T, ctx context.Context, db *store.DB, key *crypto.
 
 // serverBackedBy builds a Server on a temporary database, so every test in this
 // package exercises the real persistence wiring.
-func serverBackedBy(t *testing.T, cfgStore *config.Store) *Server {
+func serverBackedBy(t *testing.T, cfgStore *config.Store, ps ...provider.Provider) *Server {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -211,7 +214,7 @@ func serverBackedBy(t *testing.T, cfgStore *config.Store) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedProviders(t, ctx, db, key, cfgStore.Current())
+	seedProviders(t, ctx, db, key, ps)
 	s, err := New(cfgStore, db, key, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +412,7 @@ func offlineCatalog(c *config.Config) {
 
 // serverFixtureWith is serverBackedBy with the database and key handed back, so
 // a test can seed catalog rows before New reads them.
-func serverFixtureWith(t *testing.T, tune func(*config.Config)) (*store.DB, *crypto.Key, *config.Store) {
+func serverFixtureWith(t *testing.T, tune func(*config.Config), ps ...provider.Provider) (*store.DB, *crypto.Key, *config.Store) {
 	t.Helper()
 	cfgStore := config.NewStoreOf(testConfigOf(t, tune))
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
@@ -425,7 +428,7 @@ func serverFixtureWith(t *testing.T, tune func(*config.Config)) (*store.DB, *cry
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedProviders(t, ctx, db, key, cfgStore.Current())
+	seedProviders(t, ctx, db, key, ps)
 	return db, key, cfgStore
 }
 

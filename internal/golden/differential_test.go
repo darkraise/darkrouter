@@ -27,7 +27,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/edge"
 	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	"github.com/darkraise/darkrouter/internal/exec"
-	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -68,11 +68,8 @@ func executorFor(t *testing.T, kind, upstreamURL string, forward bool, cap *capt
 	c := &config.Config{}
 	config.ApplyDefaults(c)
 	c.Server.ProxyListen, c.Server.AdminListen = ":0", ":0"
-	c.Providers = []config.ProviderConfig{{
-		ID: "up", Kind: kind, BaseURL: upstreamURL,
-		APIKey: "sk-upstream", Models: []string{"target-model"},
-	}}
 	cfgStore := config.NewStoreOf(c)
+	src := providertest.NewSource(providertest.Keyed("up", kind, upstreamURL, "sk-upstream", "target-model"))
 	ads := map[string]adapter.Adapter{
 		"openaicompat": openaicompat.New(),
 		"anthropic":    anthropicadapter.New(),
@@ -87,7 +84,7 @@ func executorFor(t *testing.T, kind, upstreamURL string, forward bool, cap *capt
 		}
 		ads = hidden
 	}
-	return exec.New(cfgStore, provider.NewYAMLSource(cfgStore), ads, exec.Deps{Log: cap})
+	return exec.New(cfgStore, src, ads, exec.Deps{Log: cap})
 }
 
 // dialectFor returns the inbound dialect, per request where it is

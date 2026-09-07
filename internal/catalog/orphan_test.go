@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 func TestOrphanedPresetsNamesTheReference(t *testing.T) {
@@ -65,14 +65,9 @@ func TestAConfiguredProviderWithAnUnknownPresetIsAnOrphan(t *testing.T) {
 	// The warning already existed; nothing a configured provider carried could
 	// ever trigger it, because the preset name was dropped on the way to
 	// provider.Provider. This is the whole chain, not just the last link.
-	c := &config.Config{}
-	config.ApplyDefaults(c)
-	c.Providers = []config.ProviderConfig{{
-		ID: "p", Kind: "openaicompat", Preset: "not-a-real-preset",
-		BaseURL: "https://x/v1", APIKey: "sk", Models: []string{"m"},
-	}}
-	cfgStore := config.NewStoreOf(c)
-	ps, err := provider.NewYAMLSource(cfgStore).Providers(context.Background())
+	p := providertest.Keyed("p", "openaicompat", "https://x/v1", "sk", "m")
+	p.Preset = "not-a-real-preset"
+	ps, err := providertest.NewSource(p).Providers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
