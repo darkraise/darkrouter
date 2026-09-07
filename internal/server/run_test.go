@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -360,25 +359,22 @@ func TestRequestRowRecordsTheCandidateChain(t *testing.T) {
 	}
 }
 
-// storeFor writes a configuration body and returns its store.
-func storeFor(t *testing.T, body string) *config.Store {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "darkrouter.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfgStore, err := config.NewStore(path, func(string) (string, bool) { return "sk", true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfgStore
+// offlineCatalog is the fixture configuration for a server whose catalog
+// workers must not reach the network: an unroutable source, a short timeout,
+// and the discovery sweep off.
+func offlineCatalog(c *config.Config) {
+	c.Server.ProxyListen, c.Server.AdminListen = "127.0.0.1:0", "127.0.0.1:0"
+	c.Catalog.ModelsDevURL = "http://127.0.0.1:1/api.json"
+	c.Catalog.SyncTimeout = 200 * time.Millisecond
+	off := false
+	c.Catalog.Discovery.Enabled = &off
 }
 
 // serverFixtureWith is serverBackedBy with the database and key handed back, so
 // a test can seed catalog rows before New reads them.
-func serverFixtureWith(t *testing.T, body string) (*store.DB, *crypto.Key, *config.Store) {
+func serverFixtureWith(t *testing.T, tune func(*config.Config)) (*store.DB, *crypto.Key, *config.Store) {
 	t.Helper()
-	cfgStore := storeFor(t, body)
+	cfgStore := config.NewStoreOf(testConfigOf(t, tune))
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -398,18 +394,9 @@ func serverFixtureWith(t *testing.T, body string) (*store.DB, *crypto.Key, *conf
 	return db, key, cfgStore
 }
 
-const offlineCatalog = `
-catalog:
-  models_dev_url: http://127.0.0.1:1/api.json
-  sync_timeout: 200ms
-  discovery:
-    enabled: false
-`
-
 func serverFixture(t *testing.T) (*store.DB, *crypto.Key, *config.Store) {
 	t.Helper()
-	return serverFixtureWith(t,
-		"server:\n  proxy_listen: \"127.0.0.1:0\"\n  admin_listen: \"127.0.0.1:0\"\n"+offlineCatalog)
+	return serverFixtureWith(t, offlineCatalog)
 }
 
 func TestNewRebuildsTheCatalogBeforeServing(t *testing.T) {
@@ -468,16 +455,7 @@ func TestRunStartsAndStopsTheCatalogWorkers(t *testing.T) {
 func TestDiscoveryCanBeDisabled(t *testing.T) {
 	// Discovery is outbound traffic the gateway initiates on the operator's
 	// behalf. An operator on a locked-down network needs an off switch.
-	db, key, cfgStore := serverFixtureWith(t, `
-server:
-  proxy_listen: "127.0.0.1:0"
-  admin_listen: "127.0.0.1:0"
-catalog:
-  models_dev_url: http://127.0.0.1:1/api.json
-  sync_timeout: 200ms
-  discovery:
-    enabled: false
-`)
+	db, key, cfgStore := serverFixtureWith(t, offlineCatalog)
 	srv, err := New(cfgStore, db, key, nil)
 	if err != nil {
 		t.Fatal(err)

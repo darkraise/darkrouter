@@ -1,4 +1,5 @@
-// Package config loads darkrouter.yaml, validates it, and hot-reloads it.
+// Package config holds the running configuration: its shape, its compiled
+// defaults, the rules it must satisfy, and the store that publishes it.
 package config
 
 import "time"
@@ -20,12 +21,6 @@ type Config struct {
 	// Warnings are non-fatal findings from validation. They are surfaced on
 	// /healthz rather than rejecting the document.
 	Warnings []string `yaml:"-"`
-
-	// FileKeys names, in dotted form, every key the document actually carried.
-	// It is what lets the config API say a value came from the file rather
-	// than from applyDefaults: a non-zero value proves neither, since a
-	// default and a written value are indistinguishable once parsed.
-	FileKeys []string `yaml:"-"`
 }
 
 type ServerConfig struct {

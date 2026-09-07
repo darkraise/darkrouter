@@ -1,26 +1,14 @@
 package config
 
 import (
-	"context"
-	"fmt"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
-
-	"github.com/fsnotify/fsnotify"
 )
-
-// debounce absorbs the several write events an editor emits for one save, and
-// avoids reading a half-written file.
-const debounce = 100 * time.Millisecond
 
 // Store holds the live configuration. A request takes one snapshot at entry and
 // uses it for its whole lifetime, so a reload cannot change behavior underneath
 // an in-flight request.
 type Store struct {
-	path    string
-	lookup  func(string) (string, bool)
 	cur     atomic.Pointer[Config]
 	lastErr atomic.Pointer[error]
 	overlay atomic.Pointer[func(*Config) error]
@@ -36,8 +24,8 @@ type Store struct {
 	// while the old value is still in force.
 	boot atomic.Pointer[Config]
 
-	// reloadMu serialises Reload. The watcher and the admin API both call it,
-	// and two parses racing to publish could land the older one last.
+	// reloadMu serialises Reload. Several callers reach it, and two loads
+	// racing to publish could land the older one last.
 	reloadMu sync.Mutex
 }
 
@@ -58,17 +46,6 @@ func (s *Store) applyOverlay(c *Config) error {
 		return nil
 	}
 	return (*p)(c)
-}
-
-func NewStore(path string, lookup func(string) (string, bool)) (*Store, error) {
-	s := &Store{path: path, lookup: lookup}
-	c, err := Load(path, lookup)
-	if err != nil {
-		return nil, err
-	}
-	s.cur.Store(c)
-	s.boot.Store(c)
-	return s, nil
 }
 
 // NewStoreOf builds a store over a fixed Config. Tests that used to write a
@@ -120,10 +97,6 @@ func (s *Store) PendingRestart() []string {
 	return out
 }
 
-// Path reports the file the store watches. Tests rewrite it to exercise a
-// reload; nothing on the request path needs it.
-func (s *Store) Path() string { return s.path }
-
 func (s *Store) LastError() error {
 	if p := s.lastErr.Load(); p != nil {
 		return *p
@@ -131,9 +104,9 @@ func (s *Store) LastError() error {
 	return nil
 }
 
-// RecordError surfaces a failure that happened outside Reload — notably a
-// watcher that could not start, which would otherwise leave hot reload silently
-// dead for the process lifetime.
+// RecordError surfaces a failure that happened outside Reload — a startup step
+// that reports nowhere else, which would otherwise leave the process looking
+// healthy while something it needs never came up.
 func (s *Store) RecordError(err error) {
 	if err == nil {
 		return
@@ -141,8 +114,8 @@ func (s *Store) RecordError(err error) {
 	s.lastErr.Store(&err)
 }
 
-// Reload parses and validates the file in full, swapping only on success.
-// A file that fails validation is rejected wholesale and the previous
+// Reload builds and validates the configuration in full, swapping only on
+// success. A load that fails is rejected wholesale and the previous
 // configuration stays live: a broken edit must never take the gateway down.
 func (s *Store) Reload() error {
 	s.reloadMu.Lock()
@@ -152,7 +125,7 @@ func (s *Store) Reload() error {
 		s.lastErr.Store(&err)
 		return err
 	}
-	// Before publishing, not after: a snapshot carrying the file's aliases for
+	// Before publishing, not after: a snapshot carrying pre-overlay aliases for
 	// even an instant is one a request could be routed by.
 	if err := s.applyOverlay(next); err != nil {
 		s.lastErr.Store(&err)
@@ -165,12 +138,7 @@ func (s *Store) Reload() error {
 	return nil
 }
 
-func (s *Store) loadNext() (*Config, error) {
-	if s.load != nil {
-		return s.load()
-	}
-	return Load(s.path, s.lookup)
-}
+func (s *Store) loadNext() (*Config, error) { return s.load() }
 
 // restartOnlyWarnings names every restart-only field this edit changed.
 //
@@ -187,100 +155,4 @@ func restartOnlyWarnings(prev, next *Config) []string {
 		}
 	}
 	return out
-}
-
-// Watch reloads on change until ctx is cancelled. It watches the parent
-// directory and filters by filename, because a watch on the file itself is lost
-// the first time an editor saves by rename.
-//
-// A change to where the path resolves counts as a change to the file. A
-// Kubernetes ConfigMap is projected as a symlink into a versioned directory
-// and updated by swapping that symlink, so the watched name is never written
-// and only an entry beside it moves.
-func (s *Store) Watch(ctx context.Context) error { return s.watch(ctx, nil) }
-
-// realPath resolves symlinks; a path that cannot be resolved is returned as
-// written so a transient error does not read as a change.
-func realPath(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return filepath.Clean(p)
-}
-
-// watch closes ready once the directory watch is established. The kernel does
-// not replay events that predate the watch, so a caller that edits the file
-// without waiting for this loses the notification permanently.
-func (s *Store) watch(ctx context.Context, ready chan<- struct{}) error {
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer w.Close()
-
-	dir, _ := filepath.Split(s.path)
-	if dir == "" {
-		dir = "."
-	}
-	if err := w.Add(dir); err != nil {
-		return fmt.Errorf("watch %s: %w", dir, err)
-	}
-	// Where the path resolves is recorded before anyone is told the watcher
-	// is up: a swap that lands between the two would otherwise be the
-	// baseline rather than a change, and never reload.
-	self := filepath.Clean(s.path)
-	resolved := realPath(s.path)
-	if ready != nil {
-		close(ready)
-	}
-	// changed reports whether an event concerns this file: its own name, or
-	// an entry whose creation or rename moved where the path resolves.
-	changed := func(ev fsnotify.Event) bool {
-		if filepath.Clean(ev.Name) == self {
-			return true
-		}
-		if ev.Op&(fsnotify.Create|fsnotify.Rename) == 0 {
-			return false
-		}
-		if now := realPath(s.path); now != resolved {
-			resolved = now
-			return true
-		}
-		return false
-	}
-
-	var timer *time.Timer
-	var fire <-chan time.Time
-	defer func() {
-		if timer != nil {
-			timer.Stop()
-		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case ev, ok := <-w.Events:
-			if !ok {
-				return nil
-			}
-			if !changed(ev) {
-				continue
-			}
-			if timer != nil {
-				timer.Stop()
-			}
-			timer = time.NewTimer(debounce)
-			fire = timer.C
-		case <-fire:
-			fire = nil
-			_ = s.Reload() // the error is recorded in LastError
-		case err, ok := <-w.Errors:
-			if !ok {
-				return nil
-			}
-			s.lastErr.Store(&err)
-		}
-	}
 }
