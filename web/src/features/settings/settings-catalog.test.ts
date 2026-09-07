@@ -1,36 +1,26 @@
 import { describe, it, expect } from "vitest"
-import type { ConfigResponse } from "../../lib/api-types"
+import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
 import {
-  EDITABLE,
   SETTINGS,
+  displayOf,
   formatBytes,
   formatDuration,
+  parseBytes,
   settingGroups,
   settingRow,
 } from "./settings-catalog"
 
-const cfg = (over: Partial<ConfigResponse> = {}): ConfigResponse =>
-  ({
-    valid: true,
-    warnings: [],
-    blocks: {
-      server: { max_body_bytes: 33_554_432, shutdown_grace: "30s" },
-      log: { retention: "720h0m0s" },
-      capture: { bodies: false, max_bytes: 65_536 },
-      policy: { retry: { max_attempts: 4 }, timeout: { first_byte: "1m0s" } },
-      catalog: { discovery: { enabled: true } },
-    },
-    fields: {
-      "server.max_body_bytes": { source: "database", hot_reloadable: false },
-      "log.retention": { source: "default", hot_reloadable: true },
-      "capture.bodies": { source: "database", hot_reloadable: true },
-      "capture.max_bytes": { source: "database", hot_reloadable: true },
-      "policy.retry.max_attempts": { source: "database", hot_reloadable: true },
-      "policy.timeout.first_byte": { source: "database", hot_reloadable: true },
-      "catalog.discovery.enabled": { source: "default", hot_reloadable: true },
-    },
-    ...over,
-  }) as ConfigResponse
+/** Fills in the ConfigResponse boilerplate every test here ignores. */
+const cfgWith = (
+  values: Record<string, string>,
+  fields: Record<string, ConfigFieldMeta>,
+): ConfigResponse => ({
+  valid: true,
+  warnings: [],
+  values,
+  fields,
+  pending_restart: [],
+})
 
 describe("formatBytes", () => {
   it("reads a byte count at the scale it was written in", () => {
@@ -70,113 +60,6 @@ describe("formatDuration", () => {
   })
 })
 
-describe("settingRow", () => {
-  it("gives a setting its name and keeps its key", () => {
-    const row = settingRow(cfg(), "log.retention", SETTINGS["log.retention"]!)
-    expect(row.meta.name).toBe("Keep request records for")
-    expect(row.field).toBe("log.retention")
-  })
-
-  it("shows the literal beside a reformatted duration", () => {
-    // The stored value is still 720h0m0s, and the trail from screen to store
-    // has to survive the friendlier reading.
-    const row = settingRow(cfg(), "log.retention", SETTINGS["log.retention"]!)
-    expect(row.display).toBe("30 days")
-    expect(row.literal).toBe("720h0m0s")
-  })
-
-  it("adds no literal when the value was already readable", () => {
-    const row = settingRow(cfg(), "policy.timeout.first_byte", SETTINGS["policy.timeout.first_byte"]!)
-    expect(row.display).toBe("1 min")
-    expect(row.literal).toBe("1m0s")
-  })
-
-  it("reads a boolean as on or off", () => {
-    expect(settingRow(cfg(), "capture.bodies", SETTINGS["capture.bodies"]!).display).toBe("Off")
-    expect(
-      settingRow(cfg(), "catalog.discovery.enabled", SETTINGS["catalog.discovery.enabled"]!).display,
-    ).toBe("On")
-  })
-
-  it("scales a byte count but never a plain number", () => {
-    // A retry count of 4 must not become "4 bytes".
-    expect(settingRow(cfg(), "capture.max_bytes", SETTINGS["capture.max_bytes"]!).display).toBe(
-      "64 KB",
-    )
-    expect(
-      settingRow(cfg(), "policy.retry.max_attempts", SETTINGS["policy.retry.max_attempts"]!).display,
-    ).toBe("4")
-  })
-
-  it("carries the source and whether it reloads hot", () => {
-    const row = settingRow(cfg(), "server.max_body_bytes", SETTINGS["server.max_body_bytes"]!)
-    expect(row.source).toBe("database")
-    expect(row.hotReloadable).toBe(false)
-  })
-
-  it("says nothing rather than guessing when the block has no value", () => {
-    const row = settingRow(cfg({ blocks: {} } as Partial<ConfigResponse>), "log.retention", SETTINGS["log.retention"]!)
-    expect(row.display).toBe("—")
-  })
-})
-
-describe("settingGroups", () => {
-  it("groups settings by what they are about, not by their prefix", () => {
-    const groups = settingGroups(cfg())
-    const ids = groups.map((g) => g.group.id)
-    // Requests before server: the order is how often an operator reaches for
-    // them, not alphabetical.
-    expect(ids.indexOf("requests")).toBeLessThan(ids.indexOf("server"))
-    const requests = groups.find((g) => g.group.id === "requests")
-    expect(requests?.rows.map((r) => r.field)).toContain("policy.retry.max_attempts")
-  })
-
-  it("keeps a field the gateway added that this build cannot name", () => {
-    // Unnamed is recoverable; invisible is not.
-    const groups = settingGroups(
-      cfg({
-        fields: {
-          "policy.something_new": { source: "database", hot_reloadable: true },
-        },
-      } as Partial<ConfigResponse>),
-    )
-    const requests = groups.find((g) => g.group.id === "requests")
-    expect(requests?.rows.some((r) => r.field === "policy.something_new")).toBe(true)
-  })
-
-  it("drops a group with nothing in it", () => {
-    const groups = settingGroups(cfg({ fields: {} } as Partial<ConfigResponse>))
-    // Every named setting still renders even with no field metadata, so the
-    // groups that survive are the ones the catalogue names.
-    expect(groups.every((g) => g.rows.length > 0)).toBe(true)
-  })
-})
-
-describe("the editable set", () => {
-  it("holds only settings the API will accept a write for", () => {
-    // Every stored setting is writable through the API now; this screen just
-    // offers a control only for policy, with aliases living in their own
-    // editor on Routing. Anything else would be a control that refuses to
-    // move.
-    expect(EDITABLE.every((s) => s.field.startsWith("policy."))).toBe(true)
-  })
-
-  it("leaves out the two timeouts a reload cannot apply", () => {
-    // Both configure the one shared transport built at startup, so a save of
-    // either waits for a restart and this screen does not offer it yet.
-    const fields = EDITABLE.map((s) => s.field)
-    expect(fields).not.toContain("policy.timeout.connect")
-    expect(fields).not.toContain("policy.timeout.first_byte")
-  })
-
-  it("takes its names from the same catalogue the rest of the console uses", () => {
-    for (const setting of EDITABLE) {
-      expect(setting.name).toBe(SETTINGS[setting.field]?.name)
-      expect(setting.description).toBeTruthy()
-    }
-  })
-})
-
 describe("formatDuration rounding", () => {
   it("carries a rounded remainder into the unit above it", () => {
     // Rounding the remainder alone lets it reach a full unit and print there:
@@ -196,20 +79,157 @@ describe("formatDuration rounding", () => {
   })
 })
 
+describe("settingRow", () => {
+  it("gives a setting its name and keeps its key", () => {
+    const cfg = cfgWith(
+      { "log.retention": "720h0m0s" },
+      { "log.retention": { source: "database", hot_reloadable: true, kind: "duration" } },
+    )
+    const row = settingRow(cfg, "log.retention", SETTINGS["log.retention"]!)
+    expect(row.meta.name).toBe("Keep request records for")
+    expect(row.field).toBe("log.retention")
+  })
+
+  it("carries the source and whether it reloads hot", () => {
+    const cfg = cfgWith(
+      { "server.max_body_bytes": "33554432" },
+      { "server.max_body_bytes": { source: "database", hot_reloadable: false, kind: "bytes" } },
+    )
+    const row = settingRow(cfg, "server.max_body_bytes", SETTINGS["server.max_body_bytes"]!)
+    expect(row.source).toBe("database")
+    expect(row.hotReloadable).toBe(false)
+  })
+
+  it("says nothing rather than guessing when there is no value", () => {
+    const row = settingRow(cfgWith({}, {}), "log.retention", SETTINGS["log.retention"]!)
+    expect(row.display).toBe("—")
+  })
+
+  it("carries the stored spelling and a readable one", () => {
+    const cfg = cfgWith({ "policy.timeout.total": "720h0m0s" }, {
+      "policy.timeout.total": { source: "database", hot_reloadable: true, kind: "duration" },
+    })
+    const row = settingGroups(cfg).flatMap((s) => s.rows).find((r) => r.field === "policy.timeout.total")
+    // Both, because the save submits one and the operator reads the other.
+    expect(row?.value).toBe("720h0m0s")
+    expect(row?.display).toBe("30 days")
+  })
+
+  it("marks an environment row as not editable and names its variable", () => {
+    const cfg = cfgWith({ "server.proxy_listen": ":18080" }, {
+      "server.proxy_listen": {
+        source: "env", hot_reloadable: false, kind: "string",
+        env: "DARKROUTER_PROXY_LISTEN",
+      },
+    })
+    const row = settingGroups(cfg).flatMap((s) => s.rows).find((r) => r.field === "server.proxy_listen")
+    expect(row?.editable).toBe(false)
+    expect(row?.env).toBe("DARKROUTER_PROXY_LISTEN")
+  })
+
+  it("marks a stored row as editable", () => {
+    const cfg = cfgWith({ "log.retention": "720h0m0s" }, {
+      "log.retention": { source: "database", hot_reloadable: true, kind: "duration" },
+    })
+    const row = settingGroups(cfg).flatMap((s) => s.rows).find((r) => r.field === "log.retention")
+    expect(row?.editable).toBe(true)
+  })
+
+  it("names the nine catalogue keys that used to arrive unnamed", () => {
+    for (const field of [
+      "catalog.free_catalog_url", "catalog.free_catalog_interval",
+      "catalog.free_catalog_sync", "catalog.litellm_url",
+      "catalog.litellm_interval", "catalog.litellm_sync",
+      "catalog.seed_free_providers", "catalog.discovery.timeout",
+      "catalog.discovery.concurrency",
+    ]) {
+      // A key with no entry falls back to printing itself, which is the state
+      // this fixes: the console served them as bare dotted keys or not at all.
+      expect(SETTINGS[field]?.name, field).toBeTruthy()
+      expect(SETTINGS[field]?.name, field).not.toBe(field)
+    }
+  })
+})
+
+describe("displayOf", () => {
+  it("reads a size at the scale it was written in", () => {
+    expect(displayOf("33554432", "bytes")).toBe("32 MB")
+  })
+  it("reads a bool as on or off", () => {
+    expect(displayOf("true", "bool")).toBe("On")
+    expect(displayOf("false", "bool")).toBe("Off")
+  })
+  it("leaves a string alone", () => {
+    expect(displayOf("https://models.dev/api.json", "url")).toBe("https://models.dev/api.json")
+  })
+  it("never scales a plain count", () => {
+    // The old heuristic keyed on the key's _bytes suffix; the kind carries it
+    // now, and a retry count of 4 must not read as a size.
+    expect(displayOf("4", "int")).toBe("4")
+  })
+})
+
+describe("parseBytes", () => {
+  it("accepts what displayOf produces, so a round trip holds", () => {
+    expect(parseBytes("32 MB")).toBe(33554432)
+    expect(parseBytes("32MB")).toBe(33554432)
+    expect(parseBytes("33554432")).toBe(33554432)
+  })
+  it("refuses what is not a size", () => {
+    expect(parseBytes("")).toBeUndefined()
+    expect(parseBytes("many")).toBeUndefined()
+    expect(parseBytes("-1")).toBeUndefined()
+  })
+})
+
+describe("settingGroups", () => {
+  it("groups settings by what they are about, not by their prefix", () => {
+    const cfg = cfgWith(
+      { "policy.retry.max_attempts": "4", "server.max_body_bytes": "33554432" },
+      {
+        "policy.retry.max_attempts": { source: "database", hot_reloadable: true, kind: "int" },
+        "server.max_body_bytes": { source: "database", hot_reloadable: false, kind: "bytes" },
+      },
+    )
+    const groups = settingGroups(cfg)
+    const ids = groups.map((g) => g.group.id)
+    // Requests before server: the order is how often an operator reaches for
+    // them, not alphabetical.
+    expect(ids.indexOf("requests")).toBeLessThan(ids.indexOf("server"))
+    const requests = groups.find((g) => g.group.id === "requests")
+    expect(requests?.rows.map((r) => r.field)).toContain("policy.retry.max_attempts")
+  })
+
+  it("keeps a field the gateway added that this build cannot name", () => {
+    // Unnamed is recoverable; invisible is not.
+    const cfg = cfgWith(
+      { "policy.something_new": "1" },
+      { "policy.something_new": { source: "database", hot_reloadable: true, kind: "int" } },
+    )
+    const groups = settingGroups(cfg)
+    const requests = groups.find((g) => g.group.id === "requests")
+    expect(requests?.rows.some((r) => r.field === "policy.something_new")).toBe(true)
+  })
+
+  it("drops a group with nothing in it", () => {
+    const groups = settingGroups(cfgWith({}, {}))
+    // Every named setting still renders even with no field metadata, so the
+    // groups that survive are the ones the catalogue names.
+    expect(groups.every((g) => g.rows.length > 0)).toBe(true)
+  })
+})
+
 describe("the two settings that govern prompt text at rest", () => {
   it("shows them under one heading, so the distinction is offered rather than inferred", () => {
-    const withPlayground = cfg({
-      blocks: {
-        ...cfg().blocks,
-        playground: { save_conversations: true },
+    const cfg = cfgWith(
+      { "capture.bodies": "false", "playground.save_conversations": "true" },
+      {
+        "capture.bodies": { source: "database", hot_reloadable: true, kind: "bool" },
+        "playground.save_conversations": { source: "default", hot_reloadable: true, kind: "bool" },
       },
-      fields: {
-        ...cfg().fields,
-        "playground.save_conversations": { source: "default", hot_reloadable: true },
-      },
-    } as Partial<ConfigResponse>)
+    )
 
-    const logging = settingGroups(withPlayground).find((g) => g.group.id === "logging")
+    const logging = settingGroups(cfg).find((g) => g.group.id === "logging")
     const fields = logging?.rows.map((r) => r.field) ?? []
     expect(fields).toContain("capture.bodies")
     expect(fields).toContain("playground.save_conversations")
@@ -228,18 +248,16 @@ describe("the two settings that govern prompt text at rest", () => {
     expect(meta).toBeDefined()
     expect(meta?.group).toBe("logging")
 
-    const off = cfg({
-      blocks: { ...cfg().blocks, playground: { save_conversations: false } },
-    } as Partial<ConfigResponse>)
-    expect(
-      settingRow(off, "playground.save_conversations", meta!).display,
-    ).toBe("Off")
+    const off = cfgWith(
+      { "playground.save_conversations": "false" },
+      { "playground.save_conversations": { source: "default", hot_reloadable: true, kind: "bool" } },
+    )
+    expect(settingRow(off, "playground.save_conversations", meta!).display).toBe("Off")
 
-    const on = cfg({
-      blocks: { ...cfg().blocks, playground: { save_conversations: true } },
-    } as Partial<ConfigResponse>)
-    expect(
-      settingRow(on, "playground.save_conversations", meta!).display,
-    ).toBe("On")
+    const on = cfgWith(
+      { "playground.save_conversations": "true" },
+      { "playground.save_conversations": { source: "default", hot_reloadable: true, kind: "bool" } },
+    )
+    expect(settingRow(on, "playground.save_conversations", meta!).display).toBe("On")
   })
 })
