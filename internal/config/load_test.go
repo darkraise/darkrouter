@@ -565,7 +565,7 @@ func TestAMissingFileLoadsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a missing config file must not be fatal: %v", err)
 	}
-	if c.Server.ProxyListen != ":8080" || c.Server.AdminListen != ":8081" {
+	if c.Server.ProxyListen != ":18080" || c.Server.AdminListen != ":18081" {
 		t.Errorf("listen addresses = %q/%q, want the defaults", c.Server.ProxyListen, c.Server.AdminListen)
 	}
 	if len(c.Providers) != 0 {

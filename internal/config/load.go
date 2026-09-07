@@ -73,10 +73,10 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 
 func applyDefaults(c *Config) {
 	if c.Server.ProxyListen == "" {
-		c.Server.ProxyListen = ":8080"
+		c.Server.ProxyListen = ":18080"
 	}
 	if c.Server.AdminListen == "" {
-		c.Server.AdminListen = ":8081"
+		c.Server.AdminListen = ":18081"
 	}
 	if c.Server.MaxBodyBytes == 0 {
 		c.Server.MaxBodyBytes = 33554432

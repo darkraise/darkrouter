@@ -114,9 +114,9 @@ ENV HOME=/home/darkrouter
 # here inherits this mode, and the operator picks the uid.
 RUN install -d -m 0777 /data
 WORKDIR /data
-EXPOSE 8080 8081
+EXPOSE 18080 18081
 # readyz rather than healthz: readiness fails while the store or the config
 # is not usable, which is the state an orchestrator should route away from.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8081/readyz || exit 1
+    CMD wget -qO- http://127.0.0.1:18081/readyz || exit 1
 ENTRYPOINT ["darkrouter", "-config", "/data/darkrouter.yaml"]

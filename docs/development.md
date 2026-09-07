@@ -12,7 +12,7 @@ icon assets.
 ## Running locally
 
 ```bash
-docker compose up --build     # gateway on 8080, console on 8081
+docker compose up --build     # gateway on 18080, console on 18081
 cd web && npm run dev         # console with hot reload, proxied to the gateway
 ```
 

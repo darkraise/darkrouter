@@ -3,8 +3,8 @@ services:
     build: .
     image: darkrouter:dev
     ports:
-      - "8080:8080"
-      - "8081:8081"
+      - "18080:18080"
+      - "18081:18081"
 
     # Lets a model runtime on the host — Ollama, LM Studio, llama.cpp — be
     # reached from inside the container. Every local preset ships a localhost
@@ -27,7 +27,7 @@ services:
       - ./data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8081/readyz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:18081/readyz"]
       interval: 30s
       timeout: 3s
       retries: 3
