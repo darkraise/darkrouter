@@ -19,11 +19,11 @@ import (
 // first_byte is the live example -- and validating against a snapshot lets
 // both commit a state the next load would refuse.
 //
-// The untouched rows are assembled with the loader's reverting discipline, so
-// a row that was already unusable cannot refuse a save that has nothing to do
-// with it. The save's own values go on strictly: a value this write introduces
-// must be judged, never quietly reverted, or the row it commits is one every
-// later start throws away.
+// What is judged is the table this save would leave behind, and the loader
+// itself does the judging. A key this save touched that the loader would
+// revert is refused, because a person is waiting and can be told; a key it did
+// not touch was already being reverted before the save ran, and refusing for
+// it would leave an operator unable to fix anything at all.
 func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Patch) ([]string, error) {
 	set, del, err := effective(p)
 	if err != nil {
@@ -47,7 +47,7 @@ func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Pat
 			return nil, err
 		}
 	}
-	// Checked before the base is built. buildConfig reverts keys until the
+	// Checked before the table is judged. buildConfig reverts keys until the
 	// configuration validates and no key can fix a broken alias chain, so an
 	// unchecked bad set exhausts the loop and comes back as "compiled defaults
 	// do not validate", which names nothing an operator can act on.
@@ -55,32 +55,44 @@ func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Pat
 		return nil, config.RejectedError{Msg: err.Error()}
 	}
 
-	base := make(map[string]string, len(rows))
+	// The table this save would leave behind.
+	next := make(map[string]string, len(rows)+len(set))
 	for k, v := range rows {
 		if _, replaced := set[k]; replaced || del[k] {
 			continue
 		}
-		base[k] = v
+		next[k] = v
 	}
-	cfg, _, _, err := buildConfig(base, boot, aliases)
-	if err != nil {
-		return nil, err
+	for k, v := range set {
+		next[k] = v
 	}
 
-	// Sorted, so a patch with two bad values always names the same one first.
-	for _, key := range sortedKeys(set) {
-		f := configByKey[key]
-		if err := f.set(cfg, set[key]); err != nil {
-			return nil, config.Rejected("%s: %v", key, err)
-		}
-		if f.validate != nil {
-			if err := f.validate(cfg); err != nil {
-				return nil, config.RejectedError{Msg: err.Error()}
-			}
-		}
-	}
-	if err := config.Validate(cfg); err != nil {
+	// Judged by the loader itself, over the rows this save would leave. That is
+	// what makes one validator literal rather than approximate: the write is
+	// refused exactly when the next start would throw the operator's value
+	// away. Judging the patch against a base that excluded its own keys used
+	// the compiled default for the key being written, so a value that broke a
+	// cross-key rule with its stored neighbour could pass here and be reverted
+	// on the next load, with nothing said to the person who wrote it.
+	_, warnings, skipped, err := buildConfig(next, boot, aliases)
+	if err != nil {
 		return nil, config.RejectedError{Msg: err.Error()}
+	}
+	// A key this save touched that the loader would revert is a refusal: a
+	// person is waiting and can be told. A key it did not touch was already
+	// being reverted before this save ran, and refusing for it would leave an
+	// operator unable to fix anything at all.
+	touched := make(map[string]bool, len(set)+len(del))
+	for k := range set {
+		touched[k] = true
+	}
+	for k := range del {
+		touched[k] = true
+	}
+	for _, k := range skipped {
+		if touched[k] {
+			return nil, config.RejectedError{Msg: refusalFor(k, warnings)}
+		}
 	}
 
 	for _, key := range sortedKeys(set) {
@@ -124,7 +136,9 @@ func effective(p config.Patch) (map[string]string, map[string]bool, error) {
 		return config.Rejected("unknown setting %q", key)
 	}
 
-	for key, value := range p.Set {
+	// Sorted, so a patch naming two unknown keys reports the same one every run.
+	for _, key := range sortedKeys(p.Set) {
+		value := p.Set[key]
 		if err := known(key); err != nil {
 			return nil, nil, err
 		}
@@ -164,6 +178,22 @@ func sortedFlags(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// refusalFor turns the loader's revert warning into a refusal. The loader
+// explains why a key cannot be used and then says it fell back to the default;
+// a write has a person waiting, so the reason is kept and the fallback dropped.
+func refusalFor(key string, warnings []string) string {
+	for _, w := range warnings {
+		if !strings.Contains(w, key) {
+			continue
+		}
+		if i := strings.Index(w, "; "); i >= 0 {
+			w = w[:i]
+		}
+		return strings.TrimPrefix(w, "stored ")
+	}
+	return key + " cannot be used with the rest of the configuration"
 }
 
 // aliasesTx reads the alias table inside the write transaction, so a save that

@@ -14,29 +14,11 @@ import (
 
 // Aliases returns every alias chain, each in its stored order.
 //
-// An empty result is not the same as "never configured": an operator may have
-// deleted every alias through the console. ConfigImported is what separates
-// the two.
+// An empty result is not the same as "never configured": it means either that
+// no alias was ever configured or that the operator deleted the last one, and
+// nothing now distinguishes the two.
 func (d *DB) Aliases(ctx context.Context) (map[string][]string, error) {
-	rows, err := d.Read.QueryContext(ctx,
-		`SELECT name, target FROM aliases ORDER BY name, seq`)
-	if err != nil {
-		return nil, fmt.Errorf("read aliases: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := map[string][]string{}
-	for rows.Next() {
-		var name, target string
-		if err := rows.Scan(&name, &target); err != nil {
-			return nil, fmt.Errorf("scan alias: %w", err)
-		}
-		out[name] = append(out[name], target)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read aliases: %w", err)
-	}
-	return out, nil
+	return aliasesTx(ctx, d.Read)
 }
 
 // PutAliases replaces the whole set in one transaction.
