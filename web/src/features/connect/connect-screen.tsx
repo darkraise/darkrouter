@@ -239,8 +239,8 @@ export function ConnectScreen() {
               path prefix sits in front of the gateway, these are wrong. The
               gateway cannot see what sits in front of it, so{" "}
               <code className="font-mono">server.public_url</code> has to be set
-              to the domain clients actually use — there is no write endpoint for
-              it yet, so it is set outside the console for now.
+              to the domain clients actually use. This screen does not offer an
+              editor for it yet, so it is written through the API for now.
             </p>
           </>
         )}

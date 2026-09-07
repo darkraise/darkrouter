@@ -358,10 +358,11 @@ export const SOURCE_LABEL = {
 /**
  * The settings this console can actually change.
  *
- * Only `policy` and `aliases` are writable at all -- both moved into the
- * database after the first run -- and aliases are a routing concept with
- * their own editor. Everything else on the gateway has no write endpoint yet,
- * so listing it here would be a page of controls that refuse to move.
+ * Every stored setting is writable through the API now. This list is the
+ * subset this screen offers a control for: policy, because it is what the
+ * console has always edited here, with aliases living in the routing editor
+ * because they are a routing concept. The rest render read-only until this
+ * screen grows editors for them.
  *
  * `policy.timeout.connect` and `policy.timeout.first_byte` are absent because
  * both configure the one shared transport built at startup, so a save of
