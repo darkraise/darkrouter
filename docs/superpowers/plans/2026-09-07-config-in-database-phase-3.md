@@ -1638,3 +1638,59 @@ Carried from phase 2: the nine invisible catalogue keys (2, 5), `pending_restart
 **Type consistency:** `ConfigKind` is defined in Task 1 (Go) and Task 4 (TS) with the same six values. `SettingRow` is defined in Task 5 and consumed in Tasks 6-8. `ConfigPatch` matches the Go `config.Patch` JSON shape from phase 2 — `set`, `reset`, and the `aliases` field this screen never sends.
 
 **Rule S:** every task has `files + spec + coupling <= 3` and `spec <= 2`; no task scores 3 on spec completeness.
+
+---
+
+## What phase 4 inherits
+
+Recorded here rather than in the execution ledger, which is scratch and does
+not survive the branch.
+
+### Deferred to phase 4 or later, by design
+
+- `log.level` and `log.format` are bootstrap-owned (spec §1 lists five such
+  keys) but are not in `bootstrapShown`, so the settings screen displays only
+  the two listen addresses. Reasonable, but phase 4's documentation should say
+  which bootstrap keys the console shows and which it does not.
+- `docs/design/configuration.md` still documents the retry cap as an
+  admin-side rule; it has been a registry rule enforced on both paths since
+  phase 2.
+
+### Live behaviour worth a decision
+
+- **A background refetch discards an in-progress draft.** `useConfig` has no
+  `staleTime` and refetches on window focus. Structural sharing keeps the
+  reference unless the answer actually changed, so a draft is lost only when
+  another operator wrote, or when `warnings`/`pending_restart` changed. The
+  guard — skip the reseed while the form is dirty and say the server changed
+  underneath you — is a conflict-handling decision rather than a bug fix, so
+  it was left for whoever owns that call.
+- **An emptied box on a `default`-source row is a silent no-op.** There is no
+  stored row to delete, so no badge appears, no patch is built and the Save
+  bar does not arm; the box just sits empty. A chip reading "already the
+  default" would close it.
+
+### Findings outside this phase's scope
+
+- `internal/store/configreg.go`'s `optBool.get` returns `"false"` for a nil
+  pointer. That equals the effective value only because `applyDefaults` pins
+  all six optional bools before anything reads them. If a future change left
+  one nil, the console would show "Off" for a key that behaves as on, and
+  `ReconcileConfig` would compare an operator's explicit `false` against the
+  same `"false"` and delete the row. Worth a comment at that getter stating
+  the dependency.
+- `internal/catalog/merge.go`'s `priceSource` tolerates `override`, `litellm`
+  and `registry` price stamps that nothing in production ever writes — dead
+  tolerance, or a feature half-wired.
+- Two stale comments still teach a contract this phase changed: the env-row
+  comment in `web/src/features/settings/settings-screen.test.tsx` (around the
+  "shows an environment value as a reading" test) says `hot_reloadable` is
+  true for a listen address, which the handler stopped emitting; and
+  `internal/store/configreg_test.go`'s "takes a bare domain and normalises it"
+  comment lists `catalog.models_dev_url` alongside `server.public_url`, though
+  only the latter normalises.
+- `fieldErrors` in the settings screen matches a refusal to a key by substring.
+  Safe today — no registry key contains another — and brittle if one ever does.
+- Every 400 used to be toasted as well as shown inline; that is fixed, but the
+  seam added for it (`quietError` on `useApiMutation`) is the only opt-out and
+  is documented nowhere but its own comment.
