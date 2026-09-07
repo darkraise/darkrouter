@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -309,5 +310,122 @@ func TestMarkBootRebasesThePendingRestartBaseline(t *testing.T) {
 	s.MarkBoot()
 	if got := s.PendingRestart(); len(got) != 0 {
 		t.Errorf("PendingRestart() = %v, want nothing pending after MarkBoot", got)
+	}
+}
+
+// The write and the snapshot it produces are one operation. A reload landing
+// between them publishes a configuration the write has already superseded.
+func TestUpdateBlocksAConcurrentReload(t *testing.T) {
+	base := &Config{}
+	ApplyDefaults(base)
+	s, err := NewStoreFrom(func() (*Config, error) { dup := *base; return &dup, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inWrite, release := make(chan struct{}), make(chan struct{})
+	s.SetWriter(func(context.Context, Patch) ([]string, error) {
+		close(inWrite)
+		<-release
+		return []string{"log.retention"}, nil
+	})
+
+	updated := make(chan error, 1)
+	go func() { _, err := s.Update(context.Background(), Patch{}); updated <- err }()
+	<-inWrite
+
+	reloaded := make(chan error, 1)
+	go func() { reloaded <- s.Reload() }()
+	select {
+	case <-reloaded:
+		t.Fatal("a reload ran while a write was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-updated; err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if err := <-reloaded; err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+}
+
+// The rows are durable whether or not the republish worked, so "the write was
+// refused" and "the write landed and the old config is still serving" are two
+// different answers and the caller has to be able to tell them apart.
+func TestUpdateReportsAPublishFailureSeparately(t *testing.T) {
+	boom := errors.New("boom")
+	var loads int
+	s, err := NewStoreFrom(func() (*Config, error) {
+		loads++
+		if loads == 1 {
+			c := &Config{}
+			ApplyDefaults(c)
+			return c, nil
+		}
+		return nil, boom
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetWriter(func(context.Context, Patch) ([]string, error) {
+		return []string{"log.retention"}, nil
+	})
+
+	written, err := s.Update(context.Background(), Patch{})
+	var pub PublishError
+	if !errors.As(err, &pub) {
+		t.Fatalf("err = %v, want a PublishError", err)
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want it to carry the load failure", err)
+	}
+	// Reported even so: those keys are in the database now.
+	if len(written) != 1 || written[0] != "log.retention" {
+		t.Errorf("written = %v, want the keys the write committed", written)
+	}
+}
+
+func TestUpdateWithoutAWriterIsRefused(t *testing.T) {
+	c := &Config{}
+	ApplyDefaults(c)
+	if _, err := NewStoreOf(c).Update(context.Background(), Patch{}); err == nil {
+		t.Fatal("Update succeeded with no writer installed")
+	}
+}
+
+// Reload publishes what load returns. Returning the same pointer every time
+// mutates the snapshot an in-flight request is already using.
+func TestNewStoreOfPublishesAFreshSnapshotPerReload(t *testing.T) {
+	c := &Config{}
+	ApplyDefaults(c)
+	s := NewStoreOf(c)
+	before := s.Current()
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Current() == before {
+		t.Error("Reload republished the Config a request may already hold")
+	}
+}
+
+func TestRejectedErrorIsMatchable(t *testing.T) {
+	err := Rejected("policy.retry.max_attempts must be between 1 and %d", 10)
+	var rejected RejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("err = %v, want a RejectedError", err)
+	}
+	if rejected.Error() != "policy.retry.max_attempts must be between 1 and 10" {
+		t.Errorf("message = %q", rejected.Error())
+	}
+}
+
+func TestBootstrapVarNamesTheVariableThatOwnsAKey(t *testing.T) {
+	if name, ok := BootstrapVar("server.proxy_token"); !ok || name != "DARKROUTER_PROXY_TOKEN" {
+		t.Errorf("BootstrapVar(server.proxy_token) = %q, %v", name, ok)
+	}
+	if _, ok := BootstrapVar("log.retention"); ok {
+		t.Error("log.retention is a stored key, not a bootstrap one")
 	}
 }
