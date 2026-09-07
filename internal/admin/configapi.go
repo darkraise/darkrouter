@@ -14,74 +14,31 @@ import (
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-// fieldMeta annotates one config value with where it came from and whether a
-// reload can apply it. Spec §8.2: the settings screen shows both, and a value
-// with neither is one an operator has to guess about.
+// fieldMeta annotates one setting with where it came from, whether a reload
+// applies it, and what it holds. The console builds its editor from kind, so
+// this is the whole of what a row needs beyond its value.
 type fieldMeta struct {
 	Source        string `json:"source"`
 	HotReloadable bool   `json:"hot_reloadable"`
+	Kind          string `json:"kind"`
+	// Env names the variable that owns a bootstrap key, and is empty for a
+	// stored one. It is what lets the screen say why a row cannot be edited
+	// instead of merely disabling it.
+	Env string `json:"env,omitempty"`
 }
 
-// databaseOwned names the blocks that live in SQLite whether or not a row has
-// been written for them: the console is where they are edited, and there is
-// nowhere else they could have come from. Every other key is reported as
-// stored or not from what the database actually carries.
-//
-// policy is deliberately not in here. Its seven keys are ordinary registry
-// rows, and ReconcileConfig exists to delete the ones equal to the compiled
-// default; claiming the whole block came from the database would report those
-// deleted rows as values the operator chose.
-var databaseOwned = []string{"aliases"}
-
-// bootstrapOwned names the keys the process reads from its environment before
-// the database is open. They cannot be stored, so reporting them as a database
-// value would send an operator to a screen that cannot change them.
-var bootstrapOwned = []string{"server.proxy_listen", "server.admin_listen"}
-
-// configFields is every key the settings screen can show. Listed rather than
-// reflected: reflection would expose whatever the struct happens to carry,
-// including server.proxy_token, and phase 7 §4.1 forbids returning credential
-// material from any endpoint.
-var configFields = []string{
-	"server.proxy_listen",
-	"server.admin_listen",
-	"server.public_url",
-	"server.max_body_bytes",
-	"server.shutdown_grace",
-	"server.sse.max_line_bytes",
-	"server.sse.max_precommit_bytes",
-	"log.retention",
-	"capture.bodies",
-	"capture.max_bytes",
-	"capture.retention",
-	"playground.save_conversations",
-	"catalog.models_dev_url",
-	"catalog.sync_interval",
-	"catalog.sync_timeout",
-	"catalog.discovery.enabled",
-	"catalog.discovery.interval",
-	"media.inline",
-	"policy.cooldown.trip_after",
-	"policy.cooldown.max",
-	"policy.retry.max_attempts",
-	"policy.timeout.connect",
-	"policy.timeout.first_byte",
-	"policy.timeout.total",
-	"policy.timeout.idle",
-	"aliases",
-}
+// bootstrapShown are the environment-owned keys the settings screen displays.
+// They are not registry keys and never will be -- a value needed to reach the
+// console cannot live in the database the console writes -- but an operator
+// still needs to see what the gateway is listening on.
+var bootstrapShown = []string{"server.proxy_listen", "server.admin_listen"}
 
 // sourceOf says where one value came from. stored names the registry keys the
 // database carries; a key absent from it is on its compiled default, which is
 // the distinction the settings screen exists to show.
 func sourceOf(field string, stored map[string]bool) string {
-	for _, owned := range databaseOwned {
-		if field == owned || strings.HasPrefix(field, owned+".") {
-			return "database"
-		}
-	}
-	if slices.Contains(bootstrapOwned, field) {
-		return "environment"
+	if _, ok := config.BootstrapVar(field); ok {
+		return "env"
 	}
 	if stored[field] {
 		return "database"
@@ -95,7 +52,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Config == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": true, "warnings": []string{},
-			"blocks": map[string]any{}, "fields": map[string]fieldMeta{},
+			"values": map[string]string{}, "fields": map[string]fieldMeta{},
 			"pending_restart": []string{},
 		})
 		return
@@ -116,13 +73,34 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fields := make(map[string]fieldMeta, len(configFields))
-	for _, f := range configFields {
-		fields[f] = fieldMeta{
-			Source:        sourceOf(f, stored),
-			HotReloadable: !slices.Contains(config.RestartOnly, f),
+	// Values and fields both come from the registry, so a key added there is on
+	// the screen with no second edit. The hand-written block tree this replaces
+	// is why nine catalogue keys were never visible.
+	values := store.ConfigRowsFor(cfg)
+	fields := make(map[string]fieldMeta, len(values)+len(bootstrapShown))
+	for key := range values {
+		kind, _ := store.ConfigKindOf(key)
+		fields[key] = fieldMeta{
+			Source:        sourceOf(key, stored),
+			HotReloadable: !slices.Contains(config.RestartOnly, key),
+			Kind:          string(kind),
 		}
 	}
+	for _, key := range bootstrapShown {
+		name, _ := config.BootstrapVar(key)
+		fields[key] = fieldMeta{
+			Source: "env",
+			// An environment value is technically hot -- nothing captures it at
+			// construction -- but a variable cannot change under a running
+			// process, so calling it hot would promise a live edit that is
+			// impossible.
+			HotReloadable: false,
+			Kind:          string(store.KindString),
+			Env:           name,
+		}
+	}
+	values["server.proxy_listen"] = cfg.Server.ProxyListen
+	values["server.admin_listen"] = cfg.Server.AdminListen
 
 	// Never null: a client cannot tell a JSON null from a field an older build
 	// did not serve. Measured against the snapshot this process booted on, so
@@ -136,45 +114,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// The same expression /healthz keys config_valid on. A skipped key is
 		// a default the operator did not choose, and the settings banner reads
 		// this field: the two endpoints must not disagree about it.
-		"valid":    cfgErr == nil && len(cfg.Skipped) == 0,
-		"warnings": append(append([]string{}, s.deps.Warnings...), cfg.Warnings...),
-		"fields":   fields,
-		// Carried, not rendered: phase 3 owns the console surface for it.
+		"valid":           cfgErr == nil && len(cfg.Skipped) == 0,
+		"warnings":        append(append([]string{}, s.deps.Warnings...), cfg.Warnings...),
+		"values":          values,
+		"fields":          fields,
 		"pending_restart": pending,
-		"blocks": map[string]any{
-			// server.proxy_token is deliberately absent: it is a shared secret
-			// and no endpoint returns credential material.
-			"server": map[string]any{
-				"proxy_listen":   cfg.Server.ProxyListen,
-				"admin_listen":   cfg.Server.AdminListen,
-				"public_url":     cfg.Server.PublicURL,
-				"max_body_bytes": cfg.Server.MaxBodyBytes,
-				"shutdown_grace": cfg.Server.ShutdownGrace.String(),
-				"sse": map[string]any{
-					"max_line_bytes":      cfg.Server.SSE.MaxLineBytes,
-					"max_precommit_bytes": cfg.Server.SSE.MaxPrecommitBytes,
-				},
-			},
-			"log": map[string]any{"retention": cfg.Log.Retention.String()},
-			"capture": map[string]any{
-				"bodies":    cfg.Capture.Bodies,
-				"max_bytes": cfg.Capture.MaxBytes,
-				"retention": cfg.Capture.Retention.String(),
-			},
-			"catalog": map[string]any{
-				"models_dev_url": cfg.Catalog.ModelsDevURL,
-				"sync_interval":  cfg.Catalog.SyncInterval.String(),
-				"sync_timeout":   cfg.Catalog.SyncTimeout.String(),
-				"discovery": map[string]any{
-					"enabled":  cfg.Catalog.Discovery.Enabled == nil || *cfg.Catalog.Discovery.Enabled,
-					"interval": cfg.Catalog.Discovery.Interval.String(),
-				},
-			},
-			"media":      map[string]any{"inline": cfg.MediaInline()},
-			"playground": map[string]any{"save_conversations": cfg.SaveConversations()},
-			"aliases":    cfg.Aliases,
-			"policy":     policyBlock(cfg.Policy),
-		},
 	}
 	if cfgErr != nil {
 		// Stated alongside the error, because a config that failed validation

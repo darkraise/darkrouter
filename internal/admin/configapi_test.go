@@ -14,12 +14,13 @@ import (
 	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
-// configBody is the shape GET /api/config returns: every block, each value
-// annotated with where it came from and whether changing it does anything.
+// configBody is the shape GET /api/config returns: a flat map of every
+// registry key, each value annotated with where it came from, whether changing
+// it does anything, and what it holds.
 type configBody struct {
 	Valid    bool                 `json:"valid"`
 	Warnings []string             `json:"warnings"`
-	Blocks   map[string]any       `json:"blocks"`
+	Values   map[string]string    `json:"values"`
 	Fields   map[string]fieldMeta `json:"fields"`
 
 	PendingRestart []string `json:"pending_restart"`
@@ -39,52 +40,149 @@ func getConfig(t *testing.T, s *Server) configBody {
 	return body
 }
 
-func TestConfigReturnsEveryBlock(t *testing.T) {
-	// server was the only block served, so log, capture and catalog had no
-	// data source at all behind the settings screen.
+// The registry is the allowlist. A key it carries reaches the screen with no
+// second edit, which is the whole reason the hand-written block tree went:
+// nine catalogue keys never reached the console because nobody added them
+// twice.
+func TestConfigServesEveryRegistryKey(t *testing.T) {
 	s, _ := testServerFull(t)
-	body := getConfig(t, s)
-	for _, block := range []string{
-		"server", "log", "capture", "catalog", "aliases", "policy",
-	} {
-		if _, ok := body.Blocks[block]; !ok {
-			t.Errorf("block %q missing from the response", block)
+	cookie, _ := login(t, s)
+	var body struct {
+		Values map[string]string `json:"values"`
+		Fields map[string]struct {
+			Source        string `json:"source"`
+			HotReloadable bool   `json:"hot_reloadable"`
+			Kind          string `json:"kind"`
+			Env           string `json:"env"`
+		} `json:"fields"`
+	}
+	w := do(t, s, cookie, "", "GET", "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range store.ConfigKeys() {
+		if _, ok := body.Values[key]; !ok {
+			t.Errorf("values is missing %s", key)
+		}
+		f, ok := body.Fields[key]
+		if !ok {
+			t.Errorf("fields is missing %s", key)
+			continue
+		}
+		if f.Kind == "" {
+			t.Errorf("%s carries no kind", key)
 		}
 	}
-	catalog, ok := body.Blocks["catalog"].(map[string]any)
-	if !ok {
-		t.Fatalf("catalog is %T, want an object", body.Blocks["catalog"])
-	}
-	if _, ok := catalog["discovery"]; !ok {
-		t.Error("catalog.discovery missing; the settings screen reads it")
-	}
-}
-
-// The Connect page reads server.public_url to decide whether to hand out a
-// configured address or guess one from the page it was served on, so the block
-// has to carry the key whether or not a value was set.
-func TestConfigServesPublicURL(t *testing.T) {
-	// The extra YAML is indented and lands directly after admin_listen, so it
-	// continues the server mapping rather than opening a second one.
-	s, _ := testServerFullWithConfig(t, func(c *config.Config) { c.Server.PublicURL = "https://api.example.com/dr" })
-	server, ok := getConfig(t, s).Blocks["server"].(map[string]any)
-	if !ok {
-		t.Fatalf("server block is %T, want an object", getConfig(t, s).Blocks["server"])
-	}
-	if got := server["public_url"]; got != "https://api.example.com/dr" {
-		t.Errorf("server.public_url = %v, want the configured address", got)
+	// The keys that were invisible before this change.
+	for _, key := range []string{
+		"catalog.free_catalog_url", "catalog.litellm_sync",
+		"catalog.seed_free_providers", "catalog.discovery.timeout",
+		"catalog.discovery.concurrency",
+	} {
+		if _, ok := body.Values[key]; !ok {
+			t.Errorf("%s is still not served", key)
+		}
 	}
 }
 
-func TestConfigServesAnEmptyPublicURLWhenUnset(t *testing.T) {
+// The bootstrap keys are shown so an operator can see what the gateway is
+// listening on, and named with their variable so it is obvious why the screen
+// will not change them.
+func TestConfigNamesTheVariableThatOwnsABootstrapKey(t *testing.T) {
 	s, _ := testServerFull(t)
-	server := getConfig(t, s).Blocks["server"].(map[string]any)
-	got, present := server["public_url"]
-	if !present {
-		t.Fatal("server.public_url missing; the Connect page cannot tell unset from a stale build")
+	cookie, _ := login(t, s)
+	var body struct {
+		Values map[string]string `json:"values"`
+		Fields map[string]struct {
+			Source string `json:"source"`
+			Env    string `json:"env"`
+		} `json:"fields"`
 	}
-	if got != "" {
-		t.Errorf("server.public_url = %v, want empty when nothing configured it", got)
+	w := do(t, s, cookie, "", "GET", "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	listen, ok := body.Fields["server.proxy_listen"]
+	if !ok {
+		t.Fatal("server.proxy_listen is not served")
+	}
+	if listen.Source != "env" {
+		t.Errorf("source = %q, want env", listen.Source)
+	}
+	if listen.Env != "DARKROUTER_PROXY_LISTEN" {
+		t.Errorf("env = %q, want the variable name", listen.Env)
+	}
+	// A stored key carries no variable, and a client must not print one.
+	if stored := body.Fields["policy.timeout.total"]; stored.Env != "" {
+		t.Errorf("policy.timeout.total names %q as its variable", stored.Env)
+	}
+	// The row needs a value as well as a badge; metadata alone renders an
+	// empty box on the settings screen.
+	if body.Values["server.proxy_listen"] == "" {
+		t.Error("server.proxy_listen carries no value")
+	}
+	if body.Values["server.admin_listen"] == "" {
+		t.Error("server.admin_listen carries no value")
+	}
+}
+
+// The registry is the allowlist, so the one key that must never be echoed is
+// excluded by construction rather than by remembering to leave it out.
+func TestConfigNeverServesTheProxyToken(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, _ := login(t, s)
+	w := do(t, s, cookie, "", "GET", "/api/config", "")
+	// The fixture's bootstrap really does put this token in the config, so a
+	// handler that serialised the whole struct would print it here.
+	if strings.Contains(w.Body.String(), "fixture-proxy-token") {
+		t.Errorf("the response carries the token: %s", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "proxy_token") {
+		t.Errorf("the response names the token key: %s", w.Body.String())
+	}
+}
+
+// A configured value has to survive the whole path -- stored as a row, read
+// back by the loader, serialised by the registry -- and the defaults the test
+// above reads would look identical if none of that ran.
+func TestConfigServesAConfiguredValue(t *testing.T) {
+	s, _ := testServerFullWithConfig(t, func(c *config.Config) {
+		c.Server.PublicURL = "https://llm.example.test"
+	})
+	cookie, _ := login(t, s)
+	var body struct {
+		Values map[string]string `json:"values"`
+	}
+	w := do(t, s, cookie, "", "GET", "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Values["server.public_url"]; got != "https://llm.example.test" {
+		t.Errorf("public_url = %q, want the configured value", got)
+	}
+}
+
+// The values are the registry's own serialisation, which is what the write
+// path parses back. A screen that displayed one spelling and submitted another
+// would round-trip wrong on every save.
+func TestConfigServesValuesInTheirStoredSpelling(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, _ := login(t, s)
+	var body struct {
+		Values map[string]string `json:"values"`
+	}
+	w := do(t, s, cookie, "", "GET", "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Values["policy.timeout.total"]; got != "10m0s" {
+		t.Errorf("total = %q, want the Go duration spelling", got)
+	}
+	if got := body.Values["server.max_body_bytes"]; got != "33554432" {
+		t.Errorf("max_body_bytes = %q, want the decimal count", got)
+	}
+	if got := body.Values["capture.bodies"]; got != "false" {
+		t.Errorf("capture.bodies = %q, want a parseable bool", got)
 	}
 }
 
@@ -120,25 +218,6 @@ func TestConfigMarksRestartOnlyFieldsAsCold(t *testing.T) {
 	}
 	if meta, ok := body.Fields["log.retention"]; !ok || !meta.HotReloadable {
 		t.Errorf("log.retention should be hot-reloadable, got %+v", meta)
-	}
-}
-
-func TestConfigNamesTheSourceOfEachValue(t *testing.T) {
-	s, _ := testServerFull(t)
-	body := getConfig(t, s)
-
-	// The listen addresses are read from the environment before the database
-	// is open, so the settings screen cannot offer to change them.
-	if got := body.Fields["server.proxy_listen"].Source; got != "environment" {
-		t.Errorf("server.proxy_listen source = %q, want environment", got)
-	}
-	// Nothing stored it, so it is whatever applyDefaults chose -- reporting a
-	// source the operator never chose would be a lie the console repeats.
-	if got := body.Fields["capture.max_bytes"].Source; got != "default" {
-		t.Errorf("capture.max_bytes source = %q, want default", got)
-	}
-	if got := body.Fields["aliases"].Source; got != "database" {
-		t.Errorf("aliases source = %q, want database", got)
 	}
 }
 
