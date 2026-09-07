@@ -40,7 +40,7 @@ a copy off the host.
 Then:
 
 ```bash
-curl -N http://localhost:8080/v1/chat/completions \
+curl -N http://localhost:18080/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"openai/gpt-oss-120b","stream":true,
        "messages":[{"role":"user","content":"say hi"}]}'

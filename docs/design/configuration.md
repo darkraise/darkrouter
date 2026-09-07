@@ -53,8 +53,8 @@ configure a shared HTTP transport built once. `max_body_bytes` deliberately is
 
 | Key | Default | Notes |
 |---|---|---|
-| `server.proxy_listen` | `:8080` | Restart-only. |
-| `server.admin_listen` | `:8081` | Restart-only. |
+| `server.proxy_listen` | `:18080` | Restart-only. |
+| `server.admin_listen` | `:18081` | Restart-only. |
 | `server.proxy_token` | *empty* | Shared inbound secret. Interpolated. |
 | `server.max_body_bytes` | 33554432 | Applies on reload. |
 | `server.shutdown_grace` | `10s` | |

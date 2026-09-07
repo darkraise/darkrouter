@@ -32,8 +32,8 @@ services:
     # lists what it has to do — rather than forwarding these ports at the
     # router, which would publish the dashboard over plain HTTP.
     ports:
-      - "${PROXY_PORT:-8080}:8080"
-      - "${ADMIN_PORT:-8081}:8081"
+      - "${PROXY_PORT:-18080}:18080"
+      - "${ADMIN_PORT:-18081}:18081"
 
     # Lets a model runtime on the host — Ollama, LM Studio, llama.cpp — be
     # reached from inside the container. Every local preset ships a localhost
@@ -78,7 +78,7 @@ services:
     pids_limit: 512
 
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8081/readyz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:18081/readyz"]
       interval: 30s
       timeout: 3s
       retries: 3

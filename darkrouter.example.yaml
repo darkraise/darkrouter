@@ -9,8 +9,8 @@
 # DARKROUTER_ADMIN_PASSWORD_HASH is the optional way to provision or reset it.
 
 server:
-  proxy_listen: :8080
-  admin_listen: :8081
+  proxy_listen: :18080
+  admin_listen: :18081
   # Optional. An unset variable means proxy authentication is off, which is why
   # this file loads on a machine that has never set it.
   proxy_token: ${DARKROUTER_PROXY_TOKEN}
