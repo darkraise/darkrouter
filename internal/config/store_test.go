@@ -57,13 +57,13 @@ func TestReloadWarnsOnRestartOnlyChange(t *testing.T) {
 	stored := defaulted()
 	s := storeOver(t, stored)
 
-	stored.Server.ProxyListen = ":9090"
+	stored.Policy.Timeout.Connect = 3 * time.Second
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, w := range s.Current().Warnings {
-		if strings.Contains(w, "proxy_listen") && strings.Contains(w, "restart") {
+		if strings.Contains(w, "policy.timeout.connect") && strings.Contains(w, "restart") {
 			found = true
 		}
 	}

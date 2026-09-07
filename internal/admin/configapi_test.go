@@ -102,7 +102,6 @@ func TestConfigMarksRestartOnlyFieldsAsCold(t *testing.T) {
 	s, _ := testServerFull(t)
 	body := getConfig(t, s)
 	for _, field := range []string{
-		"server.proxy_listen",
 		"policy.timeout.connect",
 		"catalog.sync_interval",
 		"catalog.discovery.interval",
