@@ -365,3 +365,29 @@ func TestNewStoreFromKeepsTheOldSnapshotWhenTheLoaderFails(t *testing.T) {
 	}
 }
 
+// The overlay is installed after construction, so the snapshot the constructor
+// captured as boot is not the one the process runs.
+func TestMarkBootRebasesThePendingRestartBaseline(t *testing.T) {
+	s, err := NewStoreFrom(func() (*Config, error) {
+		c := &Config{}
+		applyDefaults(c)
+		return c, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetOverlay(func(c *Config) error {
+		c.Policy.Timeout.Connect = 7 * time.Second
+		return nil
+	})
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.PendingRestart(); len(got) != 1 || got[0] != "policy.timeout.connect" {
+		t.Fatalf("PendingRestart() = %v, want [policy.timeout.connect] before MarkBoot", got)
+	}
+	s.MarkBoot()
+	if got := s.PendingRestart(); len(got) != 0 {
+		t.Errorf("PendingRestart() = %v, want nothing pending after MarkBoot", got)
+	}
+}
