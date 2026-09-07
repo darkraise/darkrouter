@@ -86,6 +86,12 @@ func storeOverDatabase(t *testing.T, db *store.DB, aliases map[string][]string,
 		switch name {
 		case "DARKROUTER_PROXY_LISTEN", "DARKROUTER_ADMIN_LISTEN":
 			return ":0", true
+		case "DARKROUTER_PROXY_TOKEN":
+			// So a test asserting the token is never echoed is asserting
+			// against a token that is actually in the served config. Without
+			// it the process carries an empty token and the assertion checks
+			// for a string that was never there.
+			return "fixture-proxy-token", true
 		}
 		return "", false
 	})
