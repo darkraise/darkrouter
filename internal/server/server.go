@@ -522,7 +522,10 @@ func (s *Server) AdminHandler() http.Handler {
 		}
 
 		body := map[string]any{
-			"config_valid": cfgErr == nil,
+			// A skipped key is not a valid configuration. The process is
+			// running a default the operator did not choose, and warnings is
+			// the only place that fact appears.
+			"config_valid": cfgErr == nil && len(cfg.Warnings) == 0,
 			"warnings":     warnings,
 			"uptime":       time.Since(s.started).Round(time.Second).String(),
 			"version":      Version,

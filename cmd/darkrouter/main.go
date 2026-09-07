@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -103,6 +104,15 @@ func runServer(args []string) error {
 		} else {
 			*dbPath = "darkrouter.db"
 		}
+	}
+	// The file stopped being read in this release. Saying so once is what
+	// turns "my settings reverted" into an obvious morning rather than a
+	// confusing one.
+	legacy := filepath.Join(filepath.Dir(*dbPath), "darkrouter.yaml")
+	if _, err := os.Stat(legacy); err == nil {
+		slog.Warn("a configuration file is present but no longer read; "+
+			"settings now live in the database and are changed in the console",
+			"path", legacy)
 	}
 	if *legacyConfig != "" {
 		slog.Warn("-config is ignored; configuration now lives in the database",

@@ -196,6 +196,15 @@ func testConfigStore(t *testing.T) *config.Store {
 	return config.NewStoreOf(testConfigOf(t, nil))
 }
 
+// testServerWithConfig builds a server over a fixed, already-built Config,
+// for cases exercising something about the config itself (such as
+// cfg.Warnings) rather than the store's reload machinery that testConfigOf's
+// callers usually want.
+func testServerWithConfig(t *testing.T, c *config.Config) *Server {
+	t.Helper()
+	return serverBackedBy(t, config.NewStoreOf(c))
+}
+
 func TestHealthzReportsDroppedRecordsAndWarnings(t *testing.T) {
 	dir := t.TempDir()
 	cfgStore := testConfigStore(t)

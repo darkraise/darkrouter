@@ -48,6 +48,74 @@ func TestHealthzReportsConfigValidity(t *testing.T) {
 	}
 }
 
+// Reporting a config as valid while the process quietly substituted three
+// defaults makes the field useless. It is the only signal that a stored value
+// is being ignored, because nothing else about a skipped key is visible.
+func TestHealthzReportsASkippedKeyAsInvalid(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	c.Warnings = []string{"stored log.retention is unusable (bad duration); using the default"}
+	s := testServerWithConfig(t, c)
+
+	r := httptest.NewRequest("GET", "/healthz", nil)
+	w := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(w, r)
+
+	var body struct {
+		ConfigValid bool     `json:"config_valid"`
+		Warnings    []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ConfigValid {
+		t.Error("config_valid = true while a stored key was skipped")
+	}
+	if len(body.Warnings) == 0 {
+		t.Error("the reason a key was skipped must reach the caller")
+	}
+}
+
+// A clean load still reports valid, or the field means nothing in the
+// direction that matters. Both requests share one server and one Config
+// pointer, with only cfg.Warnings changed between them, so the assertion is
+// tied to that field rather than coincidentally true under any config_valid
+// expression that ignores it -- the first half alone would pass under both
+// "cfgErr == nil" and "cfgErr == nil && len(cfg.Warnings) == 0", since a
+// clean load makes both conjuncts true.
+func TestHealthzReportsACleanLoadAsValid(t *testing.T) {
+	c := &config.Config{}
+	config.ApplyDefaults(c)
+	s := testServerWithConfig(t, c)
+
+	r := httptest.NewRequest("GET", "/healthz", nil)
+	w := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(w, r)
+
+	var body struct {
+		ConfigValid bool `json:"config_valid"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.ConfigValid {
+		t.Error("config_valid = false on a clean load")
+	}
+
+	c.Warnings = []string{"stored log.retention is unusable (bad duration); using the default"}
+	w2 := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(w2, httptest.NewRequest("GET", "/healthz", nil))
+	var body2 struct {
+		ConfigValid bool `json:"config_valid"`
+	}
+	if err := json.Unmarshal(w2.Body.Bytes(), &body2); err != nil {
+		t.Fatal(err)
+	}
+	if body2.ConfigValid {
+		t.Error("config_valid stayed true after Warnings was set on the same config")
+	}
+}
+
 func TestReadyzReturns200(t *testing.T) {
 	s := newTestServer(t, nil)
 	rec := httptest.NewRecorder()
