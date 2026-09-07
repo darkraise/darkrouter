@@ -314,3 +314,54 @@ func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
 		t.Fatalf("PendingRestart = %v after an unrelated save, want it still pending", got)
 	}
 }
+
+func TestNewStoreFromUsesTheInjectedLoader(t *testing.T) {
+	n := 0
+	s, err := NewStoreFrom(func() (*Config, error) {
+		n++
+		c := &Config{}
+		applyDefaults(c)
+		c.Log.Retention = time.Duration(n) * 100 * time.Hour
+		return c, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Current().Log.Retention != 100*time.Hour {
+		t.Errorf("retention = %v, want the loader's first value", s.Current().Log.Retention)
+	}
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Current().Log.Retention != 200*time.Hour {
+		t.Errorf("retention = %v, want the loader's second value", s.Current().Log.Retention)
+	}
+}
+
+// A loader that fails leaves the previous snapshot live. A reload that could
+// take the gateway down is worse than one that does nothing.
+func TestNewStoreFromKeepsTheOldSnapshotWhenTheLoaderFails(t *testing.T) {
+	fail := false
+	s, err := NewStoreFrom(func() (*Config, error) {
+		if fail {
+			return nil, errors.New("database is gone")
+		}
+		c := &Config{}
+		applyDefaults(c)
+		return c, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fail = true
+	if err := s.Reload(); err == nil {
+		t.Fatal("a failing loader must report its error")
+	}
+	if s.Current() == nil {
+		t.Fatal("the previous snapshot must stay live")
+	}
+	if s.LastError() == nil {
+		t.Error("the failure must reach LastError, which /readyz reads")
+	}
+}
+
