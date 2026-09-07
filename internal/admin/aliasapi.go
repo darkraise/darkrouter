@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -35,22 +36,12 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, 64<<10, &aliases) {
 		return
 	}
+	// Not nil: the write path reads nil as "leave the alias table alone", and
+	// an operator who deleted the last chain meant the opposite.
 	if aliases == nil {
 		aliases = map[string][]string{}
 	}
-	if err := config.ValidateAliases(aliases); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.aliasTargetsExist(r.Context(), aliases); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.deps.DB.PutAliases(r.Context(), aliases); err != nil {
-		internalError(w, r, err)
-		return
-	}
-	s.republish(w)
+	s.commitConfig(w, r, config.Patch{Aliases: aliases})
 }
 
 func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
@@ -70,34 +61,39 @@ func (s *Server) handlePutPolicy(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, 16<<10, &body) {
 		return
 	}
-	if cold := restartOnlyIn(&body); len(cold) > 0 {
-		writeError(w, http.StatusBadRequest,
-			joinFields(cold)+" takes effect on restart and cannot be written here")
-		return
-	}
-	next, err := s.mergedPolicy(&body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.deps.DB.PutPolicy(r.Context(), next); err != nil {
-		internalError(w, r, err)
-		return
-	}
-	s.republish(w)
+	s.commitConfig(w, r, config.Patch{Set: policyPatch(&body)})
 }
 
-// republish reloads so the next snapshot a request takes carries the write.
-// The overlay is what pulls it back out of SQLite.
-func (s *Server) republish(w http.ResponseWriter) {
-	if err := s.deps.Config.Reload(); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": false, "error": err.Error(),
-			"serving": "the previous configuration is still serving",
-		})
-		return
+// policyPatch turns the policy endpoint's shape into registry keys. It is the
+// whole of what makes that endpoint a view rather than a second write path: a
+// field it does not mention is untouched, and one it mentions as empty is a
+// reset, which is what the console's "clear the box" has always meant.
+func policyPatch(p *policyWrite) map[string]string {
+	set := map[string]string{}
+	if p.Cooldown != nil {
+		if p.Cooldown.TripAfter != nil {
+			set["policy.cooldown.trip_after"] = strconv.Itoa(*p.Cooldown.TripAfter)
+		}
+		if p.Cooldown.Max != nil {
+			set["policy.cooldown.max"] = *p.Cooldown.Max
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+	if p.Retry != nil && p.Retry.MaxAttempts != nil {
+		set["policy.retry.max_attempts"] = strconv.Itoa(*p.Retry.MaxAttempts)
+	}
+	if p.Timeout != nil {
+		for key, v := range map[string]*string{
+			"policy.timeout.connect":    p.Timeout.Connect,
+			"policy.timeout.first_byte": p.Timeout.FirstByte,
+			"policy.timeout.total":      p.Timeout.Total,
+			"policy.timeout.idle":       p.Timeout.Idle,
+		} {
+			if v != nil {
+				set[key] = *v
+			}
+		}
+	}
+	return set
 }
 
 // overrideBody is the wire shape both ways. Every field is omitempty: an
@@ -197,15 +193,4 @@ func (s *Server) rebuildCatalog(ctx context.Context) {
 	if s.deps.Catalog != nil {
 		_ = s.deps.Catalog.Rebuild(ctx)
 	}
-}
-
-func joinFields(fields []string) string {
-	out := ""
-	for i, f := range fields {
-		if i > 0 {
-			out += ", "
-		}
-		out += f
-	}
-	return out
 }
