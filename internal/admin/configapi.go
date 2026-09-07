@@ -25,7 +25,12 @@ type fieldMeta struct {
 // been written for them: the console is where they are edited, and there is
 // nowhere else they could have come from. Every other key is reported as
 // stored or not from what the database actually carries.
-var databaseOwned = []string{"aliases", "policy"}
+//
+// policy is deliberately not in here. Its seven keys are ordinary registry
+// rows, and ReconcileConfig exists to delete the ones equal to the compiled
+// default; claiming the whole block came from the database would report those
+// deleted rows as values the operator chose.
+var databaseOwned = []string{"aliases"}
 
 // bootstrapOwned names the keys the process reads from its environment before
 // the database is open. They cannot be stored, so reporting them as a database
@@ -118,7 +123,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := map[string]any{
-		"valid":    cfgErr == nil,
+		// The same expression /healthz keys config_valid on. A skipped key is
+		// a default the operator did not choose, and the settings banner reads
+		// this field: the two endpoints must not disagree about it.
+		"valid":    cfgErr == nil && len(cfg.Skipped) == 0,
 		"warnings": append(append([]string{}, s.deps.Warnings...), cfg.Warnings...),
 		"fields":   fields,
 		"blocks": map[string]any{

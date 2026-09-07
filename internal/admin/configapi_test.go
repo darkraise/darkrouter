@@ -314,3 +314,39 @@ func seedFailover(t *testing.T, db *store.DB) {
 		},
 	}})
 }
+
+// ReconcileConfig deletes a policy row equal to the compiled default so an
+// upgraded install stops claiming the operator picked it. Reporting the whole
+// policy block as database-owned would undo that on the read side: the console
+// would name a chosen value behind every one of the seven keys.
+func TestPolicySourceFollowsWhetherARowIsStored(t *testing.T) {
+	s, _ := testServerFull(t)
+	if got := getConfig(t, s).Fields["policy.timeout.connect"].Source; got != "default" {
+		t.Errorf("policy.timeout.connect source = %q with no row stored, want default", got)
+	}
+
+	stored, db := testServerFullWithConfig(t, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 3 * time.Second
+	})
+	keys, err := store.StoredConfigKeys(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !keys["policy.timeout.connect"] {
+		t.Fatal("the fixture did not store policy.timeout.connect, so this proves nothing")
+	}
+	if got := getConfig(t, stored).Fields["policy.timeout.connect"].Source; got != "database" {
+		t.Errorf("policy.timeout.connect source = %q with a row stored, want database", got)
+	}
+}
+
+// /healthz and this endpoint answer the same question, and the settings banner
+// reads this one. A reverted key left valid here told an operator their
+// configuration was fine while the process ran a default they never chose.
+func TestConfigIsNotValidWhenAKeyWasReverted(t *testing.T) {
+	s, _ := testServerFullWithConfig(t, func(c *config.Config) { c.Capture.MaxBytes = -1 })
+	body := getConfig(t, s)
+	if body.Valid {
+		t.Errorf("valid = true with a reverted key; warnings %v", body.Warnings)
+	}
+}
