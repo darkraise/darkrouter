@@ -8,8 +8,9 @@ treat the whole directory as a secret.
 There is no configuration file. Settings — body and streaming limits, log and
 capture retention, the catalogue sync — live in the database's `settings`
 table; every key has a working default, and a key nothing has set stays on it.
-Providers and aliases are database-owned too, each in its own tables. A small bootstrap set comes from `.env`
-instead, because the process needs it before the database is open.
+Providers and aliases are database-owned too, each with its own tables. A
+small bootstrap set comes from `.env` instead, because the process needs it
+before the database is open.
 
 ## Production
 
