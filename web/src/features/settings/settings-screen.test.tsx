@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "darkraise-ui"
@@ -6,18 +6,16 @@ import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  fieldErrors,
   orderSessions,
-  readOnlyGroups,
   passwordProblem,
   reloadMessage,
   revokedText,
   SettingsScreen,
+  settingsPatch,
   syncMessage,
-  toDraft,
-  toWrite,
 } from "./settings-screen"
-import type { ConfigResponse } from "../../lib/api-types"
-import { EDITABLE } from "./settings-catalog"
+import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
 
 // PageHeader calls useRouterAdapter unconditionally even without breadcrumbs
 // or tabs, so anything rendering it needs a provider — Settings never uses
@@ -42,86 +40,132 @@ function mount(ui: React.ReactNode) {
 
 beforeEach(() => vi.unstubAllGlobals())
 
-const cfg = (): ConfigResponse => ({
+/** Fills in the ConfigResponse boilerplate every test here ignores. */
+const cfgWith = (
+  values: Record<string, string>,
+  fields: Record<string, ConfigFieldMeta>,
+): ConfigResponse => ({
   valid: true,
   warnings: [],
+  values,
+  fields,
   pending_restart: [],
-  fields: {
-    "log.retention": { source: "database", hot_reloadable: true },
-    "catalog.discovery.interval": { source: "default", hot_reloadable: false },
-    // The API reports a listen address as hot-reloadable because nothing
-    // captures it at construction; it still cannot be changed from here.
-    "server.proxy_listen": { source: "environment", hot_reloadable: true },
-    "catalog.sync_timeout": { source: "database", hot_reloadable: false },
-    aliases: { source: "database", hot_reloadable: true },
-  },
-  blocks: {
-    server: {
-      proxy_listen: ":8080",
-      admin_listen: ":8081",
-      max_body_bytes: 1,
-      shutdown_grace: "10s",
-      sse: { max_line_bytes: 1, max_precommit_bytes: 1 },
-    },
-    log: { retention: "72h" },
-    capture: { bodies: false, max_bytes: 0, retention: "24h" },
-    catalog: {
-      models_dev_url: "https://models.dev",
-      sync_interval: "12h",
-      sync_timeout: "30s",
-      discovery: { enabled: true, interval: "6h" },
-    },
-    playground: { save_conversations: true },
-    media: { inline: true },
-    aliases: { fast: ["groq/a"] },
-    policy: {
-      cooldown: { max: "30m" },
-      retry: { max_attempts: 3 },
-      timeout: { connect: "10s", first_byte: "60s", total: "10m", idle: "30s" },
-    },
-  },
 })
 
-describe("the read-only configuration", () => {
-  it("leaves out the settings shown as editable fields above it", () => {
-    // Listing a value as a live input and again as a read-only row is what
-    // made the previous version of this screen show the same five settings
-    // twice under two different names.
-    const fields = readOnlyGroups(cfg()).flatMap((g) => g.rows.map((r) => r.field))
-    for (const editable of EDITABLE) expect(fields).not.toContain(editable.field)
+const cfg = (): ConfigResponse =>
+  cfgWith(
+    {
+      "log.retention": "72h",
+      "catalog.discovery.interval": "6h",
+      "catalog.sync_timeout": "30s",
+      "policy.retry.max_attempts": "3",
+      "capture.bodies": "true",
+      "server.proxy_listen": ":8080",
+    },
+    {
+      "log.retention": { source: "database", hot_reloadable: true, kind: "duration" },
+      "capture.bodies": { source: "database", hot_reloadable: true, kind: "bool" },
+      "catalog.discovery.interval": { source: "default", hot_reloadable: false, kind: "duration" },
+      "catalog.sync_timeout": { source: "database", hot_reloadable: false, kind: "duration" },
+      "policy.retry.max_attempts": { source: "database", hot_reloadable: true, kind: "int" },
+      // The API reports a listen address as hot-reloadable because nothing
+      // captures it at construction; it still cannot be changed from here.
+      "server.proxy_listen": {
+        source: "env",
+        hot_reloadable: true,
+        kind: "string",
+        env: "DARKROUTER_PROXY_LISTEN",
+      },
+    },
+  )
+
+describe("settingsPatch", () => {
+  const cfg = cfgWith(
+    { "log.retention": "720h0m0s", "capture.bodies": "false", "policy.timeout.total": "10m0s" },
+    {
+      "log.retention": { source: "default", hot_reloadable: true, kind: "duration" },
+      "capture.bodies": { source: "default", hot_reloadable: true, kind: "bool" },
+      "policy.timeout.total": { source: "database", hot_reloadable: true, kind: "duration" },
+    },
+  )
+
+  it("sends nothing when nothing changed", () => {
+    expect(settingsPatch({ "log.retention": "720h0m0s" }, new Set(), cfg)).toEqual({})
   })
 
-  it("keeps the policy settings that exist but cannot be edited", () => {
-    // connect and first_byte configure the one shared transport built at
-    // startup, so a save of either waits for a restart — which is why they
-    // belong in the read-only view rather than nowhere.
-    const fields = readOnlyGroups(cfg()).flatMap((g) => g.rows.map((r) => r.field))
-    expect(fields).toContain("policy.timeout.connect")
-    expect(fields).toContain("policy.timeout.first_byte")
+  it("sends only the keys the draft changed", () => {
+    // The screen used to write three policy keys on every save whatever the
+    // operator touched, which reported them all as stored until the next
+    // restart reconciled them away.
+    const draft = { "log.retention": "96h", "capture.bodies": "false", "policy.timeout.total": "10m0s" }
+    expect(settingsPatch(draft, new Set(), cfg)).toEqual({ set: { "log.retention": "96h" } })
   })
 
-  it("drops a group left with nothing in it", () => {
-    // A heading over an empty card reads as a section that failed to load.
-    for (const section of readOnlyGroups(cfg())) {
-      expect(section.rows.length).toBeGreaterThan(0)
-    }
+  it("sends a padded value trimmed rather than as padding nobody typed", () => {
+    expect(settingsPatch({ "log.retention": "  96h  " }, new Set(), cfg)).toEqual({
+      set: { "log.retention": "96h" },
+    })
   })
 
-  it("carries each field's source and reloadability", () => {
-    // §8.1: the view has to say where a value came from at the point of
-    // display, since the console cannot write these.
-    const rows = readOnlyGroups(cfg()).flatMap((g) => g.rows)
-    expect(rows.find((r) => r.field === "log.retention")?.source).toBe("database")
-    expect(rows.find((r) => r.field === "catalog.discovery.interval")?.source).toBe("default")
-    expect(rows.find((r) => r.field === "catalog.discovery.interval")?.hotReloadable).toBe(false)
-    expect(rows.find((r) => r.field === "log.retention")?.hotReloadable).toBe(true)
+  it("reads a padded value equal to the stored one as no change at all", () => {
+    // The empty case already trims; comparing the untrimmed text against it
+    // made " 10m0s " a change and sent the padding to the server.
+    expect(settingsPatch({ "policy.timeout.total": " 10m0s " }, new Set(), cfg)).toEqual({})
   })
 
-  it("renders the value a person reads and keeps the stored spelling", () => {
-    const rows = readOnlyGroups(cfg()).flatMap((g) => g.rows)
-    const retention = rows.find((r) => r.field === "log.retention")
-    expect(retention?.display).toBe("3 days")
-    expect(retention?.literal).toBe("72h")
+  it("sends an emptied box as a reset for that key alone", () => {
+    const draft = { "policy.timeout.total": "" }
+    expect(settingsPatch(draft, new Set(), cfg)).toEqual({ reset: ["policy.timeout.total"] })
+  })
+
+  it("resets only the emptied box, leaving the other stored keys alone", () => {
+    // Emptying one duration box used to send "" for three policy keys, so two
+    // the operator never touched were reset with it.
+    const stored = cfgWith(
+      { "log.retention": "720h0m0s", "policy.timeout.total": "10m0s" },
+      {
+        "log.retention": { source: "database", hot_reloadable: true, kind: "duration" },
+        "policy.timeout.total": { source: "database", hot_reloadable: true, kind: "duration" },
+      },
+    )
+    const draft = { "log.retention": "720h0m0s", "policy.timeout.total": "" }
+    expect(settingsPatch(draft, new Set(), stored)).toEqual({ reset: ["policy.timeout.total"] })
+  })
+
+  it("sends nothing for an emptied box that has no stored row", () => {
+    // log.retention is on its default: there is no row to delete, and naming
+    // it would come back as a restart-pending write of nothing.
+    expect(settingsPatch({ "log.retention": "" }, new Set(), cfg)).toEqual({})
+  })
+
+  it("sends an explicit reset even when the box still holds the value", () => {
+    expect(settingsPatch({}, new Set(["policy.timeout.total"]), cfg)).toEqual({
+      reset: ["policy.timeout.total"],
+    })
+  })
+
+  it("never resets a key that has no stored row", () => {
+    // log.retention is on its default; resetting it would be a no-op the
+    // answer would still report as a restart-pending write.
+    expect(settingsPatch({}, new Set(["log.retention"]), cfg)).toEqual({})
+  })
+})
+
+describe("fieldErrors", () => {
+  it("attaches a refusal to the key it names", () => {
+    expect(fieldErrors("log.retention must be at least 48h, got 1h", ["log.retention", "capture.bodies"]))
+      .toEqual({ "log.retention": "log.retention must be at least 48h, got 1h" })
+  })
+
+  it("attaches a cross-key refusal to every key it names", () => {
+    const msg =
+      "[policy.timeout.total policy.timeout.connect policy.timeout.first_byte] broke the timeout budget rule (policy.timeout.total (5s) must be at least connect + first_byte (1m10s))"
+    expect(fieldErrors(msg, ["policy.timeout.total", "policy.timeout.connect", "log.retention"]))
+      .toEqual({ "policy.timeout.total": msg, "policy.timeout.connect": msg })
+  })
+
+  it("attaches nothing when the message names no key", () => {
+    expect(fieldErrors("something went wrong", ["log.retention"])).toEqual({})
   })
 })
 
@@ -181,18 +225,49 @@ describe("the sync result", () => {
   })
 })
 
+/** A promise the test decides when to settle, so a request can be held open
+ *  while the screen is inspected mid-flight. */
+function gate() {
+  let open: () => void = () => {}
+  const held = new Promise<void>((resolve) => {
+    open = resolve
+  })
+  return { held, open: () => open() }
+}
+
 function stubSettingsFetch(overrides: {
   reload?: { valid: boolean; error?: string; serving?: string }
   sync?: { triggered: boolean }
   sessions?: unknown[]
+  save?: { status?: number; body?: unknown }
+  /** What GET /api/config answers once a save has landed. */
+  configAfterSave?: () => ConfigResponse
+  /** Holds every GET after the first, so the refetch a save triggers can be
+   *  inspected while it is still in flight. */
+  holdRefetch?: { held: Promise<void> }
+  /** Holds the PUT, so the screen can be inspected while the save is pending. */
+  holdSave?: { held: Promise<void> }
 }) {
   let configFetches = 0
+  let saved = false
+  const saves: unknown[] = []
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const method = (init as RequestInit | undefined)?.method ?? "GET"
     if (url === "/api/config" && method === "GET") {
       configFetches += 1
-      return new Response(JSON.stringify(cfg()), {
+      if (configFetches > 1 && overrides.holdRefetch) await overrides.holdRefetch.held
+      const body = saved && overrides.configAfterSave ? overrides.configAfterSave() : cfg()
+      return new Response(JSON.stringify(body), {
         status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    if (url === "/api/config" && method === "PUT") {
+      saves.push(JSON.parse(String((init as RequestInit).body)))
+      saved = true
+      if (overrides.holdSave) await overrides.holdSave.held
+      return new Response(JSON.stringify(overrides.save?.body ?? { valid: true, restart_required: [] }), {
+        status: overrides.save?.status ?? 200,
         headers: { "Content-Type": "application/json" },
       })
     }
@@ -223,7 +298,7 @@ function stubSettingsFetch(overrides: {
     return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
   })
   vi.stubGlobal("fetch", fetchMock)
-  return { fetchMock, configFetches: () => configFetches }
+  return { fetchMock, configFetches: () => configFetches, saves }
 }
 
 describe("a failed reload", () => {
@@ -265,87 +340,14 @@ describe("a sync request", () => {
   })
 })
 
-describe("the policy draft", () => {
-  const policy = {
-    cooldown: { trip_after: 3, max: "15m" },
-    retry: { max_attempts: 4 },
-    timeout: { connect: "10s", first_byte: "1m", total: "10m", idle: "2m" },
-  }
-
-  it("fills the form from what the gateway is running", () => {
-    expect(toDraft(policy as never)["policy.retry.max_attempts"]).toBe("4")
-    expect(toDraft(policy as never)["policy.cooldown.max"]).toBe("15m")
-  })
-
-  it("survives a response missing a block rather than blanking the screen", () => {
-    // Reading through an absent block unguarded took the whole screen down
-    // with it, including the banners that would have said what was wrong.
-    expect(() => toDraft({} as never)).not.toThrow()
-    expect(toDraft({} as never)["policy.cooldown.max"]).toBe("")
-  })
-
-  it("omits the two restart-only timeouts from the write", () => {
-    const write = toWrite(toDraft(policy as never)) as Record<string, unknown>
-    expect(JSON.stringify(write)).not.toContain("connect")
-    expect(JSON.stringify(write)).not.toContain("first_byte")
-  })
-
-  it("omits an empty trip_after rather than sending zero", () => {
-    // Zero is a real value meaning "cool on the first failure", and sending
-    // it for an empty box would change behaviour nobody asked to change.
-    const write = toWrite({ ...toDraft(policy as never), "policy.cooldown.trip_after": "" })
-    expect("trip_after" in write.cooldown).toBe(false)
-  })
-})
-
-describe("the policy write", () => {
-  const draft = {
-    "policy.cooldown.max": "5m",
-    "policy.cooldown.trip_after": "3",
-    "policy.retry.max_attempts": "4",
-    "policy.timeout.total": "10m",
-    "policy.timeout.idle": "30s",
-  }
-
-  it("sends the attempts a number was typed into", () => {
-    expect(toWrite(draft).retry).toEqual({ max_attempts: 4 })
-  })
-
-  it("leaves attempts out when the box was emptied", () => {
-    // Number("") is 0, and the store reads 0 as "no override" and deletes the
-    // setting — reverting to the built-in default under a success toast.
-    expect(toWrite({ ...draft, "policy.retry.max_attempts": "" }).retry).toBeUndefined()
-  })
-
-  it("leaves trip_after out when it will not parse as a whole number", () => {
-    // The same rule as attempts: a count that is not a whole number is not
-    // a setting, and sending NaN or 2.5 would either be ignored silently or
-    // refused after the operator was told it saved.
-    expect("trip_after" in toWrite({ ...draft, "policy.cooldown.trip_after": "abc" }).cooldown).toBe(false)
-    expect("trip_after" in toWrite({ ...draft, "policy.cooldown.trip_after": "2.5" }).cooldown).toBe(false)
-    expect(toWrite(draft).cooldown.trip_after).toBe(3)
-  })
-
-  it("leaves attempts out when it will not parse as a whole number", () => {
-    // NaN serialises to null and the Go pointer stays nil, so the field is
-    // ignored with no complaint. A fraction cannot reach a Go *int either.
-    expect(toWrite({ ...draft, "policy.retry.max_attempts": "abc" }).retry).toBeUndefined()
-    expect(toWrite({ ...draft, "policy.retry.max_attempts": "2.5" }).retry).toBeUndefined()
-  })
-})
-
-describe("the read-only section on the page", () => {
+describe("the settings form", () => {
   it("shows a setting with its value, key, source and restart badge", async () => {
     stubSettingsFetch({})
     mount(<SettingsScreen />)
 
-    // The humanised value once, with the stored spelling on its title rather
-    // than printed as a second value.
-    const value = await screen.findByText("3 days")
-    expect(value).toHaveAttribute("title", "72h")
-    expect(screen.queryByText("72h")).not.toBeInTheDocument()
-    // The dotted key, which is what the settings table and every error message use.
-    expect(screen.getByText("log.retention")).toBeInTheDocument()
+    // The dotted key, which is what the settings table and every error
+    // message use.
+    expect(await screen.findByText("log.retention")).toBeInTheDocument()
     // §8.1: where the value came from, said at the point of display.
     expect(screen.getAllByText("database").length).toBeGreaterThan(0)
     expect(screen.getAllByText("default").length).toBeGreaterThan(0)
@@ -353,7 +355,7 @@ describe("the read-only section on the page", () => {
     expect(screen.getAllByText("restart").length).toBeGreaterThan(0)
   })
 
-  it("gives an environment value no hot or restart badge", async () => {
+  it("shows an environment value as a reading rather than an editor", async () => {
     // hot_reloadable is true for a listen address, and saying "hot" would
     // promise a live edit an environment variable cannot take. The
     // environment chip is the whole story for those fields.
@@ -365,19 +367,232 @@ describe("the read-only section on the page", () => {
     expect(within(envRow as HTMLElement).getByText("environment")).toBeInTheDocument()
     expect(within(envRow as HTMLElement).queryByText("hot")).not.toBeInTheDocument()
     expect(within(envRow as HTMLElement).queryByText("restart")).not.toBeInTheDocument()
-
-    const dbRow = screen.getByText("catalog.sync_timeout").closest(".border-t")
-    expect(within(dbRow as HTMLElement).getByText("restart")).toBeInTheDocument()
+    expect(within(envRow as HTMLElement).queryByRole("textbox")).not.toBeInTheDocument()
+    expect(within(envRow as HTMLElement).queryByRole("button", { name: /reset/i })).not.toBeInTheDocument()
   })
 
-  it("does not repeat a setting that is editable above it", async () => {
-    stubSettingsFetch({})
+  it("saves only the key the operator edited", async () => {
+    // The old form wrote three policy keys on every save whatever was
+    // touched, so those three reported as stored until the next restart.
+    const { saves } = stubSettingsFetch({})
+    const user = userEvent.setup()
     mount(<SettingsScreen />)
-    await screen.findByText("3 days")
 
-    // policy.retry.max_attempts is an input up the page; its dotted key must
-    // appear once, under that field, not again as a read-only row.
-    expect(screen.getAllByText("policy.retry.max_attempts")).toHaveLength(1)
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(saves).toEqual([{ set: { "log.retention": "96h" } }]))
+  })
+
+  it("sends a reset for the row whose Reset was pressed, and nothing else", async () => {
+    const { saves } = stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const row = (await screen.findByText("catalog.sync_timeout")).closest(".border-t")
+    await user.click(within(row as HTMLElement).getByRole("button", { name: /reset/i }))
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(saves).toEqual([{ reset: ["catalog.sync_timeout"] }]))
+  })
+
+  it("clears the Save bar after a save the answer reads back unchanged", async () => {
+    // /api/config reports the typed config, so a saved "10m" reads back as
+    // "10m0s" and the refetch is byte-identical. Query shares that response
+    // structurally, so the reference never changes and a draft waiting on a
+    // changed reference would sit dirty over a value that is stored.
+    stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "72h0m0s")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  it("names a restart-only key the save accepted but cannot apply", async () => {
+    // Accepted rather than refused: the value belongs in the database either
+    // way. Silence about it reads as applied.
+    stubSettingsFetch({
+      save: { body: { valid: true, restart_required: ["catalog.sync_timeout"] } },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Metadata fetch timeout")
+    await user.clear(box)
+    await user.type(box, "45s")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    const statuses = await screen.findAllByRole("status")
+    expect(
+      statuses.some((s) => /catalog\.sync_timeout.*after a restart/.test(s.textContent ?? "")),
+    ).toBe(true)
+  })
+
+  it("puts a refused save on the row the server named", async () => {
+    stubSettingsFetch({
+      save: { status: 400, body: { error: "log.retention must be at least 48h, got 1h" } },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "1h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    const row = (await screen.findByText("log.retention")).closest(".border-t")
+    expect(
+      await within(row as HTMLElement).findByText(/must be at least 48h/),
+    ).toBeInTheDocument()
+  })
+
+  it("shows one banner for a committed write whose republish failed, not two", async () => {
+    // The rows are durable, so the refetch reports valid:false too. A banner
+    // from the save beside the banner from the refetched config is the same
+    // fact told twice, in the same colour, about the same failure.
+    const bad = "policy.timeout.total (5s) must be at least connect + first_byte"
+    stubSettingsFetch({
+      save: {
+        body: { valid: false, error: bad, serving: "the previous configuration is still serving" },
+      },
+      configAfterSave: () => ({
+        ...cfg(),
+        valid: false,
+        error: bad,
+        serving: "the previous configuration is still serving",
+      }),
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    // GET /api/config carries both `error` and `serving` whenever the config
+    // failed to validate, so the query-derived banner says the whole thing.
+    expect(await screen.findByText(/the configuration is invalid/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByText(bad)).toHaveLength(1))
+    expect(screen.getByText(/previous configuration is still serving/)).toBeInTheDocument()
+    expect(screen.queryByText(/the saved configuration is invalid/i)).not.toBeInTheDocument()
+  })
+
+  it("says a row is going to be reset instead of showing it as switched off", async () => {
+    // Emptying the draft made a stored `true` render as an unchecked switch,
+    // which is what "set this to false" looks like.
+    stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const row = (await screen.findByText("capture.bodies")).closest(".border-t") as HTMLElement
+    await user.click(within(row).getByRole("button", { name: /^reset$/i }))
+
+    const toggle = within(row).getByRole("switch", { name: "Record request bodies" })
+    expect(toggle).toBeChecked()
+    expect(toggle).toBeDisabled()
+    expect(within(row).getByText(/resets to default on save/i)).toBeInTheDocument()
+  })
+
+  it("offers Keep to take a row back out of the reset", async () => {
+    stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const row = (await screen.findByText("catalog.sync_timeout")).closest(".border-t") as HTMLElement
+    await user.click(within(row).getByRole("button", { name: /^reset$/i }))
+    expect(within(row).getByLabelText("Metadata fetch timeout")).toBeDisabled()
+
+    await user.click(within(row).getByRole("button", { name: /^keep$/i }))
+    expect(within(row).getByLabelText("Metadata fetch timeout")).toBeEnabled()
+    expect(within(row).queryByText(/resets to default on save/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
+  })
+
+  it("says an emptied box will reset the row it belongs to", async () => {
+    // An emptied box is a reset -- that is the store's rule, since it cannot
+    // hold "" as a value distinct from absent -- so the row has to say so.
+    stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const row = (await screen.findByText("log.retention")).closest(".border-t") as HTMLElement
+    await user.clear(within(row).getByLabelText("Keep request records for"))
+    expect(within(row).getByText(/resets to default on save/i)).toBeInTheDocument()
+  })
+
+  it("gates the editors until the reseed that follows the save has run", async () => {
+    // A keystroke landing during the save is wiped by the reseed that follows
+    // it, so the box would swallow an edit the operator watched themselves
+    // make. The window runs to the end of the reseed, not to the end of the
+    // PUT: the refetch the reseed reads is still in flight after the PUT has
+    // answered, and an editor re-enabled there is an editor whose next
+    // keystroke is discarded.
+    const put = gate()
+    const refetch = gate()
+    stubSettingsFetch({ holdSave: put, holdRefetch: refetch })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(screen.getByLabelText("Keep request records for")).toBeDisabled())
+
+    put.open()
+    // The toast fires inside the success handler, so it marks the moment the
+    // PUT has answered while the reseed is still awaiting the refetch.
+    const statuses = await screen.findAllByRole("status")
+    expect(statuses.some((s) => s.textContent?.includes("Settings saved"))).toBe(true)
+    // Long enough for the mutation to have dispatched success had it been
+    // going to: the refetch is still gated, so nothing else can move here.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(screen.getByLabelText("Keep request records for")).toBeDisabled()
+
+    refetch.open()
+    await waitFor(() => expect(screen.getByLabelText("Keep request records for")).toBeEnabled())
+  })
+
+  it("holds the typed value until the refetch that replaces it has landed", async () => {
+    // Reseeding from the render-time config puts the pre-save value back, so
+    // the box visibly flips to the old value and only returns to the new one
+    // when the refetch lands -- or stays wrong, if the refetch fails.
+    const held = gate()
+    stubSettingsFetch({
+      holdRefetch: held,
+      configAfterSave: () => ({ ...cfg(), values: { ...cfg().values, "log.retention": "96h0m0s" } }),
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    const statuses = await screen.findAllByRole("status")
+    expect(statuses.some((s) => s.textContent?.includes("Settings saved"))).toBe(true)
+    // The refetch is still in flight: what the operator typed is still what
+    // the box shows, rather than the value the save replaced.
+    expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+
+    held.open()
+    await waitFor(() =>
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+    )
   })
 })
 
