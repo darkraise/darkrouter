@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"flag"
 	"io"
-	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,9 +27,8 @@ func TestTheSecondSignalIsNotSwallowed(t *testing.T) {
 
 // The container image's own command still carries -config, and so does every
 // operator who copied it. Rejecting the flag would refuse to start with a
-// message explaining nothing; accepting it silently would leave them believing
-// the file is still read.
-func TestConfigFlagIsAcceptedIgnoredAndWarnedAbout(t *testing.T) {
+// message explaining nothing.
+func TestConfigFlagIsAcceptedAndIgnored(t *testing.T) {
 	fs := flag.NewFlagSet("darkrouter", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dbPath, legacyConfig, err := parseFlags(fs, []string{"-config", "/etc/darkrouter/darkrouter.yaml"})
@@ -42,19 +41,47 @@ func TestConfigFlagIsAcceptedIgnoredAndWarnedAbout(t *testing.T) {
 	if dbPath != "" {
 		t.Errorf("dbPath = %q; -config must not decide where the database lives", dbPath)
 	}
+}
 
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	defer slog.SetDefault(prev)
-	warnIgnoredConfigFlag(legacyConfig)
-	if !strings.Contains(buf.String(), "/etc/darkrouter/darkrouter.yaml") {
-		t.Errorf("no warning naming the ignored file; log was %q", buf.String())
+// The console reads this list. A warning that only reaches the log is one an
+// operator working in the console never sees, which is the same as not
+// warning at all for the person the notice is for.
+func TestStartupWarningsNameALeftoverFile(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "darkrouter.yaml")
+	if err := os.WriteFile(legacy, []byte("server: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	buf.Reset()
-	warnIgnoredConfigFlag("")
-	if buf.Len() != 0 {
-		t.Errorf("a run without -config warned anyway: %q", buf.String())
+	got := startupWarnings(filepath.Join(dir, "darkrouter.db"), "")
+	if len(got) != 1 {
+		t.Fatalf("warnings = %v, want one", got)
+	}
+	if !strings.Contains(got[0], "darkrouter.yaml") {
+		t.Errorf("the warning does not name the file: %q", got[0])
+	}
+	if !strings.Contains(got[0], "no longer read") {
+		t.Errorf("the warning does not say what changed: %q", got[0])
+	}
+}
+
+func TestStartupWarningsAreEmptyWithNoLeftoverFile(t *testing.T) {
+	dir := t.TempDir()
+	if got := startupWarnings(filepath.Join(dir, "darkrouter.db"), ""); len(got) != 0 {
+		t.Errorf("warnings = %v, want none", got)
+	}
+}
+
+// The flag is accepted as a no-op for one release, and an operator whose
+// entrypoint still passes it should be told in the console rather than only in
+// the log they are not reading.
+func TestStartupWarningsNameAnIgnoredConfigFlag(t *testing.T) {
+	dir := t.TempDir()
+	got := startupWarnings(filepath.Join(dir, "darkrouter.db"), "/etc/darkrouter/darkrouter.yaml")
+	if len(got) != 1 {
+		t.Fatalf("warnings = %v, want one", got)
+	}
+	if !strings.Contains(got[0], "/etc/darkrouter/darkrouter.yaml") {
+		t.Errorf("the warning does not name the flag's value: %q", got[0])
 	}
 }
