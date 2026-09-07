@@ -106,7 +106,7 @@ export type PolicyWrite = {
 /** A count field's value, or undefined when it holds nothing a count can be.
  *  Left out rather than sent as 0: `Number("")` is 0, and the store reads 0
  *  as "no override", so an emptied box would delete the setting and silently
- *  fall back to the file default under a toast reporting success. NaN is
+ *  fall back to the built-in default under a toast reporting success. NaN is
  *  worse: it serialises to null and the field is ignored with no complaint
  *  either. */
 function wholeNumber(raw: string | undefined): number | undefined {
@@ -184,8 +184,8 @@ function SettingField({
  * One setting this screen shows but cannot change.
  *
  * The key sits under the name in mono rather than replacing it. It is what
- * the YAML file and every error message use, so dropping it would break the
- * trail from this screen to the file being edited.
+ * the settings table and every error message use, so dropping it would break
+ * the trail from this screen to the stored value.
  */
 function ReadOnlySetting({ row }: { row: SettingRow }) {
   return (
@@ -226,8 +226,8 @@ function ReadOnlySetting({ row }: { row: SettingRow }) {
 
 /** Everything the gateway is set to that this console cannot change, and
  *  where each value came from. §8.1 requires the source to be said at the
- *  point of display: after the first run a database value means editing the
- *  file has no effect. */
+ *  point of display: an environment value needs a restart, a database one does
+ *  not. */
 function ReadOnlySettings({ cfg }: { cfg: ConfigResponse }) {
   const sections = readOnlyGroups(cfg)
   if (sections.length === 0) return null
@@ -236,9 +236,9 @@ function ReadOnlySettings({ cfg }: { cfg: ConfigResponse }) {
       <div>
         <h2 className="text-sm font-medium">Read-only configuration</h2>
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Set in <span className="font-mono">darkrouter.yaml</span> or left at its default.
-          There is no write endpoint for these — change the file and reload, or restart
-          where the badge says so.
+          Stored in the database, read from the environment at startup, or left at
+          its built-in default — the badge on each row says which. There is no write
+          endpoint for these yet, so they cannot be changed from here.
         </p>
       </div>
       {sections.map(({ group, rows }) => {
@@ -422,8 +422,8 @@ export function SettingsScreen() {
           size="sm"
           variant="outline"
           disabled={reload.isPending}
-          title="Reload the config file?"
-          description="The file on disk becomes what the gateway serves. Anything changed in the console that the file still contradicts goes back to the file's version."
+          title="Reload the configuration?"
+          description="Settings are re-read from the database and become what the gateway serves. Values that need a restart keep the ones the process started with."
           confirmLabel="Reload"
           onConfirm={() => reload.mutate()}
         >
@@ -440,7 +440,7 @@ export function SettingsScreen() {
 
       {config.data && !config.data.valid && (
         <Banner variant="destructive" className="mb-4">
-          <p className="text-sm font-medium">The configuration file is invalid</p>
+          <p className="text-sm font-medium">The configuration is invalid</p>
           <p className="mt-1 font-mono text-sm break-words">{config.data.error}</p>
           {config.data.serving && <p className="mt-1 text-sm">{config.data.serving}</p>}
         </Banner>

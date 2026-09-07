@@ -236,10 +236,11 @@ export function ConnectScreen() {
             <DialectRows origin={origins.lan} />
             <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">
               {LAN_NOTE} If a published container port, a reverse proxy or a
-              path prefix sits in front of the gateway, these are wrong — set{" "}
-              <code className="font-mono">server.public_url</code> in{" "}
-              <code className="font-mono">data/darkrouter.yaml</code> to the
-              domain clients actually use.
+              path prefix sits in front of the gateway, these are wrong. The
+              gateway cannot see what sits in front of it, so{" "}
+              <code className="font-mono">server.public_url</code> has to be set
+              to the domain clients actually use — there is no write endpoint for
+              it yet, so it is set outside the console for now.
             </p>
           </>
         )}

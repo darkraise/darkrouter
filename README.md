@@ -27,10 +27,12 @@ export DARKROUTER_MASTER_KEY="$(openssl rand -base64 32)"   # keep it: it unlock
 docker compose up --build
 ```
 
-That is the whole of it. There is no configuration file to write: every setting
-has a default, and providers are added from the console once it is up. To tune
-something, or to start with a provider already configured, copy
-`darkrouter.example.yaml` to `data/darkrouter.yaml` and edit it.
+That is the whole of it. There is no configuration file: every setting has a
+default, settings live in the `settings` table of the database, and providers
+are added from the console once it is up. A small bootstrap set — the listen
+addresses, the proxy token, the master key, the admin password hash, the log
+level and format, and the database path — comes from the environment instead,
+because the process needs it before the database is open.
 
 The master key encrypts every credential stored in `data/darkrouter.db`; the
 process refuses to start without one, and a database opened under a different
@@ -127,8 +129,7 @@ aliases:
     - azure-openai/text-embedding-3-small
 ```
 
-An alias entry is a `provider/model` string, which is the shape
-`darkrouter.example.yaml` already uses for its chat aliases.
+An alias entry is a `provider/model` string.
 
 Darkrouter permits the other arrangement rather than refusing it — refusing
 would make an alias useless the moment its first provider rate-limits — but it
@@ -313,8 +314,8 @@ breaker rather than the catalog is what avoids a broken provider. A model a
 *successful* listing omits three times running is marked removed upstream and
 stops being routable.
 
-Each syncer is optional. See the `catalog:` block in `darkrouter.example.yaml`,
-and [`docs/design/catalog-and-providers.md`](docs/design/catalog-and-providers.md)
+Each syncer is optional. See the catalogue settings on the console's Settings
+screen, and [`docs/design/catalog-and-providers.md`](docs/design/catalog-and-providers.md)
 for the merge precedence.
 
 ## Third-party material
