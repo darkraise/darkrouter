@@ -244,8 +244,9 @@ function ReadOnlySettings({ cfg }: { cfg: ConfigResponse }) {
         <h2 className="text-sm font-medium">Read-only configuration</h2>
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           Stored in the database, read from the environment at startup, or left at
-          its built-in default — the badge on each row says which. There is no write
-          endpoint for these yet, so they cannot be changed from here.
+          its built-in default — the badge on each row says which. The stored ones
+          can be written through the API; this screen does not offer editors for
+          them yet.
         </p>
       </div>
       {sections.map(({ group, rows }) => {
