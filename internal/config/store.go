@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 )
@@ -12,6 +14,11 @@ type Store struct {
 	cur     atomic.Pointer[Config]
 	lastErr atomic.Pointer[error]
 	overlay atomic.Pointer[func(*Config) error]
+
+	// writer commits a Patch. Injected for the same reason overlay is: this
+	// package may not import internal/store, because store already imports
+	// config and the reverse edge would close a cycle.
+	writer atomic.Pointer[func(context.Context, Patch) ([]string, error)]
 
 	// load builds a fresh Config. Injected rather than called directly,
 	// because this package may not import internal/store: store already
@@ -49,11 +56,48 @@ func (s *Store) applyOverlay(c *Config) error {
 	return (*p)(c)
 }
 
-// NewStoreOf builds a store over a fixed Config. Tests that used to write a
-// temporary YAML file to get a store use this instead; nothing in production
-// calls it.
+// SetWriter installs the transactional commit Update runs under the reload
+// lock. Injected rather than called directly, for the same import-cycle reason
+// SetOverlay is.
+func (s *Store) SetWriter(fn func(context.Context, Patch) ([]string, error)) {
+	s.writer.Store(&fn)
+}
+
+// Update commits a patch and republishes, holding the reload lock across both.
+//
+// The lock spans the write because the commit and the snapshot it produces are
+// one operation. A reload landing between them publishes a configuration the
+// write has already superseded; two saves racing outside it can each validate
+// against a state the other is about to replace, which is how two writes that
+// each satisfy total >= connect + first_byte commit a pair that does not.
+//
+// It returns the keys the write committed even when the republish fails: they
+// are in the database either way, and a caller that treated a publish failure
+// as "nothing happened" would be wrong about durable rows.
+func (s *Store) Update(ctx context.Context, p Patch) ([]string, error) {
+	fn := s.writer.Load()
+	if fn == nil || *fn == nil {
+		return nil, errors.New("configuration is read-only: no writer is installed")
+	}
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	written, err := (*fn)(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.reloadLocked(); err != nil {
+		return written, PublishError{Err: err}
+	}
+	return written, nil
+}
+
+// NewStoreOf builds a store over a fixed Config. Tests that need a store over
+// a Config they built by hand use this; nothing in production calls it.
 func NewStoreOf(c *Config) *Store {
-	s := &Store{load: func() (*Config, error) { return c, nil }}
+	// A copy per load. Reload publishes whatever load returns, so handing back
+	// the same pointer every time would have a reload mutate the snapshot an
+	// in-flight request is already reading.
+	s := &Store{load: func() (*Config, error) { dup := *c; return &dup, nil }}
 	s.cur.Store(c)
 	s.boot.Store(c)
 	return s
@@ -121,6 +165,12 @@ func (s *Store) RecordError(err error) {
 func (s *Store) Reload() error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
+	return s.reloadLocked()
+}
+
+// reloadLocked is Reload with the lock already held, which is what lets Update
+// keep the commit and the republish inside one critical section.
+func (s *Store) reloadLocked() error {
 	next, err := s.loadNext()
 	if err != nil {
 		s.lastErr.Store(&err)
