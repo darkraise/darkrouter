@@ -112,7 +112,7 @@ restart.
 | `DARKROUTER_PROXY_TOKEN` | *empty* | Shared inbound secret. Never returned by any endpoint. |
 | `DARKROUTER_MASTER_KEY` | — | Encrypts every stored credential. The process refuses to start without one. |
 | `DARKROUTER_ADMIN_PASSWORD_HASH` | *empty* | A bcrypt hash used until a password is set in the console. After that the stored one wins, until this variable's value *changes* — a changed hash takes over on the next restart, which is how a lost password is recovered. |
-| `DARKROUTER_LOG_LEVEL` | `info` | |
+| `DARKROUTER_LOG_LEVEL` | `info` | The lowest level logged. |
 | `DARKROUTER_LOG_FORMAT` | text | `json` selects structured output. |
 | `DARKROUTER_DB` | `darkrouter.db` | The database path. `-db` overrides it. |
 
