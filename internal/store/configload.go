@@ -40,11 +40,9 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 	skip := map[string]bool{}
 	c, warnings := build(skip)
 
-	// At most two passes are needed: the first reports every key that would
-	// not parse, the second retries without them. A rule failure then reverts
-	// its own keys and is retried once more, and a rule that still fails with
-	// every one of its keys at the compiled default is a bug in the defaults,
-	// not in the stored data, so it is returned.
+	// Parse failures first: the pass above reported every key that would not
+	// parse, and this one rebuilds without them. Rule failures are handled
+	// below, where a key can only be identified from the message.
 	if len(warnings) > 0 {
 		for _, w := range warnings {
 			for _, k := range ConfigKeys() {
@@ -58,35 +56,82 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 		c, _ = build(skip)
 	}
 
-	for attempt := 0; attempt < 2; attempt++ {
+	// The bound is one iteration per key plus one. Each iteration retires at
+	// least one key -- a rule's whole set, or the single key its message names
+	// -- and the last iteration validates the compiled defaults, which must
+	// pass. A fixed two would have been enough only while a single-key failure
+	// reverted everything at once.
+	for attempt := 0; attempt <= len(configRegistry); attempt++ {
 		err := config.Validate(c)
 		if err == nil {
 			c.Warnings = append(c.Warnings, warnings...)
 			return c, nil
 		}
+
 		var re config.RuleError
-		if !errors.As(err, &re) {
-			// A single-key rule. Nothing distinguishes which stored row caused
-			// it, so every stored key reverts and the process runs on
-			// defaults rather than refusing to start.
-			c, _ = build(allKeys())
+		if errors.As(err, &re) && addAny(skip, re.Keys) {
 			warnings = append(warnings,
-				fmt.Sprintf("stored configuration is unusable (%v); every key reverted to its default", err))
+				fmt.Sprintf("stored %v broke the %s rule; all of them reverted to their defaults", re.Keys, re.Rule))
+			c, _ = build(skip)
 			continue
 		}
-		for _, k := range re.Keys {
+		// A single-key rule. Every message validate produces for one names the
+		// setting it is about, so the key to revert can be read out of it
+		// rather than guessed.
+		if k, ok := keyNamedIn(err.Error(), skip); ok {
 			skip[k] = true
+			warnings = append(warnings,
+				fmt.Sprintf("stored %s is unusable (%v); using the default", k, err))
+			c, _ = build(skip)
+			continue
 		}
-		warnings = append(warnings,
-			fmt.Sprintf("stored %v broke the %s rule; all of them reverted to their defaults", re.Keys, re.Rule))
+		// Nothing identifiable, or a rule whose keys are all reverted already.
+		// Everything goes rather than the process refusing to start.
+		skip = allKeys()
 		c, _ = build(skip)
+		warnings = append(warnings,
+			fmt.Sprintf("stored configuration is unusable (%v); every key reverted to its default", err))
 	}
 
+	// Reaching here means the compiled defaults themselves do not validate,
+	// which is a bug in the defaults rather than in anything an operator
+	// stored. Only that is allowed to fail a start.
 	if err := config.Validate(c); err != nil {
 		return nil, fmt.Errorf("compiled defaults do not validate: %w", err)
 	}
 	c.Warnings = append(c.Warnings, warnings...)
 	return c, nil
+}
+
+// addAny marks every key not already skipped, reporting whether it changed
+// anything. A pass that retires no new key would loop until the bound with the
+// same failure, so it is the caller's signal to stop narrowing.
+func addAny(skip map[string]bool, keys []string) bool {
+	added := false
+	for _, k := range keys {
+		if !skip[k] {
+			skip[k] = true
+			added = true
+		}
+	}
+	return added
+}
+
+// keyNamedIn finds the registry key a validation message is about. The longest
+// match wins, so a message naming policy.timeout.total is not attributed to a
+// key whose name is a prefix of it. A key already reverted is not a candidate:
+// returning it would revert nothing and the retry would fail identically.
+func keyNamedIn(msg string, skip map[string]bool) (string, bool) {
+	best := ""
+	for _, f := range configRegistry {
+		if skip[f.key] || !strings.Contains(msg, f.key) {
+			continue
+		}
+		if len(f.key) > len(best) {
+			best = f.key
+		}
+	}
+	return best, best != ""
 }
 
 func allKeys() map[string]bool {
