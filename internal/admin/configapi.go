@@ -209,7 +209,7 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Config.Reload(); err != nil {
 		// 200 rather than 500: the reload was performed and its outcome is the
 		// answer. A 500 would read as "the request failed", when what happened
-		// is that the file is invalid and the old config is still serving.
+		// is that the new configuration is invalid and the old one is serving.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": false, "error": err.Error(),
 			"serving": "the previous configuration is still serving",
@@ -264,9 +264,6 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 // section to reason about.
 func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.Patch) {
 	if p.Aliases != nil {
-		// Admin-side because it needs provider rows. The loader cannot make
-		// this check and internal/store's write path has no business reading
-		// a table that belongs to another part of the console.
 		if err := s.aliasTargetsExist(r.Context(), p.Aliases); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -316,9 +313,9 @@ func restartRequired(written []string) []string {
 }
 
 // aliasTargetsExist rejects a chain naming a provider that is not configured.
-// The file loader cannot make this check -- at load time the providers block
-// may not have been imported yet -- but the API can, because by then the
-// provider set is in the database.
+// It stays admin-side because it needs provider rows: WriteConfig is a
+// registry-level write rather than a domain validator, so a check that needs
+// provider rows belongs to the API.
 func (s *Server) aliasTargetsExist(ctx context.Context, aliases map[string][]string) error {
 	rows, err := s.deps.DB.ProviderRows(ctx)
 	if err != nil {

@@ -93,7 +93,7 @@ describe("the read-only configuration", () => {
 
   it("keeps the policy settings that exist but cannot be edited", () => {
     // connect and first_byte configure the one shared transport built at
-    // startup, so PUT /api/policy refuses them — which is exactly why they
+    // startup, so a save of either waits for a restart — which is why they
     // belong in the read-only view rather than nowhere.
     const fields = readOnlyGroups(cfg()).flatMap((g) => g.rows.map((r) => r.field))
     expect(fields).toContain("policy.timeout.connect")

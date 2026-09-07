@@ -393,9 +393,10 @@ func (s *Server) handleGeminiModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // authed enforces the optional proxy token in the route's own dialect. The
-// token is read live because proxy_token is hot-reloadable, unlike the listen
-// addresses, and a rejection is written in the dialect the client speaks so its
-// existing error handling applies.
+// token is read from the live snapshot rather than captured at construction,
+// though it reaches that snapshot from DARKROUTER_PROXY_TOKEN and so cannot
+// change under a running process. A rejection is written in the dialect the
+// client speaks, so the client's existing error handling applies.
 func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		presented := d.ProxyToken(r)
@@ -510,8 +511,9 @@ func (s *Server) AdminHandler() http.Handler {
 		// with an error attached, or an invalid one with none.
 		cfgErr := s.store.LastError()
 
-		// Startup warnings first: they explain state the config file cannot,
-		// such as a providers block that is no longer the source of truth.
+		// Startup warnings first, then the configuration's own. The two have
+		// different lifetimes: a startup warning is fixed for the life of the
+		// process, while cfg.Warnings is replaced by every reload.
 		warnings := append(append([]string{}, s.warnings...), cfg.Warnings...)
 		// Not a startup warning: the setup page sets a password while the
 		// process runs, and a warning fixed at startup would keep telling an
@@ -553,9 +555,9 @@ func (s *Server) AdminHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
 	})
-	// Ready means able to serve: the database answers and the live config is
-	// the one on disk. An orchestrator routes on this, so a gateway that would
-	// fail every request must not look ready.
+	// Ready means able to serve: the database answers and the live config
+	// loaded. An orchestrator routes on this, so a gateway that would fail
+	// every request must not look ready.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)

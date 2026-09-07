@@ -89,7 +89,7 @@ func TestOverlayConfigReplacesAliasesOnly(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Aliases:   map[string][]string{"from-file": {"openai/y"}},
+		Aliases:   map[string][]string{"preloaded": {"openai/y"}},
 		Policy:    config.PolicyConfig{Retry: config.RetryConfig{MaxAttempts: 2}},
 		Providers: []config.ProviderConfig{{ID: "groq"}},
 		Log:       config.LogConfig{Retention: 72 * time.Hour},
@@ -98,8 +98,8 @@ func TestOverlayConfigReplacesAliasesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := cfg.Aliases["from-file"]; ok {
-		t.Error("the file's aliases survived the overlay")
+	if _, ok := cfg.Aliases["preloaded"]; ok {
+		t.Error("the preloaded aliases survived the overlay")
 	}
 	if len(cfg.Aliases["db"]) != 1 {
 		t.Errorf("aliases = %v, want the database's", cfg.Aliases)

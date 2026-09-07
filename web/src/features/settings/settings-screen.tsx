@@ -99,9 +99,9 @@ export type PolicyWrite = {
  * The write, built from the draft.
  *
  * `connect` and `first_byte` never enter it. Both configure the one shared
- * transport built at startup, so no reload can apply them and `PUT
- * /api/policy` refuses a write that touches either — they are omitted rather
- * than sent and rejected.
+ * transport built at startup, so no reload can apply them: the API accepts a
+ * write and names them as waiting for a restart, and this screen has no editor
+ * for that yet.
  */
 /** A count field's value, or undefined when it holds nothing a count can be.
  *  Left out rather than sent as 0: `Number("")` is 0, and the store reads 0
@@ -211,8 +211,8 @@ function ReadOnlySetting({ row }: { row: SettingRow }) {
           <Badge variant="outline" title={SOURCE_NOTE[row.source]}>
             {SOURCE_LABEL[row.source]}
           </Badge>
-          {/* Stated as a fact rather than offered and refused: PUT /api/policy
-              will not accept a write to a restart-only field.
+          {/* Stated as a fact rather than offered: a restart-only field is
+              accepted by the API and takes effect on the next start.
 
               An environment value gets neither badge. It is technically
               hot-reloadable — nothing captures it at construction — but an
