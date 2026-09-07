@@ -1,4 +1,4 @@
-import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
+import type { ConfigKind, ConfigResponse, ConfigSource } from "../../lib/api-types"
 
 /**
  * What each setting is called, and what it does.
@@ -119,6 +119,55 @@ export const SETTINGS: Record<string, SettingMeta> = {
   "catalog.discovery.interval": {
     name: "Sweep providers every",
     description: "How often each provider's model list is re-read.",
+    group: "catalogue",
+  },
+  "catalog.discovery.timeout": {
+    name: "Provider sweep timeout",
+    description:
+      "Give up on a provider whose model list has not arrived by then; the sweep counts it as a failure.",
+    group: "catalogue",
+  },
+  "catalog.discovery.concurrency": {
+    name: "Providers swept at once",
+    description: "How many providers the sweep queries at once.",
+    group: "catalogue",
+  },
+  "catalog.free_catalog_url": {
+    name: "Free-tier catalogue source",
+    description: "Where the curated list of which models are free on each provider is fetched from.",
+    group: "catalogue",
+  },
+  "catalog.free_catalog_interval": {
+    name: "Refresh the free-tier list every",
+    description: "How often that curated list is re-fetched.",
+    group: "catalogue",
+  },
+  "catalog.free_catalog_sync": {
+    name: "Keep the free-tier list current",
+    description:
+      "Re-fetches the curated free-tier list on the schedule above. Off keeps the list this build shipped with.",
+    group: "catalogue",
+  },
+  "catalog.litellm_url": {
+    name: "Community price index",
+    description: "Where prices for models the metadata source does not cover are fetched from.",
+    group: "catalogue",
+  },
+  "catalog.litellm_interval": {
+    name: "Refresh prices every",
+    description: "How often that price index is re-fetched.",
+    group: "catalogue",
+  },
+  "catalog.litellm_sync": {
+    name: "Keep prices current",
+    description:
+      "Re-fetches the community price index on the schedule above. Off leaves a model unpriced when neither the metadata source nor its own provider gives a price.",
+    group: "catalogue",
+  },
+  "catalog.seed_free_providers": {
+    name: "Add free providers on first start",
+    description:
+      "At startup, adds a provider for every hosted preset that needs no credential and imports only its free models. Takes effect on the next restart; delete a seeded provider to decline it, since it is not offered twice.",
     group: "catalogue",
   },
   "media.inline": {
@@ -253,57 +302,85 @@ export function formatDuration(raw: string): string {
 export type SettingRow = {
   field: string
   meta: SettingMeta
-  /** What the value is, as a person reads it. */
+  /** The stored spelling, which is what a save submits. */
+  value: string
+  /** The same value as a person reads it: 720h0m0s as "30 days". */
   display: string
-  /** The literal the stored value carries, when it differs from the display
-   *  — a duration of 720h0m0s reads as 30 days, and the store still says the
-   *  first. Empty when the two are the same. */
-  literal: string
-  source: ConfigFieldMeta["source"]
+  source: ConfigSource
   hotReloadable: boolean
+  kind: ConfigKind
+  /** The variable that owns a bootstrap key, or "". */
+  env: string
+  editable: boolean
 }
 
-function raw(cfg: ConfigResponse, field: string): unknown {
-  let node: unknown = cfg.blocks
-  for (const part of field.split(".")) {
-    if (typeof node !== "object" || node === null) return undefined
-    node = (node as Record<string, unknown>)[part]
-  }
-  return node
-}
-
-/** One setting, formatted for reading. */
+/** One setting, formatted for reading and for writing back. */
 export function settingRow(
   cfg: ConfigResponse,
   field: string,
   meta: SettingMeta,
 ): SettingRow {
-  const value = raw(cfg, field)
   const fieldMeta = cfg.fields[field]
-  const row = {
+  const value = cfg.values[field] ?? ""
+  const source = fieldMeta?.source ?? "default"
+  const kind = fieldMeta?.kind ?? "string"
+  return {
     field,
     meta,
-    source: fieldMeta?.source ?? "default",
+    value,
+    display: displayOf(value, kind),
+    source,
     hotReloadable: fieldMeta?.hot_reloadable ?? false,
+    kind,
+    env: fieldMeta?.env ?? "",
+    // The environment owns its keys and the console cannot write them. Every
+    // other key is a registry row, and the write path takes all of them.
+    editable: source !== "env",
   }
+}
 
-  if (value === undefined || value === null) {
-    return { ...row, display: "—", literal: "" }
+/** The stored spelling as a person reads it. The row keeps both: one is what
+ *  the operator reads, the other is what a save submits. */
+export function displayOf(value: string, kind: ConfigKind): string {
+  if (value === "") return "—"
+  switch (kind) {
+    case "duration":
+      return formatDuration(value)
+    case "bytes": {
+      const n = Number(value)
+      return Number.isFinite(n) ? formatBytes(n) : value
+    }
+    case "bool":
+      return value === "true" ? "On" : "Off"
+    default:
+      return value
   }
-  if (typeof value === "boolean") {
-    return { ...row, display: value ? "On" : "Off", literal: "" }
-  }
-  if (typeof value === "number") {
-    // Only the byte fields are big enough to need scaling; a retry count of 4
-    // must not become "4 bytes".
-    const isBytes = field.endsWith("_bytes")
-    return { ...row, display: isBytes ? formatBytes(value) : String(value), literal: "" }
-  }
-  if (typeof value === "string") {
-    const human = formatDuration(value)
-    return { ...row, display: human, literal: human === value ? "" : value }
-  }
-  return { ...row, display: JSON.stringify(value), literal: "" }
+}
+
+const BYTE_UNITS: Record<string, number> = {
+  b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3,
+}
+
+/**
+ * A size an operator typed, as bytes.
+ *
+ * It accepts the shapes `formatBytes` produces: a bare number, which is what
+ * the store holds, or a number followed by a unit.
+ *
+ * The round trip is exact only for sizes formatBytes did not round: 33554433
+ * shows as "32.0 MB" and parses back one byte short. An editor therefore
+ * seeds from the stored value, not from the display.
+ */
+export function parseBytes(text: string): number | undefined {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]*)\s*$/.exec(text)
+  if (!m) return undefined
+  const n = Number(m[1])
+  const unit = (m[2] ?? "").toLowerCase()
+  if (!Number.isFinite(n) || n < 0) return undefined
+  if (unit === "" || unit === "bytes") return Math.round(n)
+  const scale = BYTE_UNITS[unit]
+  if (scale === undefined) return undefined
+  return Math.round(n * scale)
 }
 
 /** Every setting this build knows how to explain, in reading order.
@@ -314,7 +391,7 @@ export function settingRow(
 export function settingGroups(cfg: ConfigResponse): { group: Group; rows: SettingRow[] }[] {
   const known = new Set(Object.keys(SETTINGS))
   const extra = Object.keys(cfg.fields)
-    .filter((f) => !known.has(f) && f !== "aliases")
+    .filter((f) => !known.has(f))
     .map((f): [string, SettingMeta] => [
       f,
       { name: f, description: "", group: groupForPrefix(f) },
@@ -344,79 +421,14 @@ function groupForPrefix(field: string): GroupId {
 }
 
 export const SOURCE_NOTE = {
-  environment: "Read from the environment at startup; a restart applies a change",
+  env: "Read from the environment at startup; a restart applies a change",
   database: "Stored in the database, where the console reads and writes it",
   default: "Not set anywhere; this is the built-in default",
 } as const
 
 export const SOURCE_LABEL = {
-  environment: "environment",
+  env: "environment",
   database: "database",
   default: "default",
 } as const
 
-/**
- * The settings this console can actually change.
- *
- * Every stored setting is writable through the API now. This list is the
- * subset this screen offers a control for: policy, because it is what the
- * console has always edited here, with aliases living in the routing editor
- * because they are a routing concept. The rest render read-only until this
- * screen grows editors for them.
- *
- * `policy.timeout.connect` and `policy.timeout.first_byte` are absent because
- * both configure the one shared transport built at startup, so a save of
- * either waits for a restart. The API accepts them; this screen does not offer
- * them yet.
- */
-export type EditableSetting = {
-  field: string
-  name: string
-  description: string
-  group: "requests" | "failure"
-  kind: "duration" | "count"
-  placeholder: string
-}
-
-export const EDITABLE: EditableSetting[] = [
-  {
-    field: "policy.retry.max_attempts",
-    name: SETTINGS["policy.retry.max_attempts"]!.name,
-    description: SETTINGS["policy.retry.max_attempts"]!.description,
-    group: "requests",
-    kind: "count",
-    placeholder: "4",
-  },
-  {
-    field: "policy.timeout.total",
-    name: SETTINGS["policy.timeout.total"]!.name,
-    description: SETTINGS["policy.timeout.total"]!.description,
-    group: "requests",
-    kind: "duration",
-    placeholder: "10m",
-  },
-  {
-    field: "policy.timeout.idle",
-    name: SETTINGS["policy.timeout.idle"]!.name,
-    description: SETTINGS["policy.timeout.idle"]!.description,
-    group: "requests",
-    kind: "duration",
-    placeholder: "2m",
-  },
-  {
-    field: "policy.cooldown.trip_after",
-    name: SETTINGS["policy.cooldown.trip_after"]!.name,
-    description: SETTINGS["policy.cooldown.trip_after"]!.description,
-    group: "failure",
-    kind: "count",
-    placeholder: "3",
-  },
-  {
-    field: "policy.cooldown.max",
-    name: SETTINGS["policy.cooldown.max"]!.name,
-    description: SETTINGS["policy.cooldown.max"]!.description,
-    group: "failure",
-    kind: "duration",
-    placeholder: "15m",
-  },
-]
