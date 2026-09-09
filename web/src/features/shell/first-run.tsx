@@ -8,19 +8,17 @@ import {
   PasswordInputField,
 } from "darkraise-ui/components/password-input"
 import { api, ApiError, setCsrfToken } from "../../lib/api"
+import { MIN_PASSWORD, passwordConfirmationProblem } from "../../lib/password-rules"
 import { IdentityMark } from "./identity-mark"
 import { PasswordToggle } from "./password-toggle"
-
-/** The floor the server enforces; repeated here only to say so before the
- *  round trip, never instead of it. */
-const MIN_PASSWORD = 12
 
 /** What the server also checks — this is a courtesy that saves a round trip
  *  on an obvious typo, never the authority on either rule. */
 export function claimProblem(password: string, confirm: string): string | null {
-  if (password.length < MIN_PASSWORD) return `The password must be at least ${MIN_PASSWORD} characters.`
-  if (password !== confirm) return "The two passwords do not match."
-  return null
+  return passwordConfirmationProblem(password, confirm, {
+    tooShort: `The password must be at least ${MIN_PASSWORD} characters.`,
+    mismatch: "The two passwords do not match.",
+  })
 }
 
 /**
