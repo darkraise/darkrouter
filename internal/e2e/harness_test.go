@@ -41,7 +41,10 @@ type gateway struct {
 	csrf   string
 }
 
-const testPassword = "hunter2"
+const (
+	testUsername = "harness"
+	testPassword = "hunter2"
+)
 
 // passwordHash is memoized: bcrypt at cost 12 is a tenth of a second, and this
 // package would otherwise pay it per test.
@@ -53,6 +56,26 @@ var passwordHash = sync.OnceValue(func() string {
 	return h
 })
 
+// seedAccount claims the console so that a login can succeed. It writes the
+// account through the store rather than POSTing /api/auth/setup: the harness
+// still authenticates over HTTP afterwards, so the login path these tests
+// depend on is exercised for real either way, and the setup endpoint is
+// covered by internal/admin's own tests.
+//
+// Tests that assert on the unclaimed console do not call this.
+func seedAccount(t *testing.T, db *store.DB) (userID, password string) {
+	t.Helper()
+	const uid = "harness-user"
+	claimed, err := db.ClaimFirstUser(context.Background(), uid, testUsername, passwordHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Fatal("seedAccount: the console was already claimed")
+	}
+	return uid, testPassword
+}
+
 func newGateway(t *testing.T) *gateway { return openGateway(t, "") }
 
 // openGateway builds a server over dbPath, or a fresh temporary file when it is
@@ -63,7 +86,8 @@ func openGateway(t *testing.T, dbPath string) *gateway {
 	return openGatewayOpts(t, dbPath)
 }
 
-func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gateway {
+// unclaimedGateway assembles the server without claiming the console.
+func unclaimedGateway(t *testing.T, dbPath string, opts ...server.Option) *gateway {
 	t.Helper()
 	if dbPath == "" {
 		dbPath = filepath.Join(t.TempDir(), "e2e.db")
@@ -94,7 +118,6 @@ func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gatewa
 	c.Catalog.ModelsDevURL = "http://127.0.0.1:1/"
 	cfgStore := config.NewStoreOf(c)
 
-	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", passwordHash())
 	srv, err := server.New(cfgStore, db, key, nil, opts...)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +127,22 @@ func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gatewa
 		_ = db.Close()
 	})
 
-	g := &gateway{srv: srv, db: db, key: key, dbPath: dbPath}
+	return &gateway{srv: srv, db: db, key: key, dbPath: dbPath}
+}
+
+// openGatewayOpts builds a gateway, claims it and logs in. Every test that
+// makes an authenticated request goes through here.
+func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gateway {
+	t.Helper()
+	g := unclaimedGateway(t, dbPath, opts...)
+	// Reopening an existing database file finds the account already claimed.
+	n, err := g.db.UserCount(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		seedAccount(t, g.db)
+	}
 	g.login(t)
 	return g
 }
@@ -112,7 +150,7 @@ func openGatewayOpts(t *testing.T, dbPath string, opts ...server.Option) *gatewa
 func (g *gateway) login(t *testing.T) {
 	t.Helper()
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"`+testPassword+`"}`))
+		strings.NewReader(`{"username":"`+testUsername+`","password":"`+testPassword+`"}`))
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	w := httptest.NewRecorder()
 	g.srv.AdminHandler().ServeHTTP(w, r)
@@ -235,4 +273,31 @@ func oauthPresets(tokenURL string) catalog.Presets {
 func openGatewayWithPresets(t *testing.T, dbPath string, presets catalog.Presets) *gateway {
 	t.Helper()
 	return openGatewayOpts(t, dbPath, server.WithPresets(presets))
+}
+
+// TestHarnessRequestsAreRefusedWithoutAnAccount guards the harness itself. If
+// it passes while the harness seeds nothing, every other e2e test in this
+// package is asserting against an open console.
+func TestHarnessRequestsAreRefusedWithoutAnAccount(t *testing.T) {
+	g := unclaimedGateway(t, "")
+	for _, tc := range []struct {
+		name   string
+		cookie *http.Cookie
+	}{
+		{"no cookie", nil},
+		{"an invented cookie", &http.Cookie{Name: "darkrouter_session", Value: "harness-session"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/api/providers", nil)
+			r.Header.Set("Sec-Fetch-Site", "same-origin")
+			if tc.cookie != nil {
+				r.AddCookie(tc.cookie)
+			}
+			w := httptest.NewRecorder()
+			g.srv.AdminHandler().ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("an unauthenticated harness request got %d, want 401", w.Code)
+			}
+		})
+	}
 }
