@@ -80,6 +80,9 @@ func TestLoginOnAnUnclaimedConsoleIsRefusedIdentically(t *testing.T) {
 func TestLoginComparesAHashEvenWhenTheUsernameIsUnknown(t *testing.T) {
 	// Timing is what the identical message would otherwise leak. Asserting the
 	// comparison happened is stable; asserting on the clock is not.
+	//
+	// verifyCalls is process-global, so this test must never run with
+	// t.Parallel(): a concurrent login would move the counter for it.
 	s, _ := testServer(t)
 	hash := mustHash(t, "correct-horse-battery")
 	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), "u1", "alice", hash); err != nil {
