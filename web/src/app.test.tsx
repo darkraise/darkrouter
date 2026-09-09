@@ -100,7 +100,7 @@ describe("a session that dies while the console is open", () => {
     // Any call anywhere discovers it; the shell listens once for all of them.
     await expect(api.get("/api/overview")).rejects.toThrow()
 
-    expect(await screen.findByPlaceholderText(/admin password/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/^password/i)).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Requests/i })).not.toBeInTheDocument()
   })
 
@@ -110,7 +110,8 @@ describe("a session that dies while the console is open", () => {
 
     sessionGone()
     await expect(api.get("/api/overview")).rejects.toThrow()
-    const field = await screen.findByPlaceholderText(/admin password/i)
+    const usernameField = await screen.findByLabelText(/username/i)
+    const field = screen.getByLabelText(/^password/i)
 
     // The password is accepted this time, and the status call behind it
     // reports a live session again.
@@ -143,8 +144,10 @@ describe("a session that dies while the console is open", () => {
       }),
     )
 
-    await userEvent.setup().type(field, "hunter2")
-    await userEvent.setup().click(screen.getByRole("button", { name: /sign in/i }))
+    const user = userEvent.setup()
+    await user.type(usernameField, "admin")
+    await user.type(field, "hunter2")
+    await user.click(screen.getByRole("button", { name: /sign in/i }))
 
     expect(
       await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 }),
