@@ -48,23 +48,31 @@ password has no route back in through darkrouter itself. The working remedy
 is to stop the container and clear the `users` table in `data/darkrouter.db`:
 
 ```bash
-sqlite3 data/darkrouter.db "DELETE FROM users;"
+sqlite3 data/darkrouter.db "PRAGMA foreign_keys=ON; DELETE FROM users;"
 ```
 
 `sessions` cascades from `users` and is cleared with it, so this also signs
-out anyone still logged in. Nothing else is touched — providers, credentials,
-aliases and settings all live outside `users` and survive untouched. On
-restart the console falls back to its claim screen, so **be ready to claim it
-immediately**: the exposure window from before the first account existed
-reopens until someone does.
+out anyone still logged in — the pragma has to come first because a bare
+`sqlite3` connection starts with foreign keys off. Nothing else is touched —
+providers, credentials, aliases and settings all live outside `users` and
+survive untouched. On restart the console falls back to its claim screen, so
+**be ready to claim it immediately**: the exposure window from before the
+first account existed reopens until someone does.
 
-An alternative is to write a new `password_hash` row by hand instead of
-deleting the account, which skips reopening the claim screen. There is no
+An alternative is to write a new `password_hash` column value by hand instead
+of deleting the account, which skips reopening the claim screen. There is no
 `hash-password` subcommand to do this anymore; on a host with Apache's
 `htpasswd` available, `htpasswd -nbBC 12 '' 'yours' | cut -d: -f2` produces a
-cost-12 bcrypt hash to write into that column. Treat this as one option, not
-the default — `htpasswd` is not installed everywhere, and clearing `users` is
-the one guaranteed to work.
+cost-12 bcrypt hash to write into that column:
+
+```bash
+sqlite3 data/darkrouter.db \
+  "UPDATE users SET password_hash='<hash>' WHERE username_lc='<name>';"
+```
+
+The hash contains `$` characters, so keep it single-quoted. Treat this as one
+option, not the default — `htpasswd` is not installed everywhere, and clearing
+`users` is the one guaranteed to work.
 
 > **Upgrading a deployment made before these changes**, three one-time fixes:
 >
