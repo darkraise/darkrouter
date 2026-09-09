@@ -171,11 +171,21 @@ Paths barely move.
 
 | Endpoint | Change |
 |---|---|
-| `POST /api/auth/setup` | Body `{token, password}` → `{username, password, confirm}`. Stays `routePublic`. Mints the session on success. |
+| `POST /api/auth/setup` | Body `{token, password}` → `{username, password, confirm}`. Stays `routePublic`. Mints **no** session — see below. |
 | `POST /api/auth/login` | Gains `username`. |
 | `GET /api/auth/status` | `configured` becomes "a user exists" instead of "a hash exists". |
 | `POST /api/auth/password` | Operates on the caller's row. |
 | `GET /api/sessions`, `DELETE /api/sessions/{id}` | Scoped to the caller. |
+
+**The claim mints no session, and that property is kept deliberately.**
+`first-run.tsx:26-30` explains why the current setup screen spends the password
+on a real login instead: "one code path issues cookies, and the stored hash is
+exercised before the operator relies on it." That reasoning is stronger under
+this design, not weaker. With no recovery path, a founding password that was
+stored wrong would strand the operator permanently, and the difference between
+discovering it now and discovering it when the session expires is the difference
+between retyping a password and losing the console. The claim returns success;
+the screen then logs in normally.
 
 **The founding claim is atomic.** A single write transaction with the emptiness
 check re-run inside it; the loser of a race gets 409. Today's handler achieves
