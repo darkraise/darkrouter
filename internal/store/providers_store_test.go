@@ -25,6 +25,20 @@ func TestProviderByIDReadsOneRowOrErrNotFound(t *testing.T) {
 	}
 }
 
+func TestProviderCount(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if n, err := db.ProviderCount(ctx); err != nil || n != 0 {
+		t.Fatalf("ProviderCount = %d, %v, want 0, nil", n, err)
+	}
+	if err := db.CreateProvider(ctx, ProviderRow{ID: "a", Kind: "openaicompat", BaseURL: "https://a", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.ProviderCount(ctx); err != nil || n != 1 {
+		t.Fatalf("ProviderCount = %d, %v, want 1, nil", n, err)
+	}
+}
+
 func TestProviderMutationsReportSentinels(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
