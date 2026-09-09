@@ -49,7 +49,7 @@ edit `users` in `data/darkrouter.db` directly, which means stopping the
 container and writing a bcrypt hash by hand. Keep the password somewhere you
 will still have it.
 
-> **Upgrading a deployment made before these changes**, two one-time fixes:
+> **Upgrading a deployment made before these changes**, three one-time fixes:
 >
 > `DARKROUTER_ADMIN_PASSWORD_HASH` is no longer read. Remove it from `.env`;
 > leaving it set has no effect. Every session ends at this upgrade and the
