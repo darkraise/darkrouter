@@ -233,8 +233,9 @@ func TestLoginRotatesTheSessionID(t *testing.T) {
 		t.Error("the session id was reused across a login")
 	}
 	var n int
+	// The cookie carries the raw id; the row is keyed by its digest.
 	if err := db.Read.QueryRow(`SELECT count(*) FROM sessions WHERE id = ?`,
-		first.Value).Scan(&n); err != nil {
+		store.HashSessionID(first.Value)).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
