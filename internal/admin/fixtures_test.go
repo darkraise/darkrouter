@@ -146,7 +146,7 @@ func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*co
 	cat := catalog.NewStore(db, src)
 	breaker := health.New(3, time.Minute)
 	s, err := New(Deps{
-		DB: db,
+		DB:     db,
 		Config: cfg, Key: key, Presets: catalog.Embedded(),
 		Src:     src,
 		Breaker: breaker,
