@@ -130,6 +130,30 @@ func startupWarnings(dbPath, legacyConfig string) []string {
 	return out
 }
 
+// warnUnclaimed says loudly that an existing deployment is claimable.
+//
+// A database with data but no accounts is an upgrade that has not been
+// claimed yet, and until somebody claims it anyone who can reach the admin
+// port can become admin. A brand-new install is the same state for a good
+// reason and is not warned about, or every first start would cry wolf.
+//
+// slog only, not startupWarnings: /healthz already discloses the same fact
+// through unclaimedWarning (server.go), driven by the same UserCount. This
+// warning exists for the operator reading container logs at boot, not to add
+// a second copy of a disclosure that endpoint already makes.
+func warnUnclaimed(ctx context.Context, db *store.DB) {
+	users, err := db.UserCount(ctx)
+	if err != nil || users > 0 {
+		return
+	}
+	providers, err := db.ProviderCount(ctx)
+	if err != nil || providers == 0 {
+		return
+	}
+	slog.Warn("no account has claimed this console; the first visitor to reach " +
+		"the admin port will become its administrator. Claim it now.")
+}
+
 func runServer(args []string) error {
 	fs := flag.NewFlagSet("darkrouter", flag.ExitOnError)
 	dbPath, legacyConfig, err := parseFlags(fs, args)
@@ -168,6 +192,7 @@ func runServer(args []string) error {
 	if err := db.Migrate(context.Background()); err != nil {
 		return err
 	}
+	warnUnclaimed(context.Background(), db)
 	key, err := store.OpenKeyring(context.Background(), db, os.Getenv("DARKROUTER_MASTER_KEY"))
 	if err != nil {
 		return err

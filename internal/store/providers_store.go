@@ -228,6 +228,15 @@ func (d *DB) ProviderRows(ctx context.Context) ([]ProviderRow, error) {
 	return out, nil
 }
 
+// ProviderCount reports how many providers exist, without loading their rows.
+func (d *DB) ProviderCount(ctx context.Context) (int, error) {
+	var n int
+	if err := d.Read.QueryRowContext(ctx, `SELECT count(*) FROM providers`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count providers: %w", err)
+	}
+	return n, nil
+}
+
 // ProviderByID reads one provider row, or ErrNotFound.
 func (d *DB) ProviderByID(ctx context.Context, id string) (ProviderRow, error) {
 	var p ProviderRow
