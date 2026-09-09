@@ -107,7 +107,7 @@ type sessionView struct {
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.deps.DB.SessionRows(r.Context(), time.Now())
+	rows, err := s.deps.DB.SessionRows(r.Context(), userFrom(r.Context()), time.Now())
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -141,7 +141,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a session id needs at least 8 characters")
 		return
 	}
-	rows, err := s.deps.DB.SessionRows(r.Context(), time.Now())
+	rows, err := s.deps.DB.SessionRows(r.Context(), userFrom(r.Context()), time.Now())
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -165,7 +165,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "that prefix matches more than one session")
 		return
 	}
-	removed, err := s.deps.DB.RevokeSession(r.Context(), matches[0])
+	removed, err := s.deps.DB.RevokeSession(r.Context(), userFrom(r.Context()), matches[0])
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -185,10 +185,21 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, 4<<10, &body) {
 		return
 	}
+	uid := userFrom(r.Context())
+	user, ok, err := s.deps.DB.UserByID(r.Context(), uid)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	if !ok {
+		// The guard proved the session; the account behind it is gone.
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
 	// Required even though the caller already holds a session: without it, a
 	// stolen cookie becomes a permanent takeover rather than one that expires.
-	if !VerifyPassword(s.currentPasswordHash(r.Context()), body.Current) {
-		writeError(w, http.StatusUnauthorized, "invalid password")
+	if !VerifyPassword(user.PasswordHash, body.Current) {
+		writeError(w, http.StatusUnauthorized, "the current password is wrong")
 		return
 	}
 	if len(body.New) < minPasswordChars {
@@ -204,19 +215,15 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	if err := s.deps.DB.PutSetting(r.Context(), settingAdminPasswordHash, hash); err != nil {
+	if err := s.deps.DB.SetUserPassword(r.Context(), uid, hash); err != nil {
 		internalError(w, r, err)
 		return
 	}
-	// The environment hash in force now is the one this row was set beside;
-	// only a later change to it should override the row.
-	if err := s.recordPasswordEnv(r.Context()); err != nil {
-		internalError(w, r, err)
-		return
-	}
-	// Every other session, not this one: revoking the caller would log the
-	// operator out of the screen they just used.
-	revoked, err := s.deps.DB.DeleteSessionsExcept(r.Context(), sessionFrom(r.Context()))
+	// Every other browser signed in as this account, and no other account:
+	// revoking the caller would log the operator out of the screen they just
+	// used, and revoking a stranger would sign out someone whose password did
+	// not change.
+	revoked, err := s.deps.DB.DeleteSessionsExcept(r.Context(), uid, sessionFrom(r.Context()))
 	if err != nil {
 		internalError(w, r, err)
 		return

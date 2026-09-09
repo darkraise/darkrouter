@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,25 +25,6 @@ func unconfigured(t *testing.T) (*Server, *store.DB) {
 		t.Fatal(err)
 	}
 	return s, db
-}
-
-// loginAs is login for a password other than the fixture's.
-func loginAs(t *testing.T, s *Server, password string) (*http.Cookie, string) {
-	t.Helper()
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"password":"`+password+`"}`))
-	r.Header.Set("Sec-Fetch-Site", "same-origin")
-	s.Handler().ServeHTTP(w, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("login status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var body struct {
-		CSRF string `json:"csrf_token"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	return w.Result().Cookies()[0], body.CSRF
 }
 
 func postSetup(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
@@ -163,28 +143,6 @@ func TestAnEnvHashSetAfterSetupWinsOnRestart(t *testing.T) {
 	}
 	if !VerifyPassword(hash, testPassword) {
 		t.Error("the environment hash did not take effect on restart")
-	}
-}
-
-// The same gap on the change-password path: reachable only once setup exists,
-// because before it nobody could log in without an environment hash.
-func TestAnEnvHashSetAfterAPasswordChangeWinsOnRestart(t *testing.T) {
-	s, db := unconfigured(t)
-	if w := postSetup(t, s, `{"token":"`+s.setupToken+`","password":"`+setupPassword+`"}`); w.Code != http.StatusOK {
-		t.Fatalf("setup = %d", w.Code)
-	}
-	cookie, csrf := loginAs(t, s, setupPassword)
-	const changed = "a different long password"
-	body, _ := json.Marshal(map[string]string{"current": setupPassword, "new": changed})
-	if w := do(t, s, cookie, csrf, "POST", "/api/auth/password", string(body)); w.Code != http.StatusOK {
-		t.Fatalf("change password = %d, body = %s", w.Code, w.Body.String())
-	}
-	restarted, err := New(Deps{DB: db, PasswordHash: testHash()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if VerifyPassword(restarted.currentPasswordHash(context.Background()), changed) {
-		t.Error("the changed password still wins after the environment was seeded")
 	}
 }
 

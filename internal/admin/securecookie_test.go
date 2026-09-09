@@ -13,8 +13,9 @@ import (
 // returns the session cookie it set along with the CSRF token.
 func loginFrom(t *testing.T, s *Server, shape func(*http.Request)) (*http.Cookie, string) {
 	t.Helper()
+	seedTestAccount(t, s)
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"`+testPassword+`"}`))
+		strings.NewReader(testCredentials(testPassword)))
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	shape(r)
 	w := httptest.NewRecorder()

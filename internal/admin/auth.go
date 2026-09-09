@@ -17,6 +17,18 @@ func sessionFrom(ctx context.Context) string {
 	return s
 }
 
+// userKeyType is the context key carrying the authenticated account's id. It
+// sits beside sessionKey rather than replacing it: the CSRF token is keyed by
+// the cookie value, so both are needed on a mutating request.
+type userKeyType struct{}
+
+var userKey userKeyType
+
+func userFrom(ctx context.Context) string {
+	s, _ := ctx.Value(userKey).(string)
+	return s
+}
+
 // requireSession validates the cookie against the database and slides the
 // expiry. A missing or expired session is 401, which is what tells the SPA to
 // render the login screen.
@@ -27,7 +39,7 @@ func (s *Server) requireSession(h http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
-		ok, terr := s.deps.DB.TouchSession(r.Context(), c.Value, sessionTTL)
+		userID, ok, terr := s.deps.DB.TouchSession(r.Context(), c.Value, sessionTTL)
 		if terr != nil {
 			// A database failure is not a logout. Saying 401 here would send
 			// the operator to a login screen that cannot work either.
@@ -38,7 +50,9 @@ func (s *Server) requireSession(h http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
-		h(w, r.WithContext(context.WithValue(r.Context(), sessionKey, c.Value)))
+		ctx := context.WithValue(r.Context(), sessionKey, c.Value)
+		ctx = context.WithValue(ctx, userKey, userID)
+		h(w, r.WithContext(ctx))
 	}
 }
 

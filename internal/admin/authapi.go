@@ -40,21 +40,26 @@ func newSessionID() (string, error) {
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	authed := false
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
-		if ok, terr := s.deps.DB.TouchSession(r.Context(), c.Value, sessionTTL); terr == nil && ok {
+		if _, ok, terr := s.deps.DB.TouchSession(r.Context(), c.Value, sessionTTL); terr == nil && ok {
 			authed = true
 		}
 	}
-	// Whether a password exists at all, so a fresh install can explain itself
-	// instead of showing a login that refuses every password.
+	// Whether the console has been claimed at all, so a fresh install can
+	// explain itself instead of showing a login that refuses every password.
 	//
-	// This is narrower than it looks and does not weaken §3. An absent hash
-	// means no login can succeed, so disclosing it tells a caller the admin
-	// API is unusable rather than that it is open -- which is why the login
-	// handler still answers "invalid password" either way, and never says
+	// This is narrower than it looks and does not weaken §3. No accounts means
+	// no login can succeed, so disclosing it tells a caller the admin API is
+	// unusable rather than that it is open -- which is why the login handler
+	// still answers "invalid username or password" either way, and never says
 	// which of the two it was.
+	n, err := s.deps.DB.UserCount(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
 	body := map[string]any{
 		"authenticated": authed,
-		"configured":    s.currentPasswordHash(r.Context()) != "",
+		"configured":    n > 0,
 	}
 	if authed {
 		// The SPA needs the token to make its first mutating call after a
@@ -79,6 +84,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if !decodeJSON(w, r, 4<<10, &body) {
@@ -95,12 +101,24 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeRateLimited(w, time.Second)
 		return
 	}
-	verified := VerifyPassword(s.currentPasswordHash(r.Context()), body.Password)
+	user, found, err := s.deps.DB.UserByUsername(r.Context(), body.Username)
+	if err != nil {
+		release()
+		internalError(w, r, err)
+		return
+	}
+	// A miss still costs a comparison. One message for a wrong username, a
+	// wrong password and an unclaimed console is only half the promise; equal
+	// work is the other half, or the response time answers what the wording
+	// refuses to.
+	hash := dummyHash
+	if found {
+		hash = user.PasswordHash
+	}
+	verified := VerifyPassword(hash, body.Password) && found
 	release()
 	if !verified {
-		// One message for both a wrong password and an unconfigured hash: an
-		// operator reading "no password is set" learns the port is open.
-		writeError(w, http.StatusUnauthorized, "invalid password")
+		writeError(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 
@@ -114,7 +132,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	if err := s.deps.DB.CreateSession(r.Context(), id, sessionTTL); err != nil {
+	if err := s.deps.DB.CreateSession(r.Context(), id, user.ID, sessionTTL); err != nil {
 		internalError(w, r, err)
 		return
 	}
