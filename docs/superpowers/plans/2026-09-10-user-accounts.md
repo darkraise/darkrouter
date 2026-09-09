@@ -37,8 +37,9 @@ use them, do not invent parallels. The rest are added by Task 2 and Task 4 in
 
 | Helper | Where | Signature |
 |---|---|---|
-| `storetest.Migrated` | `internal/storetest` | `Migrated(t *testing.T) *store.DB` — a migrated, empty database |
-| `testServer` | `internal/admin/fixtures_test.go` | the standard admin `*Server` |
+| `migrated` | `internal/store` (in-package) | `migrated(t *testing.T) *DB` — use this in `internal/store` tests; the package cannot import its own helper package |
+| `storetest.Migrated` | `internal/store/storetest` | `Migrated(t *testing.T) *store.DB` — for tests **outside** package `store`, such as `cmd/darkrouter` |
+| `testServer` | `internal/admin/auth_test.go:42` | `testServer(t *testing.T) (*Server, *store.DB)` — **two** return values |
 | `do` | `internal/admin/fixtures_test.go:167` | `do(t, s, cookie *http.Cookie, token, method, path, body string) *httptest.ResponseRecorder` |
 | `login` | `internal/admin/auth_test.go:54` | `login(t, s) (*http.Cookie, string)` — cookie and CSRF token |
 | `loginAs` | `internal/admin/setupapi_test.go:32` | `loginAs(t, s, password string) (*http.Cookie, string)` |
@@ -64,7 +65,7 @@ func mustHash(t *testing.T, password string) string {
 // account, that account's id, and a raw session cookie value for it.
 func newServerWithSession(t *testing.T) (*Server, string, string) {
 	t.Helper()
-	s := testServer(t)
+	s, _ := testServer(t)
 	const uid = "u1"
 	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), uid, "alice", mustHash(t, "correct-horse-battery")); err != nil {
 		t.Fatal(err)
@@ -175,7 +176,7 @@ Add to `internal/store/migrate_test.go`:
 
 ```go
 func TestMigration23CreatesUsersAndOwnsSessions(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 
 	// users exists with the columns the auth path needs
 	var n int
@@ -222,7 +223,7 @@ func TestMigration23CreatesUsersAndOwnsSessions(t *testing.T) {
 }
 
 func TestMigration23DropsTheSharedPasswordRows(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	if _, err := db.Write.Exec(
 		`INSERT INTO settings (key, value) VALUES ('admin.password_hash', 'x')`); err != nil {
 		t.Fatal(err)
@@ -358,7 +359,7 @@ import (
 )
 
 func TestClaimFirstUserSucceedsOnlyOnce(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 
 	won, err := db.ClaimFirstUser(ctx, "id-1", "Alice", "hash-1")
@@ -389,7 +390,7 @@ func TestClaimFirstUserSucceedsOnlyOnce(t *testing.T) {
 }
 
 func TestClaimFirstUserIsAdmin(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "id-1", "alice", "hash-1"); err != nil {
 		t.Fatal(err)
@@ -404,7 +405,7 @@ func TestClaimFirstUserIsAdmin(t *testing.T) {
 }
 
 func TestUserByUsernameIsCaseInsensitive(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "id-1", "Alice", "hash-1"); err != nil {
 		t.Fatal(err)
@@ -429,7 +430,7 @@ func TestUserByUsernameIsCaseInsensitive(t *testing.T) {
 }
 
 func TestUserByUsernameMissIsNotAnError(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	_, ok, err := db.UserByUsername(context.Background(), "nobody")
 	if err != nil {
 		t.Fatalf("a miss must not be an error: %v", err)
@@ -440,7 +441,7 @@ func TestUserByUsernameMissIsNotAnError(t *testing.T) {
 }
 
 func TestSetUserPasswordReplacesTheHash(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "id-1", "alice", "old"); err != nil {
 		t.Fatal(err)
@@ -636,7 +637,7 @@ func seedUser(t *testing.T, db *DB, id, name string) string {
 }
 
 func TestTouchSessionReturnsTheOwner(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	uid := seedUser(t, db, "u1", "alice")
 	if err := db.CreateSession(ctx, "cookie-1", uid, time.Hour); err != nil {
@@ -652,7 +653,7 @@ func TestTouchSessionReturnsTheOwner(t *testing.T) {
 }
 
 func TestTouchSessionFailsClosedWhenTheOwnerIsGone(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	uid := seedUser(t, db, "u1", "alice")
 	if err := db.CreateSession(ctx, "cookie-1", uid, time.Hour); err != nil {
@@ -675,7 +676,7 @@ func TestTouchSessionFailsClosedWhenTheOwnerIsGone(t *testing.T) {
 }
 
 func TestSessionRowsAreScopedToOneOwner(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	a := seedUser(t, db, "u1", "alice")
 	// A second account, created directly: ClaimFirstUser only makes the first.
@@ -703,7 +704,7 @@ func TestSessionRowsAreScopedToOneOwner(t *testing.T) {
 }
 
 func TestRevokeSessionCannotReachAnotherAccount(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	a := seedUser(t, db, "u1", "alice")
 	if _, err := db.Write.ExecContext(ctx,
@@ -724,7 +725,7 @@ func TestRevokeSessionCannotReachAnotherAccount(t *testing.T) {
 }
 
 func TestDeleteSessionsExceptSparesOtherAccounts(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	a := seedUser(t, db, "u1", "alice")
 	if _, err := db.Write.ExecContext(ctx,
@@ -752,7 +753,7 @@ func TestDeleteSessionsExceptSparesOtherAccounts(t *testing.T) {
 }
 
 func TestDeletingAUserRevokesTheirSessions(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	uid := seedUser(t, db, "u1", "alice")
 	if err := db.CreateSession(ctx, "cookie-1", uid, time.Hour); err != nil {
@@ -1004,7 +1005,7 @@ func TestRequireCSRFInheritsTheOwner(t *testing.T) {
 // session, and the raw cookie value for it.
 func newServerWithSession(t *testing.T) (*Server, string, string) {
 	t.Helper()
-	s := testServer(t) // existing helper in the admin test package
+	s, _ := testServer(t) // existing helper in the admin test package
 	uid := "u1"
 	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), uid, "alice", "hash"); err != nil {
 		t.Fatal(err)
@@ -1106,7 +1107,7 @@ Add to `internal/admin/authapi_test.go`:
 
 ```go
 func TestLoginBindsTheSessionToTheAccount(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	hash, err := HashPassword("correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -1138,7 +1139,7 @@ func TestLoginBindsTheSessionToTheAccount(t *testing.T) {
 }
 
 func TestLoginRefusesAnUnknownUsernameIdentically(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	hash, _ := HashPassword("correct-horse-battery")
 	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), "u1", "alice", hash); err != nil {
 		t.Fatal(err)
@@ -1161,7 +1162,7 @@ func TestLoginRefusesAnUnknownUsernameIdentically(t *testing.T) {
 func TestLoginComparesAHashEvenWhenTheUsernameIsUnknown(t *testing.T) {
 	// Timing is what the identical message would otherwise leak. Asserting the
 	// comparison happened is stable; asserting on the clock is not.
-	s := testServer(t)
+	s, _ := testServer(t)
 	hash, _ := HashPassword("correct-horse-battery")
 	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), "u1", "alice", hash); err != nil {
 		t.Fatal(err)
@@ -1174,7 +1175,7 @@ func TestLoginComparesAHashEvenWhenTheUsernameIsUnknown(t *testing.T) {
 }
 
 func TestAuthStatusReportsConfiguredFromAccounts(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 
 	rec := getJSON(t, s, "/api/auth/status")
 	if !strings.Contains(rec.Body.String(), `"configured":false`) {
@@ -1349,7 +1350,7 @@ import (
 const claimPassword = "correct-horse-battery"
 
 func TestClaimCreatesTheFoundingAdmin(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	rec := postJSON(t, s, "/api/auth/setup",
 		`{"username":"Alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
 	if rec.Code != 200 {
@@ -1373,7 +1374,7 @@ func TestClaimMintsNoSession(t *testing.T) {
 	// operator relies on it. With no recovery path, discovering a bad hash now
 	// rather than when the session expires is the difference between retyping
 	// a password and losing the console.
-	s := testServer(t)
+	s, _ := testServer(t)
 	rec := postJSON(t, s, "/api/auth/setup",
 		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
 	for _, c := range rec.Result().Cookies() {
@@ -1384,7 +1385,7 @@ func TestClaimMintsNoSession(t *testing.T) {
 }
 
 func TestClaimRefusesAMismatchedConfirmation(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	rec := postJSON(t, s, "/api/auth/setup",
 		`{"username":"alice","password":"`+claimPassword+`","confirm":"correct-horse-batteryX"}`)
 	if rec.Code != 400 {
@@ -1396,7 +1397,7 @@ func TestClaimRefusesAMismatchedConfirmation(t *testing.T) {
 }
 
 func TestClaimRefusesAShortPassword(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	rec := postJSON(t, s, "/api/auth/setup", `{"username":"alice","password":"short","confirm":"short"}`)
 	if rec.Code != 400 {
 		t.Errorf("code = %d, want 400", rec.Code)
@@ -1404,7 +1405,7 @@ func TestClaimRefusesAShortPassword(t *testing.T) {
 }
 
 func TestClaimRefusesAnEmptyUsername(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	rec := postJSON(t, s, "/api/auth/setup",
 		`{"username":"   ","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
 	if rec.Code != 400 {
@@ -1413,7 +1414,7 @@ func TestClaimRefusesAnEmptyUsername(t *testing.T) {
 }
 
 func TestASecondClaimIsRefused(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	postJSON(t, s, "/api/auth/setup",
 		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
 	rec := postJSON(t, s, "/api/auth/setup",
@@ -1427,7 +1428,7 @@ func TestASecondClaimIsRefused(t *testing.T) {
 }
 
 func TestConcurrentClaimsProduceExactlyOneWinner(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	const racers = 8
 	var (
 		wg   sync.WaitGroup
@@ -1463,7 +1464,7 @@ func TestConcurrentClaimsProduceExactlyOneWinner(t *testing.T) {
 }
 
 func TestClaimIsRefusedCrossSite(t *testing.T) {
-	s := testServer(t)
+	s, _ := testServer(t)
 	rec := postJSONCrossSite(t, s, "/api/auth/setup",
 		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
 	if rec.Code != 403 {
@@ -1623,7 +1624,7 @@ func TestTheEnvironmentHashIsNotRead(t *testing.T) {
 	// The variable is retired. A deployment that still sets it must get no
 	// effect at all -- not a fallback, not a seeded account.
 	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", mustHash(t, "correct-horse-battery"))
-	s := testServer(t)
+	s, _ := testServer(t)
 
 	if n, _ := s.deps.DB.UserCount(t.Context()); n != 0 {
 		t.Error("the environment hash seeded an account")
@@ -1654,6 +1655,8 @@ From `internal/admin/admin.go`, remove the `setupToken` and `setupMu` fields fro
 From `internal/server/server.go`, remove the unclaimed-console warning string that names the setup token (around `:500-510`) and its caller.
 
 From `cmd/darkrouter/main.go`, remove the `hash-password` subcommand and its dispatch entry. It exists only to generate the retired variable.
+
+From `internal/admin/Deps`, remove the `PasswordHash` field: nothing supplies it and nothing reads it once the cluster above is gone. `testServer` (`auth_test.go:42-50`) passes it today and must drop it too, along with the `testHash` helper.
 
 From `internal/admin/password.go`, keep `HashPassword` and `VerifyPassword` — the claim and the password change both still need them.
 
@@ -2348,7 +2351,7 @@ Add to `internal/store/users_test.go`:
 
 ```go
 func TestCreateUserRefusesADuplicateNameRegardlessOfCase(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "u1", "Alice", "hash"); err != nil {
 		t.Fatal(err)
@@ -2360,7 +2363,7 @@ func TestCreateUserRefusesADuplicateNameRegardlessOfCase(t *testing.T) {
 }
 
 func TestUsersListsEveryAccountOldestFirst(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
 		t.Fatal(err)
@@ -2386,7 +2389,7 @@ func TestUsersListsEveryAccountOldestFirst(t *testing.T) {
 }
 
 func TestDeleteUserReportsWhetherARowWent(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
 		t.Fatal(err)
@@ -2405,7 +2408,7 @@ func TestDeleteUserReportsWhetherARowWent(t *testing.T) {
 }
 
 func TestAdminCountSeesOnlyAdmins(t *testing.T) {
-	db := storetest.Migrated(t)
+	db := migrated(t)
 	ctx := context.Background()
 	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
 		t.Fatal(err)
