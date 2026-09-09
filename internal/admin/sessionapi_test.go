@@ -235,6 +235,36 @@ func TestChangingMyPasswordRefusesAWrongCurrent(t *testing.T) {
 	}
 }
 
+// TestChangePasswordWrongCurrentWireMessage pins the exact 401 body, not just
+// the status code. Its counterpart is
+// web/src/features/settings/change-password-dialog.test.tsx: the console's
+// ChangePasswordDialog keys its expectedRejection on this literal string to
+// keep a wrong current password on the dialog with an inline error instead
+// of a global logout. If this handler's wording changes without the console
+// changing to match, the string comparison in api.ts's isExpectedRejection
+// silently stops matching, the 401 falls through to the shared logout
+// listener, and the operator is signed out of the whole console over a
+// typo -- which is exactly what happened once already (task 7 changed this
+// message and the console was not updated in the same change). Byte-for-byte
+// here is deliberate: a wording tweak that "obviously still means the same
+// thing" is precisely the kind of edit that would otherwise pass a Go-only
+// review unnoticed.
+func TestChangePasswordWrongCurrentWireMessage(t *testing.T) {
+	s, uid, cookie := newServerWithSession(t)
+	if err := s.deps.DB.SetUserPassword(t.Context(), uid, mustHash(t, "old-password-here")); err != nil {
+		t.Fatal(err)
+	}
+	rec := postJSONAs(t, s, "/api/auth/password",
+		`{"current":"not-the-password","new":"a-brand-new-password"}`, cookie)
+	if rec.Code != 401 {
+		t.Fatalf("code = %d, want 401", rec.Code)
+	}
+	const want = `{"error":"the current password is wrong"}` + "\n"
+	if got := rec.Body.String(); got != want {
+		t.Errorf("wire body = %q, want %q", got, want)
+	}
+}
+
 // The environment hash is retired. A deployment that still sets it must get no
 // effect at all -- not a login fallback, not a seeded account -- because the
 // variable outlives the code that read it in every operator's compose file.
