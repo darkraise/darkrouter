@@ -13,14 +13,16 @@ import {
 import { PasswordToggle } from "../shell/password-toggle"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
+import { MIN_PASSWORD, passwordConfirmationProblem } from "../../lib/password-rules"
 import { keys } from "../../lib/queries"
 
 export function passwordProblem(next: string, confirm: string): string | null {
   // The server's floor, checked here as a courtesy. It remains the authority:
   // this is about not spending a round trip on a typo.
-  if (next.length < 12) return "The new password must be at least 12 characters."
-  if (next !== confirm) return "The two entries do not match."
-  return null
+  return passwordConfirmationProblem(next, confirm, {
+    tooShort: `The new password must be at least ${MIN_PASSWORD} characters.`,
+    mismatch: "The two entries do not match.",
+  })
 }
 
 export function revokedText(revoked: number): string {
