@@ -66,8 +66,8 @@ export function ChangePasswordDialog({
     setNext("")
     setConfirm("")
     // The rejection belongs to the attempt that produced it. Left standing, a
-    // reopened and empty form carries "invalid password" over fields nobody
-    // has typed into yet.
+    // reopened and empty form carries "the current password is wrong" over
+    // fields nobody has typed into yet.
     change.reset()
   }
 
@@ -79,7 +79,7 @@ export function ChangePasswordDialog({
       api.post<{ revoked: number }>(
         "/api/auth/password",
         { current, new: next },
-        { expectedRejection: "invalid password" },
+        { expectedRejection: "the current password is wrong" },
       ),
     invalidates: [keys.sessions],
     success: (res) => revokedText(res.revoked),
