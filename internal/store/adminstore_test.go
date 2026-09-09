@@ -11,10 +11,11 @@ import (
 func TestASessionRoundTrips(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "sess-1", time.Hour); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-1", uid, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := db.TouchSession(ctx, "sess-1", time.Hour)
+	_, ok, err := db.TouchSession(ctx, "sess-1", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +29,7 @@ func TestAnUnknownSessionIsAMissRatherThanAnError(t *testing.T) {
 	// screen, an error is a 500. Collapsing them makes an outage look like a
 	// logout.
 	db := migrated(t)
-	ok, err := db.TouchSession(context.Background(), "never-existed", time.Hour)
+	_, ok, err := db.TouchSession(context.Background(), "never-existed", time.Hour)
 	if err != nil {
 		t.Fatalf("a miss was reported as an error: %v", err)
 	}
@@ -42,7 +43,8 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 	// thirty days after logging in regardless of use.
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "sess-2", time.Minute); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-2", uid, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	var before int64
@@ -50,7 +52,7 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 		`SELECT expires_at FROM sessions WHERE id = ?`, HashSessionID("sess-2")).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.TouchSession(ctx, "sess-2", 48*time.Hour); err != nil {
+	if _, _, err := db.TouchSession(ctx, "sess-2", 48*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	var after int64
@@ -66,10 +68,11 @@ func TestTouchExtendsTheExpiry(t *testing.T) {
 func TestAnExpiredSessionDoesNotValidate(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "sess-3", -time.Minute); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-3", uid, -time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := db.TouchSession(ctx, "sess-3", time.Hour)
+	_, ok, err := db.TouchSession(ctx, "sess-3", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,13 +86,14 @@ func TestAnExpiredSessionIsNotResurrectedByTouch(t *testing.T) {
 	// extend the row it just decided was dead.
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "sess-4", -time.Minute); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-4", uid, -time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.TouchSession(ctx, "sess-4", 48*time.Hour); err != nil {
+	if _, _, err := db.TouchSession(ctx, "sess-4", 48*time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := db.TouchSession(ctx, "sess-4", time.Hour)
+	_, ok, err := db.TouchSession(ctx, "sess-4", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +108,8 @@ func TestDeleteSessionRemovesTheRow(t *testing.T) {
 	// who copied it.
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "sess-5", time.Hour); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-5", uid, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.DeleteSession(ctx, "sess-5"); err != nil {
@@ -123,10 +128,11 @@ func TestDeleteSessionRemovesTheRow(t *testing.T) {
 func TestSweepRemovesOnlyExpiredSessions(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "live", time.Hour); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "live", uid, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateSession(ctx, "dead", -time.Hour); err != nil {
+	if err := db.CreateSession(ctx, "dead", uid, -time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	n, err := db.SweepSessions(ctx)
@@ -136,7 +142,7 @@ func TestSweepRemovesOnlyExpiredSessions(t *testing.T) {
 	if n != 1 {
 		t.Errorf("swept %d rows, want 1", n)
 	}
-	ok, _ := db.TouchSession(ctx, "live", time.Hour)
+	_, ok, _ := db.TouchSession(ctx, "live", time.Hour)
 	if !ok {
 		t.Error("the sweep removed a live session")
 	}
@@ -962,10 +968,11 @@ func TestSessionRowsReadTheStoredMilliseconds(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
 	before := time.Now().Add(-time.Minute)
-	if err := db.CreateSession(ctx, "sess-live", time.Hour); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-live", uid, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := db.SessionRows(ctx, time.Now())
+	rows, err := db.SessionRows(ctx, uid, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -985,10 +992,11 @@ func TestSessionRowsOmitAnExpiredSession(t *testing.T) {
 	// last week is not a browser anyone can sign out.
 	db := migrated(t)
 	ctx := context.Background()
-	if err := db.CreateSession(ctx, "sess-dead", time.Hour); err != nil {
+	uid := seedUser(t, db, "u1", "alice")
+	if err := db.CreateSession(ctx, "sess-dead", uid, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := db.SessionRows(ctx, time.Now().Add(2*time.Hour))
+	rows, err := db.SessionRows(ctx, uid, time.Now().Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

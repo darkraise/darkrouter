@@ -29,14 +29,14 @@ func HashSessionID(id string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// CreateSession writes a new session row. The caller mints the id; this does not
-// generate one, because the id is a security-relevant value and the code that
-// chooses its entropy should be the code that owns the decision.
-func (d *DB) CreateSession(ctx context.Context, id string, ttl time.Duration) error {
+// CreateSession writes a new session row for one account. The caller mints the
+// id; this does not generate one, because the id is a security-relevant value
+// and the code that chooses its entropy should be the code that owns it.
+func (d *DB) CreateSession(ctx context.Context, id, userID string, ttl time.Duration) error {
 	now := time.Now()
 	if _, err := d.Write.ExecContext(ctx,
-		`INSERT INTO sessions (id, created_at, expires_at) VALUES (?, ?, ?)`,
-		HashSessionID(id), now.UnixMilli(), now.Add(ttl).UnixMilli()); err != nil {
+		`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+		HashSessionID(id), userID, now.UnixMilli(), now.Add(ttl).UnixMilli()); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	return nil
@@ -52,35 +52,36 @@ func (d *DB) CreateSession(ctx context.Context, id string, ttl time.Duration) er
 // A miss is reported as false rather than as an error, because a missing session
 // and a database failure are different things to the caller: the first renders
 // the login screen, the second is a 500.
-func (d *DB) TouchSession(ctx context.Context, id string, ttl time.Duration) (bool, error) {
+func (d *DB) TouchSession(ctx context.Context, id string, ttl time.Duration) (string, bool, error) {
 	now := time.Now()
 	hashed := HashSessionID(id)
-	var expires int64
+	var (
+		userID  string
+		expires int64
+	)
+	// The join is what makes an orphaned row a 401 rather than a handler
+	// holding an empty owner. ON DELETE CASCADE should make it unreachable;
+	// a restored backup that de-synced the tables is where that stops being
+	// true, and failing closed there costs nothing.
 	err := d.Read.QueryRowContext(ctx,
-		`SELECT expires_at FROM sessions
-		  WHERE id = ? AND expires_at > ? AND created_at > ?`,
-		hashed, now.UnixMilli(), now.Add(-SessionMaxAge).UnixMilli()).Scan(&expires)
+		`SELECT s.user_id, s.expires_at FROM sessions s
+		   JOIN users u ON u.id = s.user_id
+		  WHERE s.id = ? AND s.expires_at > ? AND s.created_at > ?`,
+		hashed, now.UnixMilli(), now.Add(-SessionMaxAge).UnixMilli()).Scan(&userID, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return "", false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("touch session: %w", err)
+		return "", false, fmt.Errorf("touch session: %w", err)
 	}
-	next := now.Add(ttl)
-	if next.Sub(time.UnixMilli(expires)) < sessionTouchInterval {
-		return true, nil
+	if time.UnixMilli(expires).Sub(now) < ttl-sessionTouchInterval {
+		if _, err := d.Write.ExecContext(ctx,
+			`UPDATE sessions SET expires_at = ? WHERE id = ? AND expires_at > ?`,
+			now.Add(ttl).UnixMilli(), hashed, now.UnixMilli()); err != nil {
+			return "", false, fmt.Errorf("touch session: %w", err)
+		}
 	}
-	res, err := d.Write.ExecContext(ctx,
-		`UPDATE sessions SET expires_at = ? WHERE id = ? AND expires_at > ?`,
-		next.UnixMilli(), hashed, now.UnixMilli())
-	if err != nil {
-		return false, fmt.Errorf("touch session: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("touch session: %w", err)
-	}
-	return n > 0, nil
+	return userID, true, nil
 }
 
 // DeleteSession removes the row. Spec §3: logout deletes rather than only
@@ -94,10 +95,13 @@ func (d *DB) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
-// RevokeSession removes a row by its stored (hashed) id, which is what a
-// listing hands back. It reports whether a row went.
-func (d *DB) RevokeSession(ctx context.Context, hashedID string) (bool, error) {
-	res, err := d.Write.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, hashedID)
+// RevokeSession removes one of the caller's own rows by its stored (hashed)
+// id, which is what a listing hands back. The owner is in the WHERE rather
+// than checked by the handler: a store method should not depend on every
+// caller remembering to scope it.
+func (d *DB) RevokeSession(ctx context.Context, userID, hashedID string) (bool, error) {
+	res, err := d.Write.ExecContext(ctx,
+		`DELETE FROM sessions WHERE id = ? AND user_id = ?`, hashedID, userID)
 	if err != nil {
 		return false, fmt.Errorf("revoke session: %w", err)
 	}
@@ -130,17 +134,20 @@ func (d *DB) SweepSessions(ctx context.Context) (int, error) {
 // credential the cookie carries; a caller compares with HashSessionID.
 type SessionRow struct {
 	ID        string
+	UserID    string
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
 
-// SessionRows lists sessions that have not expired, newest first.
-func (d *DB) SessionRows(ctx context.Context, now time.Time) ([]SessionRow, error) {
+// SessionRows lists one account's live sessions, newest first. Scoped to the
+// caller: a listing that showed every account's sessions would let any user
+// revoke any other's, which is a permission model nobody asked for.
+func (d *DB) SessionRows(ctx context.Context, userID string, now time.Time) ([]SessionRow, error) {
 	rows, err := d.Read.QueryContext(ctx,
-		`SELECT id, created_at, expires_at FROM sessions
-		  WHERE expires_at > ? AND created_at > ?
+		`SELECT id, user_id, created_at, expires_at FROM sessions
+		  WHERE user_id = ? AND expires_at > ? AND created_at > ?
 		  ORDER BY created_at DESC, id`,
-		now.UnixMilli(), now.Add(-SessionMaxAge).UnixMilli())
+		userID, now.UnixMilli(), now.Add(-SessionMaxAge).UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -152,7 +159,7 @@ func (d *DB) SessionRows(ctx context.Context, now time.Time) ([]SessionRow, erro
 			r                SessionRow
 			created, expires int64
 		)
-		if err := rows.Scan(&r.ID, &created, &expires); err != nil {
+		if err := rows.Scan(&r.ID, &r.UserID, &created, &expires); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
 		r.CreatedAt = time.UnixMilli(created).UTC()
@@ -165,12 +172,13 @@ func (d *DB) SessionRows(ctx context.Context, now time.Time) ([]SessionRow, erro
 	return out, nil
 }
 
-// DeleteSessionsExcept revokes every session but one. It is what a password
-// change uses: anything that also revoked the caller would log the operator
-// out of the screen they just used.
-func (d *DB) DeleteSessionsExcept(ctx context.Context, keep string) (int, error) {
+// DeleteSessionsExcept revokes every other session belonging to one account.
+// It is what a password change uses: anything that also revoked the caller
+// would log the operator out of the screen they just used, and anything that
+// reached other accounts would sign out people whose password did not change.
+func (d *DB) DeleteSessionsExcept(ctx context.Context, userID, keep string) (int, error) {
 	res, err := d.Write.ExecContext(ctx,
-		`DELETE FROM sessions WHERE id <> ?`, HashSessionID(keep))
+		`DELETE FROM sessions WHERE user_id = ? AND id <> ?`, userID, HashSessionID(keep))
 	if err != nil {
 		return 0, fmt.Errorf("revoke sessions: %w", err)
 	}
