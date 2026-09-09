@@ -430,44 +430,24 @@ func TestHealthEndpointsStayUnauthenticated(t *testing.T) {
 	}
 }
 
-func TestAMissingPasswordHashWarnsRatherThanFailingStartup(t *testing.T) {
+func TestAnUnclaimedConsoleWarnsRatherThanFailingStartup(t *testing.T) {
 	// The gateway's job is proxying. Refusing to start because the optional
-	// dashboard has no password would take a working proxy down over a feature
-	// the operator may not use.
-	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", "")
+	// dashboard has nobody to log into it would take a working proxy down over
+	// a feature the operator may not use.
 	s := newTestServer(t, nil)
-
-	rec := httptest.NewRecorder()
-	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
-	var body struct {
-		Warnings []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	var found bool
-	for _, w := range body.Warnings {
-		if strings.Contains(w, "setup token") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("warnings = %v; an operator cannot tell the console is unclaimed", body.Warnings)
+	if !warnsAboutSetup(t, s) {
+		t.Error("an operator cannot tell the console is unclaimed")
 	}
 }
 
-func TestALoginWorksAgainstAConfiguredHash(t *testing.T) {
-	// The other half: a configured hash opens the dashboard, so the warning
-	// above is about configuration rather than a permanently closed port.
-	hash, err := admin.HashPassword("hunter2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", hash)
+func TestALoginWorksAgainstAClaimedConsole(t *testing.T) {
+	// The other half: an account opens the dashboard, so the warning above is
+	// about an unclaimed console rather than a permanently closed port.
 	s := newTestServer(t, nil)
+	seedAccount(t, s, "hunter2-hunter2")
 
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"hunter2"}`))
+		strings.NewReader(`{"username":"operator","password":"hunter2-hunter2"}`))
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	rec := httptest.NewRecorder()
 	s.AdminHandler().ServeHTTP(rec, r)
@@ -584,6 +564,23 @@ func TestTheSyncedLiteLLMIndexReachesTheRoutedCatalog(t *testing.T) {
 	}
 }
 
+// seedAccount claims the console the way the setup screen does, so a test can
+// tell a claimed console from an unclaimed one.
+func seedAccount(t *testing.T, s *Server, password string) {
+	t.Helper()
+	hash, err := admin.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.db.ClaimFirstUser(context.Background(), "u-operator", "operator", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Fatal("the console was already claimed")
+	}
+}
+
 // warnsAboutSetup reports whether /healthz is telling an operator the console
 // still has to be claimed.
 func warnsAboutSetup(t *testing.T, s *Server) bool {
@@ -597,31 +594,25 @@ func warnsAboutSetup(t *testing.T, s *Server) bool {
 		t.Fatal(err)
 	}
 	for _, w := range body.Warnings {
-		if strings.Contains(w, "setup token") {
+		if w == unclaimedWarning {
 			return true
 		}
 	}
 	return false
 }
 
-// The console is claimed through the setup page now, not only by restarting
-// with an environment hash, so this warning describes state that changes while
-// the process runs. Computed once at startup it goes stale the moment an
-// operator sets a password, and monitoring keeps alerting on a console that is
-// fine.
-func TestTheUnclaimedWarningClearsOnceAPasswordIsSet(t *testing.T) {
-	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", "")
+// The console is claimed by creating the first account while the process
+// runs, so this warning describes state that changes under a running server.
+// Computed once at startup it goes stale the moment an operator claims the
+// console, and monitoring keeps alerting on a console that is fine.
+func TestTheUnclaimedWarningClearsOnceAnAccountExists(t *testing.T) {
 	s := newTestServer(t, nil)
 	if !warnsAboutSetup(t, s) {
 		t.Fatal("an unclaimed console does not say so")
 	}
-	// The row the setup page writes; the key is admin's settingAdminPasswordHash.
-	if err := s.db.PutSetting(context.Background(), "admin.password_hash",
-		"$2a$10$P4Ck2vJmRy1kM1sJ8jvLZuJ3s6Q0iJm9Xq0y3cZ1oR9pC5oGm0m0y"); err != nil {
-		t.Fatal(err)
-	}
+	seedAccount(t, s, "hunter2-hunter2")
 	if warnsAboutSetup(t, s) {
-		t.Error("the console still warns it is unclaimed after a password was set")
+		t.Error("the console still warns it is unclaimed after an account was created")
 	}
 }
 

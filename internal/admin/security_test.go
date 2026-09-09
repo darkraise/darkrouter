@@ -174,7 +174,7 @@ func TestOverviewCountsCredentialsWithoutAKeyring(t *testing.T) {
 		t.Fatal(err)
 	}
 	// No Key: the overview must still count and flag the credential.
-	s, err := New(Deps{DB: db, PasswordHash: testHash()})
+	s, err := New(Deps{DB: db})
 	if err != nil {
 		t.Fatal(err)
 	}

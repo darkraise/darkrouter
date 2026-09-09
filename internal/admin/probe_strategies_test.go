@@ -90,7 +90,7 @@ func strategyServer(t *testing.T, presets catalog.Presets, client *http.Client) 
 		presets = catalog.Embedded()
 	}
 	s, err := New(Deps{
-		DB: db, PasswordHash: testHash(),
+		DB: db,
 		Config: configStoreFor(t, nil), Key: key, Presets: presets,
 		Src:     provider.NewSQLSource(db, key),
 		Breaker: health.New(3, time.Minute),

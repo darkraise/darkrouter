@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"runtime/debug"
 	"sort"
 	"sync"
@@ -255,14 +254,12 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		Protocols: protocols,
 	})
 
-	// The dashboard is always mounted. A missing password hash closes it — the
-	// API refuses every login — rather than making startup fail: the gateway's
-	// job is proxying, and refusing to start over an optional dashboard would
-	// take a working proxy down for a feature the operator may not use.
+	// The dashboard is always mounted. An unclaimed console closes it — the
+	// API refuses every login until the first account exists — rather than
+	// making startup fail: the gateway's job is proxying, and refusing to
+	// start over an optional dashboard would take a working proxy down for a
+	// feature the operator may not use.
 	//
-	// The warning is appended before admin.New because startupWarnings is
-	// passed by value, and the same slice is what /healthz reads.
-	passwordHash := os.Getenv("DARKROUTER_ADMIN_PASSWORD_HASH")
 	// A typed nil is not a nil interface. Assigning a disabled discoverer
 	// straight into admin.Deps.Disc would satisfy every `Disc != nil` guard in
 	// that package and then dereference on the first call.
@@ -272,7 +269,7 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 	}
 
 	adm, err := admin.New(admin.Deps{
-		DB: db, PasswordHash: passwordHash,
+		DB:     db,
 		Config: cfgStore, Src: src, Key: key,
 		Catalog: cat, Disc: discTrigger, Sync: syncer, Breaker: breaker,
 		Presets: o.presets, Exec: ex, Kinds: kinds,
@@ -499,9 +496,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 func (s *Server) CloseAdmin() { s.adm.Close() }
 
 // unclaimedWarning is what /healthz says while the console still has to be
-// claimed. It names where the setup token is, never the token.
-const unclaimedWarning = "no admin password is set; open the console and claim it with the " +
-	"setup token printed in this process's log"
+// claimed.
+const unclaimedWarning = "no operator account exists; open the console and claim it by " +
+	"creating the first account"
 
 func (s *Server) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -515,11 +512,14 @@ func (s *Server) AdminHandler() http.Handler {
 		// different lifetimes: a startup warning is fixed for the life of the
 		// process, while cfg.Warnings is replaced by every reload.
 		warnings := append(append([]string{}, s.warnings...), cfg.Warnings...)
-		// Not a startup warning: the setup page sets a password while the
-		// process runs, and a warning fixed at startup would keep telling an
-		// operator to claim a console they already claimed. The token itself
-		// stays out of it -- this endpoint needs no session.
-		if !s.adm.PasswordConfigured(r.Context()) {
+		// Not a startup warning: the console is claimed by creating the first
+		// account while the process runs, and a warning fixed at startup would
+		// keep telling an operator to claim a console they already claimed.
+		// Counted rather than remembered, and no account detail is served --
+		// this endpoint needs no session.
+		if n, err := s.db.UserCount(r.Context()); err != nil {
+			slog.Error("counting accounts for the unclaimed warning failed", "err", err)
+		} else if n == 0 {
 			warnings = append(warnings, unclaimedWarning)
 		}
 

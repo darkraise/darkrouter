@@ -16,9 +16,9 @@ func TestAHashedPasswordVerifies(t *testing.T) {
 }
 
 func TestAnEmptyHashRefusesEveryPassword(t *testing.T) {
-	// An unconfigured DARKROUTER_ADMIN_PASSWORD_HASH must close the admin
-	// port, not open it. A helper that returns true here is how a dashboard
-	// ends up unauthenticated on a LAN.
+	// An account row with an empty hash must close the admin port, not open
+	// it. A helper that returns true here is how a dashboard ends up
+	// unauthenticated on a LAN.
 	for _, pw := range []string{"", "anything", "admin"} {
 		if VerifyPassword("", pw) {
 			t.Errorf("an empty hash accepted %q", pw)
@@ -27,7 +27,7 @@ func TestAnEmptyHashRefusesEveryPassword(t *testing.T) {
 }
 
 func TestAMalformedHashRefusesEveryPassword(t *testing.T) {
-	// A truncated or hand-edited value in the environment must fail closed.
+	// A truncated or hand-edited hash must fail closed.
 	for _, h := range []string{"not-a-hash", "$2a$", "$2a$12$tooshort"} {
 		if VerifyPassword(h, "anything") {
 			t.Errorf("malformed hash %q accepted a password", h)
