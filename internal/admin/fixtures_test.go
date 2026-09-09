@@ -166,13 +166,20 @@ func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*co
 // header on mutating verbs so a test does not repeat six lines of setup.
 func do(t *testing.T, s *Server, cookie *http.Cookie, token, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return doSite(t, s, "same-origin", cookie, token, method, path, body)
+}
+
+// doSite is do with the Sec-Fetch-Site header spelled out, for a test that has
+// to arrive from somewhere other than the console's own origin.
+func doSite(t *testing.T, s *Server, site string, cookie *http.Cookie, token, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	// nil for the unauthenticated shorthands below: /api/auth/login and
 	// /api/auth/status are reached without a session.
 	if cookie != nil {
 		r.AddCookie(cookie)
 	}
-	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("Sec-Fetch-Site", site)
 	if method != "GET" {
 		r.Header.Set(csrfHeader, token)
 		r.Header.Set("Content-Type", "application/json")
