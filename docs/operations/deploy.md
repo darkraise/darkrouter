@@ -32,24 +32,28 @@ the Settings screen, and reads nothing from it.
 added in the console rather than here — nothing in the file is interpolated,
 so values are pasted exactly as they were printed.
 
-The admin password is set in the browser, not here. On first run the process
-prints a one-time setup token; open the console and it asks for that token and
-a password:
+The first account claims the console. On first run the console shows a claim
+screen instead of a login: pick a username and a password, and that account
+becomes the administrator. There is no setup token and no environment
+variable — whoever reaches the console first claims it.
 
-```bash
-docker compose -f compose.prod.yml logs | grep 'setup token'
-```
+**Claim it immediately after the first start.** Both ports bind every
+interface, so until an account exists anyone who can reach the admin port can
+become the administrator. The process logs a warning at every start while a
+database that already holds providers has no account.
 
-Setting a password closes setup for good. `DARKROUTER_ADMIN_PASSWORD_HASH`
-still works, but it only overrides the stored password when its value has
-changed since the console password was last set; left unchanged, the stored
-password survives every restart. Changing it is how a lost password is
-recovered — see below.
+**There is no password recovery.** No environment variable overrides a stored
+password and no subcommand resets one. An administrator who forgets their
+password has no route back in through darkrouter itself; the only remedy is to
+edit `users` in `data/darkrouter.db` directly, which means stopping the
+container and writing a bcrypt hash by hand. Keep the password somewhere you
+will still have it.
 
-> **Upgrading a deployment made before these changes**, three one-time fixes:
+> **Upgrading a deployment made before these changes**, two one-time fixes:
 >
-> The bcrypt hash used to need every `$` doubled. It no longer does, and a
-> doubled hash now refuses a correct password — `sed -i 's/\$\$/$/g' .env`.
+> `DARKROUTER_ADMIN_PASSWORD_HASH` is no longer read. Remove it from `.env`;
+> leaving it set has no effect. Every session ends at this upgrade and the
+> console falls to its claim screen, so claim it as soon as it restarts.
 >
 > Settings that lived only in `data/darkrouter.yaml` are gone. The `server`,
 > `log`, `capture`, `catalog`, `media` and `playground` blocks were file-only,
@@ -61,24 +65,6 @@ recovered — see below.
 > directory owned by someone else, so an existing `data/` locks the database
 > read-only — `sudo chown -R 0:0 data`. A deployment created after this change
 > needs neither.
-
-**Recovering a lost password.** Put a fresh hash in `DARKROUTER_ADMIN_PASSWORD_HASH`
-and restart. A hash that differs from the one in force when the password was
-last set reads as newer, and the stored password is dropped in its favour:
-
-```bash
-docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest \
-  hash-password -password 'yours'
-```
-
-> On a database that has a console password but has never checked its
-> environment hash against one before, the first restart after setting the
-> hash silently does nothing but adopt it as the new baseline — the old,
-> forgotten password still works, and the log stays quiet. A log line reading
-> `DARKROUTER_ADMIN_PASSWORD_HASH changed since the password was last set in
-> the console; the environment's hash is now in effect` is the tell that the
-> hash took effect; its absence means this was the adopting restart. Set a
-> different hash again and restart once more to actually recover it.
 
 The whole of `.env` is passed to the container, so a bootstrap variable is set
 there under its own name without touching `compose.prod.yml`. Nothing is
@@ -150,10 +136,8 @@ cmp /tmp/served.js internal/admin/dist/assets/index-*.js && echo "deploy matches
 ```
 
 The console needs a password. On this machine it is in `.uat-credentials` at
-the repository root, which is gitignored and stays that way: the console
-checks the password set in the console once one has been set, and the bcrypt
-hash in `.env` otherwise — either way the hash is what is committed so the
-plaintext never is.
+the repository root, which is gitignored and stays that way: only a bcrypt
+hash of it lives in the database, so the plaintext is never committed.
 
 ## Backup and restore
 
@@ -242,10 +226,8 @@ changes.
 ## Command line
 
 ```bash
-docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest hash-password
 docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest rotate-key -db …
 ```
 
 The entrypoint is the gateway itself, which is why the override is needed.
-`hash-password` with no flag reads the password from stdin; `rotate-key` reads
-the new key from stdin.
+`rotate-key` reads the new key from stdin.
