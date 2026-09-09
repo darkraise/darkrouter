@@ -44,13 +44,13 @@ func TestClaimMintsNoSession(t *testing.T) {
 	s, _ := testServer(t)
 	rec := postJSON(t, s, "/api/auth/setup",
 		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	// Asserted before the cookies: a refused claim sets none either, so
+	// without this the check below passes on a claim that stopped working.
+	if rec.Code != 200 {
+		t.Fatalf("claim = %d, want 200: %s", rec.Code, rec.Body)
+	}
 	if got := rec.Result().Cookies(); len(got) != 0 {
 		t.Errorf("the claim set %d cookies, want none: %v", len(got), got)
-	}
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == sessionCookie && c.Value != "" {
-			t.Error("the claim minted a session; it must not")
-		}
 	}
 }
 
@@ -97,7 +97,12 @@ func TestASecondClaimIsRefused(t *testing.T) {
 	}
 }
 
-func TestConcurrentClaimsProduceExactlyOneWinner(t *testing.T) {
+// Eight concurrent claims are answered coherently: one 200, seven 409s, no
+// 500 from SQLite contention and no 429 from the login limiter. It does not
+// prove the INSERT is atomic -- bcrypt staggers the requests far enough apart
+// that they never collide inside the store. TestConcurrentClaimsCreateOneUser
+// in internal/store/users_test.go is the guard for that.
+func TestConcurrentClaimsAreAnsweredCoherently(t *testing.T) {
 	s, _ := testServer(t)
 	const racers = 8
 	var (

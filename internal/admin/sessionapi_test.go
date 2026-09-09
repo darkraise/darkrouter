@@ -234,3 +234,20 @@ func TestChangingMyPasswordRefusesAWrongCurrent(t *testing.T) {
 		t.Errorf("code = %d, want 401", rec.Code)
 	}
 }
+
+// The environment hash is retired. A deployment that still sets it must get no
+// effect at all -- not a login fallback, not a seeded account -- because the
+// variable outlives the code that read it in every operator's compose file.
+func TestTheEnvironmentHashIsNotRead(t *testing.T) {
+	t.Setenv("DARKROUTER_ADMIN_PASSWORD_HASH", mustHash(t, "correct-horse-battery"))
+	s, _ := testServer(t)
+
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 0 {
+		t.Error("the environment hash seeded an account")
+	}
+	rec := postJSON(t, s, "/api/auth/login",
+		`{"username":"admin","password":"correct-horse-battery"}`)
+	if rec.Code != 401 {
+		t.Errorf("the environment hash authenticated a login: %d %s", rec.Code, rec.Body)
+	}
+}

@@ -71,7 +71,7 @@ func testCredentials(password string) string {
 func testServer(t *testing.T) (*Server, *store.DB) {
 	t.Helper()
 	db := storetest.Migrated(t)
-	s, err := New(Deps{DB: db, PasswordHash: testHash()})
+	s, err := New(Deps{DB: db})
 	if err != nil {
 		t.Fatal(err)
 	}

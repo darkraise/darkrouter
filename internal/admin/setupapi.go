@@ -1,62 +1,10 @@
 package admin
 
 import (
-	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"strings"
 )
-
-// mintSetupToken generates the claim for a console that has no password yet.
-//
-// A console nobody can log into has to be claimable, and the alternative --
-// letting whoever reaches the port first set the password -- would make an
-// empty hash open the port rather than close it, which is the inverse of what
-// VerifyPassword promises. Requiring a token from the startup log means the
-// claim needs host access rather than merely a route to the port.
-func (s *Server) mintSetupToken(ctx context.Context) error {
-	if s.currentPasswordHash(ctx) != "" {
-		return nil
-	}
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return err
-	}
-	s.setupMu.Lock()
-	s.setupToken = base64.RawURLEncoding.EncodeToString(b)
-	token := s.setupToken
-	s.setupMu.Unlock()
-
-	// slog only. startupWarnings reaches unauthenticated /healthz and the
-	// config endpoint, and a claim token printed there would be readable by
-	// exactly the caller it exists to keep out.
-	slog.Warn("no admin password is set; claim the console with this setup token",
-		"setup_token", token)
-	return nil
-}
-
-// PasswordConfigured reports whether the console can be logged into at all.
-// Read at request time rather than remembered from startup, because the setup
-// page changes the answer while the process runs.
-func (s *Server) PasswordConfigured(ctx context.Context) bool {
-	return s.currentPasswordHash(ctx) != ""
-}
-
-func (s *Server) currentSetupToken() string {
-	s.setupMu.Lock()
-	defer s.setupMu.Unlock()
-	return s.setupToken
-}
-
-// spendSetupToken clears the claim, so the log line cannot be replayed against
-// a console whose password has since been changed.
-func (s *Server) spendSetupToken() {
-	s.setupMu.Lock()
-	s.setupToken = ""
-	s.setupMu.Unlock()
-}
 
 // maxUsernameChars bounds what a claim may store. Long enough for any name
 // somebody will actually pick, short enough that the column is not a place to

@@ -42,12 +42,11 @@ type DiscoveryTrigger interface {
 	Trigger(providerID string)
 }
 
-// Deps are the admin server's collaborators. Every field except DB and
-// PasswordHash is optional, so a handler test can build a server without
-// standing up a router, a catalog and a breaker.
+// Deps are the admin server's collaborators. Every field except DB is
+// optional, so a handler test can build a server without standing up a
+// router, a catalog and a breaker.
 type Deps struct {
-	DB           *store.DB
-	PasswordHash string
+	DB *store.DB
 
 	Config  *config.Store
 	Src     *provider.SQLSource
@@ -102,14 +101,6 @@ type Server struct {
 	probes probeLocks
 	logins *loginLimiter
 
-	// setupToken is the one-time claim on a console that has no password yet.
-	// It lives in memory and nowhere else: the database would outlive the
-	// process that logged it, and /healthz serves startup warnings without a
-	// session. Empty once the console is claimed, and on any server that
-	// started with a password already configured.
-	setupMu    sync.Mutex
-	setupToken string
-
 	// listeners are the temporary loopback servers receiving OAuth redirects,
 	// keyed by provider so a second flow replaces the first rather than failing
 	// to bind a port the first still holds.
@@ -122,8 +113,8 @@ type Server struct {
 	closeOnce sync.Once
 }
 
-// New builds the admin server, reconciles the password hash with the
-// environment, sweeps expired sessions once, and starts the periodic sweeper.
+// New builds the admin server, sweeps expired sessions once, and starts the
+// periodic sweeper.
 func New(deps Deps) (*Server, error) {
 	if deps.DB == nil {
 		return nil, fmt.Errorf("admin: DB is required")
@@ -137,12 +128,6 @@ func New(deps Deps) (*Server, error) {
 		deps: deps, csrf: csrf,
 		logins:    newLoginLimiter(loginRate, loginBurst, loginConcurrency),
 		stopSweep: make(chan struct{}),
-	}
-	if err := s.reconcilePasswordHash(ctx); err != nil {
-		return nil, fmt.Errorf("admin: %w", err)
-	}
-	if err := s.mintSetupToken(ctx); err != nil {
-		return nil, fmt.Errorf("admin: %w", err)
 	}
 	if _, err := deps.DB.SweepSessions(ctx); err != nil {
 		return nil, fmt.Errorf("admin: sweep sessions: %w", err)

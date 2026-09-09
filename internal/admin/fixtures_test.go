@@ -146,7 +146,7 @@ func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*co
 	cat := catalog.NewStore(db, src)
 	breaker := health.New(3, time.Minute)
 	s, err := New(Deps{
-		DB: db, PasswordHash: testHash(),
+		DB: db,
 		Config: cfg, Key: key, Presets: catalog.Embedded(),
 		Src:     src,
 		Breaker: breaker,
@@ -350,7 +350,7 @@ func testServerWithExecutorLog(t *testing.T, upstreamURL, model string, logger e
 		exec.Deps{Catalog: cat, Log: logger})
 
 	s, err := New(Deps{
-		DB: db, PasswordHash: testHash(), Config: cfg, Key: key,
+		DB: db, Config: cfg, Key: key,
 		Presets: catalog.Embedded(), Catalog: cat,
 		Breaker: health.New(3, time.Minute), Exec: ex,
 	})

@@ -38,9 +38,9 @@ var dummyHash = func() string {
 	return h
 }()
 
-// HashPassword produces a hash for DARKROUTER_ADMIN_PASSWORD_HASH. It exists so
-// an operator can generate one with the binary they already have rather than
-// installing a second tool.
+// HashPassword produces the stored hash for an account's password. Every path
+// that writes users.password_hash -- the claim and a password change -- goes
+// through it, so the cost parameter has one home.
 func HashPassword(password string) (string, error) {
 	if password == "" {
 		return "", fmt.Errorf("password is empty")
@@ -54,10 +54,10 @@ func HashPassword(password string) (string, error) {
 
 // VerifyPassword reports whether password matches hash.
 //
-// It fails closed on an empty or malformed hash. An unconfigured
-// DARKROUTER_ADMIN_PASSWORD_HASH must close the admin port rather than open it,
-// and a helper that conflated "nothing configured" with "anything accepted" is
-// how a dashboard ends up unauthenticated on a LAN.
+// It fails closed on an empty or malformed hash. An account row with no usable
+// hash must close the admin port rather than open it, and a helper that
+// conflated "nothing stored" with "anything accepted" is how a dashboard ends
+// up unauthenticated on a LAN.
 func VerifyPassword(hash, password string) bool {
 	if hash == "" || password == "" {
 		return false

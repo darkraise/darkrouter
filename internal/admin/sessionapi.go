@@ -1,96 +1,14 @@
 package admin
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-// settingAdminPasswordHash holds a password set through the API. It takes
-// precedence over the hash the process started with, unless the environment
-// hash has changed since the row was written — see reconcilePasswordHash.
-const settingAdminPasswordHash = "admin.password_hash"
-
-// settingPasswordEnvFingerprint records which environment hash was current
-// when the stored password was last reconciled, so a changed environment can
-// be told from an unchanged one without keeping the hash itself twice.
-const settingPasswordEnvFingerprint = "admin.password_env_fingerprint"
-
 // minPasswordChars is the floor the setup page and a password change share.
 const minPasswordChars = 12
-
-func fingerprint(hash string) string {
-	sum := sha256.Sum256([]byte(hash))
-	return hex.EncodeToString(sum[:])
-}
-
-// reconcilePasswordHash decides which hash wins at startup.
-//
-// A password changed through the console outlives a restart, which is what
-// the settings row is for. But an operator who then sets a new
-// DARKROUTER_ADMIN_PASSWORD_HASH — the documented way to recover a lost
-// password — expects it to take effect, and a row that silently won would
-// leave them locked out with the environment saying otherwise. The
-// environment's fingerprint is recorded when the row is first seen; if it
-// later differs, the environment is newer and the row goes.
-func (s *Server) reconcilePasswordHash(ctx context.Context) error {
-	db := s.deps.DB
-	env := s.deps.PasswordHash
-	if env == "" {
-		return nil
-	}
-	_, stored, err := db.GetSetting(ctx, settingAdminPasswordHash)
-	if err != nil {
-		return err
-	}
-	if !stored {
-		return nil
-	}
-	seen, hasSeen, err := db.GetSetting(ctx, settingPasswordEnvFingerprint)
-	if err != nil {
-		return err
-	}
-	current := fingerprint(env)
-	if !hasSeen {
-		return db.PutSetting(ctx, settingPasswordEnvFingerprint, current)
-	}
-	if seen == current {
-		return nil
-	}
-	if err := db.DeleteSetting(ctx, settingAdminPasswordHash); err != nil {
-		return err
-	}
-	slog.Warn("DARKROUTER_ADMIN_PASSWORD_HASH changed since the password was last set in the console; the environment's hash is now in effect")
-	return db.PutSetting(ctx, settingPasswordEnvFingerprint, current)
-}
-
-// recordPasswordEnv notes which environment hash was in force when the stored
-// password was written.
-//
-// Unconditional, empty environment included. reconcilePasswordHash only
-// overrides the row when the fingerprint it finds differs from the current
-// environment's, so a row written with no fingerprint is a row that survives
-// the operator seeding DARKROUTER_ADMIN_PASSWORD_HASH to recover a lost
-// password -- the recovery documented in deploy.md, silently doing nothing.
-func (s *Server) recordPasswordEnv(ctx context.Context) error {
-	return s.deps.DB.PutSetting(ctx, settingPasswordEnvFingerprint, fingerprint(s.deps.PasswordHash))
-}
-
-// currentPasswordHash is the hash logins are checked against: whatever the
-// operator last set, falling back to the one supplied at startup.
-func (s *Server) currentPasswordHash(ctx context.Context) string {
-	if s.deps.DB != nil {
-		if stored, ok, err := s.deps.DB.GetSetting(ctx, settingAdminPasswordHash); err == nil && ok && stored != "" {
-			return stored
-		}
-	}
-	return s.deps.PasswordHash
-}
 
 // sessionIDPrefix is how much of a stored session id a listing shows and the
 // least a revoke may name. The stored id is a digest rather than the cookie
