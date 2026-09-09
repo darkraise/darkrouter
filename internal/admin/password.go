@@ -18,9 +18,13 @@ import (
 // literal so a downgrade is a visible edit rather than a typo.
 const passwordCost = 12
 
-// verifyCalls counts password comparisons. It exists so a test can assert that
-// an unknown username still costs a bcrypt comparison, which is what keeps the
-// miss from being timeable. Nothing in the request path reads it.
+// verifyCalls counts bcrypt comparisons, not calls to VerifyPassword: it is
+// incremented past the empty-hash guard, so a call that returns early without
+// hashing anything does not move it. It exists so a test can assert that an
+// unknown username still costs a real comparison, which is what keeps the miss
+// from being timeable. Counting entries instead would leave the test green
+// while a caller passed an empty hash and answered in microseconds. Nothing in
+// the request path reads it.
 var verifyCalls atomic.Uint64
 
 // dummyHash is compared against when a username does not resolve, so a miss
@@ -55,9 +59,9 @@ func HashPassword(password string) (string, error) {
 // and a helper that conflated "nothing configured" with "anything accepted" is
 // how a dashboard ends up unauthenticated on a LAN.
 func VerifyPassword(hash, password string) bool {
-	verifyCalls.Add(1)
 	if hash == "" || password == "" {
 		return false
 	}
+	verifyCalls.Add(1)
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
