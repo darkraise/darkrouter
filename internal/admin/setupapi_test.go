@@ -1,166 +1,146 @@
 package admin
 
 import (
-	"context"
-	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
-
-	"github.com/darkraise/darkrouter/internal/store"
-	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
-// setupPassword is long enough for the twelve-character floor the setup and
-// change-password paths share; testPassword is deliberately shorter.
-const setupPassword = "correct horse battery"
+const claimPassword = "correct-horse-battery"
 
-// unconfigured builds an admin server over an empty database with no password
-// in the environment, which is what a fresh deployment starts as.
-func unconfigured(t *testing.T) (*Server, *store.DB) {
+// postJSONCrossSite is postJSON arriving from a foreign site, which is what a
+// cross-site refusal has to be shown against: do sets same-origin.
+func postJSONCrossSite(t *testing.T, s *Server, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	db := storetest.Migrated(t)
-	s, err := New(Deps{DB: db})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s, db
+	return doSite(t, s, "cross-site", nil, "", "POST", path, body)
 }
 
-func postSetup(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/api/auth/setup", strings.NewReader(body))
-	r.Header.Set("Sec-Fetch-Site", "same-origin")
-	r.Header.Set("Content-Type", "application/json")
-	s.Handler().ServeHTTP(w, r)
-	return w
-}
-
-func TestAnUnconfiguredServerMintsASetupToken(t *testing.T) {
-	s, _ := unconfigured(t)
-	if s.setupToken == "" {
-		t.Fatal("no setup token was minted for an unconfigured server")
-	}
-}
-
-// The token is the claim on an unclaimed console. A server that already has a
-// password has nothing to claim, and minting one would leave a credential in
-// memory that opens nothing.
-func TestAConfiguredServerMintsNoSetupToken(t *testing.T) {
+func TestClaimCreatesTheFoundingAdmin(t *testing.T) {
 	s, _ := testServer(t)
-	if s.setupToken != "" {
-		t.Error("a configured server minted a setup token")
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"Alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 200 {
+		t.Fatalf("claim = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	u, ok, err := s.deps.DB.UserByUsername(t.Context(), "alice")
+	if err != nil || !ok {
+		t.Fatalf("no account was created: %v ok=%v", err, ok)
+	}
+	if u.Role != "admin" {
+		t.Errorf("role = %q, want admin", u.Role)
+	}
+	if !VerifyPassword(u.PasswordHash, claimPassword) {
+		t.Error("the stored hash does not verify the password that was set")
 	}
 }
 
-func TestSetupClaimsTheConsoleWithTheToken(t *testing.T) {
-	s, _ := unconfigured(t)
-	w := postSetup(t, s, `{"token":"`+s.setupToken+`","password":"`+setupPassword+`"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("setup = %d, body = %s", w.Code, w.Body.String())
-	}
-	// The password it set is the one login now accepts, which is the whole
-	// point: a claim that did not change what logins check is not a claim.
-	if !VerifyPassword(s.currentPasswordHash(context.Background()), setupPassword) {
-		t.Error("the password set through setup is not the one logins check")
-	}
-}
-
-// Setup mints no session. Issuing one here would be a second place that
-// writes the session cookie, with its own attributes to keep in step with
-// handleLogin's; the console logs in immediately afterwards instead.
-func TestSetupIssuesNoSession(t *testing.T) {
-	s, _ := unconfigured(t)
-	w := postSetup(t, s, `{"token":"`+s.setupToken+`","password":"`+setupPassword+`"}`)
-	if cookies := w.Result().Cookies(); len(cookies) != 0 {
-		t.Errorf("setup set %d cookies, want none", len(cookies))
-	}
-}
-
-func TestSetupRefusesAWrongToken(t *testing.T) {
-	s, _ := unconfigured(t)
-	w := postSetup(t, s, `{"token":"not-the-token","password":"`+setupPassword+`"}`)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("setup with a wrong token = %d, want 401", w.Code)
-	}
-	if VerifyPassword(s.currentPasswordHash(context.Background()), setupPassword) {
-		t.Error("a refused setup still set the password")
-	}
-}
-
-// Reaching the endpoint on a console someone else already claimed must not
-// evaluate the token at all, let alone overwrite the password.
-func TestSetupRefusesOnceConfigured(t *testing.T) {
+func TestClaimMintsNoSession(t *testing.T) {
+	// The password is spent on a real login immediately afterwards, so one
+	// code path issues cookies and the stored hash is exercised before the
+	// operator relies on it. With no recovery path, discovering a bad hash now
+	// rather than when the session expires is the difference between retyping
+	// a password and losing the console.
 	s, _ := testServer(t)
-	w := postSetup(t, s, `{"token":"anything","password":"`+setupPassword+`"}`)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("setup on a configured console = %d, want 409", w.Code)
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if got := rec.Result().Cookies(); len(got) != 0 {
+		t.Errorf("the claim set %d cookies, want none: %v", len(got), got)
 	}
-	if !VerifyPassword(s.currentPasswordHash(context.Background()), testPassword) {
-		t.Error("setup overwrote a password that was already set")
-	}
-}
-
-func TestSetupRefusesAShortPassword(t *testing.T) {
-	s, _ := unconfigured(t)
-	w := postSetup(t, s, `{"token":"`+s.setupToken+`","password":"short"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("setup with a short password = %d, want 400", w.Code)
-	}
-}
-
-// The token opens the console once. Leaving it live would let anyone who read
-// the log line re-claim a console after the operator changed the password.
-func TestTheSetupTokenIsSpentOnceUsed(t *testing.T) {
-	s, _ := unconfigured(t)
-	token := s.setupToken
-	if w := postSetup(t, s, `{"token":"`+token+`","password":"`+setupPassword+`"}`); w.Code != http.StatusOK {
-		t.Fatalf("first setup = %d", w.Code)
-	}
-	if s.setupToken != "" {
-		t.Error("the setup token survived the claim that spent it")
-	}
-}
-
-// A password set through setup runs with no environment hash, and the
-// fingerprint of that empty environment is what lets a later
-// DARKROUTER_ADMIN_PASSWORD_HASH read as newer. Without the row the
-// documented recovery from a lost password silently does nothing.
-func TestAnEnvHashSetAfterSetupWinsOnRestart(t *testing.T) {
-	s, db := unconfigured(t)
-	if w := postSetup(t, s, `{"token":"`+s.setupToken+`","password":"`+setupPassword+`"}`); w.Code != http.StatusOK {
-		t.Fatalf("setup = %d", w.Code)
-	}
-	// The operator lost the password and seeds the environment to recover.
-	restarted, err := New(Deps{DB: db, PasswordHash: testHash()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	hash := restarted.currentPasswordHash(context.Background())
-	if VerifyPassword(hash, setupPassword) {
-		t.Error("the password set through setup still wins after the environment was seeded")
-	}
-	if !VerifyPassword(hash, testPassword) {
-		t.Error("the environment hash did not take effect on restart")
-	}
-}
-
-// /healthz and the config endpoint serve Deps.Warnings without a session. A
-// claim token that reached that slice would be readable by exactly the caller
-// requiring a token is meant to exclude.
-func TestTheSetupTokenNeverReachesTheWarnings(t *testing.T) {
-	db := storetest.Migrated(t)
-	s, err := New(Deps{DB: db, Warnings: []string{"an existing warning"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.setupToken == "" {
-		t.Fatal("no token was minted, so this proves nothing")
-	}
-	for _, w := range s.deps.Warnings {
-		if strings.Contains(w, s.setupToken) {
-			t.Fatalf("the setup token is in an unauthenticated warning: %q", w)
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookie && c.Value != "" {
+			t.Error("the claim minted a session; it must not")
 		}
+	}
+}
+
+func TestClaimRefusesAMismatchedConfirmation(t *testing.T) {
+	s, _ := testServer(t)
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"alice","password":"`+claimPassword+`","confirm":"correct-horse-batteryX"}`)
+	if rec.Code != 400 {
+		t.Fatalf("code = %d, want 400", rec.Code)
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 0 {
+		t.Error("a mismatched confirmation created an account")
+	}
+}
+
+func TestClaimRefusesAShortPassword(t *testing.T) {
+	s, _ := testServer(t)
+	rec := postJSON(t, s, "/api/auth/setup", `{"username":"alice","password":"short","confirm":"short"}`)
+	if rec.Code != 400 {
+		t.Errorf("code = %d, want 400", rec.Code)
+	}
+}
+
+func TestClaimRefusesAnEmptyUsername(t *testing.T) {
+	s, _ := testServer(t)
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"   ","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 400 {
+		t.Errorf("code = %d, want 400", rec.Code)
+	}
+}
+
+func TestASecondClaimIsRefused(t *testing.T) {
+	s, _ := testServer(t)
+	postJSON(t, s, "/api/auth/setup",
+		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"mallory","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 409 {
+		t.Fatalf("code = %d, want 409", rec.Code)
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 1 {
+		t.Errorf("UserCount = %d, want 1", n)
+	}
+}
+
+func TestConcurrentClaimsProduceExactlyOneWinner(t *testing.T) {
+	s, _ := testServer(t)
+	const racers = 8
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		won  int
+		lost int
+	)
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rec := postJSON(t, s, "/api/auth/setup",
+				`{"username":"racer`+string(rune('a'+i))+`","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+			mu.Lock()
+			defer mu.Unlock()
+			switch rec.Code {
+			case 200:
+				won++
+			case 409:
+				lost++
+			default:
+				t.Errorf("unexpected code %d: %s", rec.Code, rec.Body)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if won != 1 {
+		t.Errorf("winners = %d, want exactly 1", won)
+	}
+	if lost != racers-1 {
+		t.Errorf("losers = %d, want %d", lost, racers-1)
+	}
+}
+
+func TestClaimIsRefusedCrossSite(t *testing.T) {
+	s, _ := testServer(t)
+	rec := postJSONCrossSite(t, s, "/api/auth/setup",
+		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 403 {
+		t.Errorf("code = %d, want 403", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "cross-site") {
+		t.Errorf("body = %s", rec.Body)
 	}
 }
