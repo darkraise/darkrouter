@@ -11,38 +11,47 @@ import { api, ApiError, setCsrfToken } from "../../lib/api"
 import { IdentityMark } from "./identity-mark"
 import { PasswordToggle } from "./password-toggle"
 
-/** The server's exact wording for a refused token. Naming it opts this 401
- *  out of the global logout, which would otherwise treat a mistyped token as
- *  a dead session and remount the screen the operator is already on. */
-const REJECTED = "invalid setup token"
-
 /** The floor the server enforces; repeated here only to say so before the
  *  round trip, never instead of it. */
 const MIN_PASSWORD = 12
+
+/** What the server also checks — this is a courtesy that saves a round trip
+ *  on an obvious typo, never the authority on either rule. */
+export function claimProblem(password: string, confirm: string): string | null {
+  if (password.length < MIN_PASSWORD) return `The password must be at least ${MIN_PASSWORD} characters.`
+  if (password !== confirm) return "The two passwords do not match."
+  return null
+}
 
 /**
  * What a console nobody has claimed yet shows instead of a login it cannot
  * pass.
  *
- * The token comes from the startup log, which is what keeps the claim to
- * whoever can read the host rather than whoever can reach the port. Setup
- * mints no session, so the password just set is spent immediately on a real
- * login — one code path issues cookies, and the stored hash is exercised
- * before the operator relies on it.
+ * The claim is trust-on-first-use: whoever reaches this screen first picks a
+ * username and password and owns the console from then on, no token
+ * involved. Setup still mints no session, so the password just set is spent
+ * immediately on a real login — one code path issues cookies, and the
+ * stored hash is exercised before the operator relies on it.
  */
 export function FirstRun({ onClaimed }: { onClaimed: () => void }) {
-  const [token, setToken] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-  const tokenField = useRef<HTMLInputElement>(null)
+  const usernameField = useRef<HTMLInputElement>(null)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
     setError("")
+    const problem = claimProblem(password, confirm)
+    if (problem) {
+      setError(problem)
+      return
+    }
+    setBusy(true)
     try {
-      await api.post("/api/auth/setup", { token, password }, { expectedRejection: REJECTED })
+      await api.post("/api/auth/setup", { username, password, confirm })
     } catch (err) {
       // Someone claimed it between this page loading and this submit. The
       // console has a password now, so what this operator needs is the login
@@ -51,20 +60,17 @@ export function FirstRun({ onClaimed }: { onClaimed: () => void }) {
         onClaimed()
         return
       }
-      const refused = err instanceof ApiError && err.status === 401 && err.message === REJECTED
-      setError(refused ? "That setup token is not right." : (err as Error).message || "setup failed")
-      tokenField.current?.focus()
-      tokenField.current?.select()
+      setError((err as Error).message || "setup failed")
+      usernameField.current?.focus()
+      usernameField.current?.select()
       return
     } finally {
       setBusy(false)
     }
-    const res = await api.post<{ csrf_token: string }>("/api/auth/login", { password })
+    const res = await api.post<{ csrf_token: string }>("/api/auth/login", { username, password })
     setCsrfToken(res.csrf_token)
     onClaimed()
   }
-
-  const tooShort = password !== "" && password.length < MIN_PASSWORD
 
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
@@ -75,31 +81,29 @@ export function FirstRun({ onClaimed }: { onClaimed: () => void }) {
             <h1 className="text-xl font-medium">Claim this console</h1>
           </div>
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            No admin password is set yet. The setup token was printed to the
-            startup log — <code className="font-mono">docker compose logs</code>{" "}
-            — and setting a password here closes it for good.
+            No account exists yet. The first username and password set here
+            become the console&apos;s admin account — trust on first use, no
+            setup token involved.
           </p>
 
           <div className="flex flex-col gap-2">
-            <label htmlFor="setup-token" className="text-sm font-medium">
-              Setup token
+            <label htmlFor="setup-username" className="text-sm font-medium">
+              Username
             </label>
             <Input
-              id="setup-token"
-              ref={tokenField}
+              id="setup-username"
+              ref={usernameField}
               autoFocus
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono"
+              autoComplete="username"
               aria-invalid={error !== "" || undefined}
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
             />
           </div>
 
           <div className="flex flex-col gap-2">
             <label htmlFor="setup-password" className="text-sm font-medium">
-              Admin password
+              Password
             </label>
             {/* Revealable: this password is being chosen, not recalled, and a
                 masked field makes a typo in a new password undiscoverable
@@ -109,6 +113,7 @@ export function FirstRun({ onClaimed }: { onClaimed: () => void }) {
                 <PasswordInputField
                   id="setup-password"
                   autoComplete="new-password"
+                  aria-invalid={error !== "" || undefined}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
@@ -120,14 +125,35 @@ export function FirstRun({ onClaimed }: { onClaimed: () => void }) {
             </p>
           </div>
 
+          <div className="flex flex-col gap-2">
+            <label htmlFor="setup-confirm" className="text-sm font-medium">
+              Confirm password
+            </label>
+            <PasswordInput>
+              <PasswordInputControl>
+                <PasswordInputField
+                  id="setup-confirm"
+                  autoComplete="new-password"
+                  aria-invalid={error !== "" || undefined}
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                />
+                <PasswordToggle />
+              </PasswordInputControl>
+            </PasswordInput>
+          </div>
+
           {error ? (
             <p role="alert" className="text-destructive text-sm">
               {error}
             </p>
           ) : null}
 
-          <Button type="submit" disabled={busy || token === "" || tooShort || password === ""}>
-            {busy ? "Setting…" : "Set password"}
+          <Button
+            type="submit"
+            disabled={busy || username === "" || password === "" || confirm === ""}
+          >
+            {busy ? "Claiming…" : "Claim console"}
           </Button>
         </form>
       </Card>
