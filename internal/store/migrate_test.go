@@ -609,3 +609,100 @@ func TestPriceKnownDefaultsToUnknown(t *testing.T) {
 		t.Errorf("price_known = %d, want 0", got)
 	}
 }
+
+func TestMigration23CreatesUsersAndOwnsSessions(t *testing.T) {
+	db := migrated(t)
+
+	// users exists with the columns the auth path needs
+	var n int
+	if err := db.Read.QueryRow(
+		`SELECT count(*) FROM pragma_table_info('users')
+		  WHERE name IN ('id','username','username_lc','password_hash','role','created_at')`,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 6 {
+		t.Errorf("users columns = %d, want 6", n)
+	}
+
+	// sessions carries an owner, NOT NULL, with a cascading foreign key
+	var notNull int
+	if err := db.Read.QueryRow(
+		`SELECT "notnull" FROM pragma_table_info('sessions') WHERE name = 'user_id'`,
+	).Scan(&notNull); err != nil {
+		t.Fatalf("sessions.user_id missing: %v", err)
+	}
+	if notNull != 1 {
+		t.Error("sessions.user_id is nullable; a session with no owner must be unrepresentable")
+	}
+	var onDelete string
+	if err := db.Read.QueryRow(
+		`SELECT "on_delete" FROM pragma_foreign_key_list('sessions') WHERE "table" = 'users'`,
+	).Scan(&onDelete); err != nil {
+		t.Fatalf("no foreign key from sessions to users: %v", err)
+	}
+	if onDelete != "CASCADE" {
+		t.Errorf("on delete = %q, want CASCADE", onDelete)
+	}
+
+	// username_lc is unique, so two accounts cannot differ only by case
+	var uniq int
+	if err := db.Read.QueryRow(
+		`SELECT count(*) FROM pragma_index_list('users') l
+		    JOIN pragma_index_info(l.name) i
+		   WHERE l."unique" = 1 AND i.name = 'username_lc'`,
+	).Scan(&uniq); err != nil {
+		t.Fatal(err)
+	}
+	if uniq == 0 {
+		t.Error("no unique index on users; username_lc must be unique")
+	}
+}
+
+func TestMigration23DropsTheSharedPasswordRows(t *testing.T) {
+	// Staged at version 22 so the legacy rows exist before 0023 runs: on a
+	// database migrated all the way, nothing ever wrote them and the delete
+	// would be vacuously satisfied.
+	ctx := context.Background()
+	db := openTest(t)
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version >= 23 {
+			break
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("migration %d: %v", m.version, err)
+		}
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES
+		   ('admin.password_hash', 'x'), ('admin.password_env_fingerprint', 'y')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var n int
+	if err := db.Read.QueryRow(
+		`SELECT count(*) FROM settings
+		  WHERE key IN ('admin.password_hash','admin.password_env_fingerprint')`,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("shared password rows still present: %d", n)
+	}
+}
