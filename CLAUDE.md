@@ -35,10 +35,12 @@ that is only testable by looking at it cannot be checked from tests alone.
 
 The password for this machine's UAT instance is in **`.uat-credentials`** at
 the repository root. That file is gitignored, and it stays that way: the
-console checks a password against the bcrypt hash in `.env`
-(`DARKROUTER_ADMIN_PASSWORD_HASH`), and a hash is committed precisely so the
-plaintext is not. Read the file for the password; do not copy it into here, a
-commit message, or any other tracked file.
+console checks the password set in the console when one has been set, and
+the bcrypt hash in `.env` (`DARKROUTER_ADMIN_PASSWORD_HASH`) otherwise.
+Neither is tracked — `.env` is gitignored too, and only the empty
+placeholder in `.env.example` is committed — so the plaintext must not be
+either. Read the file for the password; do not copy it into here, a commit
+message, or any other tracked file.
 
 Log in before claiming a UI change looks right. Test suites cover behaviour —
 what a component renders, what a request carries — and cannot see layout,
