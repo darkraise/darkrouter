@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -99,5 +101,55 @@ func TestSetUserPasswordReplacesTheHash(t *testing.T) {
 	u, _, _ := db.UserByID(ctx, "id-1")
 	if u.PasswordHash != "new" {
 		t.Errorf("hash = %q, want %q", u.PasswordHash, "new")
+	}
+}
+
+// The emptiness test has to live inside the INSERT. A read followed by a write
+// leaves a window in which two callers both see an empty table, and at first
+// boot that window is two browsers both being told they founded the console.
+// Racing the call directly -- rather than through the handler, where bcrypt
+// staggers the arrivals far enough apart to hide the window -- is what makes a
+// check-then-insert implementation fail here.
+func TestConcurrentClaimsCreateOneUser(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	const racers = 16
+	var (
+		wg    sync.WaitGroup
+		start = make(chan struct{})
+		mu    sync.Mutex
+		won   int
+	)
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			name := "racer" + strconv.Itoa(i)
+			ok, err := db.ClaimFirstUser(ctx, name, name, "hash")
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if ok {
+				won++
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	if won != 1 {
+		t.Errorf("winners = %d, want exactly 1", won)
+	}
+	n, err := db.UserCount(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("UserCount = %d, want 1", n)
 	}
 }
