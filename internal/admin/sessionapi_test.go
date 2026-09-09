@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func TestSessionsListMarksTheCaller(t *testing.T) {
@@ -111,10 +113,14 @@ func TestPasswordChangeTakesEffectAndRevokesOthers(t *testing.T) {
 	if w := do(t, s, victim, token, "GET", "/api/sessions", ""); w.Code != 401 {
 		t.Errorf("another session survived the change: %d", w.Code)
 	}
-	if !VerifyPassword(s.currentPasswordHash(t.Context()), "a-much-longer-password") {
+	u, found, err := s.deps.DB.UserByID(t.Context(), "u-admin")
+	if err != nil || !found {
+		t.Fatalf("the caller's account is gone: %v found=%v", err, found)
+	}
+	if !VerifyPassword(u.PasswordHash, "a-much-longer-password") {
 		t.Error("the new password does not verify")
 	}
-	if VerifyPassword(s.currentPasswordHash(t.Context()), testPassword) {
+	if VerifyPassword(u.PasswordHash, testPassword) {
 		t.Error("the old password still verifies")
 	}
 }
@@ -129,11 +135,12 @@ func TestPasswordChangeRejectsAShortPassword(t *testing.T) {
 	}
 }
 
-func TestAuthStatusSaysWhetherAPasswordExists(t *testing.T) {
+func TestAuthStatusSaysWhetherTheConsoleIsClaimed(t *testing.T) {
 	// §12: a fresh install must explain itself rather than present a login
 	// that refuses every password. The status endpoint is unauthenticated, so
 	// this is the only place the SPA can learn it before trying.
 	s, _ := testServerFull(t)
+	seedTestAccount(t, s)
 	r := httptest.NewRequest("GET", "/api/auth/status", nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -149,6 +156,81 @@ func TestAuthStatusSaysWhetherAPasswordExists(t *testing.T) {
 		t.Error("an unauthenticated request reported a session")
 	}
 	if !body.Configured {
-		t.Error("a server with a password hash reported itself unconfigured")
+		t.Error("a claimed console reported itself unconfigured")
+	}
+}
+
+func TestListSessionsShowsOnlyTheCallersOwn(t *testing.T) {
+	s, _, cookie := newServerWithSession(t) // account u1
+	seedSecondAccountWithSession(t, s)      // account u2, cookie "other"
+
+	rec := getJSONAs(t, s, "/api/sessions", cookie)
+	if rec.Code != 200 {
+		t.Fatalf("GET /api/sessions = %d: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), store.HashSessionID("other")[:sessionIDPrefix]) {
+		t.Errorf("another account's session was listed: %s", rec.Body)
+	}
+	// Two-sided on purpose: an empty listing would satisfy the check above
+	// while proving nothing.
+	if !strings.Contains(rec.Body.String(), store.HashSessionID(cookie)[:sessionIDPrefix]) {
+		t.Errorf("the caller's own session was not listed: %s", rec.Body)
+	}
+}
+
+func TestRevokingAnotherAccountsSessionIs404(t *testing.T) {
+	s, _, cookie := newServerWithSession(t)
+	seedSecondAccountWithSession(t, s)
+
+	rec := deleteAs(t, s, "/api/sessions/"+store.HashSessionID("other")[:sessionIDPrefix], cookie)
+	if rec.Code != 404 {
+		t.Errorf("code = %d, want 404: one account must not reach another's session", rec.Code)
+	}
+	if _, ok, _ := s.deps.DB.TouchSession(t.Context(), "other", sessionTTL); !ok {
+		t.Error("the other account's session was revoked")
+	}
+}
+
+func TestChangingMyPasswordUpdatesMyRowOnly(t *testing.T) {
+	s, uid, cookie := newServerWithSession(t)
+	hash := mustHash(t, "old-password-here")
+	if err := s.deps.DB.SetUserPassword(t.Context(), uid, hash); err != nil {
+		t.Fatal(err)
+	}
+	otherID, _ := seedSecondAccountWithSession(t, s)
+
+	rec := postJSONAs(t, s, "/api/auth/password",
+		`{"current":"old-password-here","new":"a-brand-new-password"}`, cookie)
+	if rec.Code != 200 {
+		t.Fatalf("code = %d: %s", rec.Code, rec.Body)
+	}
+	u, _, _ := s.deps.DB.UserByID(t.Context(), uid)
+	if !VerifyPassword(u.PasswordHash, "a-brand-new-password") {
+		t.Error("the new password does not verify against the stored hash")
+	}
+	// The other account's own hash is untouched.
+	other, _, _ := s.deps.DB.UserByID(t.Context(), otherID)
+	if !VerifyPassword(other.PasswordHash, "correct-horse-battery") {
+		t.Error("a password change rewrote an unrelated account's hash")
+	}
+	// The other account keeps its session: their password did not change.
+	if _, ok, _ := s.deps.DB.TouchSession(t.Context(), "other", sessionTTL); !ok {
+		t.Error("a password change signed out an unrelated account")
+	}
+	// The caller keeps the session they are using.
+	if _, ok, _ := s.deps.DB.TouchSession(t.Context(), cookie, sessionTTL); !ok {
+		t.Error("the caller was signed out of the screen they just used")
+	}
+}
+
+func TestChangingMyPasswordRefusesAWrongCurrent(t *testing.T) {
+	s, uid, cookie := newServerWithSession(t)
+	if err := s.deps.DB.SetUserPassword(t.Context(), uid, mustHash(t, "old-password-here")); err != nil {
+		t.Fatal(err)
+	}
+	rec := postJSONAs(t, s, "/api/auth/password",
+		`{"current":"not-the-password","new":"a-brand-new-password"}`, cookie)
+	if rec.Code != 401 {
+		t.Errorf("code = %d, want 401", rec.Code)
 	}
 }

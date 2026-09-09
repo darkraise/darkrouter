@@ -167,7 +167,11 @@ func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*co
 func do(t *testing.T, s *Server, cookie *http.Cookie, token, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
-	r.AddCookie(cookie)
+	// nil for the unauthenticated shorthands below: /api/auth/login and
+	// /api/auth/status are reached without a session.
+	if cookie != nil {
+		r.AddCookie(cookie)
+	}
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	if method != "GET" {
 		r.Header.Set(csrfHeader, token)
@@ -176,6 +180,85 @@ func do(t *testing.T, s *Server, cookie *http.Cookie, token, method, path, body 
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	return w
+}
+
+// mustHash is a bcrypt hash of password, or a fatal error.
+func mustHash(t *testing.T, password string) string {
+	t.Helper()
+	h, err := HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// newServerWithSession returns a server whose console is claimed by one admin
+// account, that account's id, and a raw session cookie value for it.
+func newServerWithSession(t *testing.T) (*Server, string, string) {
+	t.Helper()
+	s, _ := testServer(t)
+	const uid = "u1"
+	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), uid, "alice", mustHash(t, "correct-horse-battery")); err != nil {
+		t.Fatal(err)
+	}
+	const cookie = "cookie-1"
+	if err := s.deps.DB.CreateSession(t.Context(), cookie, uid, sessionTTL); err != nil {
+		t.Fatal(err)
+	}
+	return s, uid, cookie
+}
+
+// seedSecondAccountWithSession adds a second, non-admin account holding the
+// session cookie "other", so a test can show that one account's request never
+// reaches another's rows.
+//
+// The row is inserted directly rather than through a store method: CreateUser
+// arrives with the account-management endpoints, and until then ClaimFirstUser
+// is the only writer — and it refuses once the console is claimed.
+func seedSecondAccountWithSession(t *testing.T, s *Server) (string, string) {
+	t.Helper()
+	const uid = "u2"
+	if _, err := s.deps.DB.Write.ExecContext(t.Context(),
+		`INSERT INTO users (id, username, username_lc, password_hash, role, created_at)
+		 VALUES (?, 'bob', 'bob', ?, 'member', 0)`, uid, mustHash(t, "correct-horse-battery")); err != nil {
+		t.Fatal(err)
+	}
+	const cookie = "other"
+	if err := s.deps.DB.CreateSession(t.Context(), cookie, uid, sessionTTL); err != nil {
+		t.Fatal(err)
+	}
+	return uid, cookie
+}
+
+// The request shorthands. Each is a thin wrapper over do, so a test that only
+// cares about one path and one caller does not spell out six lines of setup.
+
+func postJSON(t *testing.T, s *Server, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return do(t, s, nil, "", "POST", path, body)
+}
+
+func getJSON(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return do(t, s, nil, "", "GET", path, "")
+}
+
+func postJSONAs(t *testing.T, s *Server, path, body, cookie string) *httptest.ResponseRecorder {
+	t.Helper()
+	c := &http.Cookie{Name: sessionCookie, Value: cookie}
+	return do(t, s, c, s.csrf.Token(cookie), "POST", path, body)
+}
+
+func getJSONAs(t *testing.T, s *Server, path, cookie string) *httptest.ResponseRecorder {
+	t.Helper()
+	c := &http.Cookie{Name: sessionCookie, Value: cookie}
+	return do(t, s, c, s.csrf.Token(cookie), "GET", path, "")
+}
+
+func deleteAs(t *testing.T, s *Server, path, cookie string) *httptest.ResponseRecorder {
+	t.Helper()
+	c := &http.Cookie{Name: sessionCookie, Value: cookie}
+	return do(t, s, c, s.csrf.Token(cookie), "DELETE", path, "")
 }
 
 // seedProviderWithKey creates a provider and one credential, returning the

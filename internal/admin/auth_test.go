@@ -37,6 +37,35 @@ var testHash = sync.OnceValue(func() string {
 	return string(h)
 })
 
+// testUsername is the account every login helper in this package authenticates
+// as. It is created on demand rather than by testServer, because an unclaimed
+// console is a state several tests assert on.
+const testUsername = "admin"
+
+// seedTestAccount claims the console for testUsername, unless a login helper
+// already did. Idempotent, because a test that wants two sessions calls login
+// twice.
+func seedTestAccount(t *testing.T, s *Server) {
+	t.Helper()
+	if _, ok, err := s.deps.DB.UserByUsername(t.Context(), testUsername); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		return
+	}
+	claimed, err := s.deps.DB.ClaimFirstUser(t.Context(), "u-admin", testUsername, testHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Fatal("the console was already claimed by another account")
+	}
+}
+
+// testCredentials is the JSON body the login helpers post.
+func testCredentials(password string) string {
+	return `{"username":"` + testUsername + `","password":"` + password + `"}`
+}
+
 // testServer builds an admin server over a migrated database with one known
 // password, and returns it alongside the database so a test can seed rows.
 func testServer(t *testing.T) (*Server, *store.DB) {
@@ -53,9 +82,10 @@ func testServer(t *testing.T) (*Server, *store.DB) {
 // which is how every mutating test below authenticates.
 func login(t *testing.T, s *Server) (*http.Cookie, string) {
 	t.Helper()
+	seedTestAccount(t, s)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"`+testPassword+`"}`))
+		strings.NewReader(testCredentials(testPassword)))
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -193,7 +223,7 @@ func TestLoginRotatesTheSessionID(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"`+testPassword+`"}`))
+		strings.NewReader(testCredentials(testPassword)))
 	r.AddCookie(first)
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	s.Handler().ServeHTTP(w, r)
@@ -238,9 +268,10 @@ func TestTheSessionCookieIsNotSecureOverPlainHTTP(t *testing.T) {
 	// The default homelab posture is plain HTTP. A Secure cookie there is
 	// dropped by the browser and login silently never works.
 	s, _ := testServer(t)
+	seedTestAccount(t, s)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"`+testPassword+`"}`))
+		strings.NewReader(testCredentials(testPassword)))
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	s.Handler().ServeHTTP(w, r)
 
@@ -258,12 +289,47 @@ func TestTheSessionCookieIsNotSecureOverPlainHTTP(t *testing.T) {
 
 func TestAWrongPasswordIsRefused(t *testing.T) {
 	s, _ := testServer(t)
+	seedTestAccount(t, s)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/api/auth/login",
-		strings.NewReader(`{"password":"wrong"}`))
+		strings.NewReader(testCredentials("wrong")))
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestRequireSessionPutsTheOwnerInContext(t *testing.T) {
+	s, uid, cookie := newServerWithSession(t)
+
+	var seen string
+	h := s.requireSession(func(w http.ResponseWriter, r *http.Request) {
+		seen = userFrom(r.Context())
+	})
+	req := httptest.NewRequest("GET", "/api/anything", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
+	h(httptest.NewRecorder(), req)
+
+	if seen != uid {
+		t.Errorf("userFrom = %q, want %q", seen, uid)
+	}
+}
+
+func TestRequireCSRFInheritsTheOwner(t *testing.T) {
+	s, uid, cookie := newServerWithSession(t)
+
+	var seen string
+	h := s.requireCSRF(func(w http.ResponseWriter, r *http.Request) {
+		seen = userFrom(r.Context())
+	})
+	req := httptest.NewRequest("POST", "/api/anything", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set(csrfHeader, s.csrf.Token(cookie))
+	h(httptest.NewRecorder(), req)
+
+	if seen != uid {
+		t.Errorf("userFrom through requireCSRF = %q, want %q", seen, uid)
 	}
 }

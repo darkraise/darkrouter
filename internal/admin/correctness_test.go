@@ -10,11 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/store"
-	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 type captureLogger struct {
@@ -96,50 +93,6 @@ func TestTheSweeperDropsAbandonedFlows(t *testing.T) {
 	s.sweepOnce(time.Now())
 	if _, err := s.deps.Flows.Claim(state, "sess"); err != auth.ErrUnknownState {
 		t.Errorf("claim after sweep = %v, want ErrUnknownState", err)
-	}
-}
-
-func TestAChangedEnvironmentHashOverridesTheStoredPassword(t *testing.T) {
-	db := storetest.Migrated(t)
-	open := func(hash string) *Server {
-		s, err := New(Deps{DB: db, PasswordHash: hash})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(s.Close)
-		return s
-	}
-	tryLogin := func(s *Server, password string) int {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"password":"`+password+`"}`))
-		r.Header.Set("Sec-Fetch-Site", "same-origin")
-		s.Handler().ServeHTTP(w, r)
-		return w.Code
-	}
-	s := open(testHash())
-	cookie, token := login(t, s)
-	if w := do(t, s, cookie, token, "POST", "/api/auth/password",
-		`{"current":"`+testPassword+`","new":"console-set-password"}`); w.Code != http.StatusOK {
-		t.Fatalf("change = %d %s", w.Code, w.Body.String())
-	}
-	// Same environment across a restart: the console's password holds.
-	if code := tryLogin(open(testHash()), "console-set-password"); code != http.StatusOK {
-		t.Fatalf("after a restart with the same env hash: %d", code)
-	}
-	// A new environment hash: it wins and the stored one is gone.
-	newHash, err := bcrypt.GenerateFromPassword([]byte("env-recovery"), bcrypt.MinCost)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s3 := open(string(newHash))
-	if code := tryLogin(s3, "console-set-password"); code != http.StatusUnauthorized {
-		t.Errorf("stale console password still logs in: %d", code)
-	}
-	if code := tryLogin(s3, "env-recovery"); code != http.StatusOK {
-		t.Errorf("the new environment password does not log in: %d", code)
-	}
-	if _, ok, _ := db.GetSetting(context.Background(), settingAdminPasswordHash); ok {
-		t.Error("the stored hash survived a changed environment hash")
 	}
 }
 
