@@ -38,6 +38,24 @@ func TestAMemberCannotCreateAnAccount(t *testing.T) {
 	}
 }
 
+// TestAMemberCannotDeleteAnAccount covers the third account-management route;
+// list and create above cover the other two. The member aims at its own row
+// rather than the founding admin's, because the last-administrator refusal
+// further down handleDeleteUser would turn that request away on its own and
+// leave requireAdmin untested -- an administrator is allowed to remove this
+// row, so without the guard the request succeeds and the account goes.
+func TestAMemberCannotDeleteAnAccount(t *testing.T) {
+	s, _, _ := newServerWithSession(t)
+	memberID, memberCookie := seedSecondAccountWithSession(t, s)
+	rec := deleteAs(t, s, "/api/users/"+memberID, memberCookie)
+	if rec.Code != 403 {
+		t.Errorf("code = %d, want 403: %s", rec.Code, rec.Body)
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 2 {
+		t.Errorf("users = %d, want 2: a member removed an account", n)
+	}
+}
+
 func TestAnAdminCreatesAMember(t *testing.T) {
 	s, _, cookie := newServerWithSession(t) // founding admin
 	rec := postJSONAs(t, s, "/api/users",
