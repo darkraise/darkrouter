@@ -6,6 +6,7 @@ import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  accountsForbidden,
   fieldErrors,
   orderSessions,
   passwordProblem,
@@ -16,6 +17,7 @@ import {
   settingsPatch,
   syncMessage,
 } from "./settings-screen"
+import { ApiError } from "../../lib/api"
 import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
 
 // PageHeader calls useRouterAdapter unconditionally even without breadcrumbs
@@ -250,6 +252,12 @@ function stubSettingsFetch(overrides: {
   sync?: { triggered: boolean }
   sessions?: unknown[]
   users?: { users: unknown[]; me: string }
+  /** GET /api/users answers 403, as it does for a caller who is not an
+   *  administrator. */
+  usersForbidden?: boolean
+  /** GET /api/users answers with some other failure -- a genuine one, unlike
+   *  the 403 above. */
+  usersError?: { status: number; message: string }
   save?: { status?: number; body?: unknown }
   /** What GET /api/config answers before any save. */
   config?: () => ConfigResponse
@@ -294,6 +302,18 @@ function stubSettingsFetch(overrides: {
       })
     }
     if (url === "/api/users" && method === "GET") {
+      if (overrides.usersForbidden) {
+        return new Response(
+          JSON.stringify({ error: "only an administrator can manage accounts" }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      if (overrides.usersError) {
+        return new Response(JSON.stringify({ error: overrides.usersError.message }), {
+          status: overrides.usersError.status,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
       return new Response(JSON.stringify(overrides.users ?? { users: [], me: "" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -711,6 +731,40 @@ describe("the accounts list", () => {
     const bobRow = (await screen.findByText("bob")).closest("li")
     expect(bobRow).toHaveTextContent(/this is you/i)
     expect(screen.getAllByRole("button", { name: /remove/i })).toHaveLength(1)
+  })
+})
+
+describe("accountsForbidden", () => {
+  it("recognises the 403 a non-administrator gets", () => {
+    expect(accountsForbidden(new ApiError(403, "only an administrator can manage accounts"))).toBe(
+      true,
+    )
+  })
+
+  it("does not mistake a genuine failure for it", () => {
+    expect(accountsForbidden(new ApiError(500, "internal error"))).toBe(false)
+    expect(accountsForbidden(new TypeError("network error"))).toBe(false)
+  })
+})
+
+describe("a member on the accounts section", () => {
+  it("sees the explanation, not a destructive banner, when the listing is forbidden", async () => {
+    stubSettingsFetch({ usersForbidden: true })
+    mount(<SettingsScreen />)
+
+    // The positive marker the forbidden branch renders once the query has
+    // settled -- waiting on it (rather than asserting the banner's absence
+    // immediately) is what stops this test from passing vacuously before
+    // the fetch has even resolved.
+    await screen.findByText(/limited to administrators/i)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it("still shows a destructive banner for a genuine failure", async () => {
+    stubSettingsFetch({ usersError: { status: 500, message: "internal error" } })
+    mount(<SettingsScreen />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/account list did not load/i)
   })
 })
 

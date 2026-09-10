@@ -224,8 +224,8 @@ export function AccountsCard({ users, me }: { users: UserAccount[]; me: string }
 
       <ul className="mt-3 flex flex-col gap-2">
         {users.map((u) => (
-          <li key={u.id} className="flex items-center gap-3 text-sm">
-            <span className="font-medium">{u.username}</span>
+          <li key={u.id} className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="min-w-0 flex-1 truncate font-medium">{u.username}</span>
             <Badge variant={u.role === "admin" ? "secondary" : "outline"} className="font-medium">
               {roleLabel(u.role)}
             </Badge>
