@@ -432,10 +432,6 @@ and produce a different bundle from the one that was tested.
 store or configuration is unusable, which is the state an orchestrator should
 route away from.
 
-**A bcrypt hash contains `$`, which compose reads as a variable.** Every one
-must be doubled in `.env` or the value silently arrives truncated and a
-correct password still fails.
-
 **Verify a deploy by comparing bytes, not filenames.** The asset hash is not
 stable across build environments — the image builds at one path and a host
 build at another — so a filename comparison reports a false mismatch on a good
