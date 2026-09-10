@@ -228,6 +228,10 @@ func (s *Server) routeTable() []route {
 		{"DELETE", "/api/playground/conversations/{id}", routeCSRF, s.handleDeletePlaygroundConversation},
 		{"POST", "/api/playground/conversations/{id}/messages", routeCSRF, s.requireConversationSaving(s.handleAppendPlaygroundTurn)},
 
+		{"GET", "/api/users", routeSession, s.handleListUsers},
+		{"POST", "/api/users", routeCSRF, s.handleCreateUser},
+		{"DELETE", "/api/users/{id}", routeCSRF, s.handleDeleteUser},
+
 		{"GET", "/api/overview", routeSession, s.handleOverview},
 		{"GET", "/api/usage", routeSession, s.handleUsage},
 		{"GET", "/api/models", routeSession, s.handleModels},
