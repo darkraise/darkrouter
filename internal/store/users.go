@@ -107,3 +107,71 @@ func (d *DB) SetUserPassword(ctx context.Context, id, hash string) error {
 	}
 	return nil
 }
+
+// Users lists every account, oldest first. The password hash is deliberately
+// not selected: a listing has no use for it, and a field that is never read
+// cannot be leaked by a handler that forgets to strip it.
+func (d *DB) Users(ctx context.Context) ([]User, error) {
+	rows, err := d.Read.QueryContext(ctx,
+		`SELECT id, username, username_lc, role, created_at FROM users
+		  ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []User{}
+	for rows.Next() {
+		var (
+			u       User
+			created int64
+		)
+		if err := rows.Scan(&u.ID, &u.Username, &u.UsernameLC, &u.Role, &created); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		u.CreatedAt = time.UnixMilli(created).UTC()
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return out, nil
+}
+
+// CreateUser adds an account. The unique index on username_lc is what refuses
+// a duplicate name, so the check and the write cannot drift apart.
+func (d *DB) CreateUser(ctx context.Context, id, username, hash, role string) error {
+	if _, err := d.Write.ExecContext(ctx,
+		`INSERT INTO users (id, username, username_lc, password_hash, role, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		id, username, normalizeUsername(username), hash, role, time.Now().UnixMilli()); err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+	return nil
+}
+
+// DeleteUser removes an account and, through ON DELETE CASCADE, every session
+// it holds. It reports whether a row went.
+func (d *DB) DeleteUser(ctx context.Context, id string) (bool, error) {
+	res, err := d.Write.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return false, fmt.Errorf("delete user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete user: %w", err)
+	}
+	return n > 0, nil
+}
+
+// AdminCount is what stops the last administrator removing or demoting
+// themselves, which would leave a console nobody can manage and no recovery
+// path to fix it.
+func (d *DB) AdminCount(ctx context.Context) (int, error) {
+	var n int
+	if err := d.Read.QueryRowContext(ctx,
+		`SELECT count(*) FROM users WHERE role = ?`, RoleAdmin).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count admins: %w", err)
+	}
+	return n, nil
+}

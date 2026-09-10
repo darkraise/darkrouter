@@ -153,3 +153,78 @@ func TestConcurrentClaimsCreateOneUser(t *testing.T) {
 		t.Errorf("UserCount = %d, want 1", n)
 	}
 }
+
+func TestCreateUserRefusesADuplicateNameRegardlessOfCase(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.ClaimFirstUser(ctx, "u1", "Alice", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	err := db.CreateUser(ctx, "u2", "ALICE", "hash", RoleMember)
+	if err == nil {
+		t.Fatal("a second account took a name differing only by case")
+	}
+}
+
+func TestUsersListsEveryAccountOldestFirst(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateUser(ctx, "u2", "bob", "hash", RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	list, err := db.Users(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("len = %d, want 2", len(list))
+	}
+	if list[0].ID != "u1" {
+		t.Errorf("first = %q, want the founding account", list[0].ID)
+	}
+	for _, u := range list {
+		if u.PasswordHash != "" {
+			t.Error("Users returned a password hash; a listing has no business carrying one")
+		}
+	}
+}
+
+func TestDeleteUserReportsWhetherARowWent(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := db.DeleteUser(ctx, "u1")
+	if err != nil || !gone {
+		t.Fatalf("DeleteUser: %v gone=%v", err, gone)
+	}
+	gone, err = db.DeleteUser(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gone {
+		t.Error("deleting an absent account reported a removal")
+	}
+}
+
+func TestAdminCountSeesOnlyAdmins(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateUser(ctx, "u2", "bob", "hash", RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	n, err := db.AdminCount(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("AdminCount = %d, want 1", n)
+	}
+}
