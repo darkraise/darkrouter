@@ -3,7 +3,6 @@ package admin
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/store"
@@ -68,17 +67,9 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, 4<<10, &body) {
 		return
 	}
-	username := strings.TrimSpace(body.Username)
-	if username == "" || len([]rune(username)) > maxUsernameChars {
-		writeError(w, http.StatusBadRequest, "a username is required")
-		return
-	}
-	if len(body.Password) < minPasswordChars {
-		writeError(w, http.StatusBadRequest, "the password must be at least 12 characters")
-		return
-	}
-	if len(body.Password) > maxPasswordBytes {
-		writeError(w, http.StatusBadRequest, "the password must be at most 72 bytes")
+	username, msg, ok := validateCredentials(body.Username, body.Password)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	// The column has no CHECK constraint and the store validates nothing, so
@@ -89,6 +80,15 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the role must be admin or member")
 		return
 	}
+	// Before hashing: bcrypt is deliberately expensive, and a request that is
+	// going to be refused should not pay for it.
+	if _, taken, err := s.deps.DB.UserByUsername(r.Context(), username); err != nil {
+		internalError(w, r, err)
+		return
+	} else if taken {
+		writeError(w, http.StatusConflict, "that username is already taken")
+		return
+	}
 	hash, err := HashPassword(body.Password)
 	if err != nil {
 		internalError(w, r, err)
@@ -97,13 +97,6 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	id, err := newSessionID() // 32 bytes of entropy; reused as an opaque row id
 	if err != nil {
 		internalError(w, r, err)
-		return
-	}
-	if _, taken, err := s.deps.DB.UserByUsername(r.Context(), username); err != nil {
-		internalError(w, r, err)
-		return
-	} else if taken {
-		writeError(w, http.StatusConflict, "that username is already taken")
 		return
 	}
 	if err := s.deps.DB.CreateUser(r.Context(), id, username, hash, body.Role); err != nil {
