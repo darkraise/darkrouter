@@ -97,11 +97,16 @@ func TestASecondClaimIsRefused(t *testing.T) {
 	}
 }
 
-// Eight concurrent claims are answered coherently: one 200, seven 409s, no
-// 500 from SQLite contention and no 429 from the login limiter. It does not
-// prove the INSERT is atomic -- bcrypt staggers the requests far enough apart
-// that they never collide inside the store. TestConcurrentClaimsCreateOneUser
-// in internal/store/users_test.go is the guard for that.
+// Eight concurrent claims are answered coherently: exactly one 200 and no 500
+// from SQLite contention. It does not prove the INSERT is atomic -- bcrypt
+// staggers the requests far enough apart that they never collide inside the
+// store. TestConcurrentClaimsCreateOneUser in internal/store/users_test.go is
+// the guard for that.
+//
+// A loser is a 409 or a 429. Both are refusals of the same claim: the claim
+// endpoint shares the global bcrypt ceiling with login, and eight racers
+// against four slots means some are turned away before they hash rather than
+// after. What matters here is that no racer is left believing it won.
 func TestConcurrentClaimsAreAnsweredCoherently(t *testing.T) {
 	s, _ := testServer(t)
 	const racers = 8
@@ -122,7 +127,7 @@ func TestConcurrentClaimsAreAnsweredCoherently(t *testing.T) {
 			switch rec.Code {
 			case 200:
 				won++
-			case 409:
+			case 409, 429:
 				lost++
 			default:
 				t.Errorf("unexpected code %d: %s", rec.Code, rec.Body)
@@ -135,6 +140,63 @@ func TestConcurrentClaimsAreAnsweredCoherently(t *testing.T) {
 	}
 	if lost != racers-1 {
 		t.Errorf("losers = %d, want %d", lost, racers-1)
+	}
+	// The account count is the claim that matters and the recorders cannot
+	// make it: one winner among the responses would still be wrong if two rows
+	// had landed.
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 1 {
+		t.Errorf("UserCount = %d, want 1", n)
+	}
+}
+
+// TestAClaimedConsoleRefusesASecondClaimWithoutHashing pins the cheap refusal
+// in front of the expensive one. Without it every claim arriving at a console
+// somebody claimed months ago -- an unauthenticated request anyone who can
+// reach the port may send -- pays for a cost-12 bcrypt before the INSERT is
+// allowed to say no.
+//
+// hashCalls is process-global, so this test must never run with t.Parallel():
+// a concurrent claim or password change would move the counter for it.
+func TestAClaimedConsoleRefusesASecondClaimWithoutHashing(t *testing.T) {
+	s, _ := testServer(t)
+	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), "u1", "alice", mustHash(t, claimPassword)); err != nil {
+		t.Fatal(err)
+	}
+	before := hashCalls.Load()
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"mallory","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 409 {
+		t.Fatalf("code = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	if n := hashCalls.Load() - before; n != 0 {
+		t.Errorf("the refused claim ran %d bcrypt hashes, want 0", n)
+	}
+}
+
+// TestAClaimIsRefusedWhenEveryHashSlotIsBusy holds the global ceiling closed
+// and shows the claim declining to hash anyway. The per-address bucket cannot
+// stand in for this: a flood spread across addresses empties none of them,
+// which is the whole reason loginConcurrency exists.
+func TestAClaimIsRefusedWhenEveryHashSlotIsBusy(t *testing.T) {
+	s, _ := testServer(t)
+	for i := 0; i < loginConcurrency; i++ {
+		release, ok := s.logins.acquire()
+		if !ok {
+			t.Fatalf("slot %d was already taken", i)
+		}
+		t.Cleanup(release)
+	}
+	before := hashCalls.Load()
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"alice","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 429 {
+		t.Fatalf("code = %d, want 429: %s", rec.Code, rec.Body)
+	}
+	if n := hashCalls.Load() - before; n != 0 {
+		t.Errorf("the shed claim ran %d bcrypt hashes, want 0", n)
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 0 {
+		t.Error("a shed claim created an account")
 	}
 }
 

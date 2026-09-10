@@ -27,6 +27,14 @@ const passwordCost = 12
 // the request path reads it.
 var verifyCalls atomic.Uint64
 
+// hashCalls counts bcrypt hash generations, for the reason verifyCalls counts
+// comparisons: the claim endpoint is unauthenticated, so a claim arriving at a
+// console that was claimed months ago must be refused before it pays for one.
+// Only a counter separates a refusal that hashed first from one that did not --
+// both answer 409, and both answer it fast enough on an idle machine to look
+// alike. Nothing in the request path reads it.
+var hashCalls atomic.Uint64
+
 // dummyHash is compared against when a username does not resolve, so a miss
 // costs the same work as a hit. Generated once at startup rather than being a
 // constant, so it carries this build's cost parameter.
@@ -45,6 +53,7 @@ func HashPassword(password string) (string, error) {
 	if password == "" {
 		return "", fmt.Errorf("password is empty")
 	}
+	hashCalls.Add(1)
 	h, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
