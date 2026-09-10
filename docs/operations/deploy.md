@@ -160,9 +160,10 @@ curl -s "http://localhost:8091/$asset" > /tmp/served.js
 cmp /tmp/served.js internal/admin/dist/assets/index-*.js && echo "deploy matches source"
 ```
 
-The console needs a password. On this machine it is in `.uat-credentials` at
-the repository root, which is gitignored and stays that way: only a bcrypt
-hash of it lives in the database, so the plaintext is never committed.
+The console needs a username and a password. On this machine both are in
+`.uat-credentials` at the repository root, which is gitignored and stays that
+way: a plaintext password does not belong in the repository, whatever the
+database stores.
 
 ## Backup and restore
 

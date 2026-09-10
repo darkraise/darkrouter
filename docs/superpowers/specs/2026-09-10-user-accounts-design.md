@@ -113,6 +113,20 @@ reaches unauthenticated `/healthz`. Without it an unattended upgrade hands admin
 to whoever loads the console first — a health check, a left-open bookmark, a
 stranger. (Graft from candidate C.)
 
+**Amendment, 2026-09-11 (final review).** The rule above — `slog` only, never
+`/healthz` — was written without examining two routes that already publish the
+same fact. `internal/server/server.go:520-524` appends `unclaimedWarning` to the
+same unauthenticated `/healthz` response, counted per request rather than fixed
+at startup, and `GET /api/auth/status` answers `configured:false` to anyone who
+can reach the port, which the SPA cannot render the claim screen without. The
+marginal disclosure of the `/healthz` warning is therefore zero, and
+`docs/design/security.md:63-67` already documents it deliberately as one of the
+two mitigations a monitor can probe. The code is kept as it stands. What the
+rule still governs, and what `cmd/darkrouter` honours with a test pinning it, is
+that `warnUnclaimed`'s own text does not also reach `startupWarnings`: one
+disclosure told through two mechanisms is a second thing to keep true. The
+reasoning above stands as written; this records what it did not consider.
+
 **The window is real and untestable.** Between that restart and the claim,
 anyone who can reach the admin port can become admin. Both ports bind every
 interface. The mitigations are the warning, the documentation, and claiming
