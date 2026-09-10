@@ -62,7 +62,7 @@ scan of the pushed digest.
 **[`docs/operations/deploy.md`](docs/operations/deploy.md)** is the procedure:
 running the published image, building locally for UAT, verifying a deploy took,
 backup and restore, rolling back, exposing it to the internet, reaching a model
-runtime on the host, and the `hash-password` and `rotate-key` subcommands.
+runtime on the host, and the `rotate-key` subcommand.
 
 ## Endpoints
 
@@ -181,25 +181,22 @@ discovery, aliases and policy, route preview, requests and traces, usage,
 sessions and proxy tokens, the playground, OAuth connection, and the
 config view.
 
-The first time the console is opened it asks for a password. A console with no
-password is claimed rather than open: the process prints a one-time setup token
-to its log, and the setup page wants that token alongside the password you are
-choosing, so claiming it takes host access rather than a route to the port.
+The first time the console is opened it asks to claim it: pick a username and
+a password, and that account becomes the administrator. There is no setup
+token and no environment variable — whoever reaches the admin port first
+between the first start and the claim wins it, and both ports bind every
+interface by default, so **claim the console immediately after the first
+start**. The process logs a warning at every start while a database that
+already holds providers has no account, and `/healthz` reports the console
+unclaimed without needing a session.
 
-```bash
-docker compose logs | grep 'setup token'
-```
+The gateway keeps proxying throughout — that is its job — regardless of
+whether the console has been claimed.
 
-Setting a password closes setup permanently. To provision one ahead of time
-instead — or to recover a lost one, since a changed hash overrides the stored
-password on the next restart — set `DARKROUTER_ADMIN_PASSWORD_HASH`:
-
-```bash
-export DARKROUTER_ADMIN_PASSWORD_HASH="$(echo -n 'your-password' | darkrouter hash-password)"
-```
-
-Either way the gateway keeps proxying — that is its job — and `/healthz`
-carries a warning while the console is still unclaimed.
+There is no password recovery: no environment variable overrides a stored
+password and no subcommand resets one. See
+[`docs/operations/deploy.md`](docs/operations/deploy.md) for the working
+remedy if an administrator forgets their password.
 
 Nine destinations cover operations and configuration: **Overview**,
 **Requests**, **Usage**, **Providers**, **Models**, **Routing**,

@@ -33,14 +33,12 @@ re-litigated. Everything under `web/` is bound by the rule without exception.
 The admin console at **http://localhost:8091** needs a password, so a change
 that is only testable by looking at it cannot be checked from tests alone.
 
-The password for this machine's UAT instance is in **`.uat-credentials`** at
-the repository root. That file is gitignored, and it stays that way: the
-console checks the password set in the console when one has been set, and
-the bcrypt hash in `.env` (`DARKROUTER_ADMIN_PASSWORD_HASH`) otherwise.
-Neither is tracked — `.env` is gitignored too, and only the empty
-placeholder in `.env.example` is committed — so the plaintext must not be
-either. Read the file for the password; do not copy it into here, a commit
-message, or any other tracked file.
+The username and password for this machine's UAT instance are in
+**`.uat-credentials`** at the repository root. That file is gitignored, and it
+stays that way: the account was created by claiming the console on first run,
+and there is no password recovery, so the plaintext exists nowhere else and
+must not be copied into here, a commit message, or any other tracked file.
+Read the file for the credentials; do not copy them anywhere tracked.
 
 Log in before claiming a UI change looks right. Test suites cover behaviour —
 what a component renders, what a request carries — and cannot see layout,

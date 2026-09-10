@@ -47,16 +47,16 @@ same input.
 
 Some criteria can only be checked against a running gateway with a real
 provider credential. That pass needs: the UAT stack up, one real provider
-credential, `DARKROUTER_ADMIN_PASSWORD_HASH` set, and someone to drive a
-browser in **both** themes.
+credential, an account claimed, and someone to drive a browser in **both**
+themes.
 
 Last run 2026-09-02 against Groq, with the playground's chat and compare modes
 completed end to end.
 
 Two states no automated suite can reach, both needing the same live stack:
 pointing a fresh data directory at the gateway to confirm the zero-provider
-teaching state renders instead of empty grids, and unsetting the password hash
-to confirm the first-run screen still explains itself.
+teaching state renders instead of empty grids, and clearing the `users` table
+to confirm the claim screen still explains itself.
 
 ## Writing a test that can fail
 
