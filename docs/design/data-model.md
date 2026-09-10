@@ -26,7 +26,7 @@ year 58633 and listing expired sessions as revocable browsers.
 
 ## Tables
 
-Seventeen application tables, plus `schema_version` created by the migrator
+Eighteen application tables, plus `schema_version` created by the migrator
 itself.
 
 | Table | Holds |
@@ -43,7 +43,8 @@ itself.
 | `provider_discovery` | Per-provider discovery health and filtering. |
 | `aliases` | Ordered alias chains. |
 | `proxy_tokens` | Per-client proxy tokens, stored as SHA-256 digests. |
-| `sessions` | Admin sessions, stored as digests. |
+| `users` | The named accounts that can sign in to the console, their role and their bcrypt password hash. |
+| `sessions` | Admin sessions, stored as digests, each owned by the `users` row it authenticated; the owner column cascades, so removing an account signs it out everywhere. |
 | `settings` | Every configuration key the registry names, on its compiled default until something writes it; plus a few non-configuration rows — the keyring salt and iteration count, the key verifier, the CSRF secret. |
 | `playground_presets` | Saved console playground configurations. |
 | `playground_conversations`, `playground_messages` | Saved playground conversations. |
@@ -63,14 +64,18 @@ Numbered SQL files, embedded, forward-only, each in its own transaction.
 must be contiguous from 1 — a skipped number is a startup error — and a
 database newer than the binary refuses to start rather than half-applying.
 
-Twenty-one migrations exist. Two of them rebuild a table rather than altering
+Twenty-three migrations exist. Two of them rebuild a table rather than altering
 it, so the migration files mention two transient `*_new` names that are not
-part of the schema. Two are worth knowing about because their names
+part of the schema. Three are worth knowing about because their names
 do not say what they do:
 
 - **0013** is data-only: it rewrites four presets' authentication style.
 - **0017** **wipes the sessions table**, because session identifiers became
   digests. Every operator is logged out by that upgrade.
+- **0023** **wipes the sessions table** as well, and for the same kind of
+  reason: a session now names its owner, and SQLite cannot add that NOT NULL
+  column to a populated table. It also deletes the retired shared-password
+  settings rows.
 
 Because migrations are forward-only, restoring and downgrading are the same
 operation: restore the data directory and the master key that was current when
