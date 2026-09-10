@@ -311,6 +311,25 @@ crash mid-refresh loses a refresh rather than the account.
 **Constant-time comparison hashes both sides first**, so the comparison's
 length-based early return cannot leak token length.
 
+**The first account to be created claims the console; there is no setup token
+and no password recovery.** *Do not re-litigate.*
+
+`mintSetupToken` argued the opposite, in a comment that survived until this
+change: a token from the startup log kept the claim to whoever could read the
+host rather than whoever could reach the port, and letting the first visitor
+claim it "would make an empty hash open the port rather than close it." That
+reasoning was correct. It was overridden deliberately, for convenience on a
+single-operator deployment, with the operator told what it costs.
+
+What replaces the token is weaker and is meant to be understood as weaker: a
+startup warning while a populated database has no account, and a line in
+deploy.md. Between a first start and the claim, anyone who can reach the admin
+port can become the administrator, and both ports bind every interface.
+
+`DARKROUTER_ADMIN_PASSWORD_HASH` was retired in the same change, so there is no
+recovery path at all. An administrator who forgets their password edits the
+database by hand or loses the console.
+
 ---
 
 ## Console and brand
