@@ -24,7 +24,6 @@ import type {
   SessionsResponse,
   UsageDimension,
   UsageResponse,
-  UserAccount,
   UsersResponse,
 } from "./api-types"
 
@@ -257,11 +256,10 @@ export function usePolicy(extra?: Extra<PolicyBlock>) {
   })
 }
 
-export function useUsers(extra?: Extra<UserAccount[]>) {
+export function useUsers(extra?: Extra<UsersResponse>) {
   return useQuery({
     queryKey: keys.users,
-    queryFn: async ({ signal }) =>
-      (await api.get<UsersResponse>("/api/users", { signal })).users,
+    queryFn: ({ signal }) => api.get<UsersResponse>("/api/users", { signal }),
     ...extra,
   })
 }

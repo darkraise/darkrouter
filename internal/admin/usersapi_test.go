@@ -125,6 +125,27 @@ func TestListingNeverCarriesAHash(t *testing.T) {
 	}
 }
 
+// TestListingNamesTheCaller proves the envelope's "me" is the caller's own
+// id, not just any id from the listing: the seeded second account sorts
+// before the admin's (created_at 0 versus "now" -- store.Users orders by
+// created_at, id), so a handler that answered with whichever row came first
+// would report the wrong one here.
+func TestListingNamesTheCaller(t *testing.T) {
+	s, adminID, adminCookie := newServerWithSession(t)
+	seedSecondAccountWithSession(t, s)
+
+	rec := getJSONAs(t, s, "/api/users", adminCookie)
+	var body struct {
+		Me string `json:"me"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode listing: %v: %s", err, rec.Body)
+	}
+	if body.Me != adminID {
+		t.Errorf("me = %q, want the caller's own id %q", body.Me, adminID)
+	}
+}
+
 // TestADuplicateUsernameIsRefused covers the fold as well as the refusal: the
 // seeded account is "bob", and "Bob" must not become a second row that login
 // then cannot tell apart.

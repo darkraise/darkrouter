@@ -249,6 +249,7 @@ function stubSettingsFetch(overrides: {
   reload?: { valid: boolean; error?: string; serving?: string }
   sync?: { triggered: boolean }
   sessions?: unknown[]
+  users?: { users: unknown[]; me: string }
   save?: { status?: number; body?: unknown }
   /** What GET /api/config answers before any save. */
   config?: () => ConfigResponse
@@ -288,6 +289,12 @@ function stubSettingsFetch(overrides: {
     }
     if (url === "/api/sessions" && method === "GET") {
       return new Response(JSON.stringify({ sessions: overrides.sessions ?? [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    if (url === "/api/users" && method === "GET") {
+      return new Response(JSON.stringify(overrides.users ?? { users: [], me: "" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -681,6 +688,29 @@ describe("the sessions list", () => {
     const rows = items.filter((li) => /since/.test(li.textContent ?? ""))
     expect(rows[0]).toHaveTextContent("this browser")
     expect(rows[1]).toHaveTextContent("Revoke")
+  })
+})
+
+describe("the accounts list", () => {
+  // "me" is "u2" here, not the founding admin "u1" and not "" -- either of
+  // those would also be wrong, but a hardcoded "" already fails loudly (no
+  // row ever matches), where a hardcoded "u1" would happen to pass if the
+  // fixture used the founding admin instead. Naming the second account is
+  // what makes a reverted-to-constant wiring visible.
+  it("marks the row the server names as the caller's, not always the first", async () => {
+    stubSettingsFetch({
+      users: {
+        users: [
+          { id: "u1", username: "alice", role: "admin", created_at: "2026-08-01T10:00:00Z" },
+          { id: "u2", username: "bob", role: "member", created_at: "2026-08-01T11:00:00Z" },
+        ],
+        me: "u2",
+      },
+    })
+    mount(<SettingsScreen />)
+    const bobRow = (await screen.findByText("bob")).closest("li")
+    expect(bobRow).toHaveTextContent(/this is you/i)
+    expect(screen.getAllByRole("button", { name: /remove/i })).toHaveLength(1)
   })
 })
 
