@@ -50,15 +50,19 @@ which a revoked token keeps working.
 
 Password login, bcrypt at cost 12, failing closed on an empty hash.
 
-A console with no password yet is claimed, not open. At startup the process
-mints a one-time setup token, keeps it in memory, and writes it to its log;
-`POST /api/auth/setup` takes that token and sets the first password. So the
-claim needs the ability to read the host's log, not merely a route to the
-port — which matters because the admin port binds every interface and the
-project ships no reverse proxy. The token is never persisted, never returned
-by an endpoint, and deliberately kept out of the startup warnings, which
-`/healthz` serves without a session. It is spent on first use, and setup
-refuses with 409 once any password exists. The write goes through an
+A console with no account yet is claimed, not open, on a trust-on-first-use
+model: the first account `POST /api/auth/setup` creates becomes the
+administrator, and there is no token gating that call. Whoever reaches the
+admin port first — between the process's first start and the moment someone
+claims it — becomes the administrator, which is **weaker than requiring host
+access**: the admin port binds every interface by default, the project ships
+no reverse proxy, and nothing but reachability is required during that
+window. Two mitigations narrow it without closing it: the process logs a
+warning at every start while a database that already holds providers has no
+account, and `/healthz` reports the console unclaimed without needing a
+session, so both an operator watching logs and a monitor probing the
+endpoint can see the exposure and close it by claiming the console. Setup
+refuses with 409 once any account exists, and the write goes through an
 insert-if-absent so two simultaneous claims cannot both believe they won.
 
 Setup issues no session. The console spends the password it just set on an

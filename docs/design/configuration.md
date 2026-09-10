@@ -9,10 +9,10 @@ Four steps, in order:
    database is open, or in order to be reachable at all:
    `DARKROUTER_PROXY_LISTEN` and `DARKROUTER_ADMIN_LISTEN` (defaults `:18080`
    and `:18081`), `DARKROUTER_PROXY_TOKEN`, `DARKROUTER_MASTER_KEY`,
-   `DARKROUTER_ADMIN_PASSWORD_HASH`, `DARKROUTER_LOG_LEVEL`,
-   `DARKROUTER_LOG_FORMAT`, and the database path (`-db`, or `DARKROUTER_DB`,
-   defaulting to `darkrouter.db` in the working directory). None of these is a
-   row in `settings`, and a change to one takes a restart.
+   `DARKROUTER_LOG_LEVEL`, `DARKROUTER_LOG_FORMAT`, and the database path
+   (`-db`, or `DARKROUTER_DB`, defaulting to `darkrouter.db` in the working
+   directory). None of these is a row in `settings`, and a change to one
+   takes a restart.
 3. **The database** — the `settings` table for every key in the table below,
    and the providers and aliases tables for those two blocks. This is the
    source of truth for everything else, and a key absent from `settings` is on
@@ -113,7 +113,6 @@ restart.
 | `DARKROUTER_ADMIN_LISTEN` | `:18081` | The admin and console listen address. |
 | `DARKROUTER_PROXY_TOKEN` | *empty* | Shared inbound secret. Never returned by any endpoint. |
 | `DARKROUTER_MASTER_KEY` | — | Encrypts every stored credential. The process refuses to start without one. |
-| `DARKROUTER_ADMIN_PASSWORD_HASH` | *empty* | A bcrypt hash used until a password is set in the console. After that the stored one wins, until this variable's value *changes* — a changed hash takes over on the next restart, which is how a lost password is recovered. |
 | `DARKROUTER_LOG_LEVEL` | `info` | The lowest level logged. |
 | `DARKROUTER_LOG_FORMAT` | text | `json` selects structured output. |
 | `DARKROUTER_DB` | `darkrouter.db` | The database path. `-db` overrides it. |
