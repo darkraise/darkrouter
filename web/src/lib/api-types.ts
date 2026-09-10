@@ -547,3 +547,12 @@ export type Session = {
 }
 
 export type SessionsResponse = { sessions: Session[] }
+
+export type UserAccount = {
+  id: string
+  username: string
+  role: string
+  created_at: string
+}
+
+export type UsersResponse = { users: UserAccount[] }

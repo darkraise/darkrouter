@@ -7,9 +7,10 @@ import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
 import { LoadError, LoadingRows } from "../shell/screen-state"
 import { usePurgeConversations } from "../playground/lib/conversations"
-import { keys, useConfig, useSessions } from "../../lib/queries"
+import { keys, useConfig, useSessions, useUsers } from "../../lib/queries"
 import { dateTime, zoneLabel } from "../../lib/format"
 import type { ConfigResponse, Session } from "../../lib/api-types"
+import { AccountsCard } from "./accounts-card"
 import { ChangePasswordDialog } from "./change-password-dialog"
 import { SettingField } from "./setting-field"
 import { settingGroups, type GroupId } from "./settings-catalog"
@@ -323,6 +324,7 @@ export function orderSessions(sessions: Session[]): Session[] {
 export function SettingsScreen() {
   const config = useConfig()
   const sessions = useSessions()
+  const users = useUsers()
   const queryClient = useQueryClient()
   const [passwordOpen, setPasswordOpen] = useState(false)
 
@@ -510,6 +512,23 @@ export function SettingsScreen() {
           ))}
         </ul>
       </Card>
+
+      {users.isError && (
+        <LoadError
+          what="The account list"
+          error={users.error}
+          onRetry={() => void users.refetch()}
+          className="mt-4"
+        />
+      )}
+      {users.isPending && !users.isError && <LoadingRows rows={2} className="mt-4 flex flex-col gap-2" />}
+      {users.data && (
+        // No endpoint yet reports the signed-in account's own id, so no row
+        // here can be marked as the caller's; every row offers Remove until
+        // one does. The last-administrator refusal is enforced by the store
+        // regardless, so this is a missing convenience, not a missing guard.
+        <AccountsCard users={users.data} me="" />
+      )}
     </>
   )
 }
