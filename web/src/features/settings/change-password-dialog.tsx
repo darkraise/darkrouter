@@ -123,7 +123,8 @@ export function ChangePasswordDialog({
 
         <div className="flex flex-col gap-3">
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            Every other signed-in browser is signed out when the password changes.
+            Your other signed-in browsers are signed out when the password changes. Other
+            accounts are not affected.
           </p>
 
           <div className="flex flex-col gap-1.5">

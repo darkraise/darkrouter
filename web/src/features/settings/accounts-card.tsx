@@ -184,8 +184,10 @@ function AddAccountDialog({
  * `me` marks the caller's own row so they are not offered a Remove button
  * for it. The server allows a non-last administrator to remove themselves
  * regardless -- this is a UI convenience against a misclick, not the safety
- * mechanism; the last-administrator refusal lives in the store and answers
- * with its own 409 however the request reaches it.
+ * mechanism; the last-administrator refusal lives in handleDeleteUser, which
+ * answers 409 however the request reaches that handler. Nothing below it
+ * refuses: store.DeleteUser removes the last administrator without complaint,
+ * so a second deletion path would need a guard of its own.
  */
 export function AccountsCard({ users, me }: { users: UserAccount[]; me: string }) {
   const [addOpen, setAddOpen] = useState(false)

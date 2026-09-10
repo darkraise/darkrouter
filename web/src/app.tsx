@@ -26,7 +26,7 @@ const queryClient = new QueryClient({
 
 type AuthStatus = {
   authenticated: boolean
-  /** Whether an admin password exists at all. */
+  /** Whether any account exists yet -- whether the console has been claimed. */
   configured: boolean
   csrf_token?: string
 }

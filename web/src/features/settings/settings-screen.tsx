@@ -467,8 +467,7 @@ export function SettingsScreen() {
           <div className="min-w-0 flex-1">
             <h2 className="font-medium">Password</h2>
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
-              The one password that opens this console. Changing it signs every other browser
-              out.
+              The password for your own account. Changing it signs your other browsers out.
             </p>
           </div>
           <Button size="sm" variant="outline" onClick={() => setPasswordOpen(true)}>
@@ -481,8 +480,9 @@ export function SettingsScreen() {
       <Card className="mt-4 p-4">
         <h2 className="mb-1 text-sm font-medium">Signed-in browsers</h2>
         <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
-          Every session that can reach this console. Revoking one signs it out at its next
-          request. Times in {zoneLabel()}.
+          Where your own account is signed in. Other accounts have sessions of their own,
+          which are not listed here. Revoking one signs it out at its next request.
+          Times in {zoneLabel()}.
         </p>
         {sessions.isError && (
           <LoadError

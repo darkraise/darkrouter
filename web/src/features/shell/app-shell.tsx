@@ -287,7 +287,7 @@ function AccountMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent className="dr-user-menu-content" align="end">
         <DropdownMenuLabel className="dr-user-menu-label">
-          <p className="dr-user-menu-name">Administrator</p>
+          <p className="dr-user-menu-name">Signed in</p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onChangePassword}>
