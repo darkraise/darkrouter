@@ -194,8 +194,8 @@ func (s *Server) routeTable() []route {
 		// decide whether to render the login screen.
 		{"GET", "/api/auth/status", routePublic, s.handleAuthStatus},
 		{"POST", "/api/auth/login", routePublic, s.handleLogin},
-		// Public because a console with no password has no session to offer.
-		// It refuses once one is set, and needs the token from the startup log.
+		// Public because an unclaimed console has no session to offer. It
+		// refuses once the console is claimed.
 		{"POST", "/api/auth/setup", routePublic, s.handleSetup},
 		{"POST", "/api/auth/logout", routeCSRF, s.handleLogout},
 

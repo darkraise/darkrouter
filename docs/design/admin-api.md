@@ -1,9 +1,10 @@
 # Admin API
 
-Fifty-six routes under `/api`, registered in one table in
-`internal/admin/admin.go` and walked by a guard test, so a route cannot be
-added without a guard. Three operational routes are registered separately, on
-the admin listener but outside the admin handler.
+57 routes under `/api` are registered in one table in
+`internal/admin/admin.go` — 60 when OAuth flow storage is configured, since
+three more join the same table — and walked by a guard test, so a route
+cannot be added without a guard. Three operational routes are registered
+separately, on the admin listener but outside the admin handler.
 
 ## Conventions
 
