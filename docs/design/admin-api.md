@@ -43,9 +43,13 @@ readiness the signal an orchestrator should route away from.
 |---|---|
 | `GET /api/auth/status` | public |
 | `POST /api/auth/login` | public |
+| `POST /api/auth/setup` | public |
 | `POST /api/auth/logout`, `POST /api/auth/password` | CSRF |
 | `GET /api/sessions` | session |
 | `DELETE /api/sessions/{id}` | CSRF |
+| `GET /api/users` | session — admin only |
+| `POST /api/users` | CSRF — admin only |
+| `DELETE /api/users/{id}` | CSRF — admin only |
 
 A password is at least 12 and at most 72 bytes — bcrypt's own limit.
 
@@ -53,6 +57,17 @@ A password is at least 12 and at most 72 bytes — bcrypt's own limit.
 characters of the SHA-256 digest of it. Revoking takes that prefix. A prefix
 shorter than eight is a 400, one matching several rows is a 409, and one
 matching none is a 404.
+
+`POST /api/auth/setup` claims an unclaimed console: the first account it
+creates becomes the administrator, and it refuses with 409 once any account
+exists. It is `public` because a console with no account has no session to
+offer, not because anyone may call it freely once one does.
+
+**"admin only" on the three `/api/users` routes is checked in the handler,
+not a fourth guard tier.** `session` and `CSRF` still gate them exactly as the
+table says; `requireAdmin` runs after that and answers 403 for a
+non-administrator. Only account management works this way — every other
+route stays reachable by every account.
 
 ## Providers and credentials
 

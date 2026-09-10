@@ -48,7 +48,10 @@ which a revoked token keeps working.
 
 ## The admin surface
 
-Password login, bcrypt at cost 12, failing closed on an empty hash.
+Username-and-password login, bcrypt at cost 12. A username that does not
+resolve is compared against a dummy hash rather than skipped, so a miss costs
+the same work as a hit; `VerifyPassword` itself still fails closed on an
+empty or malformed hash.
 
 A console with no account yet is claimed, not open, on a trust-on-first-use
 model: the first account `POST /api/auth/setup` creates becomes the

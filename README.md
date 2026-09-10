@@ -30,9 +30,9 @@ docker compose up --build
 That is the whole of it. There is no configuration file: every setting has a
 default, settings live in the `settings` table of the database, and providers
 are added from the console once it is up. A small bootstrap set — the listen
-addresses, the proxy token, the master key, the admin password hash, the log
-level and format, and the database path — comes from the environment instead,
-because the process needs it before the database is open.
+addresses, the proxy token, the master key, the log level and format, and the
+database path — comes from the environment instead, because the process needs
+it before the database is open.
 
 The master key encrypts every credential stored in `data/darkrouter.db`; the
 process refuses to start without one, and a database opened under a different

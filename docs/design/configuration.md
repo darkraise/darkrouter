@@ -129,9 +129,9 @@ Every key below is a row in `settings`, on its compiled default until
 something writes it.
 
 The converse does not hold: `settings` also carries rows that are not
-configuration — the keyring's salt and verifier, the CSRF secret, the admin
-password hash — which is why the loader reads only the keys the registry
-names rather than the whole table.
+configuration — the keyring's salt and verifier, the CSRF secret — which is
+why the loader reads only the keys the registry names rather than the whole
+table.
 
 Providers and aliases are not in this table. Each has its own tables — providers
 carry encrypted credentials, aliases are ordered chains — and `store.OverlayConfig`
