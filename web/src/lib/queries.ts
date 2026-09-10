@@ -24,6 +24,8 @@ import type {
   SessionsResponse,
   UsageDimension,
   UsageResponse,
+  UserAccount,
+  UsersResponse,
 } from "./api-types"
 
 /**
@@ -55,6 +57,7 @@ export const keys = {
   sessions: ["sessions"] as const,
   discovery: ["health", "discovery"] as const,
   policy: ["policy"] as const,
+  users: ["users"] as const,
   override: (provider: string, model: string) =>
     ["models", "override", provider, model] as const,
 } as const
@@ -250,6 +253,15 @@ export function usePolicy(extra?: Extra<PolicyBlock>) {
   return useQuery({
     queryKey: keys.policy,
     queryFn: ({ signal }) => api.get<PolicyBlock>("/api/policy", { signal }),
+    ...extra,
+  })
+}
+
+export function useUsers(extra?: Extra<UserAccount[]>) {
+  return useQuery({
+    queryKey: keys.users,
+    queryFn: async ({ signal }) =>
+      (await api.get<UsersResponse>("/api/users", { signal })).users,
     ...extra,
   })
 }
