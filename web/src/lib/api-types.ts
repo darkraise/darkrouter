@@ -555,4 +555,4 @@ export type UserAccount = {
   created_at: string
 }
 
-export type UsersResponse = { users: UserAccount[] }
+export type UsersResponse = { users: UserAccount[]; me: string }

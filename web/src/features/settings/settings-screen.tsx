@@ -522,13 +522,7 @@ export function SettingsScreen() {
         />
       )}
       {users.isPending && !users.isError && <LoadingRows rows={2} className="mt-4 flex flex-col gap-2" />}
-      {users.data && (
-        // No endpoint yet reports the signed-in account's own id, so no row
-        // here can be marked as the caller's; every row offers Remove until
-        // one does. The last-administrator refusal is enforced by the store
-        // regardless, so this is a missing convenience, not a missing guard.
-        <AccountsCard users={users.data} me="" />
-      )}
+      {users.data && <AccountsCard users={users.data.users} me={users.data.me} />}
     </>
   )
 }

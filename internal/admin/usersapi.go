@@ -49,7 +49,11 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: u.CreatedAt.Format(time.RFC3339),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+	// The console has no other way to learn which row is the caller's own:
+	// /api/auth/status is routePublic and cannot carry it, and the listing is
+	// the one admin-only response every client of this route already fetches.
+	// requireAdmin has already resolved the caller above, so this is free.
+	writeJSON(w, http.StatusOK, map[string]any{"users": out, "me": userFrom(r.Context())})
 }
 
 // handleCreateUser adds an account, validating exactly as the founding claim
