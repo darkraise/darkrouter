@@ -8,12 +8,11 @@
  * .control, .control-primary, .status-badge, .field, .field-input,
  * .field-input-inert, .legend, .legend-caps, .section-title, .spec-note,
  * .prose, .mono, .micro, .region, .pin, .pin-note (darkrouter-ui.css).
- * The sign-in field is a .field-input on --surface-2 cut into the card's
- * --surface, which is the same recessed step every data region in the
- * product gets and the one that inverts between themes; the unconfigured
- * state's field is .field-input-inert, the dashed "there is nothing to
- * read here" variant, because a password box on a gateway with no hash is
- * not read-only, it is inoperative.
+ * Every field on this screen is a .field-input on --surface-2 cut into
+ * the card's --surface, the same recessed step every data region in the
+ * product gets and the one that inverts between themes. Elsewhere in the
+ * set, .field-input-inert is the dashed "there is nothing to read here"
+ * variant for a field that is inoperative rather than merely read-only.
  *
  * Everything below is prefixed login- so the two screens written in the
  * same wave and concatenated into the same stylesheet cannot collide with
@@ -120,12 +119,6 @@
   justify-content: center;
 }
 
-/* Inoperative, not low-emphasis: .control-ghost dims at rest and comes up
-   to full on hover, which is the wrong promise for a button that cannot
-   be pressed, so the hover state is pinned to the rest state. */
-.login-submit-off,
-.login-submit-off:hover { opacity: 0.45; }
-
 /* The rejected field carries the outcome on the control as well as in the
    sentence, so the eye lands on what to retype without reading first. */
 .login-input-bad { border-color: var(--state-failed); }
@@ -155,69 +148,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-/* --- The remedy -------------------------------------------------------- */
-
-.login-remedy {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.login-step {
-  display: flex;
-  gap: 8px;
-}
-.login-step-n {
-  flex: 0 0 auto;
-  width: 14px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  font-variant-numeric: tabular-nums;
-  color: var(--legend);
-}
-.login-step-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* A command or an environment value exactly as it is typed: wire text, so
-   mono, and a --surface-2 because it is data the operator copies rather than
-   chrome the console draws. nowrap plus an ellipsis rather than a wrap:
-   a hash broken across two lines invites a copy that is missing a
-   character, which is the same failure this whole state exists to
-   explain. */
-.login-cmd {
-  display: block;
-  padding: 4px 8px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The doubled dollar signs, marked so the difference between the two
-   spellings is visible without counting characters. --accent-ink, not
-   --trace: this is accent-coloured TEXT, and --trace only reaches 5.17:1
-   in light mode. */
-.login-esc {
-  color: var(--accent-ink);
-  font-weight: 500;
-}
-
-.login-gotcha {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- Identity mark board ----------------------------------------------- */

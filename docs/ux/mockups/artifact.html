@@ -6198,12 +6198,11 @@ body.theme-light .preset-scrim,
  * .control, .control-primary, .status-badge, .field, .field-input,
  * .field-input-inert, .legend, .legend-caps, .section-title, .spec-note,
  * .prose, .mono, .micro, .region, .pin, .pin-note (darkrouter-ui.css).
- * The sign-in field is a .field-input on --surface-2 cut into the card's
- * --surface, which is the same recessed step every data region in the
- * product gets and the one that inverts between themes; the unconfigured
- * state's field is .field-input-inert, the dashed "there is nothing to
- * read here" variant, because a password box on a gateway with no hash is
- * not read-only, it is inoperative.
+ * Every field on this screen is a .field-input on --surface-2 cut into
+ * the card's --surface, the same recessed step every data region in the
+ * product gets and the one that inverts between themes. Elsewhere in the
+ * set, .field-input-inert is the dashed "there is nothing to read here"
+ * variant for a field that is inoperative rather than merely read-only.
  *
  * Everything below is prefixed login- so the two screens written in the
  * same wave and concatenated into the same stylesheet cannot collide with
@@ -6310,12 +6309,6 @@ body.theme-light .preset-scrim,
   justify-content: center;
 }
 
-/* Inoperative, not low-emphasis: .control-ghost dims at rest and comes up
-   to full on hover, which is the wrong promise for a button that cannot
-   be pressed, so the hover state is pinned to the rest state. */
-.login-submit-off,
-.login-submit-off:hover { opacity: 0.45; }
-
 /* The rejected field carries the outcome on the control as well as in the
    sentence, so the eye lands on what to retype without reading first. */
 .login-input-bad { border-color: var(--state-failed); }
@@ -6345,69 +6338,6 @@ body.theme-light .preset-scrim,
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-/* --- The remedy -------------------------------------------------------- */
-
-.login-remedy {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.login-step {
-  display: flex;
-  gap: 8px;
-}
-.login-step-n {
-  flex: 0 0 auto;
-  width: 14px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  font-variant-numeric: tabular-nums;
-  color: var(--legend);
-}
-.login-step-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* A command or an environment value exactly as it is typed: wire text, so
-   mono, and a --surface-2 because it is data the operator copies rather than
-   chrome the console draws. nowrap plus an ellipsis rather than a wrap:
-   a hash broken across two lines invites a copy that is missing a
-   character, which is the same failure this whole state exists to
-   explain. */
-.login-cmd {
-  display: block;
-  padding: 4px 8px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The doubled dollar signs, marked so the difference between the two
-   spellings is visible without counting characters. --accent-ink, not
-   --trace: this is accent-coloured TEXT, and --trace only reaches 5.17:1
-   in light mode. */
-.login-esc {
-  color: var(--accent-ink);
-  font-weight: 500;
-}
-
-.login-gotcha {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
 }
 
 /* --- Identity mark board ----------------------------------------------- */
@@ -13540,7 +13470,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
         <div class="region">
           <p class="section-title">Account</p>
-          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/auth/password, GET/DELETE /api/sessions. Both new. Sessions have a sliding 30-day TTL and there is no way to list or revoke one today.</span></p>
+          <p><b class="pin" data-pin="4">4</b><span class="pin-note">4 &middot; POST /api/auth/password, GET/DELETE /api/sessions. Both new. Sessions have a sliding 30-day TTL; GET lists the active ones and DELETE revokes one by id.</span></p>
           <div class="panel set-panel">
             <div class="set-head">
               <span class="mono set-head-id">admin</span>
@@ -13799,7 +13729,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <button class="control control-primary login-submit" type="button">Sign in</button>
 
-              <p class="spec-note">Named accounts now, not one shared password &mdash; every sign-in carries a username. There is still no reset link and no second factor; the only remedy for a forgotten password is in deploy.md, and it clears every account, not just one.</p>
+              <p class="spec-note">Named accounts now, not one shared password &mdash; every sign-in carries a username. There is still no reset link and no second factor; deploy.md documents the remedy for a forgotten password &mdash; clear every account and reopen this screen, or hand-write a new password_hash for just the one account if a tool to produce the hash is on hand.</p>
 
             </div>
           </div>
@@ -13852,7 +13782,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <button class="control control-primary login-submit" type="button">Sign in</button>
 
-              <p class="spec-note">A token bucket per address &mdash; five attempts a minute, burst of ten &mdash; plus a global cap of four bcrypt verifications in flight at once, so a flood of guesses costs CPU rather than nothing. Past the bucket, the answer is 429 with a Retry-After, not a third wording.</p>
+              <p class="spec-note">A token bucket per address &mdash; five attempts a minute, burst of ten &mdash; plus a global cap of four bcrypt verifications in flight at once, so a flood of guesses costs CPU rather than nothing. Past the bucket, the answer is 429 "too many login attempts; try again later" with a Retry-After &mdash; a third wording, but one about the rate limit, never about which credential was wrong.</p>
 
             </div>
           </div>
@@ -13863,7 +13793,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
           <p class="login-state-head">
             <b class="pin" data-pin="3">3</b>
             <span class="legend-caps">unclaimed</span>
-            <span class="pin-note">3 &middot; Unclaimed &mdash; the state that replaces last version's closed sign-in. GET /api/auth/status reports configured:false while the database holds no account, and the SPA renders this claim form in place of a login. POST /api/setup {"username","password","confirm"} takes the same same-origin check and the same rate limit as sign-in, requires a password of at least 12 characters and a username of at most 64, and answers 409 "the console has already been set up" if another claim already won &mdash; the insert that decides that is atomic, so two claims racing cannot both succeed.</span>
+            <span class="pin-note">3 &middot; Unclaimed &mdash; the state that replaces last version's closed sign-in. GET /api/auth/status reports configured:false while the database holds no account, and the SPA renders this claim form in place of a login. POST /api/auth/setup {"username","password","confirm"} takes the same same-origin check and spends from the same per-address rate bucket as sign-in, but never claims the global four-slot bcrypt cap login does; it requires a password of at least 12 characters and a username of at most 64, and answers 409 "the console has already been set up" if another claim already won &mdash; the insert that decides that is atomic, so two claims racing cannot both succeed.</span>
           </p>
           <div class="login-viewport">
             <div class="panel login-card">
@@ -13907,7 +13837,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
 
               <button class="control control-primary login-submit" type="button">Claim console</button>
 
-              <p class="spec-note">Claiming mints no session by itself: the screen immediately replays the same username and password through sign-in, so the account is exercised as a real login before anyone relies on it working. There is no recovery after this &mdash; no environment variable and no subcommand resets a forgotten password. The only remedy is stopping the container and clearing every account from the database, which reopens this exact screen for whoever claims it next (deploy.md).</p>
+              <p class="spec-note">Claiming mints no session by itself: the screen immediately replays the same username and password through sign-in, so the account is exercised as a real login before anyone relies on it working. There is no recovery after this &mdash; no environment variable and no subcommand resets a forgotten password. The guaranteed remedy in deploy.md is stopping the container and clearing every account, which reopens this exact screen for whoever claims it next; hand-writing a new password_hash for just the locked-out account skips that reopening, but needs a tool like htpasswd that is not on every host.</p>
 
               <p class="spec-note">This form renders for any request while the database holds no account &mdash; there is no loopback restriction here. That is the whole exposure the reversal in decisions.md accepts: both ports bind every interface, so until someone claims it, whoever reaches the port first is who claims it.</p>
 
