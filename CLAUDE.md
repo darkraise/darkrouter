@@ -30,15 +30,18 @@ re-litigated. Everything under `web/` is bound by the rule without exception.
 
 ## Verifying a change in the running console
 
-The admin console at **http://localhost:8091** needs a password, so a change
-that is only testable by looking at it cannot be checked from tests alone.
+The admin console at **http://localhost:8091** needs a username and password,
+so a change that is only testable by looking at it cannot be checked from
+tests alone.
 
 The username and password for this machine's UAT instance are in
 **`.uat-credentials`** at the repository root. That file is gitignored, and it
 stays that way: the account was created by claiming the console on first run,
-and there is no password recovery, so the plaintext exists nowhere else and
-must not be copied into here, a commit message, or any other tracked file.
-Read the file for the credentials; do not copy them anywhere tracked.
+and only a bcrypt hash of the password lives in the database, so the
+plaintext exists nowhere else and must not be copied into here, a commit
+message, or any other tracked file. There is no password recovery, so losing
+this file loses the account. Read it for the credentials; do not copy them
+anywhere tracked.
 
 Log in before claiming a UI change looks right. Test suites cover behaviour —
 what a component renders, what a request carries — and cannot see layout,

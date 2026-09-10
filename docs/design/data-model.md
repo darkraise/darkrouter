@@ -44,7 +44,7 @@ itself.
 | `aliases` | Ordered alias chains. |
 | `proxy_tokens` | Per-client proxy tokens, stored as SHA-256 digests. |
 | `sessions` | Admin sessions, stored as digests. |
-| `settings` | Every configuration key the registry names, on its compiled default until something writes it; plus a few non-configuration rows — the keyring salt and iteration count, the key verifier, the CSRF secret, the admin password hash and the environment fingerprint it was set from. |
+| `settings` | Every configuration key the registry names, on its compiled default until something writes it; plus a few non-configuration rows — the keyring salt and iteration count, the key verifier, the CSRF secret. |
 | `playground_presets` | Saved console playground configurations. |
 | `playground_conversations`, `playground_messages` | Saved playground conversations. |
 
