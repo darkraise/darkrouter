@@ -119,6 +119,10 @@ func dbPathOf(db *store.DB) string {
 
 func TestAnUnclaimedPopulatedDatabaseWarns(t *testing.T) {
 	var buf bytes.Buffer
+	// Restored, or every later test in the package logs into this buffer and
+	// loses its output at the moment it fails.
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 
 	db := openPopulatedTestDB(t) // has providers, no users
@@ -131,6 +135,10 @@ func TestAnUnclaimedPopulatedDatabaseWarns(t *testing.T) {
 
 func TestAFreshDatabaseDoesNotWarn(t *testing.T) {
 	var buf bytes.Buffer
+	// Restored, or every later test in the package logs into this buffer and
+	// loses its output at the moment it fails.
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 
 	db := openEmptyTestDB(t) // nothing in it at all
@@ -138,6 +146,28 @@ func TestAFreshDatabaseDoesNotWarn(t *testing.T) {
 
 	if strings.Contains(buf.String(), "no account has claimed this console") {
 		t.Error("a brand-new install was warned about; only an upgrade should be")
+	}
+}
+
+// TestAFaultedDatabaseWarnsRatherThanGoingQuiet holds the error path open. A
+// count that fails is not a claimed console, and returning silently on it drops
+// the one warning protecting an upgrade at the moment the database is least
+// trustworthy. Only the users count is reachable this way; the providers count
+// errors for the same reasons and shares the message.
+func TestAFaultedDatabaseWarnsRatherThanGoingQuiet(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	db := openPopulatedTestDB(t)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	warnUnclaimed(t.Context(), db)
+
+	if !strings.Contains(buf.String(), "cannot tell whether this console has been claimed") {
+		t.Errorf("a faulted database logged nothing: %q", buf.String())
 	}
 }
 

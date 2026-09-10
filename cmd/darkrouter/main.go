@@ -142,12 +142,23 @@ func startupWarnings(dbPath, legacyConfig string) []string {
 // warning exists for the operator reading container logs at boot, not to add
 // a second copy of a disclosure that endpoint already makes.
 func warnUnclaimed(ctx context.Context, db *store.DB) {
+	// A failed count is not a claimed console. Returning silently on the error
+	// would drop the one warning protecting an upgrade, and drop it precisely
+	// when the database is in trouble.
 	users, err := db.UserCount(ctx)
-	if err != nil || users > 0 {
+	if err != nil {
+		slog.Warn("cannot tell whether this console has been claimed", "error", err)
+		return
+	}
+	if users > 0 {
 		return
 	}
 	providers, err := db.ProviderCount(ctx)
-	if err != nil || providers == 0 {
+	if err != nil {
+		slog.Warn("cannot tell whether this console has been claimed", "error", err)
+		return
+	}
+	if providers == 0 {
 		return
 	}
 	slog.Warn("no account has claimed this console; the first visitor to reach " +
