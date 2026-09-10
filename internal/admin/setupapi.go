@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // maxUsernameChars bounds what a claim may store. Long enough for any name
@@ -77,7 +78,30 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the two passwords do not match")
 		return
 	}
+	// Cheap refusal before the expensive one. A console claimed months ago is
+	// the steady state of any real deployment, and every claim arriving at it
+	// would otherwise pay for a cost-12 hash before ClaimFirstUser could say
+	// no. This is an optimisation and never the guard: the INSERT below is
+	// still the only thing that decides who won, because two claims racing
+	// past this count must not both be told they did.
+	if n, err := s.deps.DB.UserCount(r.Context()); err != nil {
+		internalError(w, r, err)
+		return
+	} else if n > 0 {
+		writeError(w, http.StatusConflict, "the console has already been set up")
+		return
+	}
+	// The same global ceiling handleLogin observes, and for the same reason:
+	// the per-address bucket empties long after a flood spread across many
+	// addresses has spent every core on bcrypt. This endpoint needs it more,
+	// not less -- it is the one an unauthenticated caller can reach.
+	release, ok := s.logins.acquire()
+	if !ok {
+		writeRateLimited(w, time.Second)
+		return
+	}
 	hash, err := HashPassword(body.Password)
+	release() // held over the hash only; the insert below is not what it caps
 	if err != nil {
 		internalError(w, r, err)
 		return
