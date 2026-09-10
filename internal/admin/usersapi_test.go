@@ -124,3 +124,37 @@ func TestListingNeverCarriesAHash(t *testing.T) {
 		}
 	}
 }
+
+// TestADuplicateUsernameIsRefused covers the fold as well as the refusal: the
+// seeded account is "bob", and "Bob" must not become a second row that login
+// then cannot tell apart.
+func TestADuplicateUsernameIsRefused(t *testing.T) {
+	s, _, cookie := newServerWithSession(t)
+	seedSecondAccountWithSession(t, s)
+	rec := postJSONAs(t, s, "/api/users",
+		`{"username":"Bob","password":"correct-horse-battery","role":"member"}`, cookie)
+	if rec.Code != 409 {
+		t.Fatalf("code = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 2 {
+		t.Errorf("users = %d, want 2: a duplicate username was created", n)
+	}
+}
+
+// TestCreateRefusesAShortPassword covers the create side of the shared
+// validator. Without it, only handleSetup's tests hold validateCredentials in
+// place, and the account-management path could stop calling it unnoticed.
+func TestCreateRefusesAShortPassword(t *testing.T) {
+	s, _, cookie := newServerWithSession(t)
+	rec := postJSONAs(t, s, "/api/users",
+		`{"username":"bob","password":"short","role":"member"}`, cookie)
+	if rec.Code != 400 {
+		t.Fatalf("code = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if want := "the password must be at least 12 characters"; !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("body = %s, want the shared message %q", rec.Body, want)
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 1 {
+		t.Error("an account was created with a short password")
+	}
+}

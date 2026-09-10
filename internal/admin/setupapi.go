@@ -11,6 +11,29 @@ import (
 // put arbitrary data.
 const maxUsernameChars = 64
 
+// validateCredentials is the shared floor for every path that creates an
+// account: the founding claim and the account-management endpoint. One function
+// rather than the same three checks written twice, because the two paths
+// agreeing about what a usable username or password is has to be structural --
+// a copy drifts the first time one side is edited.
+//
+// It returns the trimmed username, since the display name is stored as given
+// and the caller is the only thing that trims it. The confirmation check stays
+// at handleSetup's call site: only the claim has a second password field.
+func validateCredentials(username, password string) (string, string, bool) {
+	username = strings.TrimSpace(username)
+	if username == "" || len([]rune(username)) > maxUsernameChars {
+		return "", "a username is required", false
+	}
+	if len(password) < minPasswordChars {
+		return "", "the password must be at least 12 characters", false
+	}
+	if len(password) > maxPasswordBytes {
+		return "", "the password must be at most 72 bytes", false
+	}
+	return username, "", true
+}
+
 // handleSetup claims an unclaimed console: the first account created becomes
 // admin.
 //
@@ -42,17 +65,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, 4<<10, &body) {
 		return
 	}
-	username := strings.TrimSpace(body.Username)
-	if username == "" || len([]rune(username)) > maxUsernameChars {
-		writeError(w, http.StatusBadRequest, "a username is required")
-		return
-	}
-	if len(body.Password) < minPasswordChars {
-		writeError(w, http.StatusBadRequest, "the password must be at least 12 characters")
-		return
-	}
-	if len(body.Password) > maxPasswordBytes {
-		writeError(w, http.StatusBadRequest, "the password must be at most 72 bytes")
+	username, msg, ok := validateCredentials(body.Username, body.Password)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	// Checked on the server, not only in the screen: with no recovery path a
