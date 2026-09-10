@@ -321,6 +321,13 @@ export function orderSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => Number(b.current) - Number(a.current))
 }
 
+/** GET /api/users answers 403 for a caller who is not an administrator --
+ *  every account can still use every other part of this screen, so that is
+ *  not a load failure and must not read as one. */
+export function accountsForbidden(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403
+}
+
 export function SettingsScreen() {
   const config = useConfig()
   const sessions = useSessions()
@@ -513,7 +520,7 @@ export function SettingsScreen() {
         </ul>
       </Card>
 
-      {users.isError && (
+      {users.isError && !accountsForbidden(users.error) && (
         <LoadError
           what="The account list"
           error={users.error}
@@ -521,7 +528,19 @@ export function SettingsScreen() {
           className="mt-4"
         />
       )}
-      {users.isPending && !users.isError && <LoadingRows rows={2} className="mt-4 flex flex-col gap-2" />}
+      {users.isError && accountsForbidden(users.error) && (
+        // Not a load failure: every account reaches every other part of this
+        // screen, and a member simply has no accounts to manage. A destructive
+        // banner here would contradict the sentence the accounts card itself
+        // uses to explain that.
+        <Card className="mt-4 p-4">
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            Every account can sign in and use every screen. Managing accounts is limited to
+            administrators.
+          </p>
+        </Card>
+      )}
+      {users.isPending && <LoadingRows rows={2} className="mt-4 flex flex-col gap-2" />}
       {users.data && <AccountsCard users={users.data.users} me={users.data.me} />}
     </>
   )
