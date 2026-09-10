@@ -13752,13 +13752,13 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
   <p class="legend">
     The sign-in screen in the three states it actually has. It carries no
     rail and no top bar, because neither exists before a session does, so
-    the card sits alone on the chassis colour. The third state is the one
-    the product gets wrong today: an unset
-    <span class="mono">DARKROUTER_ADMIN_PASSWORD_HASH</span> refuses every
-    password and explains nothing, and the only trace is a startup warning on
-    <span class="mono">/healthz</span> that an operator staring at a login box
-    will never read. Press <kbd>A</kbd> to reveal pins, <kbd>T</kbd> for light
-    mode.
+    the card sits alone on the chassis colour. The third state used to be a
+    login the product had locked itself out of; it is not a login at all
+    now. An unclaimed console &mdash; no account yet in the database &mdash;
+    renders a claim form instead of closing sign-in, and the first username
+    and password it takes become the administrator, with no setup token and
+    no password recovery behind them. Press <kbd>A</kbd> to reveal pins,
+    <kbd>T</kbd> for light mode.
   </p>
 
   <div class="login-board">
@@ -13773,7 +13773,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
           <p class="login-state-head">
             <b class="pin" data-pin="1">1</b>
             <span class="legend-caps">resting</span>
-            <span class="pin-note">1 &middot; Resting &mdash; GET /api/auth/status decides whether this screen renders at all. Sign in is POST /api/auth/login {"password"}, behind a same-origin check that answers 403 "cross-site request refused" before the password is read. Success rotates the session id, then sets darkrouter_session &mdash; HttpOnly, SameSite=Lax, Secure only under TLS, 30-day sliding expiry.</span>
+            <span class="pin-note">1 &middot; Resting &mdash; GET /api/auth/status decides what this screen shows: nothing if authenticated is already true, this login if configured is true, the claim form in state 3 otherwise. Sign in is POST /api/auth/login {"username","password"}, behind a same-origin check that answers 403 "cross-site request refused" before either is read. Success rotates the session id, then sets darkrouter_session &mdash; HttpOnly, SameSite=Lax, Secure only under TLS, 30-day sliding expiry.</span>
           </p>
           <div class="login-viewport">
             <div class="panel login-card">
@@ -13796,13 +13796,18 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
               </div>
 
               <label class="field">
-                <span class="legend-caps">admin password</span>
+                <span class="legend-caps">username</span>
+                <input class="field-input" type="text" autocomplete="username">
+              </label>
+
+              <label class="field">
+                <span class="legend-caps">password</span>
                 <input class="field-input" type="password" autocomplete="current-password">
               </label>
 
               <button class="control control-primary login-submit" type="button">Sign in</button>
 
-              <p class="spec-note">One operator, one password. There is no account list, no reset link and no second factor &mdash; the only credential this console has is the hash in the environment.</p>
+              <p class="spec-note">Named accounts now, not one shared password &mdash; every sign-in carries a username. There is still no reset link and no second factor; the only remedy for a forgotten password is in deploy.md, and it clears every account, not just one.</p>
 
             </div>
           </div>
@@ -13813,7 +13818,7 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
           <p class="login-state-head">
             <b class="pin" data-pin="2">2</b>
             <span class="legend-caps">rejected</span>
-            <span class="pin-note">2 &middot; Rejected &mdash; 401 {"error":"invalid password"}. One string for a wrong password AND for an unconfigured hash. VerifyPassword fails closed on an empty or malformed hash, so bcrypt (cost 12) is never even reached in the second case and the two answers are indistinguishable from outside.</span>
+            <span class="pin-note">2 &middot; Rejected &mdash; 401 {"error":"invalid username or password"}. One string covers a wrong username, a wrong password AND an unclaimed console: a miss on the username still runs VerifyPassword against a dummy hash, so which of the three happened is not readable from the wording or from the time it took.</span>
           </p>
           <div class="login-viewport">
             <div class="panel login-card">
@@ -13838,30 +13843,35 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
               <div class="login-alert" data-tone="rejected">
                 <p class="login-alert-line">
                   <span class="chip status-badge" data-status="error">401</span>
-                  <span class="prose">Sign-in failed. Check the password and try again.</span>
+                  <span class="prose">Sign-in failed. Check the username and password and try again.</span>
                 </p>
-                <p class="spec-note">The same sentence answers a wrong password and a gateway with no hash configured at all. Which of the two it was is deliberately absent: an operator who read that no password is set would have learned the port is open, and so would anyone else who reached this box.</p>
+                <p class="spec-note">The same sentence answers a wrong username, a wrong password and a console nobody has claimed yet. Which of the three it was is deliberately absent: telling them apart would leak whether an account even exists to someone who has not proven they hold one.</p>
               </div>
 
               <label class="field">
-                <span class="legend-caps">admin password</span>
+                <span class="legend-caps">username</span>
+                <input class="field-input login-input-bad" type="text" value="flint" autocomplete="username">
+              </label>
+
+              <label class="field">
+                <span class="legend-caps">password</span>
                 <input class="field-input login-input-bad" type="password" value="trombone-marmalade" autocomplete="current-password">
               </label>
 
               <button class="control control-primary login-submit" type="button">Sign in</button>
 
-              <p class="spec-note">No lockout and no attempt counter today. The cost of a guess is one bcrypt verification at cost 12, which is the only rate limit there is.</p>
+              <p class="spec-note">A token bucket per address &mdash; five attempts a minute, burst of ten &mdash; plus a global cap of four bcrypt verifications in flight at once, so a flood of guesses costs CPU rather than nothing. Past the bucket, the answer is 429 with a Retry-After, not a third wording.</p>
 
             </div>
           </div>
         </div>
 
-        <!-- ── 3. No password configured ─────────────────────────────── -->
+        <!-- ── 3. Unclaimed ──────────────────────────────────────────── -->
         <div class="login-stage">
           <p class="login-state-head">
             <b class="pin" data-pin="3">3</b>
-            <span class="legend-caps">no password configured</span>
-            <span class="pin-note">3 &middot; Unconfigured &mdash; NEW, and the one state the product fails at. Today the unset variable only appends a line to the startup warnings /healthz reports, admin.New is handed an empty PasswordHash, and the login box answers 401 forever with no way to tell why. This banner needs GET /api/auth/status to report configured:false, and the server serves it only to a request arriving on the loopback interface, so the 401 in state 2 stays the only answer a remote browser ever gets.</span>
+            <span class="legend-caps">unclaimed</span>
+            <span class="pin-note">3 &middot; Unclaimed &mdash; the state that replaces last version's closed sign-in. GET /api/auth/status reports configured:false while the database holds no account, and the SPA renders this claim form in place of a login. POST /api/setup {"username","password","confirm"} takes the same same-origin check and the same rate limit as sign-in, requires a password of at least 12 characters and a username of at most 64, and answers 409 "the console has already been set up" if another claim already won &mdash; the insert that decides that is atomic, so two claims racing cannot both succeed.</span>
           </p>
           <div class="login-viewport">
             <div class="panel login-card">
@@ -13884,63 +13894,30 @@ X-Darkrouter-Request: 01M0W4WBNR5N8XW2VR6MBD3HYA</pre></div>
               </div>
 
               <div class="login-alert" data-tone="unconfigured">
-                <p class="legend-caps">sign-in is closed</p>
-                <p class="prose">No admin password hash is configured on this gateway, so every password is refused &mdash; including the right one. The proxy keeps serving; only the dashboard is shut. Three steps on the machine running it:</p>
-
-                <div class="login-remedy">
-
-                  <div class="login-step">
-                    <span class="login-step-n">1</span>
-                    <div class="login-step-body">
-                      <p class="prose">Generate a hash with the binary you already have. bcrypt, cost 12. With no <span class="mono">-password</span> it reads from stdin, so the password stays out of shell history.</p>
-                      <code class="well login-cmd">darkrouter hash-password</code>
-                    </div>
-                  </div>
-
-                  <div class="login-step">
-                    <span class="login-step-n">2</span>
-                    <div class="login-step-body">
-                      <p class="prose">Put the printed value in the environment.</p>
-                      <div class="field">
-                        <span class="field-key">DARKROUTER_ADMIN_PASSWORD_HASH</span>
-                        <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="login-step">
-                    <span class="login-step-n">3</span>
-                    <div class="login-step-body">
-                      <p class="prose">Restart. The variable is read once at startup; a config reload does not pick it up.</p>
-                      <code class="well login-cmd">docker compose restart darkrouter</code>
-                    </div>
-                  </div>
-
-                </div>
-
-                <div class="login-gotcha">
-                  <p class="legend-caps">if the value goes through compose</p>
-                  <p class="prose">A bcrypt hash always contains <span class="mono login-esc">$</span>, and docker compose reads each one as the start of a variable while it loads <span class="mono">.env</span>. Double every one of them, or the value silently arrives truncated and the correct password still fails with the message in the middle column.</p>
-                  <div class="field">
-                    <span class="legend-caps">as hash-password prints it</span>
-                    <code class="well login-cmd">$2a$12$K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
-                  </div>
-                  <div class="field">
-                    <span class="legend-caps">as compose must receive it</span>
-                    <code class="well login-cmd"><span class="login-esc">$$</span>2a<span class="login-esc">$$</span>12<span class="login-esc">$$</span>K7dRz9mQv1uYxJ4pC2sHwO&hellip;Bn6TcSk1e</code>
-                  </div>
-                </div>
-
+                <p class="legend-caps">no account yet</p>
+                <p class="prose">Nobody has claimed this console. Pick a username and a password below and this becomes the administrator account &mdash; there is no setup token to prove who is allowed to claim it, so claim it now if this is the real deployment.</p>
               </div>
 
-              <div class="field">
-                <span class="legend-caps">admin password</span>
-                <input class="field-input field-input-inert" type="password" placeholder="nothing to sign in against" disabled>
-              </div>
+              <label class="field">
+                <span class="legend-caps">username</span>
+                <input class="field-input" type="text" autocomplete="username">
+              </label>
 
-              <button class="control login-submit login-submit-off" type="button" disabled>Sign in</button>
+              <label class="field">
+                <span class="legend-caps">password</span>
+                <input class="field-input" type="password" autocomplete="new-password">
+              </label>
 
-              <p class="spec-note">The form stays on screen rather than being replaced, so the fix and the thing it fixes are in one frame. Shown only to a request from the loopback interface; a browser reaching this gateway across the LAN gets state 2 unchanged.</p>
+              <label class="field">
+                <span class="legend-caps">confirm password</span>
+                <input class="field-input" type="password" autocomplete="new-password">
+              </label>
+
+              <button class="control control-primary login-submit" type="button">Claim console</button>
+
+              <p class="spec-note">Claiming mints no session by itself: the screen immediately replays the same username and password through sign-in, so the account is exercised as a real login before anyone relies on it working. There is no recovery after this &mdash; no environment variable and no subcommand resets a forgotten password. The only remedy is stopping the container and clearing every account from the database, which reopens this exact screen for whoever claims it next (deploy.md).</p>
+
+              <p class="spec-note">This form renders for any request while the database holds no account &mdash; there is no loopback restriction here. That is the whole exposure the reversal in decisions.md accepts: both ports bind every interface, so until someone claims it, whoever reaches the port first is who claims it.</p>
 
             </div>
           </div>
