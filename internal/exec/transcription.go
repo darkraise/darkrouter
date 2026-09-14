@@ -107,6 +107,9 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 	// enforces this by consulting the writer, and the byte count is what the
 	// trace has instead of an in-stream error the format cannot carry.
 	ac.served(ac.Warns)
+	if cerr != nil {
+		return ac.failedAfterCommit(cerr)
+	}
 	return adapter.OutcomeSuccess, nil
 }
 
@@ -144,6 +147,11 @@ func applyTranscriptUsage(ac *AttemptCtx, raw []byte) {
 // an SSE event or an audio frame goes out without waiting for its neighbours.
 const copyChunkBytes = 32 << 10
 
+// errClientWrite marks a copy that failed writing to the client rather than
+// reading from the provider, which is the client's failure, not the
+// provider's.
+var errClientWrite = errors.New("write to client failed")
+
 // copyFlushing copies src to dst, flushing after every chunk.
 //
 // io.Copy alone would let the ResponseWriter buffer, which turns an SSE
@@ -159,7 +167,7 @@ func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
 			w, werr := dst.Write(buf[:n])
 			total += int64(w)
 			if werr != nil {
-				return total, werr
+				return total, fmt.Errorf("%w: %w", errClientWrite, werr)
 			}
 			dst.Flush()
 		}

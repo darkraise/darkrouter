@@ -279,6 +279,19 @@ func (b *Breaker) Record(k Key, s Signal) {
 	}
 }
 
+// ReleaseProbe gives back a half-open claim on k and on its credential entry
+// without recording an outcome. A stream that commits calls it: the provider
+// has started answering, so the next caller may probe, but whether the answer
+// completes is known only when the stream ends, and that is when its one
+// outcome is recorded. Holding the claim until then would shut the entry for
+// the whole length of a long response.
+func (b *Breaker) ReleaseProbe(k Key) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.releaseProbeLocked(k)
+	b.releaseProbeLocked(Key{ProviderID: k.ProviderID, KeyID: k.KeyID})
+}
+
 // releaseProbeLocked gives back a half-open claim without changing anything
 // else, so the next caller after expiry becomes the probe instead.
 func (b *Breaker) releaseProbeLocked(k Key) {

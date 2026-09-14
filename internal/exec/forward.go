@@ -39,6 +39,8 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		pendingBytes int
 		committed    bool
 		usage        ir.Usage
+		// failed is an error event the provider sent after commit.
+		failed error
 	)
 
 	// recordWarning notes a post-commit fault on the row. Failover is
@@ -101,6 +103,11 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 			return adapter.OutcomeSuccess, nil
 		}
 
+		if re.ErrPayload != "" && failed == nil {
+			// Forwarded verbatim like every event after commit, and still
+			// the provider failing this response.
+			failed = forwardedStreamError(fw, raw, maxLine, re.ErrPayload)
+		}
 		if strip && re.UsageOnly {
 			return adapter.OutcomeSuccess, nil
 		}
@@ -151,7 +158,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				}
 				recordWarning("upstream connection failed after commit: " + rerr.Error())
 				se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
-				return adapter.OutcomeSuccess, nil
+				return ac.failedAfterCommit(rerr)
 			}
 			break
 		}
@@ -169,6 +176,9 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		// legitimately empty completion rather than a fault: failing over here
 		// would burn the whole chain every time a model stops immediately.
 		commit()
+	}
+	if failed != nil {
+		return ac.failedAfterCommit(failed)
 	}
 	return adapter.OutcomeSuccess, nil
 }
@@ -310,7 +320,9 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 	_, _ = cw.Write(body)
 	if oversize {
 		// Committed already: a truncated body would be worse than a slow one.
-		_, _ = io.Copy(cw, resp.Body)
+		if _, err := copyFlushing(cw, resp.Body); err != nil {
+			return ac.failedAfterCommit(err)
+		}
 	}
 	return adapter.OutcomeSuccess, nil
 }

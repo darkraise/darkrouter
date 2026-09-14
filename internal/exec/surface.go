@@ -13,6 +13,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -110,9 +111,9 @@ type AttemptCtx struct {
 	// idleArmed records that idle has replaced the pre-commit deadline.
 	idleArmed bool
 	// healthDone guards the one breaker signal an attempt may emit. The first
-	// caller wins: a surface reporting a pre-commit fault beats the loop's
-	// deferred record on the way out, and a success reported once the body
-	// was read beats nothing, because nothing else reports one.
+	// caller wins: a surface reporting a pre-commit fault, or the loop
+	// reporting a failure after commit, beats the loop's deferred record of
+	// the attempt's result on the way out.
 	healthDone bool
 }
 
@@ -135,6 +136,9 @@ func (ac *AttemptCtx) readOutcome(err error) adapter.Outcome {
 		return adapter.OutcomeRetryableProvider
 	}
 	if ac.inbound != nil && errors.Is(ac.inbound.Err(), context.Canceled) {
+		return adapter.OutcomeClientCancelled
+	}
+	if errors.Is(err, errClientWrite) {
 		return adapter.OutcomeClientCancelled
 	}
 	return outcomeForParseError(err)
@@ -175,10 +179,17 @@ func (b *idleBody) Read(p []byte) (int, error) {
 }
 
 // served marks this attempt as the one that answered: the record names its
-// target, carries its warnings and its time to first byte, and the breaker
-// hears a success. It is called once the body has been parsed or the stream
-// has committed — never from the status line alone, which a provider can
-// send ahead of a body it then fails to deliver.
+// target, carries its warnings and its time to first byte. It is called once
+// the body has been parsed or the stream has committed — never from the
+// status line alone, which a provider can send ahead of a body it then fails
+// to deliver.
+//
+// The breaker does not hear a success here. A stream can still fail after it
+// commits, and a success recorded at commit would reset the failure count
+// that failure needs, so a provider that dies after its first token on every
+// request would never cool. The attempt records its one outcome when the
+// response has ended; here the half-open probe is only given back, so a long
+// response does not keep the entry shut.
 //
 // Warnings are assigned, not appended: the request is re-rendered per
 // attempt, and the record must describe the translation the client actually
@@ -192,7 +203,9 @@ func (ac *AttemptCtx) served(warns []ir.Warning) {
 	rec.FinalProviderID = c.ProviderID
 	rec.FinalModel = c.Model
 	rec.Warnings = warningStrings(warns)
-	ac.recordHealth(adapter.OutcomeSuccess, ac.resp)
+	if f := ac.Exec.deps.Fleet; f != nil {
+		f.ReleaseProbe(health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model})
+	}
 }
 
 // chatOp is the llm surface. It is the first SurfaceOp and its behavior is

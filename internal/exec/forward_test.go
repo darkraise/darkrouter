@@ -103,14 +103,16 @@ func TestForwardStreamFailsOverOnAPreCommitError(t *testing.T) {
 }
 
 func TestForwardStreamPassesAPostCommitErrorThrough(t *testing.T) {
-	// After commit the recognizer's opinion no longer matters: the client
+	// After commit the error event is forwarded like any other: the client
 	// already has bytes and a second attempt would concatenate two halves.
+	// The failure is still reported, for the breaker and the row; the loop
+	// ends the chain because the writer committed, whatever is returned.
 	cw, ac := forwardFixture(t)
 	body := "data: c-first\n\ndata: e-overloaded\n\n"
 	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 
-	if out != adapter.OutcomeSuccess || ierr != nil {
-		t.Fatalf("outcome = %v err = %v", out, ierr)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the post-commit failure reported", out, ierr)
 	}
 	if got := recorderBody(cw); got != body {
 		t.Errorf("client saw %q", got)
@@ -214,8 +216,8 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 	}
 	se := &recordedStreamError{}
 	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
-	if out != adapter.OutcomeSuccess || ierr != nil {
-		t.Fatalf("outcome = %v err = %v", out, ierr)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the post-commit failure reported", out, ierr)
 	}
 	if !cw.Committed() {
 		t.Fatal("the content event should have committed")
