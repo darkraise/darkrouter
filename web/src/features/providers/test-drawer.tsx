@@ -228,6 +228,11 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   const [verdict, setVerdict] = useState<Verdict>({ kind: "idle" })
   const [running, setRunning] = useState(false)
   const [tab, setTab] = useState("chat")
+  // `row` is the snapshot the drawer was opened with, and refetching the
+  // provider list does not replace it, so the row this drawer made is
+  // remembered here or the next send would try to make it again.
+  const [created, setCreated] = useState(false)
+  const needsCreating = !!row?.keyless && !row.provider && !created
   const abort = useRef(false)
   const transcript = useRef<HTMLDivElement>(null)
 
@@ -288,9 +293,10 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     // and a preset alone is not something a request can be routed to. Creating
     // it here is the setup, done in the one click that was going to happen
     // anyway rather than as a step in front of it.
-    if (row.keyless && !row.provider) {
+    if (needsCreating) {
       try {
         await api.post("/api/providers", { id: row.id, preset: row.preset || row.id })
+        setCreated(true)
         say("info", `added ${row.name} to your providers`)
         void queryClient.invalidateQueries({ queryKey: keys.providers })
       } catch (err) {
@@ -411,7 +417,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
             </Button>
           )}
         </div>
-        {row?.keyless && !row.provider && (
+        {needsCreating && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             {row.name} asks for no credential. Sending adds it to your providers and
             routes through it — nothing else to set up.
