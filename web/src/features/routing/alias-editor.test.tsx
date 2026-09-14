@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster, toast } from "darkraise-ui"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AliasEditor } from "./routing-screen"
 
@@ -227,11 +228,20 @@ describe("AliasEditor keyboard reorder", () => {
 })
 
 describe("saving", () => {
-  beforeEach(() => vi.unstubAllGlobals())
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    // Sonner's store is module-level, so a toast an earlier test fired
+    // without mounting a Toaster is still queued and would render into the
+    // first Toaster any later test mounts.
+    toast.dismiss()
+  })
 
   it("refreshes the catalogue, whose alias column reads the same map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify({ valid: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     ))
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidated = vi.spyOn(client, "invalidateQueries")
@@ -245,6 +255,39 @@ describe("saving", () => {
       const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
       expect(keys).toContain(JSON.stringify(["models"]))
     })
+  })
+
+  it("reports a write that persisted but did not take effect as a failure", async () => {
+    // commitConfig 200s with valid:false when the rows committed but the
+    // router could not republish -- the previous configuration is still
+    // serving. Treating that as "Aliases saved" would tell the operator the
+    // new chain is live when it never took effect.
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          valid: false,
+          error: "no provider named ghost",
+          serving: "the previous configuration is still serving",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Toaster />
+        <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("status").some((s) => /no provider named ghost/.test(s.textContent ?? "")),
+      ).toBe(true)
+    })
+    expect(
+      screen.queryAllByRole("status").some((s) => /^Aliases saved$/.test(s.textContent ?? "")),
+    ).toBe(false)
   })
 
   it("does not shout when it cannot save", () => {

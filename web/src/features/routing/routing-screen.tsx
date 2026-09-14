@@ -167,6 +167,15 @@ function reorderRows(rows: DraftRow[], from: number, to: number): DraftRow[] {
 
 const EMPTY_CONTEXT: ChainContext = { providers: [], models: [] }
 
+/** What PUT /api/aliases answers -- the same shape every commitConfig write
+ *  answers with, since the alias endpoint is a view over one write path. */
+type AliasesSaveResult = {
+  valid: boolean
+  error?: string
+  serving?: string
+  restart_required?: string[]
+}
+
 export function AliasEditor({
   aliases,
   knownProviders,
@@ -221,7 +230,15 @@ export function AliasEditor({
   const [dragTarget, setDragTarget] = useState<{ name: string; index: number } | null>(null)
 
   const save = useApiMutation({
-    mutationFn: (next: Aliases) => api.put("/api/aliases", next),
+    mutationFn: async (next: Aliases) => {
+      const res = await api.put<AliasesSaveResult>("/api/aliases", next)
+      // A 200 here can still mean the write never took effect: the rows
+      // committed but the router could not republish, and the previous
+      // configuration is still what is serving. Thrown so the mutation
+      // reports it as the failure it is instead of toasting "saved".
+      if (!res.valid) throw new Error(res.error ?? "the new aliases did not take effect")
+      return res
+    },
     success: "Aliases saved",
     // The catalogue too: its alias column is read from the same map.
     invalidates: [keys.aliases, keys.config, keys.models],
