@@ -20,6 +20,7 @@
   --lad-radius: var(--radius);
   --lad-radius-pill: 9999px;
   --lad-row-h: 36px;
+  --lad-row-pad-y: 6px;
   --lad-pad: 16px;
 
   /* Amber and red here are the two carve-outs the design language names:
@@ -42,9 +43,14 @@
    as one of the two places amber is allowed, and failed, which reports an
    attempt's outcome rather than a routing choice. */
 
+/* A grid of one column rather than a flex column: the column is as wide as
+   the widest row needs, so in a panel narrower than a row every row keeps
+   the same width and the ladder scrolls inside its own border instead of
+   rows spilling past it. */
 .ladder {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(min-content, 1fr);
+  overflow-x: auto;
   background: var(--lad-surface);
   border: 1px solid var(--lad-border);
   border-radius: var(--lad-radius);
@@ -55,8 +61,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: var(--lad-row-h);
-  padding: 0 var(--lad-pad);
+  /* A minimum, not a height: a trace's reason carries the upstream error
+     verbatim and wraps, and a fixed row spills it over the rows below. The
+     block padding sits inside the one-line height, so a one-line row is
+     exactly as tall as before. */
+  min-height: var(--lad-row-h);
+  padding: var(--lad-row-pad-y) var(--lad-pad);
   border-bottom: 1px solid var(--lad-border-subtle);
 }
 .ladder-row:last-child { border-bottom: none; }
@@ -108,6 +118,8 @@
 
 .spine {
   align-self: stretch;
+  /* Through the row's block padding, so the spine stays unbroken. */
+  margin-block: calc(-1 * var(--lad-row-pad-y));
   width: 1px;
   background: var(--lad-border);
 }
@@ -211,7 +223,9 @@
   flex: 1 1 auto;
   align-items: baseline;
   gap: 6px;
-  min-width: 0;
+  /* Enough to read a wrapped error at. Below this the ladder scrolls rather
+     than narrowing the reason to a word per line. */
+  min-width: 12rem;
   color: var(--lad-ink-muted);
 }
 .reason-code {
@@ -226,6 +240,8 @@
   font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--lad-ink-muted);
+  /* An upstream error can be one unbroken token -- a URL, a JSON body. */
+  overflow-wrap: anywhere;
 }
 
 /* The candidate identity itself — provider/model, off the wire, so mono.
