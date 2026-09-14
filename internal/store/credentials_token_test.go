@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/crypto"
@@ -32,7 +33,8 @@ func TestReplaceCredentialSecretIsAtomic(t *testing.T) {
 	}
 
 	exp := int64(1800000000)
-	if err := db.ReplaceCredentialSecret(ctx, key, id, `{"access_token":"new"}`, &exp); err != nil {
+	if err := db.ReplaceCredentialSecret(ctx, key, id, `{"access_token":"old"}`,
+		`{"access_token":"new"}`, &exp); err != nil {
 		t.Fatal(err)
 	}
 
@@ -61,8 +63,52 @@ func TestReplaceCredentialSecretRefusesAMissingRow(t *testing.T) {
 	// would leave the worker believing it persisted a token that does not exist.
 	ctx := context.Background()
 	db, key := credentialFixture(t)
-	if err := db.ReplaceCredentialSecret(ctx, key, "no-such-id", "x", nil); err == nil {
-		t.Fatal("replacing a missing credential must be an error")
+	err := db.ReplaceCredentialSecret(ctx, key, "no-such-id", "x", "y", nil)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("replacing a missing credential = %v, want ErrNotFound", err)
+	}
+}
+
+// A refresh that began before an operator replaced the credential carries
+// tokens descended from the secret that was replaced. Landing it would put the
+// old grant back over the new one.
+func TestReplaceCredentialSecretRefusesARowThatMovedOn(t *testing.T) {
+	ctx := context.Background()
+	db, key := credentialFixture(t)
+	id, err := db.AddCredential(ctx, key, Credential{
+		ProviderID: "p", Kind: "oauth", Secret: "replacement", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.ReplaceCredentialSecret(ctx, key, id, "original", "refreshed", nil)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("replace over a different secret = %v, want ErrConflict", err)
+	}
+	if got, err := db.CredentialSecret(ctx, key, id); err != nil || got != "replacement" {
+		t.Errorf("stored secret = %q, %v; want the replacement untouched", got, err)
+	}
+}
+
+func TestDisableCredentialRefusesARowThatMovedOn(t *testing.T) {
+	ctx := context.Background()
+	db, key := credentialFixture(t)
+	id, err := db.AddCredential(ctx, key, Credential{
+		ProviderID: "p", Kind: "oauth", Secret: "replacement", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.DisableCredential(ctx, key, id, "original", "reconnect required")
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("disable over a different secret = %v, want ErrConflict", err)
+	}
+	creds, err := db.Credentials(ctx, key, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !creds[0].Enabled {
+		t.Error("a refusal earned by the replaced secret disabled the replacement")
 	}
 }
 
@@ -108,7 +154,7 @@ func TestExpiringCredentialsSkipsDisabledRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DisableCredential(ctx, id, "reconnect required"); err != nil {
+	if err := db.DisableCredential(ctx, key, id, "a", "reconnect required"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.ExpiringCredentials(ctx, key, "oauth", 500)
@@ -128,7 +174,7 @@ func TestDisableCredentialRecordsWhy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DisableCredential(ctx, id, "reconnection required"); err != nil {
+	if err := db.DisableCredential(ctx, key, id, "a", "reconnection required"); err != nil {
 		t.Fatal(err)
 	}
 	creds, err := db.Credentials(ctx, key, "p")

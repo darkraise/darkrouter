@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,12 +28,19 @@ type OAuthPresets interface {
 	OAuthFor(preset string) (OAuthConfig, bool)
 }
 
-// TokenStore persists a refreshed credential. It is the narrow half of *store.DB
-// this package needs, which keeps auth from importing store.
+// TokenStore reads and persists a credential's stored secret. It is the narrow
+// half of *store.DB this package needs, which keeps auth from importing store.
 type TokenStore interface {
-	ReplaceCredentialSecret(ctx context.Context, id, secret string, expiresAt *int64) error
-	DisableCredential(ctx context.Context, id, reason string) error
+	CredentialSecret(ctx context.Context, id string) (string, error)
+	// ReplaceCredentialSecret and DisableCredential write only while the row
+	// still holds prev, and otherwise fail with ErrCredentialChanged.
+	ReplaceCredentialSecret(ctx context.Context, id, prev, secret string, expiresAt *int64) error
+	DisableCredential(ctx context.Context, id, prev, reason string) error
 }
+
+// ErrCredentialChanged reports a stored credential that no longer holds the
+// secret a write was derived from: it was replaced or deleted meanwhile.
+var ErrCredentialChanged = errors.New("the credential was changed while it was in use")
 
 // ErrNeedsReconnect marks a terminal refusal. The credential is disabled and no
 // retry follows: hammering a refused refresh endpoint is how an account gets
@@ -188,23 +196,44 @@ func describe(w wireToken) string {
 type oauthAccount struct {
 	mu  sync.Mutex
 	tok Token
+	// secret is the stored value tok was read from or last persisted as. A
+	// write from this account lands only while the row still holds it.
+	secret string
 	// dead marks a credential whose refresh was terminally refused. Checked
 	// before the endpoint is called again, so "no retries" holds within the
 	// process as well as across ticks.
 	dead bool
+	// stale makes the next caller re-read tok from the store before using it.
+	// Atomic so Forget can set it without waiting out a refresh in flight.
+	stale atomic.Bool
 }
 
-// Forget drops the cached state for one credential.
+// Forget discards what the manager derived from one credential's secret.
 //
 // The cache is keyed on credential id, and both halves of what it holds are
 // derived from a secret that can be replaced underneath it: the access token,
 // which would otherwise go on being presented after a rotation, and the dead
 // mark, which is process-lifetime and would otherwise outlive the credential
 // that earned it. A no-op for a credential never seen.
+//
+// With a store, the account is kept and re-read from its row instead of being
+// dropped. Dropping it let a request still holding the previous provider
+// snapshot build a second account from that snapshot's secret, which can
+// predate a persisted refresh and so name a refresh token the vendor has
+// already rotated away, and let two accounts refresh one grant under two
+// mutexes.
 func (m *Manager) Forget(credID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.oauth, credID)
+	acct, ok := m.oauth[credID]
+	if !ok {
+		return
+	}
+	if m.deps.Tokens == nil {
+		delete(m.oauth, credID)
+		return
+	}
+	acct.stale.Store(true)
 }
 
 func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authorizer, error) {
@@ -223,7 +252,10 @@ func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authori
 	m.mu.Lock()
 	acct, ok := m.oauth[c.ID]
 	if !ok {
-		acct = &oauthAccount{tok: tok}
+		acct = &oauthAccount{tok: tok, secret: c.Secret}
+		// The row, not the snapshot the caller resolved from, is where a
+		// refreshed pair lives: persisting one does not reload the router.
+		acct.stale.Store(m.deps.Tokens != nil)
 		m.oauth[c.ID] = acct
 	}
 	m.mu.Unlock()
@@ -267,6 +299,11 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	acct.mu.Lock()
 	defer acct.mu.Unlock()
 
+	if acct.stale.Load() {
+		if err := m.reload(ctx, acct, credID); err != nil {
+			return "", err
+		}
+	}
 	if acct.dead {
 		return "", fmt.Errorf("%w: credential %s", ErrNeedsReconnect, credID)
 	}
@@ -274,16 +311,14 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 		return acct.tok.Header(), nil
 	}
 	if acct.tok.RefreshToken == "" {
-		acct.dead = true
-		m.disable(ctx, credID)
-		return "", fmt.Errorf("%w: credential %s has no refresh token", ErrNeedsReconnect, credID)
+		return "", m.refuse(ctx, acct, credID,
+			fmt.Errorf("%w: credential %s has no refresh token", ErrNeedsReconnect, credID))
 	}
 
 	next, err := refreshToken(ctx, m.deps.HTTP, cfg, acct.tok.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrNeedsReconnect) {
-			acct.dead = true
-			m.disable(ctx, credID)
+			return "", m.refuse(ctx, acct, credID, err)
 		}
 		// A transient failure leaves the stored pair alone: the old refresh
 		// token is still the only one that exists.
@@ -304,33 +339,65 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	// Persisted BEFORE the in-memory pair is replaced. A crash between the two
 	// then loses a refresh rather than the account: the durable row already
 	// names the token the vendor now expects.
-	if err := m.persist(ctx, credID, next); err != nil {
+	raw, err := next.Marshal()
+	if err != nil {
 		return "", err
 	}
-	acct.tok = next
+	if err := m.persist(ctx, acct, credID, next, string(raw)); err != nil {
+		return "", err
+	}
+	acct.tok, acct.secret = next, string(raw)
 	return next.Header(), nil
 }
 
-func (m *Manager) persist(ctx context.Context, credID string, tok Token) error {
+// reload replaces the account's pair with what its row holds now.
+func (m *Manager) reload(ctx context.Context, acct *oauthAccount, credID string) error {
+	// Cleared before the read, so a Forget that lands during it is not lost.
+	acct.stale.Store(false)
+	secret, err := m.deps.Tokens.CredentialSecret(ctx, credID)
+	if err == nil {
+		var tok Token
+		if tok, err = ParseToken([]byte(secret)); err == nil {
+			acct.tok, acct.secret, acct.dead = tok, secret, false
+			return nil
+		}
+	}
+	acct.stale.Store(true)
+	return fmt.Errorf("load credential %s: %w", credID, err)
+}
+
+func (m *Manager) persist(ctx context.Context, acct *oauthAccount, credID string, tok Token, raw string) error {
 	if m.deps.Tokens == nil {
 		return nil
 	}
-	raw, err := tok.Marshal()
-	if err != nil {
-		return err
-	}
 	// WithoutCancel: this runs on a request's context, and a client that hangs
 	// up mid-refresh must not leave the rotated pair unpersisted.
-	if err := m.deps.Tokens.ReplaceCredentialSecret(
-		context.WithoutCancel(ctx), credID, string(raw), tok.Unix()); err != nil {
+	err := m.deps.Tokens.ReplaceCredentialSecret(
+		context.WithoutCancel(ctx), credID, acct.secret, raw, tok.Unix())
+	if errors.Is(err, ErrCredentialChanged) {
+		// The pair just minted descends from a secret the row no longer
+		// holds. It is dropped, and the next caller reads the row.
+		acct.stale.Store(true)
+	}
+	if err != nil {
 		return fmt.Errorf("persist refreshed credential: %w", err)
 	}
 	return nil
 }
 
-func (m *Manager) disable(ctx context.Context, credID string) {
-	if m.deps.Tokens == nil {
-		return
+// refuse records a terminal refusal: the account stops calling the endpoint
+// and the credential is disabled pending reconnection — unless the row has
+// moved on from the secret that was refused, which makes the refusal
+// meaningless for what the row now holds.
+func (m *Manager) refuse(ctx context.Context, acct *oauthAccount, credID string, cause error) error {
+	if m.deps.Tokens != nil {
+		err := m.deps.Tokens.DisableCredential(
+			context.WithoutCancel(ctx), credID, acct.secret, reconnectReason)
+		if errors.Is(err, ErrCredentialChanged) {
+			acct.stale.Store(true)
+			return fmt.Errorf("credential %s: %w", credID, err)
+		}
 	}
-	_ = m.deps.Tokens.DisableCredential(context.WithoutCancel(ctx), credID, reconnectReason)
+	acct.dead = true
+	return cause
 }

@@ -68,7 +68,8 @@ func (a *authServer) count() int {
 	return a.refreshes
 }
 
-// memTokens is an in-memory TokenStore recording every persist.
+// memTokens is an in-memory TokenStore recording every persist. Its writes
+// compare and swap, as the store's do.
 type memTokens struct {
 	mu       sync.Mutex
 	secrets  map[string]string
@@ -80,17 +81,40 @@ func newMemTokens() *memTokens {
 	return &memTokens{secrets: map[string]string{}, disabled: map[string]string{}}
 }
 
-func (m *memTokens) ReplaceCredentialSecret(_ context.Context, id, secret string, _ *int64) error {
+// seed writes a row directly, as an operator's save or a first connect does.
+func (m *memTokens) seed(id, secret string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.secrets[id] = secret
+}
+
+func (m *memTokens) CredentialSecret(_ context.Context, id string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.secrets[id]
+	if !ok {
+		return "", fmt.Errorf("%w: no credential %s", ErrCredentialChanged, id)
+	}
+	return s, nil
+}
+
+func (m *memTokens) ReplaceCredentialSecret(_ context.Context, id, prev, secret string, _ *int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.secrets[id]; !ok || s != prev {
+		return fmt.Errorf("%w: credential %s", ErrCredentialChanged, id)
+	}
 	m.secrets[id] = secret
 	m.writes++
 	return nil
 }
 
-func (m *memTokens) DisableCredential(_ context.Context, id, reason string) error {
+func (m *memTokens) DisableCredential(_ context.Context, id, prev, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if s, ok := m.secrets[id]; !ok || s != prev {
+		return fmt.Errorf("%w: credential %s", ErrCredentialChanged, id)
+	}
 	m.disabled[id] = reason
 	return nil
 }
@@ -131,7 +155,19 @@ func expiring(t *testing.T, in time.Duration) string {
 	return string(raw)
 }
 
+// oauthAz resolves cred-1 from a snapshot carrying secret, after writing secret
+// to its row as well: the state right after a connect or an operator's save.
 func oauthAz(t *testing.T, m *Manager, secret string) Authorizer {
+	t.Helper()
+	if tokens, ok := m.deps.Tokens.(*memTokens); ok {
+		tokens.seed("cred-1", secret)
+	}
+	return resolveOAuth(t, m, secret)
+}
+
+// resolveOAuth resolves cred-1 from a snapshot carrying secret, leaving the row
+// alone: a request still holding a provider set older than the row.
+func resolveOAuth(t *testing.T, m *Manager, secret string) Authorizer {
 	t.Helper()
 	az, err := m.For(context.Background(),
 		Target{ProviderID: "sub", Style: StyleOAuth, Preset: "anthropic-oauth"},
@@ -313,10 +349,11 @@ func TestATransientFailureLeavesTheStoredPairAlone(t *testing.T) {
 	a, srv := newAuthServer(t)
 	a.status, a.errBody = http.StatusInternalServerError, `{"error":"server_error"}`
 	tokens := newMemTokens()
-	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+	secret := expiring(t, -time.Minute)
+	az := oauthAz(t, oauthManager(t, srv, tokens), secret)
 
 	_ = az(context.Background(), blank(t))
-	if tokens.stored("cred-1") != "" {
+	if tokens.stored("cred-1") != secret {
 		t.Errorf("a transient failure wrote to the store: %q", tokens.stored("cred-1"))
 	}
 }
@@ -409,9 +446,11 @@ func TestTheWorkerRefreshesThroughTheSamePath(t *testing.T) {
 	a, srv := newAuthServer(t)
 	tokens := newMemTokens()
 	m := oauthManager(t, srv, tokens)
+	secret := expiring(t, time.Minute)
+	tokens.seed("cred-1", secret)
 	w := NewRefreshWorker(m, &expiringFake{rows: []StoredCredential{{
 		ID: "cred-1", ProviderID: "sub", Kind: "oauth",
-		Secret: expiring(t, time.Minute), Style: StyleOAuth, Preset: "anthropic-oauth",
+		Secret: secret, Style: StyleOAuth, Preset: "anthropic-oauth",
 	}}}, RefreshOptions{})
 
 	w.Once(context.Background())
