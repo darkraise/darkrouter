@@ -105,7 +105,7 @@ func failedParse(ac *AttemptCtx, resp *http.Response, err error) (adapter.Outcom
 		ac.Rec.Attempts[last].Outcome = string(outcome)
 		ac.Rec.Attempts[last].Error = err.Error()
 	}
-	ac.recordHealth(outcome, resp)
+	ac.recordFailure(outcome, resp, err)
 	var ie *ir.Error
 	if outcome != adapter.OutcomeClientCancelled && errors.As(err, &ie) {
 		return outcome, ie

@@ -75,6 +75,14 @@ An ambiguous 400 is re-read under a bounded cap and reclassified as
 **fatal**, not retryable: a refusal is the provider answering, not the
 provider being broken.
 
+An error the provider reports inside a 2xx — a unary error envelope or an
+in-stream error event — is classified from the type the adapter gave it, as
+its status line would have been: authentication and permission are
+*retryable credential*, not-found is *retryable model*, a rate limit is a
+*retryable provider* 429, a content filter or invalid request is *fatal*. An
+untyped one is *retryable provider*. A body read cancelled by the client is
+*client cancelled*, exactly as a cancelled send is.
+
 ### Advancement
 
 - **Success** finishes. **Fatal** and **client-cancelled** return.
