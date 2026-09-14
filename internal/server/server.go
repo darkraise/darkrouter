@@ -367,7 +367,13 @@ func (s *Server) ProxyHandler() http.Handler {
 	mux.HandleFunc("POST /v1beta/models/{model}", s.authed(gm, s.handleGemini))
 	mux.HandleFunc("GET /v1beta/models", s.authed(gm, s.handleGeminiModels))
 
-	return mux
+	return writeDeadlines(mux, s.idleTimeout)
+}
+
+// idleTimeout is the live policy.timeout.idle, which also bounds a single
+// write to a client.
+func (s *Server) idleTimeout() time.Duration {
+	return s.store.Current().Policy.Timeout.Idle
 }
 
 // handleGemini dispatches on the method suffix the path segment carries.
@@ -593,7 +599,7 @@ func (s *Server) AdminHandler() http.Handler {
 	// an orchestrator and a Prometheus scrape read them, and a session in front
 	// of either breaks it.
 	mux.Handle("/", s.adm.Handler())
-	return mux
+	return writeDeadlines(mux, s.idleTimeout)
 }
 
 // Run starts both listeners and blocks until ctx is cancelled, then drains.
@@ -699,7 +705,8 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler: s.ProxyHandler(),
 		// No WriteTimeout: it would kill long streams at a fixed age. Slowloris
 		// protection comes from ReadHeaderTimeout; ReadTimeout bounds a client
-		// that sends its body at a trickle.
+		// that sends its body at a trickle; the handler's writeDeadlines
+		// bounds a client that stops reading, one write at a time.
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,
