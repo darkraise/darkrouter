@@ -66,6 +66,35 @@ func TestTranscriptionsServeJSON(t *testing.T) {
 	}
 }
 
+// A JSON transcription is forwarded as it arrived, which makes a 200 carrying
+// the provider's error envelope, or a body that is not JSON at all, look like
+// an answer unless it is checked before the bytes go out.
+func TestATranscriptionErrorBodyUnder200IsNotServed(t *testing.T) {
+	for name, body := range map[string]string{
+		"error envelope": `{"error":{"message":"quota exhausted","type":"server_error"}}`,
+		"malformed":      `{"text":"hel`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, body)
+			}))
+			defer upstream.Close()
+
+			e, rec := executorForOp(t, upstream.URL, catalogWith("p", "whisper-1", ir.SurfaceSTT))
+			w := httptest.NewRecorder()
+			e.HandleTranscriptions(w, transcriptionRequest(t, "whisper-1"), openaiedge.New())
+
+			if w.Code == http.StatusOK {
+				t.Fatalf("status = 200 body = %s; an error body was served as a transcript", w.Body.String())
+			}
+			if got := rec.only(t); got.Status == "success" || got.Attempts[0].Outcome == "success" {
+				t.Errorf("status %q, attempt %q; recorded as a success", got.Status, got.Attempts[0].Outcome)
+			}
+		})
+	}
+}
+
 func TestTranscriptionsForwardPlainTextByContentType(t *testing.T) {
 	// The route cannot tell srt from json; the response header can.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

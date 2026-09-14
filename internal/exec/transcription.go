@@ -73,6 +73,10 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 			return failedParse(ac, resp,
 				fmt.Errorf("transcription response exceeds %d bytes", int64(maxTranscriptBytes)))
 		}
+		fw, _ := ac.Adapter.(adapter.Forwarder)
+		if err := unservableBody(fw, resp, raw); err != nil {
+			return failedParse(ac, resp, err)
+		}
 		// Read for the record only. The bytes go out unchanged, because
 		// verbose_json carries per-segment timings and log-probabilities that
 		// re-emitting from a narrow IR would drop.
