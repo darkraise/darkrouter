@@ -296,3 +296,59 @@ export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
 		t.Errorf("free tier = %+v, want the synced avoid grading", m.FreeTier)
 	}
 }
+
+// A listing that quotes input and output but no cache rates outranks
+// models.dev for the rates it quoted, and only those. Taking the stored record
+// whole costed every cached token at zero.
+func TestAListedPriceTakesCacheRatesItDidNotQuote(t *testing.T) {
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = ? WHERE id = 'p'`, embeddedPreset); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 80_000,
+		}},
+		{ModelID: "quoted-zero-cache", Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 80_000,
+			CacheReadMicrosPerMTok: &zero,
+		}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	cat := NewStore(db, src)
+	directory := Metadata{
+		InputMicrosPerMTok: 999_000, OutputMicrosPerMTok: 999_000,
+		CacheReadMicrosPerMTok: 25_000, CacheWriteMicrosPerMTok: 60_000,
+		PriceKnown: true,
+	}
+	cat.SetDoc(func() Doc {
+		return Doc{embeddedPreset: {embeddedModel: directory, "quoted-zero-cache": directory}}
+	})
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := cat.Snapshot().Lookup("p", embeddedModel)
+	if m.Pricing.Source != SourceDiscovered || m.Pricing.InputMicrosPerMTok != 50_000 ||
+		m.Pricing.OutputMicrosPerMTok != 80_000 {
+		t.Errorf("pricing = %+v, want the listing's input and output", m.Pricing)
+	}
+	if m.Pricing.CacheReadMicrosPerMTok != 25_000 || m.Pricing.CacheWriteMicrosPerMTok != 60_000 {
+		t.Errorf("cache = %d/%d, want models.dev's 25000/60000 for rates the listing did not quote",
+			m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok)
+	}
+
+	// A rate the listing did quote, zero included, is still the listing's.
+	q, _ := cat.Snapshot().Lookup("p", "quoted-zero-cache")
+	if q.Pricing.CacheReadMicrosPerMTok != 0 {
+		t.Errorf("cache read = %d, want the quoted 0", q.Pricing.CacheReadMicrosPerMTok)
+	}
+	if q.Pricing.CacheWriteMicrosPerMTok != 60_000 {
+		t.Errorf("cache write = %d, want models.dev's 60000", q.Pricing.CacheWriteMicrosPerMTok)
+	}
+}

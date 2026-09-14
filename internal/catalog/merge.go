@@ -157,6 +157,9 @@ func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
 	}
 	if stored.Source.Authoritative() {
 		m.Pricing = resolvePrice(stored, fromDoc, fromLiteLLM)
+		if stored.Known {
+			m.Pricing = withUnquotedCacheRates(m.Pricing, row, fromDoc, fromLiteLLM)
+		}
 	} else {
 		m.Pricing = resolvePrice(fromDoc, fromLiteLLM, stored)
 	}
@@ -334,6 +337,25 @@ func priceSource(stored string) Source {
 	default:
 		return SourceInferred
 	}
+}
+
+// withUnquotedCacheRates fills the cache rates an authoritative row does not
+// hold from the directories below it, leaving every rate the row does hold,
+// zero included. A directory's zero cache rate is its spelling of "not
+// published", so only a nonzero one fills.
+func withUnquotedCacheRates(p Pricing, row store.ModelRow, lower ...Pricing) Pricing {
+	for _, c := range lower {
+		if !c.Known {
+			continue
+		}
+		if !row.CacheReadKnown && p.CacheReadMicrosPerMTok == 0 {
+			p.CacheReadMicrosPerMTok = c.CacheReadMicrosPerMTok
+		}
+		if !row.CacheWriteKnown && p.CacheWriteMicrosPerMTok == 0 {
+			p.CacheWriteMicrosPerMTok = c.CacheWriteMicrosPerMTok
+		}
+	}
+	return p
 }
 
 // resolvePrice returns the first candidate whose price is known. Callers pass

@@ -377,6 +377,45 @@ func TestSyncKeepsADiscoveredPriceNotJustItsStamp(t *testing.T) {
 	}
 }
 
+// Whether a listing quoted a cache rate is what decides if a directory may
+// fill it, so a sync must not turn a quoted zero into an unquoted one.
+func TestSyncKeepsWhetherADiscoveredCacheRateWasQuoted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	ctx := context.Background()
+	zero := int64(0)
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: "big", Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 111, OutputMicrosPerMTok: 222, CacheReadMicrosPerMTok: &zero,
+		}},
+		{ModelID: "cheap"}, {ModelID: "private"},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Models(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rowFor(t, rows, "p", "big")
+	if !got.CacheReadKnown || got.CacheReadMicrosPerMTok != 0 {
+		t.Errorf("cache read known=%v value=%d, want the quoted 0 kept",
+			got.CacheReadKnown, got.CacheReadMicrosPerMTok)
+	}
+	if got.CacheWriteKnown {
+		t.Error("the sync invented a cache write rate the listing never quoted")
+	}
+}
+
 func TestSyncKeepsADiscoveredFreeModelPriced(t *testing.T) {
 	// A free model's rates are zero, so only the flag separates it from one
 	// nobody has priced. models.dev listing no cost for the same name must not
