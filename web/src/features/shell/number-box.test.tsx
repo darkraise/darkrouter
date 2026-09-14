@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NumberBox } from "./number-box"
 
 /** The box driven the way every call site drives it: from a string. */
@@ -49,6 +49,28 @@ describe("the number box over a string", () => {
     expect(stored()).toBe('"0."')
     await userEvent.type(field, "7")
     expect(stored()).toBe('"0.7"')
+  })
+
+  describe("in a browser whose locale groups with a period", () => {
+    const Browser = Intl.NumberFormat
+    beforeEach(() => {
+      // Only the default locale changes: a caller naming one still gets it.
+      Intl.NumberFormat = function (locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions) {
+        return new Browser(locales ?? "de-DE", options)
+      } as unknown as typeof Intl.NumberFormat
+    })
+    afterEach(() => {
+      Intl.NumberFormat = Browser
+    })
+
+    it("keeps a typed decimal a decimal when the field is left", async () => {
+      // The stored string is a JavaScript number, so its point is a decimal
+      // point whatever the operator's locale calls a period.
+      render(<Harness />)
+      await userEvent.type(screen.getByRole("spinbutton"), "0.7")
+      await userEvent.click(screen.getByRole("button", { name: "elsewhere" }))
+      expect(stored()).toBe('"0.7"')
+    })
   })
 
   it("returns to empty when the box is cleared", async () => {
