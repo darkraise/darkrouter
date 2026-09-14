@@ -121,10 +121,10 @@ export function useAppendTurn() {
         content: vars.content,
         request_id: vars.requestId,
       }),
-    // seq is assigned by the server in the order the appends arrive, and one
-    // exchange sends two. Two exchanges whose saves overlap -- the second
-    // model round trip outlasting the first pair of local writes -- would
-    // otherwise interleave, and a transcript is only its seq order.
+    // seq is assigned by the server in the order the appends arrive, and a
+    // transcript is only its seq order. This orders single writes; keeping an
+    // exchange's two writes together is Chat mode's backlog, since a scope
+    // cannot stop a second exchange queueing between them.
     scope: { id: "playground-turns" },
     invalidates: [keys.playgroundConversations],
   })
