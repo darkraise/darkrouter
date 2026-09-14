@@ -124,6 +124,9 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 		}
 		out.Embeddings = append(out.Embeddings, e)
 	}
+	if err := adapter.ValidateEmbeddings(out.Embeddings); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
