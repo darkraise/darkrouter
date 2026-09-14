@@ -166,7 +166,8 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		in, out := meta.InputMicrosPerMTok, meta.OutputMicrosPerMTok
 		cacheRead, cacheWrite := meta.CacheReadMicrosPerMTok, meta.CacheWriteMicrosPerMTok
 		priceKnown := meta.PriceKnown
-		if priceSrc != string(SourceModelsDev) {
+		keepCache := priceSrc != string(SourceModelsDev)
+		if keepCache {
 			// The row's stamp outranks this sync, so its numbers do too. Keeping
 			// the label without the values would report a figure as measured
 			// that models.dev supplied.
@@ -192,6 +193,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			CacheWriteMicrosPerMTok: cacheWrite,
 			PriceKnown:              priceKnown,
 			PriceSource:             priceSrc,
+			KeepCacheRates:          keepCache,
 		})
 	}
 

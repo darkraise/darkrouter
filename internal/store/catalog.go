@@ -30,6 +30,11 @@ type ModelRow struct {
 	OutputMicrosPerMTok     int64
 	CacheReadMicrosPerMTok  int64
 	CacheWriteMicrosPerMTok int64
+	// CacheReadKnown and CacheWriteKnown report a non-NULL column. A listing
+	// that quotes input and output often quotes no cache rate, and the merge
+	// fills only a rate the row does not hold.
+	CacheReadKnown  bool
+	CacheWriteKnown bool
 	// PriceKnown separates "free" from "we never found out". Both read back as
 	// zero, and the UI shows them differently.
 	PriceKnown bool
@@ -76,6 +81,10 @@ type MetadataRow struct {
 	// PriceSource records which authority the price came from, so the console
 	// can separate a figure the seller quoted from one a directory estimated.
 	PriceSource string
+	// KeepCacheRates leaves both cache columns as stored. The write turns a
+	// zero into NULL, and for a row whose price outranks the sync that would
+	// erase the difference between a quoted zero and an unquoted rate.
+	KeepCacheRates bool
 }
 
 const modelColumns = `provider_id, model_id, publisher, surfaces, capabilities,
@@ -123,6 +132,7 @@ func (d *DB) Models(ctx context.Context) ([]ModelRow, error) {
 		r.OutputMicrosPerMTok = outPrice.Int64
 		r.CacheReadMicrosPerMTok = cacheRead.Int64
 		r.CacheWriteMicrosPerMTok = cacheWrite.Int64
+		r.CacheReadKnown, r.CacheWriteKnown = cacheRead.Valid, cacheWrite.Valid
 		if lastSeen.Valid {
 			r.LastSeenAt = time.UnixMilli(lastSeen.Int64).UTC()
 		}
@@ -200,8 +210,10 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 		    publisher = ?, surfaces = ?, capabilities = ?, capabilities_source = ?,
 		    context_window = ?, max_output_tokens = ?,
 		    input_price_micros_per_mtok = ?, output_price_micros_per_mtok = ?,
-		    cache_read_price_micros_per_mtok = ?,
-		    cache_write_price_micros_per_mtok = ?,
+		    cache_read_price_micros_per_mtok =
+		        CASE WHEN ? THEN cache_read_price_micros_per_mtok ELSE ? END,
+		    cache_write_price_micros_per_mtok =
+		        CASE WHEN ? THEN cache_write_price_micros_per_mtok ELSE ? END,
 		    price_source = ?, price_known = ?
 		  WHERE provider_id = ? AND model_id = ?`)
 	if err != nil {
@@ -222,8 +234,8 @@ func (d *DB) UpsertMetadata(ctx context.Context, rows []MetadataRow) error {
 			r.Publisher, string(surfaces), string(caps), r.CapabilitiesSource,
 			nullableInt(r.ContextWindow), nullableInt(r.MaxOutputTokens),
 			nullableInt64(r.InputMicrosPerMTok), nullableInt64(r.OutputMicrosPerMTok),
-			nullableInt64(r.CacheReadMicrosPerMTok),
-			nullableInt64(r.CacheWriteMicrosPerMTok),
+			r.KeepCacheRates, nullableInt64(r.CacheReadMicrosPerMTok),
+			r.KeepCacheRates, nullableInt64(r.CacheWriteMicrosPerMTok),
 			priceSourceOr(r.PriceSource), r.PriceKnown,
 			r.ProviderID, r.ModelID); err != nil {
 			return fmt.Errorf("write metadata for %s/%s: %w", r.ProviderID, r.ModelID, err)
