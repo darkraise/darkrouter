@@ -115,6 +115,37 @@ func TestBuildListRequestHonorsAModelsURLOverride(t *testing.T) {
 	}
 }
 
+func TestAMovedBaseURLListsWhereItServes(t *testing.T) {
+	// The preset's listing host belongs to the base it ships. A row pointed at
+	// another installation must not send its credential to the original vendor.
+	pre := Preset{
+		Kind: "openaicompat", BaseURL: "https://api.example.com/v1",
+		ModelsURL: "https://catalog.example.com/v1/models", Auth: Auth{Style: "bearer"},
+	}
+	for _, tc := range []struct {
+		name, base, want string
+	}{
+		{name: "preset base", base: "https://api.example.com/v1", want: "https://catalog.example.com/v1/models"},
+		{name: "preset base with slash", base: "https://api.example.com/v1/", want: "https://catalog.example.com/v1/models"},
+		{name: "no row base", base: "", want: "https://catalog.example.com/v1/models"},
+		{name: "moved base", base: "https://gw.internal/v1", want: "https://gw.internal/v1/models"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr, err := ProbeFor(provider.Provider{ID: "p", Kind: "openaicompat", BaseURL: tc.base}, pre, "sk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := BuildListRequest(context.Background(), pr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.URL.String() != tc.want {
+				t.Errorf("listed %s, want %s", r.URL, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildListRequestCustomAPIKeyHeader(t *testing.T) {
 	r, _ := BuildListRequest(context.Background(), Probe{
 		Kind: "openaicompat", BaseURL: "https://x/v1",
