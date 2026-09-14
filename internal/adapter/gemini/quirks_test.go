@@ -81,6 +81,55 @@ func TestThinkingConfigDisabledSendsAZeroBudget(t *testing.T) {
 	}
 }
 
+// Google's per-model ranges: 2.5 Pro takes 128 to 32768 and cannot turn
+// thinking off; 2.5 Flash-Lite takes 512 to 24576 or 0. A budget outside
+// the range is a 400, not a clamp.
+func TestThinkingConfigHonorsTheFamilyFloor(t *testing.T) {
+	cases := []struct {
+		model  string
+		budget int
+		want   float64
+		warned bool
+	}{
+		{"gemini-2.5-pro", 64, 128, true},
+		{"gemini-2.5-flash-lite", 100, 512, true},
+		{"gemini-2.5-flash-lite", 600, 600, false},
+		{"gemini-2.5-flash", 64, 64, false},
+	}
+	for _, tc := range cases {
+		body, warns := builtFor(t, tc.model, &ir.Request{Reasoning: &ir.Reasoning{Budget: tc.budget}})
+		if got := thinking(body)["thinkingBudget"]; got != tc.want {
+			t.Errorf("%s budget %d: thinkingBudget = %v, want %v", tc.model, tc.budget, got, tc.want)
+		}
+		if (len(warns) > 0) != tc.warned {
+			t.Errorf("%s budget %d: warnings = %v", tc.model, tc.budget, warns)
+		}
+	}
+}
+
+func TestThinkingConfigDisabledOnAModelThatAlwaysThinks(t *testing.T) {
+	body, warns := builtFor(t, "gemini-2.5-pro", &ir.Request{Reasoning: &ir.Reasoning{Disabled: true}})
+	if tc := thinking(body); tc["thinkingBudget"] != float64(128) {
+		t.Errorf("thinkingConfig = %v; 2.5 Pro rejects zero, and its floor is the nearest to off", tc)
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %v; the client's off switch was not honored", warns)
+	}
+
+	body, warns = builtFor(t, "gemini-3.1-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Disabled: true}})
+	if tc := thinking(body); tc["thinkingLevel"] != "low" {
+		t.Errorf("thinkingConfig = %v; Gemini 3 Pro cannot turn thinking off and has no minimal level", tc)
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %v", warns)
+	}
+
+	body, _ = builtFor(t, "gemini-3-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Effort: "minimal"}})
+	if tc := thinking(body); tc["thinkingLevel"] != "low" {
+		t.Errorf("thinkingConfig = %v; minimal is an error on Gemini 3 Pro", tc)
+	}
+}
+
 func TestThinkingConfigSendsALevelToGemini3(t *testing.T) {
 	body, warns := builtFor(t, "gemini-3-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Effort: "xhigh"}})
 	tc := thinking(body)
