@@ -9,6 +9,7 @@ import { useSearchFilters, filterQuery } from "../../lib/search-filters"
 import type { RequestPage, RequestRow } from "../../lib/api-types"
 import { ModelCombobox } from "../shell/model-combobox"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
+import { LoadError } from "../shell/screen-state"
 import { TrafficStrip } from "./traffic-strip"
 import { TraceDrawer } from "./trace-drawer"
 import { FilterSelect } from "./filter-select"
@@ -249,6 +250,10 @@ export function RequestsScreen() {
   const columns = useMemo(() => buildColumns(openTrace), [])
   const more = cursor === undefined ? held?.nextCursor : cursor
   const filtered = Object.values(filters).some((v) => v !== "")
+  // No page has ever loaded, and the one just attempted failed: the empty
+  // state below would otherwise read as "no requests yet" rather than as the
+  // query failure it is.
+  const initialFailure = first.isError && held === null
 
   // The page's own values first — those are the ones with traffic behind them
   // right now — then everything else the gateway knows about.
@@ -389,39 +394,61 @@ export function RequestsScreen() {
 
       <TrafficStrip rows={rows} />
 
-      {/* Scrolls sideways inside its own box rather than pushing the page
-          wider: ten columns do not fit a laptop, and the Path column at the
-          far end is the one that used to fall off. */}
-      {/* A click anywhere on a row opens it; the Open button stays for
-          the keyboard and for screen readers, since the row itself is a
-          row and not a button. The table renders its own cells, so the id
-          rides on the first cell and the click is delegated from here. */}
-      <div className="overflow-x-auto [&_tbody_tr]:cursor-pointer" onClick={openRowUnderPointer}>
-        <DataTable
-          columns={columns}
-          data={rows}
-          facets={["surface", "status", "failover"]}
-          virtualize={{ rowHeight: 36, height: 640 }}
+      {initialFailure ? (
+        // Not the table: without a page to show, "no requests yet" is a
+        // claim about the log that a query failure never earned.
+        <LoadError
+          what="The requests"
+          error={first.error}
+          onRetry={() => void first.refetch()}
+          className="mt-4"
         />
-      </div>
-
-      {rows.length === 0 && (
-        <div className="mt-4">
-          {filtered ? (
-            <NoMatch what="requests" onClear={clear} />
-          ) : (
-            <EmptyState
-              title="Every request the gateway serves is logged here"
-              hint="Point a client at the proxy and the first one appears within seconds, with the full attempt trail behind it."
-              action={
-                <Button asChild size="sm">
-                  <Link to="/connect">Get a client connected</Link>
-                </Button>
-              }
-              preview={<GhostRows />}
-            />
+      ) : (
+        <>
+          {/* A failed poll on a screen that already has rows is a staleness
+              note, not an alarm: the rows below are real, just older than
+              they look. */}
+          {first.isError && held && held.requests.length > 0 && (
+            <p className="mb-2 text-sm text-[hsl(var(--warning))]">
+              last refresh failed — rows may be stale
+            </p>
           )}
-        </div>
+          {/* Scrolls sideways inside its own box rather than pushing the page
+              wider: ten columns do not fit a laptop, and the Path column at
+              the far end is the one that used to fall off. */}
+          {/* A click anywhere on a row opens it; the Open button stays for
+              the keyboard and for screen readers, since the row itself is a
+              row and not a button. The table renders its own cells, so the
+              id rides on the first cell and the click is delegated from
+              here. */}
+          <div className="overflow-x-auto [&_tbody_tr]:cursor-pointer" onClick={openRowUnderPointer}>
+            <DataTable
+              columns={columns}
+              data={rows}
+              facets={["surface", "status", "failover"]}
+              virtualize={{ rowHeight: 36, height: 640 }}
+            />
+          </div>
+
+          {rows.length === 0 && (
+            <div className="mt-4">
+              {filtered ? (
+                <NoMatch what="requests" onClear={clear} />
+              ) : (
+                <EmptyState
+                  title="Every request the gateway serves is logged here"
+                  hint="Point a client at the proxy and the first one appears within seconds, with the full attempt trail behind it."
+                  action={
+                    <Button asChild size="sm">
+                      <Link to="/connect">Get a client connected</Link>
+                    </Button>
+                  }
+                  preview={<GhostRows />}
+                />
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {loadMoreError !== null && (
