@@ -691,3 +691,52 @@ func TestOptingInClearsTheVeto(t *testing.T) {
 		t.Error("the opt-in must leave the curated rule intact")
 	}
 }
+
+func TestSweepSeedsBothVertexPublishers(t *testing.T) {
+	// Vertex registers no lister, so a probe that stopped at the listing step
+	// never reached the seeding that is the kind's only source of models.
+	for _, presetID := range []string{"vertex", "vertex-anthropic"} {
+		t.Run(presetID, func(t *testing.T) {
+			preset := Embedded()[presetID]
+			if preset.Publisher == "" {
+				t.Fatalf("preset %q declares no publisher; seeding is not under test", presetID)
+			}
+			db := discoveryDB(t)
+			if _, err := db.Write.ExecContext(context.Background(),
+				`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('v', 'vertex', ?, 0)`,
+				preset.BaseURL); err != nil {
+				t.Fatal(err)
+			}
+			src := &staticSource{ps: []provider.Provider{{
+				ID: "v", Kind: "vertex", Preset: presetID, BaseURL: preset.BaseURL,
+				Credentials: []provider.Credential{{ID: "k", Secret: "{}", Enabled: true}},
+			}}}
+			live := Doc{preset.ModelsDevID: {"seeded-model": {ContextWindow: 7, PriceKnown: true}}}
+			h := &fakeHealth{}
+			cat := NewStore(db, src)
+			NewDiscoverer(db, src, cat, h, DiscoveryOptions{
+				Metadata: func() Doc { return live },
+			}).SweepOnce(context.Background())
+
+			rows, err := db.Models(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].ModelID != "seeded-model" {
+				t.Fatalf("rows = %+v, want the seeded model", rows)
+			}
+			if rows[0].Publisher != preset.Publisher || rows[0].ContextWindow != 7 {
+				t.Errorf("row = %+v, want publisher %q and the document's context window",
+					rows[0], preset.Publisher)
+			}
+			if _, ok := cat.Snapshot().Lookup("v", "seeded-model"); !ok {
+				t.Error("the seeded model did not reach the routing snapshot")
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.signals) != 0 {
+				t.Errorf("recorded %d health signals for a kind that makes no request", len(h.signals))
+			}
+		})
+	}
+}
