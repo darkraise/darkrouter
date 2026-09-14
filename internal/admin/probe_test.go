@@ -162,6 +162,57 @@ func TestAProbeAgainstABadCredentialReportsFailureNot500(t *testing.T) {
 	}
 }
 
+func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
+	// The console deletes a just-added key the probe marks rejected. A rate
+	// limit, an outage or an unreachable host says nothing about the key, and
+	// deleting on those loses a secret the operator may not have elsewhere.
+	cases := []struct {
+		name     string
+		status   int
+		down     bool
+		rejected bool
+	}{
+		{name: "401", status: http.StatusUnauthorized, rejected: true},
+		{name: "403", status: http.StatusForbidden, rejected: true},
+		{name: "429", status: http.StatusTooManyRequests},
+		{name: "503", status: http.StatusServiceUnavailable},
+		{name: "unreachable", down: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer upstream.Close()
+			if tc.down {
+				upstream.Close()
+			}
+
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			seedProviderWithKey(t, s, cookie, token, "p1", upstream.URL)
+
+			w := do(t, s, cookie, token, "POST", "/api/providers/p1/test", "")
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			var body struct {
+				OK       bool `json:"ok"`
+				Rejected bool `json:"rejected"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.OK {
+				t.Fatalf("ok = true: %s", w.Body.String())
+			}
+			if body.Rejected != tc.rejected {
+				t.Errorf("rejected = %v, want %v: %s", body.Rejected, tc.rejected, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestASuccessfulProbeClearsTheCredentialCooldown(t *testing.T) {
 	// The whole reason the probe exists. A credential-level cooldown lives
 	// under a key with an EMPTY model, so clearing only the triples would

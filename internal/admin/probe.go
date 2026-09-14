@@ -102,8 +102,13 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		// 200 with ok:false. A rejected key is an answer, not a server error,
 		// and a 500 would make the settings screen show "something broke" for
 		// the one outcome the button exists to discover.
+		//
+		// rejected separates a refusal of the credential from a probe that
+		// could not finish — a timeout, a rate limit, an outage — so a caller
+		// deciding whether to discard the key does not discard a good one.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "probe": kind, "latency_ms": latency, "error": perr.Error(),
+			"rejected": errors.As(perr, new(rejectedCredential)),
 		})
 		return
 	}
@@ -119,6 +124,12 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "probe": kind, "latency_ms": latency, "model_count": count,
 	})
 }
+
+// rejectedCredential marks a probe failure in which the provider answered and
+// refused the credential itself.
+type rejectedCredential struct{ error }
+
+func (e rejectedCredential) Unwrap() error { return e.error }
 
 // clearCooldowns resets the ladder after a successful probe.
 //
@@ -211,7 +222,8 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 	}()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "listing", 0, errors.New("the provider rejected this credential: " + resp.Status)
+		return "listing", 0, rejectedCredential{
+			errors.New("the provider rejected this credential: " + resp.Status)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// The status alone is a poor answer when the provider said something
@@ -282,7 +294,11 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 		Region: row.Region, Authorize: az,
 	})
 	if err != nil {
-		return classifyAWSProbe(err), 0, err
+		kind := classifyAWSProbe(err)
+		if kind == "signature" {
+			err = rejectedCredential{err}
+		}
+		return kind, 0, err
 	}
 	return "listing", len(models), nil
 }
@@ -348,7 +364,8 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "permission", 0, errors.New("vertex rejected this credential: " + resp.Status)
+		return "permission", 0, rejectedCredential{
+			errors.New("vertex rejected this credential: " + resp.Status)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "reachability", 0, errors.New("vertex returned " + resp.Status)
@@ -404,8 +421,8 @@ func (s *Server) probeOAuth(ctx context.Context, row store.ProviderRow,
 	}
 	if err := az(ctx, req); err != nil {
 		if errors.Is(err, auth.ErrNeedsReconnect) {
-			return "refresh", 0, fmt.Errorf(
-				"this account must be reconnected: the provider refused the refresh")
+			return "refresh", 0, rejectedCredential{fmt.Errorf(
+				"this account must be reconnected: the provider refused the refresh")}
 		}
 		return "refresh", 0, err
 	}

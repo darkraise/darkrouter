@@ -25,6 +25,7 @@ type probeReply struct {
 	ModelCount int    `json:"model_count"`
 	LatencyMs  int64  `json:"latency_ms"`
 	Error      string `json:"error"`
+	Rejected   bool   `json:"rejected"`
 }
 
 func probeProvider(t *testing.T, s *Server, cookie *http.Cookie, token, id string) probeReply {
@@ -165,6 +166,21 @@ func TestSigV4ProbeNamesAPermissionFailure(t *testing.T) {
 	}
 }
 
+func TestSigV4ProbeMarksARefusedSignatureRejected(t *testing.T) {
+	aws, srv := newFakeAWS(t)
+	aws.status = http.StatusUnauthorized
+	s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+	id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+	got := probeProvider(t, s, cookie, token, id)
+	if got.OK || got.Probe != "signature" {
+		t.Fatalf("ok = %v, probe = %q, want a signature failure", got.OK, got.Probe)
+	}
+	if !got.Rejected {
+		t.Error("a refused signature is a rejected credential")
+	}
+}
+
 func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 	// Signing for the wrong region is a 403 that reads as a bad key.
 	_, srv := newFakeAWS(t)
@@ -222,6 +238,9 @@ func TestOAuthProbeReportsAnExpiredGrant(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(got.Error), "reconnect") {
 		t.Errorf("the operator must be told to reconnect: %q", got.Error)
+	}
+	if !got.Rejected {
+		t.Error("a refused refresh is a rejected credential")
 	}
 }
 

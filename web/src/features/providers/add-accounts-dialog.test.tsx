@@ -18,7 +18,12 @@ function mount(ui: React.ReactNode) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
-function stub(presets: Preset[], providers: Provider[] = [], probeOk = true) {
+function stub(
+  presets: Preset[],
+  providers: Provider[] = [],
+  probeOk = true,
+  rejected = !probeOk,
+) {
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), {
@@ -31,7 +36,13 @@ function stub(presets: Preset[], providers: Provider[] = [], probeOk = true) {
     }
     if (url === "/api/providers") return json({ id: "groq" }, 201)
     if (String(url).includes("/test")) {
-      return json({ ok: probeOk, probe: "models", latency_ms: 12, error: probeOk ? "" : "401" })
+      return json({
+        ok: probeOk,
+        probe: "models",
+        latency_ms: 12,
+        error: probeOk ? "" : rejected ? "401" : "the provider returned 503 Service Unavailable",
+        rejected: probeOk ? undefined : rejected,
+      })
     }
     if (String(url).endsWith("/keys")) return json({ id: "cred-1", label: "x" }, 201)
     return json({})
@@ -188,6 +199,32 @@ describe("the wizard", () => {
         "/api/providers/groq/keys/cred-1",
       ])
     })
+  })
+
+  it("keeps a key whose check could not complete", async () => {
+    // A rate limit or an outage says nothing about the key, and deleting it
+    // would lose a secret the operator may not have anywhere else.
+    const fetchMock = stub(
+      [preset({ id: "groq", name: "Groq" })],
+      [provider("groq", [cred("k1")])],
+      false,
+      false,
+    )
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-good")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/test"))).toBe(true),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /adding/i })).not.toBeInTheDocument(),
+    )
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "DELETE"),
+    ).toHaveLength(0)
   })
 
   it("keeps every key when the check is turned off", async () => {
