@@ -227,6 +227,57 @@ describe("the wizard", () => {
     ).toHaveLength(0)
   })
 
+  it("stays open with the form and the reason when nothing could be added", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys")) {
+        return new Response(JSON.stringify({ error: "no keyring" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    const onOpenChange = vi.fn()
+    mount(<AddAccountsDialog open onOpenChange={onOpenChange} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-kept")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    expect(await screen.findByText(/no keyring/i)).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByLabelText(/api key/i)).toHaveValue("sk-kept")
+  })
+
+  it("keeps only the pasted lines that did not make it for another try", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) => {
+      const body = (init as RequestInit)?.body
+      if (String(url).endsWith("/keys") && String(body).includes("sk-bbb")) {
+        return new Response(JSON.stringify({ error: "duplicate label" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    const onOpenChange = vi.fn()
+    mount(<AddAccountsDialog open onOpenChange={onOpenChange} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.click(screen.getByRole("checkbox", { name: /check every key/i }))
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nspare|sk-bbb")
+    await userEvent.click(screen.getByRole("button", { name: /add 2 credentials/i }))
+
+    expect(await screen.findByText(/duplicate label/i)).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByLabelText(/one per line/i)).toHaveValue("spare|sk-bbb")
+  })
+
   it("keeps every key when the check is turned off", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])], false)
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)

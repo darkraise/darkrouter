@@ -32,6 +32,8 @@ import {
   countAccounts,
   progressLabel,
   reportAdded,
+  retryDraft,
+  type AddFailure,
   type AddProgress,
 } from "./accounts"
 import { ProviderIcon } from "./provider-icon"
@@ -267,6 +269,9 @@ export function AddAccountsDialog({
   const [selected, setSelected] = useState<Preset | null>(null)
   const [accounts, setAccounts] = useState<AccountDraft>(() => draftFor(provider))
   const [progress, setProgress] = useState<AddProgress | null>(null)
+  // What the last run could not store, and why. Held in the dialog as well as
+  // toasted, because the form stays open for a retry and a toast does not.
+  const [notAdded, setNotAdded] = useState<AddFailure[]>([])
   const [wasOpen, setWasOpen] = useState(open)
 
   // The row the free-models box reads its setting from. A preset usually has
@@ -294,6 +299,7 @@ export function AddAccountsDialog({
     setSelected(null)
     setAccounts(draftFor(settled))
     setProgress(null)
+    setNotAdded([])
     setQ("")
   }
 
@@ -312,6 +318,7 @@ export function AddAccountsDialog({
     mutationFn: async () => {
       if (!chosen) throw new Error("no provider chosen")
       setProgress(null)
+      setNotAdded([])
       // The provider row is created only when it does not exist yet, and from
       // the preset alone — id, kind, base URL and auth style all come from the
       // release rather than from anything typed here.
@@ -338,6 +345,14 @@ export function AddAccountsDialog({
     invalidates: [keys.providers, keys.health, keys.overview, keys.models, keys.discovery],
     onSuccess: (result) => {
       reportAdded(result)
+      if (result.retry.length > 0) {
+        // Closing would throw away the keys that did not go in along with the
+        // reason, and the operator may have them nowhere else.
+        setProgress(null)
+        setNotAdded(result.retry)
+        setAccounts((a) => retryDraft(a, result.retry, needsAccount(chosen?.base_url)))
+        return
+      }
       const id = chosen?.id
       onOpenChange(false)
       reset()
@@ -477,6 +492,21 @@ export function AddAccountsDialog({
                 </span>
               </div>
               <Progress value={progress.done} max={progress.total} />
+            </div>
+          )}
+
+          {notAdded.length > 0 && (
+            <div role="alert" className="flex flex-col gap-1 text-sm text-[hsl(var(--destructive))]">
+              <span className="font-medium">
+                Not added — still in the form to fix and send again
+              </span>
+              <ul className="flex flex-col gap-0.5">
+                {notAdded.map((f, i) => (
+                  <li key={i}>
+                    <span className="font-mono">{f.label}</span>: {f.error}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

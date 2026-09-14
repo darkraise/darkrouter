@@ -1,10 +1,17 @@
 import { toast } from "darkraise-ui"
 import { api } from "../../lib/api"
-import { type AccountDraft, draftAccounts } from "./account-fields"
+import { type AccountDraft, type ParsedAccount, draftAccounts } from "./account-fields"
 import type { ProbeResult } from "../../lib/api-types"
 
 export type AddFailure = { label: string; error: string }
-export type AddResult = { added: number; failed: AddFailure[]; rejected: AddFailure[] }
+export type AddResult = {
+  added: number
+  failed: AddFailure[]
+  rejected: AddFailure[]
+  /** The accounts that were not stored and why, so the operator can fix and
+   *  resend them without resending the ones that were. */
+  retry: (AddFailure & { account: ParsedAccount })[]
+}
 
 /** Where a run has got to. `done` counts accounts finished, so it is the
  *  index of the one named — the bar and the sentence never disagree. */
@@ -58,6 +65,7 @@ export async function addCredentials(
 ): Promise<AddResult> {
   const failed: AddFailure[] = []
   const rejected: AddFailure[] = []
+  const retry: AddResult["retry"] = []
   let added = 0
 
   const items = draftAccounts(draft, needsAccount)
@@ -69,7 +77,9 @@ export async function addCredentials(
     try {
       created = await api.post<{ id: string }>(`/api/providers/${providerId}/keys`, item)
     } catch (err) {
-      failed.push({ label: item.label, error: err instanceof Error ? err.message : "failed" })
+      const failure = { label: item.label, error: err instanceof Error ? err.message : "failed" }
+      failed.push(failure)
+      retry.push({ ...failure, account: item })
       continue
     }
 
@@ -101,7 +111,9 @@ export async function addCredentials(
       // The provider answered and refused it. Keeping it would leave a key
       // that fails every request it is ever chosen for.
       await api.del(`/api/providers/${providerId}/keys/${created.id}`)
-      rejected.push({ label: item.label, error: probe.error || "the provider refused it" })
+      const refusal = { label: item.label, error: probe.error || "the provider refused it" }
+      rejected.push(refusal)
+      retry.push({ ...refusal, account: item })
     } catch (err) {
       // The probe itself could not run. The key is kept: an unreachable
       // gateway is not evidence the key is bad, and deleting it would lose a
@@ -113,7 +125,26 @@ export async function addCredentials(
       })
     }
   }
-  return { added, failed, rejected }
+  return { added, failed, rejected, retry }
+}
+
+/**
+ * The draft to leave in the form after a run that did not store everything:
+ * only the accounts still to add, so sending it again cannot duplicate the
+ * ones that went in. A single credential is already exactly that.
+ */
+export function retryDraft(
+  draft: AccountDraft,
+  retry: AddResult["retry"],
+  needsAccount: boolean,
+): AccountDraft {
+  if (draft.mode === "single") return draft
+  const bulk = retry
+    .map(({ account: a }) =>
+      needsAccount ? `${a.label}|${a.account_id ?? ""}|${a.secret}` : `${a.label}|${a.secret}`,
+    )
+    .join("\n")
+  return { ...draft, bulk }
 }
 
 export function reportAdded(result: AddResult) {
@@ -122,11 +153,12 @@ export function reportAdded(result: AddResult) {
     toast.success(added === 1 ? "Credential added" : `${added} credentials added`)
     return
   }
-  // Naming the ones that did not make it, because "18 of 20" without saying
-  // which two leaves the operator to diff the list by hand.
-  const names = (list: AddFailure[]) => list.map((f) => f.label).join(", ")
-  if (rejected.length > 0 && added === 0 && failed.length === 0) {
-    toast.error(`No credential kept. ${names(rejected)} — ${rejected[0]?.error}`)
+  // Naming the ones that did not make it, and why, because "18 of 20" without
+  // saying which two leaves the operator to diff the list by hand, and a name
+  // without its reason leaves them guessing at the fix.
+  const names = (list: AddFailure[]) => list.map((f) => `${f.label}: ${f.error}`).join("; ")
+  if (added === 0) {
+    toast.error(`No credential kept. ${names([...rejected, ...failed])}`)
     return
   }
   const parts = [`${added} added`]
