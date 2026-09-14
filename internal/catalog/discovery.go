@@ -263,25 +263,28 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	}
 	p.BaseURL = base
 
-	pr, err := ProbeForKind(p, preset, preset.Auth.Secret(cred.Secret), d.opts.Listers)
-	if err != nil {
-		// An undiscoverable kind is a permanent, known fact rather than a
-		// failure. Counting it would retire Vertex's catalogue on the third
-		// tick and cool its credential for a call it never made.
-		return
-	}
-
 	now := time.Now().UTC()
 
 	// A kind with no listing endpoint is seeded from models.dev rather than
 	// probed. Spec §4.3: no credential is spent and no request is made, which
 	// is what "discovery is not pretended" means in practice. The credential
 	// probe confirms reachability separately, on the operator's schedule.
+	//
+	// Ahead of the listing probe, because that probe refuses exactly the kinds
+	// seeding exists for.
 	if seeded := SeedFromPreset(preset, d.doc()); len(seeded) > 0 {
 		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset))
 		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
 			slog.Warn("discovery: seeding failed", "provider", p.ID, "err", err)
 		}
+		return
+	}
+
+	pr, err := ProbeForKind(p, preset, preset.Auth.Secret(cred.Secret), d.opts.Listers)
+	if err != nil {
+		// An undiscoverable kind is a permanent, known fact rather than a
+		// failure. Counting it would retire Vertex's catalogue on the third
+		// tick and cool its credential for a call it never made.
 		return
 	}
 
