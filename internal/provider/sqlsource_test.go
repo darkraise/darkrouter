@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -363,5 +365,55 @@ func TestReloadCarriesTheUnsanctionedOptIn(t *testing.T) {
 	}
 	if !got[0].AllowUnsanctionedFree {
 		t.Error("the opt-in did not reach the provider set")
+	}
+}
+
+// A reload reads the database and then publishes, and admin mutations each
+// reload after committing. Two of them interleaving let the one that read
+// before a revocation publish after the one that read it, putting a disabled
+// credential back into routing until some later mutation reloaded again.
+func TestAReloadThatReadEarlierCannotPublishLast(t *testing.T) {
+	db, key := newTestDB(t)
+	ctx := context.Background()
+	keyID := seed(t, db, key, "p", 1, true, "m")
+
+	src := NewSQLSource(db, key)
+	stalled, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	src.beforePublish = func() {
+		if calls.Add(1) == 1 {
+			close(stalled)
+			<-release
+		}
+	}
+
+	first := make(chan error, 1)
+	go func() { first <- src.Reload(ctx) }()
+	<-stalled
+
+	if _, err := db.SetCredentialEnabled(ctx, "p", keyID, false); err != nil {
+		t.Fatal(err)
+	}
+	second := make(chan error, 1)
+	go func() { second <- src.Reload(ctx) }()
+
+	// Given the chance to finish ahead of the stalled reload. A serialized
+	// reload cannot, so the wait simply runs out.
+	select {
+	case err := <-second:
+		second <- err
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	for _, ch := range []chan error{first, second} {
+		if err := <-ch; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ps, _ := src.Providers(ctx)
+	if len(ps) != 0 {
+		t.Fatalf("providers = %+v; the reload that read the revoked credential "+
+			"was overwritten by one that read before the revocation", ps)
 	}
 }
