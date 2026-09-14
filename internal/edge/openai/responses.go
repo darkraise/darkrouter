@@ -158,8 +158,16 @@ func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthro
 	if w.Reasoning != nil && w.Reasoning.Effort != "" {
 		req.Reasoning = &ir.Reasoning{Effort: w.Reasoning.Effort}
 	}
-	if f := w.Text; f != nil && f.Format != nil && f.Format.Type == "json_schema" {
-		req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: f.Format.Schema}
+	if f := w.Text; f != nil && f.Format != nil {
+		switch f.Format.Type {
+		case "json_object":
+			req.ResponseFormat = &ir.ResponseFormat{Type: "json_object"}
+		case "json_schema":
+			req.ResponseFormat = &ir.ResponseFormat{
+				Type: "json_schema", Schema: f.Format.Schema,
+				Name: f.Format.Name, Strict: f.Format.Strict,
+			}
+		}
 	}
 	if err := applyResponsesTools(req, w.Tools, w.ToolChoice); err != nil {
 		return nil, nil, nil, err

@@ -446,3 +446,25 @@ func TestWriteResponsesEmitsAnEmptyOutputArrayNotNull(t *testing.T) {
 		t.Errorf("body = %s", w.Body.String())
 	}
 }
+
+func TestParseResponsesKeepsTheSchemaNameAndStrictness(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi",
+	  "text":{"format":{"type":"json_schema","name":"answer","strict":true,"schema":{"type":"object"}}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := req.ResponseFormat
+	if rf == nil || rf.Name != "answer" || rf.Strict == nil || !*rf.Strict {
+		t.Errorf("response format = %+v; strict adherence the client asked for was dropped", rf)
+	}
+}
+
+func TestParseResponsesReadsJSONObjectMode(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi","text":{"format":{"type":"json_object"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" {
+		t.Errorf("response format = %+v", req.ResponseFormat)
+	}
+}
