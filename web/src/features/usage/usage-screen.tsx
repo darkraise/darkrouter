@@ -15,6 +15,7 @@ import {
 import { useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import { count, money } from "../../lib/format"
+import { utcDays } from "../../lib/time"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
 import { EmptyState, GhostChart } from "../shell/empty-state"
 import { LoadError, LoadingRows } from "../shell/screen-state"
@@ -108,12 +109,22 @@ export function stackByDay(
   rows: UsageRow[],
   keys: string[],
   value: (r: UsageRow) => number | null,
+  days: string[],
 ): Record<string, number | string | null>[] {
   const byDay = new Map<string, Record<string, number | string | null>>()
   // Which keys have had at least one row on a given day -- distinct from the
   // zero-fill placeholder, which marks "no row at all" rather than "a row
   // whose value we don't know yet".
   const seen = new Map<string, Set<string>>()
+  // A day with no rows at all is a zero for every key: nothing ran, so
+  // nothing was spent either. The x-axis is categorical, and a day left out
+  // closes the gap between its neighbours instead of drawing one.
+  for (const d of days) {
+    const day: Record<string, number | string | null> = { day: d }
+    for (const k of keys) day[k] = 0
+    byDay.set(d, day)
+    seen.set(d, new Set())
+  }
 
   for (const r of rows) {
     if (r.key === undefined || !keys.includes(r.key)) continue
@@ -280,6 +291,7 @@ export function UsageScreen() {
   const days = range.days
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
+  const windowDays = usage.data ? utcDays(usage.data.first_day, usage.data.last_day) : []
   const rows = summarise(usageRows, dimension)
   const series = chartSeries(usageRows, dimension)
   const legend = dimension !== "day"
@@ -357,7 +369,7 @@ export function UsageScreen() {
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Requests</h2>
             <StackedAreaChart
-              data={stackByDay(series.rows, series.keys, (r) => r.requests)}
+              data={stackByDay(series.rows, series.keys, (r) => r.requests, windowDays)}
               keys={series.keys}
               labels={series.keys.map(keyLabel)}
               legend={legend}
@@ -367,7 +379,7 @@ export function UsageScreen() {
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Tokens</h2>
             <StackedAreaChart
-              data={stackByDay(series.rows, series.keys, (r) => r.tokens_in + r.tokens_out)}
+              data={stackByDay(series.rows, series.keys, (r) => r.tokens_in + r.tokens_out, windowDays)}
               keys={series.keys}
               labels={series.keys.map(keyLabel)}
               legend={legend}
@@ -377,7 +389,7 @@ export function UsageScreen() {
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Cost</h2>
             <CostLineChart
-              data={stackByDay(series.rows, series.keys, (r) => r.cost_micros)}
+              data={stackByDay(series.rows, series.keys, (r) => r.cost_micros, windowDays)}
               keys={series.keys}
               labels={series.keys.map(keyLabel)}
               formatValue={costTick}

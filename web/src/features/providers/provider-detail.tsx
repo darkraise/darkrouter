@@ -24,6 +24,7 @@ import {
   useUsage,
 } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
+import { utcDays } from "../../lib/time"
 import { ConfirmButton } from "../shell/confirm-button"
 import { EmptyState, GhostRows } from "../shell/empty-state"
 import { LoadError } from "../shell/screen-state"
@@ -370,7 +371,11 @@ export function ProviderDetail() {
   const accountsSummary = accountSummary(provider, cooling)
   const models = modelsFor(catalog.data?.models ?? [], provider.id)
   const caps = capabilityCount(models)
-  const series = requestsByDay(usage.data?.days ?? [], provider.id)
+  const series = requestsByDay(
+    usage.data?.days ?? [],
+    provider.id,
+    usage.data ? utcDays(usage.data.first_day, usage.data.last_day) : [],
+  )
   const requests = totalRequests(usage.data?.days ?? [], provider.id)
   const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === provider.id)
   const discovered = discoveryFraction(discoveryRow)

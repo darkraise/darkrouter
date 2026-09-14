@@ -41,6 +41,10 @@ export type UsageDimension = "provider" | "model" | "alias"
 export type UsageResponse = {
   days: UsageRow[]
   priced: boolean
+  /** The UTC calendar days the window covers, inclusive. `days` holds only
+   *  the ones that had traffic. */
+  first_day: string
+  last_day: string
   group_by?: UsageDimension
 }
 
