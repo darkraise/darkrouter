@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 
@@ -106,7 +107,11 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 		StopReason string            `json:"stop_reason"`
 		Usage      wireUsage         `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+	body, err := adapter.ReadResponse(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&w); err != nil {
 		return nil, err
 	}
 
