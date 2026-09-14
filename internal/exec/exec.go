@@ -552,6 +552,15 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		built, buildWarns, err := op.Build(ctx, tgt, ac.Adapter)
 		ac.Warns = append(ac.Warns, buildWarns...)
 		if err != nil {
+			// An adapter that names the error type is reporting something
+			// about the request itself, which the client needs in order to
+			// fix it; anything else is the gateway's own failure.
+			var ie *ir.Error
+			if errors.As(err, &ie) && ie.Type != "" {
+				res := failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ie.Type)
+				res.Err = ie
+				return res
+			}
 			return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
 		}
 		hr = built

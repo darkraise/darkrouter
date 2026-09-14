@@ -74,8 +74,11 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 	var warns []ir.Warning
 	body := map[string]any{}
 
-	contents, w := f.renderContents(ctx, req)
+	contents, w, err := f.renderContents(ctx, req)
 	warns = append(warns, w...)
+	if err != nil {
+		return nil, warns, err
+	}
 	body["contents"] = contents
 
 	sys, w := xlate.CollectSystem(req, targetName)

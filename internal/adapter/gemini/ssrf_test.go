@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -22,7 +21,7 @@ func TestPartRefusesAnAddressOffThePublicInternet(t *testing.T) {
 	}))
 	defer up.Close()
 
-	got, warns := NewFetcher().part(context.Background(),
+	got, warns := onePart(t, NewFetcher(),
 		&ir.Media{URL: up.URL + "/a.png"}, "image")
 	if got != nil {
 		t.Fatalf("part = %v; a loopback address must not be fetched", got)
