@@ -118,6 +118,15 @@ describe("running one chat turn", () => {
     expect(result.current.messages).toHaveLength(0)
   })
 
+  it("refuses to send under a schema it could not read", async () => {
+    yields(frame("x"))
+    const config = { ...emptyConfig(), model: "m", dialect: "openai" as const, schemaRaw: "{nope" }
+    const { result } = renderHook(() => useChatRun(config, () => {}))
+    await act(() => result.current.send("hi"))
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(result.current.messages).toHaveLength(0)
+  })
+
   it("keeps the half answer when the operator stops", async () => {
     // Stopping is a decision, not a failure: the tokens were spent and the
     // partial answer is what they bought.

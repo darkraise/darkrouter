@@ -3,7 +3,7 @@ import { Button, Textarea } from "darkraise-ui"
 import { Plus } from "lucide-react"
 import { ConfigPane } from "./config-pane/config-pane"
 import { stream, type StreamStart } from "../../lib/api"
-import { chatBody } from "./lib/request"
+import { chatBody, requestProblem } from "./lib/request"
 import { drainSSE } from "./lib/stream"
 import { traceWhenWritten } from "./metrics"
 import { routeFromTrace } from "./message"
@@ -121,7 +121,9 @@ export function Compare({
   const busy = columns.some((c) => c.status === "streaming")
   // Gated on busy: a second run starting on top of a live one would append
   // two runs' output into the same columns and time both at once.
-  const canRun = !busy && prompt !== "" && columns.every((c) => c.model !== "")
+  const problem = requestProblem(config)
+  const canRun =
+    !busy && prompt !== "" && columns.every((c) => c.model !== "") && problem === undefined
 
   const updateColumn = (id: string, fn: (c: Column) => Column) =>
     setColumns((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
@@ -214,6 +216,11 @@ export function Compare({
             <span className="text-sm text-[hsl(var(--legend))]">
               Four is the most that stays readable side by side.
             </span>
+          ) : null}
+          {/* Beside Run, which it is holding: the pane that shows the same
+              message can be scrolled out of view. */}
+          {problem !== undefined ? (
+            <span className="text-sm text-[hsl(var(--destructive))]">{problem}</span>
           ) : null}
           <Button className="ml-auto" onClick={run} disabled={!canRun}>
             {busy ? "Running…" : "Run"}
