@@ -423,6 +423,28 @@ func TestConsoleRequestsAreSeparableFromClientTraffic(t *testing.T) {
 	}
 }
 
+func TestAProviderTestThatFailedEveryAttemptIsInItsLog(t *testing.T) {
+	// Nothing served, so the request names no final provider; the provider
+	// test log still has to show the run that failed on it.
+	s, db := testServerFull(t)
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
+		ID: "01FAILEDTEST", TS: time.Now(), Dialect: "openai", Surface: "llm",
+		RequestedModel: "m", Status: "error", Source: store.SourceConsole,
+		Attempts: []store.AttemptRecord{
+			{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider"},
+		},
+	}})
+	cookie, token := login(t, s)
+	res := do(t, s, cookie, token, "GET", "/api/requests?attempted_provider=groq&source=console", "")
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "01FAILEDTEST") {
+		t.Errorf("status %d, body %s: the failed test is missing", res.Code, res.Body.String())
+	}
+	res = do(t, s, cookie, token, "GET", "/api/requests?attempted_provider=nebius", "")
+	if strings.Contains(res.Body.String(), "01FAILEDTEST") {
+		t.Errorf("a provider never attempted matched: %s", res.Body.String())
+	}
+}
+
 func TestARequestWithNoSourceReadsAsProxy(t *testing.T) {
 	// Every row written before the column existed came through the front door.
 	// Backfilling them as anything else would invent a fact about history.
