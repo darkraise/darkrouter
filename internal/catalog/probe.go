@@ -162,37 +162,43 @@ func BuildListRequest(ctx context.Context, p Probe) (*http.Request, error) {
 // sent as both a header and a query parameter is rejected by some upstreams and
 // logged by more of them.
 func applyAuth(r *http.Request, p Probe) {
-	if p.APIKey == "" || p.AuthStyle == "none" {
+	ApplyStaticAuth(r, p.AuthStyle, p.AuthHeader, p.AuthQueryParam, p.APIKey)
+}
+
+// ApplyStaticAuth writes key where a static auth style puts it: the header
+// or query parameter the preset names, or the style's default. The executor
+// sends its requests through this too, so a listing and a completion to the
+// same provider cannot disagree about how it authenticates.
+func ApplyStaticAuth(r *http.Request, style, header, queryParam, key string) {
+	if key == "" || style == "none" {
 		return
 	}
-	switch p.AuthStyle {
+	switch style {
 	// optional and anonymous are bearer with a different rule about when there
 	// is a key at all: one may have none, the other ships its own. By the time
 	// a key has been resolved they are written the same way, and falling
 	// through to the default instead sent the listing request unauthenticated
 	// while the caller believed it had been credentialled.
 	case "bearer", "optional", "anonymous":
-		r.Header.Set("Authorization", "Bearer "+p.APIKey)
+		r.Header.Set("Authorization", "Bearer "+key)
 	case "x-api-key":
-		r.Header.Set("x-api-key", p.APIKey)
+		r.Header.Set("x-api-key", key)
 	case "api-key":
-		header := p.AuthHeader
 		if header == "" {
 			header = "api-key"
 		}
-		r.Header.Set(header, p.APIKey)
+		r.Header.Set(header, key)
 	case "query-param":
-		param := p.AuthQueryParam
-		if param == "" {
-			param = "key"
+		if queryParam == "" {
+			queryParam = "key"
 		}
 		q := r.URL.Query()
-		q.Set(param, p.APIKey)
+		q.Set(queryParam, key)
 		r.URL.RawQuery = q.Encode()
 	default:
-		// sigv4, gcp-sa and oauth are phase 8's. ProbeFor already refused
-		// their kinds, so reaching here means an unsigned request that will be
-		// rejected — which is the honest outcome, not a silent bearer guess.
+		// sigv4, gcp-sa and oauth are served by their own strategies, never
+		// here. Reaching this means an unsigned request that will be rejected
+		// — which is the honest outcome, not a silent bearer guess.
 	}
 }
 
