@@ -24,6 +24,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		reader := sse.NewReader(r, maxLine)
 		var (
 			started    bool
+			ids        *callIDs
 			textIdx    = -1
 			thoughtIdx = -1
 			nextIdx    int
@@ -91,6 +92,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 
 			if !started {
 				started = true
+				ids = newCallIDs(chunk.ResponseID)
 				if !yield(ir.StreamEvent{
 					Type: ir.EventMessageStart, ID: chunk.ResponseID, Model: chunk.ModelVersion,
 				}, nil) {
@@ -121,7 +123,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					nextIdx++
 					d := &ir.Delta{
 						Type:   ir.BlockToolUse,
-						ToolID: p.FunctionCall.ID, ToolName: p.FunctionCall.Name,
+						ToolID: ids.next(p.FunctionCall.ID), ToolName: p.FunctionCall.Name,
 					}
 					if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: idx, Delta: d}, nil) {
 						return

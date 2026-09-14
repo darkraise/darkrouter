@@ -14,6 +14,7 @@
                 "args": {
                   "city": "Oslo"
                 },
+                "id": "call_r-1_1",
                 "name": "lookup"
               }
             }

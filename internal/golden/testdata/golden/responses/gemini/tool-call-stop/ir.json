@@ -22,7 +22,7 @@
       "Media": null,
       "Thinking": null,
       "ToolUse": {
-        "ID": "",
+        "ID": "call_r-1_1",
         "Name": "lookup",
         "Input": {
           "city": "Oslo"
