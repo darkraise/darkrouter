@@ -230,3 +230,42 @@ func TestOverridesCarryTheResaleDeclaration(t *testing.T) {
 		t.Error("the declaration did not survive the override merge")
 	}
 }
+
+// An override that names a field replaces it even with its zero value: vertex
+// declares base_url "" so the adapter builds the project-scoped endpoint, and
+// quirks [] is how a correction removes quirks carried from the last run.
+func TestOverridesApplyExplicitZeroValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "overrides.yaml")
+	if err := os.WriteFile(path, []byte(`
+vertex:
+  base_url: ""
+  quirks: []
+  free_tier: false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps := catalog.Presets{"vertex": {
+		Name:     "Google Vertex AI",
+		Kind:     "vertex",
+		BaseURL:  "https://us-central1-aiplatform.googleapis.com/v1/projects",
+		Website:  "https://cloud.google.com/vertex-ai",
+		Quirks:   []string{"requires-max-tokens"},
+		FreeTier: true,
+	}}
+	if _, err := applyOverrides(ps, path); err != nil {
+		t.Fatal(err)
+	}
+	got := ps["vertex"]
+	if got.BaseURL != "" {
+		t.Errorf("base_url = %q, want the explicit empty override", got.BaseURL)
+	}
+	if len(got.Quirks) != 0 {
+		t.Errorf("quirks = %v, want the explicit empty override", got.Quirks)
+	}
+	if got.FreeTier {
+		t.Error("free_tier = true, want the explicit false override")
+	}
+	if got.Website != "https://cloud.google.com/vertex-ai" {
+		t.Errorf("website = %q, an undeclared field must keep its generated value", got.Website)
+	}
+}
