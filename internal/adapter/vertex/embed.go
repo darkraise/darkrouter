@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -17,7 +18,8 @@ const maxEmbeddingBytes = 32 << 20
 
 // BuildEmbedding renders the Google publisher's :predict request. Vertex
 // serves text embeddings through the generic prediction route rather than
-// the Gemini API's batchEmbedContents, and takes every input in one call.
+// the Gemini API's batchEmbedContents. Each call carries one sub-batch the
+// executor split by EmbeddingBatches.
 func (a *Adapter) BuildEmbedding(ctx context.Context, t *adapter.Target,
 	req *ir.EmbeddingRequest) (*http.Request, []ir.Warning, error) {
 
@@ -113,4 +115,43 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 	return out, nil
 }
 
-var _ adapter.Embedder = (*Adapter)(nil)
+// Vertex's per-request embedding limits, from its text-embedding docs: 250
+// input texts and 20,000 input tokens, past which :predict answers 400.
+const (
+	maxEmbeddingInputs = 250
+	maxEmbeddingTokens = 20000
+)
+
+// EmbeddingBatches splits a request to fit one :predict call each.
+//
+// Tokens are bounded by bytes because Darkrouter has no tokenizer for Google's
+// embedding models. A subword tokenizer with byte fallback emits at most one
+// token per UTF-8 byte plus a leading marker, so the bound over-splits rather
+// than under-splits: over-splitting costs a request, under-splitting the batch.
+func (a *Adapter) EmbeddingBatches(t *adapter.Target, req *ir.EmbeddingRequest) []int {
+	limit := maxEmbeddingInputs
+	if strings.Contains(t.Model, "gemini-embedding-001") {
+		// This model takes a single input text per request.
+		limit = 1
+	}
+	var out []int
+	n, tokens := 0, 0
+	for _, text := range req.Input {
+		cost := len(text) + 1
+		if n > 0 && (n == limit || tokens+cost > maxEmbeddingTokens) {
+			out = append(out, n)
+			n, tokens = 0, 0
+		}
+		n++
+		tokens += cost
+	}
+	if n > 0 {
+		out = append(out, n)
+	}
+	return out
+}
+
+var (
+	_ adapter.Embedder         = (*Adapter)(nil)
+	_ adapter.EmbeddingBatcher = (*Adapter)(nil)
+)

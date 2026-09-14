@@ -7,6 +7,14 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
+// EmbeddingBatcher is implemented by an Embedder whose upstream caps what one
+// request may carry. EmbeddingBatches returns the input count of each
+// consecutive sub-batch, in order and summing to req.InputCount(); the executor
+// sends each as its own request and joins the vectors. Nil means one request.
+type EmbeddingBatcher interface {
+	EmbeddingBatches(t *Target, req *ir.EmbeddingRequest) []int
+}
+
 // ValidateEmbeddings rejects a parsed batch that decoded cleanly but cannot be
 // a real answer: an empty or undecodable vector, vectors of differing
 // dimensions, or indices that are not each position of the batch exactly once.

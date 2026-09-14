@@ -523,6 +523,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		return failBefore(adapter.OutcomeRetryableCredential, credErr,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
+	ac.authorize = authorizer
 	// The endpoint is per credential for a provider whose base URL carries an
 	// account, so this resolves after the credential is chosen and fails the
 	// same way: the next credential may well carry the account this one lacks.
