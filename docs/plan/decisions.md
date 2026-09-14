@@ -390,6 +390,16 @@ The claim that conversations were the first place prompt text was retained at
 rest was false — a preset's system prompt had been stored since the feature
 shipped.
 
+**The console's Content-Security-Policy admits images from any HTTPS origin
+and blob media.** The playground shows what a model returned: image
+generation can answer with a hosted URL instead of base64, and speech plays
+from an object URL. Under `img-src 'self' data:` the first was blocked, and
+with no `media-src` the fallback to `default-src 'self'` blocked the second in
+Chromium. Only those two directives were loosened. The cost is that a model
+response can make the console fetch an image from any HTTPS origin when it is
+displayed, which tells that origin the operator's address and when they
+looked. Scripts, styles, fonts and connections stay as strict as before.
+
 **The destructive purge stays leftmost of the settings header actions.** Two
 reviewers independently defended it: the rightmost slot is the habitual
 primary target, so leftmost keeps a destructive action away from muscle
