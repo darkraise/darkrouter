@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -165,7 +166,9 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if len(req.Tools) > 0 {
 		tools, w := renderTools(req.Tools, cb)
 		warns = append(warns, w...)
-		body["tools"] = tools
+		if len(tools) > 0 {
+			body["tools"] = tools
+		}
 	}
 	toolChoice := req.ToolChoice
 	if toolChoice != nil && traits.noForcedToolChoice && (toolChoice.Mode == "any" || toolChoice.Mode == "tool") {
@@ -403,6 +406,10 @@ func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
 	var warns []ir.Warning
 	out := make([]any, 0, len(tools))
 	for _, t := range tools {
+		if t.BuiltIn() {
+			warns = append(warns, builtInDropped(t)...)
+			continue
+		}
 		m := map[string]any{}
 		if _, typed := t.Extra["type"]; !typed {
 			schema := t.Schema
@@ -426,6 +433,24 @@ func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
 		out = append(out, m)
 	}
 	return out, warns
+}
+
+// builtInDropped reports another provider's built-in tool, such as Gemini's
+// googleSearch. It has no name and only its own dialect can declare it.
+func builtInDropped(t ir.Tool) []ir.Warning {
+	keys := make([]string, 0, len(t.Extra))
+	for k := range t.Extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	warns := make([]ir.Warning, 0, len(keys))
+	for _, k := range keys {
+		warns = append(warns, ir.Warning{
+			Field: "tools[]." + k, Target: targetName,
+			Reason: "another provider's built-in tool has no Anthropic equivalent; dropped",
+		})
+	}
+	return warns
 }
 
 // renderToolChoice maps the IR's four modes. disable_parallel_tool_use lives
