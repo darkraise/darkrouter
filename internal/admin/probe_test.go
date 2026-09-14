@@ -319,3 +319,25 @@ func TestASuccessfulProbeClearsTripleCooldownsToo(t *testing.T) {
 		}
 	}
 }
+
+// Viewing the providers screen reads the breaker. It must not claim the
+// credential's half-open probe: nothing on a read path ever records an
+// outcome, so the credential would stay shut to every request.
+func TestListingProvidersDoesNotClaimTheProbe(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p1", "http://127.0.0.1:1")
+
+	br := s.deps.Breaker
+	br.Configure(func() (int, time.Duration) { return 3, 10 * time.Millisecond })
+	credKey := health.Key{ProviderID: "p1", KeyID: keyID}
+	br.Record(credKey, health.Signal{Outcome: adapter.OutcomeRetryableCredential})
+	time.Sleep(30 * time.Millisecond)
+
+	if w := do(t, s, cookie, token, "GET", "/api/providers", ""); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !br.Available(credKey) {
+		t.Error("listing providers claimed the probe; no request can reach the credential")
+	}
+}

@@ -23,7 +23,7 @@ import (
 // whole Breaker so a test can supply four methods instead of a live one.
 type Health interface {
 	Record(k health.Key, s health.Signal)
-	Available(k health.Key) bool
+	SnapshotAvailability(at time.Time) health.Availability
 	LastUsedSnapshot() map[health.CredKey]time.Time
 	MarkUsed(ck health.CredKey, at time.Time)
 }
@@ -541,15 +541,20 @@ func (d *Discoverer) showCapabilities(ctx context.Context, pr Probe, modelID str
 // pickCredential returns the least-recently-used credential that is not
 // cooling. Least-recently-used is what spreads probes across quotas instead of
 // spending the first key's budget on listing.
+//
+// Cooling is read from a frozen view rather than the breaker's Available,
+// which claims the half-open probe. A listing never records its success, so a
+// probe claimed here would never be released.
 func (d *Discoverer) pickCredential(p provider.Provider) (provider.Credential, bool) {
 	lastUsed := d.health.LastUsedSnapshot()
+	avail := d.health.SnapshotAvailability(time.Now())
 
 	usable := make([]provider.Credential, 0, len(p.Credentials))
 	for _, c := range p.Credentials {
 		if !c.Enabled {
 			continue
 		}
-		if !d.health.Available(health.Key{ProviderID: p.ID, KeyID: c.ID}) {
+		if !avail.Available(health.Key{ProviderID: p.ID, KeyID: c.ID}) {
 			continue
 		}
 		usable = append(usable, c)

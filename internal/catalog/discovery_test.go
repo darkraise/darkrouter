@@ -36,10 +36,23 @@ func (f *fakeHealth) Record(k health.Key, s health.Signal) {
 	f.signals = append(f.signals, s)
 }
 
-func (f *fakeHealth) Available(k health.Key) bool {
+// SnapshotAvailability goes through a real breaker because Availability has
+// no exported constructor.
+func (f *fakeHealth) SnapshotAvailability(at time.Time) health.Availability {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return !f.cooling[health.CredKey{ProviderID: k.ProviderID, KeyID: k.KeyID}]
+	var entries []health.Entry
+	for ck, cooling := range f.cooling {
+		if cooling {
+			entries = append(entries, health.Entry{
+				Key:          health.Key{ProviderID: ck.ProviderID, KeyID: ck.KeyID},
+				CoolingUntil: at.Add(time.Hour),
+			})
+		}
+	}
+	b := health.New(1, time.Hour)
+	b.Rehydrate(entries)
+	return b.SnapshotAvailability(at)
 }
 
 func (f *fakeHealth) LastUsedSnapshot() map[health.CredKey]time.Time {
@@ -503,6 +516,32 @@ func TestAKeyedProviderWithNoCredentialIsNotSwept(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{}, health: &fakeHealth{}}
 	if _, ok := d.pickCredential(provider.Provider{ID: "groq", AuthStyle: "bearer"}); ok {
 		t.Error("a keyed provider with no credential must not be swept")
+	}
+}
+
+// Choosing a credential to list with is a read. Nothing records a successful
+// listing, so a half-open probe claimed while choosing would never be given
+// back, and the credential would stay shut to every request.
+func TestPickingACredentialDoesNotClaimTheProbe(t *testing.T) {
+	b := health.New(3, 10*time.Millisecond)
+	p := provider.Provider{ID: "p", AuthStyle: "bearer", Credentials: []provider.Credential{
+		{ID: "a", Secret: "sk-a", Enabled: true},
+		{ID: "b", Secret: "sk-b", Enabled: true},
+	}}
+	for _, c := range p.Credentials {
+		b.Record(health.Key{ProviderID: "p", KeyID: c.ID},
+			health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	}
+	time.Sleep(30 * time.Millisecond)
+
+	d := &Discoverer{opts: DiscoveryOptions{}, health: b}
+	if _, ok := d.pickCredential(p); !ok {
+		t.Fatal("no credential picked once every cooldown had expired")
+	}
+	for _, c := range p.Credentials {
+		if !b.Available(health.Key{ProviderID: "p", KeyID: c.ID}) {
+			t.Errorf("credential %s: picking claimed its probe", c.ID)
+		}
 	}
 }
 

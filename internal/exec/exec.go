@@ -310,19 +310,20 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			break
 		}
 
-		// Re-check live health: another request may have tripped this breaker
-		// since the snapshot. Record the skip so the trace still explains the
-		// realized sequence.
-		hk := health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}
-		if e.deps.Fleet != nil && !e.deps.Fleet.Available(hk) {
-			rec.Skips = append(rec.Skips, traceSkipOf(c, "cooling"))
+		ad, ok := e.adapterFor(c.Kind)
+		if !ok {
+			rec.Skips = append(rec.Skips, traceSkipOf(c, "no_adapter"))
 			i++
 			continue
 		}
 
-		ad, ok := e.adapterFor(c.Kind)
-		if !ok {
-			rec.Skips = append(rec.Skips, traceSkipOf(c, "no_adapter"))
+		// Re-check live health: another request may have tripped this breaker
+		// since the snapshot. Record the skip so the trace still explains the
+		// realized sequence. This is the last check before the attempt, because
+		// a true claims the half-open probe and only the attempt releases it.
+		hk := health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}
+		if e.deps.Fleet != nil && !e.deps.Fleet.Available(hk) {
+			rec.Skips = append(rec.Skips, traceSkipOf(c, "cooling"))
 			i++
 			continue
 		}
