@@ -81,7 +81,8 @@ func decodeResponse(r io.Reader) (*ir.Response, error) {
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage wireUsage `json:"usage"`
+		Usage wireUsage  `json:"usage"`
+		Error *wireError `json:"error"`
 	}
 	raw, err := adapter.ReadResponse(r)
 	if err != nil {
@@ -89,6 +90,12 @@ func decodeResponse(r io.Reader) (*ir.Response, error) {
 	}
 	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&w); err != nil {
 		return nil, err
+	}
+	if w.Error != nil {
+		return nil, w.Error.toIR()
+	}
+	if len(w.Choices) == 0 {
+		return nil, &ir.Error{Type: ir.ErrAPI, Message: "the upstream response carried no choices"}
 	}
 	out := &ir.Response{ID: w.ID, Model: w.Model, Usage: w.Usage.toIR()}
 	if len(w.Choices) > 1 {
