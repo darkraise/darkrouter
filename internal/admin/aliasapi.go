@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -194,7 +195,10 @@ func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	s.rebuildCatalog(afterCommit(r))
+	if err := s.rebuildCatalog(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	writeJSON(w, http.StatusOK, body)
 }
 
@@ -204,7 +208,10 @@ func (s *Server) handleDeleteOverride(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
-	s.rebuildCatalog(afterCommit(r))
+	if err := s.rebuildCatalog(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -218,8 +225,13 @@ func afterCommit(r *http.Request) context.Context {
 // rebuildCatalog folds the write into the merged snapshot the router reads.
 // Without it an override sits in a table nothing consults until an unrelated
 // worker next rebuilds, which is up to a discovery interval away.
-func (s *Server) rebuildCatalog(ctx context.Context) {
-	if s.deps.Catalog != nil {
-		_ = s.deps.Catalog.Rebuild(ctx)
+func (s *Server) rebuildCatalog(ctx context.Context) error {
+	if s.deps.Catalog == nil {
+		return nil
 	}
+	if err := s.deps.Catalog.Rebuild(ctx); err != nil {
+		slog.Error("catalog rebuild after a committed change failed", "err", err)
+		return errRoutingNotUpdated
+	}
+	return nil
 }

@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -275,7 +277,10 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	// A keyless provider is discoverable the moment it exists: the sweep needs
 	// one of the provider's own keys, and this one has none to need. Waiting a
 	// quarter of an hour for its first models is the same gap the first
@@ -324,7 +329,10 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	updated, err := s.deps.DB.ProviderByID(r.Context(), id)
 	if err != nil {
 		writeStoreError(w, r, err)
@@ -355,28 +363,48 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		s.forgetCredential(c.ID)
 	}
 	s.probes.drop(id)
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// errRoutingNotUpdated is what a caller hears when its write committed but the
+// running router could not load it. Both halves matter: the write must not be
+// repeated, and the router is still serving what it served before — which for
+// a disabled credential means the revoked key. Nothing reloads the provider
+// set on a timer, so this response is the only place the operator learns it.
+var errRoutingNotUpdated = errors.New("the change was saved, but the gateway could not " +
+	"load it and is still routing with the previous settings; see the server log")
 
 // reloadProviders pushes the mutation into the running router. Without it the
 // change is in the database and the gateway keeps serving the old provider set
 // until something else happens to reload.
-func (s *Server) reloadProviders(ctx context.Context) {
-	if s.deps.Src == nil {
-		return
+func (s *Server) reloadProviders(ctx context.Context) error {
+	var failed bool
+	if s.deps.Src != nil {
+		if err := s.deps.Src.Reload(ctx); err != nil {
+			slog.Error("provider reload after a committed change failed", "err", err)
+			failed = true
+		}
 	}
-	// A reload failure is not reported to the caller: the mutation succeeded
-	// and the database is the source of truth. The next natural reload picks it
-	// up, and reporting a 500 for a write that landed would be worse.
-	_ = s.deps.Src.Reload(ctx)
 	// Reloading the source is not enough. Provider identity, order and
 	// enablement are baked into the catalog snapshot when it is built, so
 	// without this the operator's change reaches routing only when some
 	// unrelated worker next rebuilds — up to a discovery interval away.
-	if s.deps.Catalog != nil {
-		_ = s.deps.Catalog.Rebuild(ctx)
+	if s.deps.Src != nil && s.rebuildCatalog(ctx) != nil {
+		failed = true
 	}
+	if failed {
+		return errRoutingNotUpdated
+	}
+	return nil
+}
+
+// writeRoutingNotUpdated answers a committed write the router did not load.
+func writeRoutingNotUpdated(w http.ResponseWriter) {
+	writeError(w, http.StatusInternalServerError, errRoutingNotUpdated.Error())
 }
 
 // forgetCredential drops any in-memory state the auth manager derived from a
@@ -442,7 +470,10 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	// Only on the first one. A bulk import of twenty keys would otherwise ask
 	// the provider to list its models twenty times, against a rate limit the
 	// operator has just finished telling us they care about — and the second
@@ -465,7 +496,10 @@ func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) 
 	// The auth manager caches an OAuth account under the credential id; a
 	// deleted credential must not keep presenting the token it minted.
 	s.forgetCredential(keyID)
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

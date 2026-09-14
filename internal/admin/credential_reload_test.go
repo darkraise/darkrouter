@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/auth"
@@ -46,6 +47,39 @@ func TestDisablingACredentialStopsItServing(t *testing.T) {
 	if got := liveCredentials(t, s, "p"); len(got) != 0 {
 		t.Errorf("credentials after disabling = %v, want none: the disable "+
 			"reached the database but not the running router", got)
+	}
+}
+
+// A reload keeps the previous provider set when it cannot read every row. A
+// revocation that committed but did not reach the router must not answer as
+// though the credential had stopped serving: nothing else would ever tell the
+// operator the leaked key is still in use.
+func TestARevocationTheRouterDidNotLoadIsNotReportedAsDone(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p", "http://p.invalid")
+	otherID := seedProviderWithKey(t, s, cookie, token, "q", "http://q.invalid")
+	// Another provider's row that no longer authenticates, so the next reload
+	// fails as a whole.
+	if _, err := db.Sync.Exec(`UPDATE provider_keys SET ciphertext = x'00' WHERE id = ?`,
+		otherID); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(t, s, cookie, token, "PATCH", "/api/providers/p/keys/"+keyID, `{"enabled":false}`)
+	if w.Code < 500 {
+		t.Fatalf("patch = %d %s; the router still serves the revoked key, "+
+			"so the response must not report success", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "saved") {
+		t.Errorf("body = %s; it must say the change itself was saved", w.Body.String())
+	}
+	creds, err := db.CredentialSummaries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creds["p"]) != 1 || creds["p"][0].Enabled {
+		t.Errorf("credential = %+v, want it disabled in the database", creds["p"])
 	}
 }
 
