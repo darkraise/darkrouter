@@ -413,6 +413,9 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 	if err != nil {
 		return nil, err
 	}
+	if err := authorize(ctx, pr, req); err != nil {
+		return nil, err
+	}
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -444,12 +447,28 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 	return ParseList(pr.Kind, body)
 }
 
+// authorize runs a non-static style's authorizer on a generic request. The
+// static header BuildListRequest writes is deliberately nothing for those
+// styles, so skipping this sends the request with no credential at all.
+func authorize(ctx context.Context, pr Probe, req *http.Request) error {
+	if pr.Authorize == nil {
+		return nil
+	}
+	if err := pr.Authorize(ctx, req); err != nil {
+		return fmt.Errorf("authorize listing: %w", err)
+	}
+	return nil
+}
+
 // showCapabilities asks a local runtime about one model. A failure is silent:
 // the listing already succeeded, and turning "this one model did not answer"
 // into a provider-wide discovery failure would retire a working catalogue.
 func (d *Discoverer) showCapabilities(ctx context.Context, pr Probe, modelID string) (store.ModelCapabilities, bool) {
 	req, err := BuildCapabilityRequest(ctx, pr, modelID)
 	if err != nil {
+		return store.ModelCapabilities{}, false
+	}
+	if authorize(ctx, pr, req) != nil {
 		return store.ModelCapabilities{}, false
 	}
 	resp, err := d.client.Do(req)
