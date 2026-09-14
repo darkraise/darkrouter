@@ -48,19 +48,41 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		body["system"] = sys
 	}
 
-	messages, mw := renderMessages(xlate.NonSystemMessages(req.Messages))
+	// Converse forwards all of this to Claude's native request, so the shapes
+	// a generation refuses, and the controls Anthropic rejects while thinking
+	// is on, are refused here exactly as on the direct API. Thinking is
+	// settled first because the other rules depend on it.
+	shape := claudeShapeOf(t)
+	extra, extraWarns := additionalFields(t, req)
+	thinking := shape.thinkingAlwaysOn || thinkingEnabled(extra)
+
+	msgs := xlate.NonSystemMessages(req.Messages)
+	dropPrefill := (thinking || shape.noPrefill) && endsInPrefill(msgs)
+	if dropPrefill {
+		msgs = msgs[:len(msgs)-1]
+	}
+	messages, mw := renderMessages(msgs)
 	warns = append(warns, mw...)
+	if dropPrefill {
+		reason := "response prefill is rejected while thinking is on; the turn was dropped"
+		if shape.noPrefill {
+			reason = "this model rejects a response prefill; the turn was dropped"
+		}
+		warns = append(warns, ir.Warning{
+			Field: "messages[last].assistant_prefill", Target: targetName, Reason: reason,
+		})
+	}
 	body["messages"] = messages
-	if cfg := inferenceConfig(req); len(cfg) > 0 {
+	cfg, cw := inferenceConfig(req, shape, thinking)
+	warns = append(warns, cw...)
+	if len(cfg) > 0 {
 		body["inferenceConfig"] = cfg
 	}
-	if extra, w := additionalFields(t, req); len(extra) > 0 || len(w) > 0 {
-		warns = append(warns, w...)
-		if len(extra) > 0 {
-			body["additionalModelRequestFields"] = extra
-		}
+	warns = append(warns, extraWarns...)
+	if len(extra) > 0 {
+		body["additionalModelRequestFields"] = extra
 	}
-	if tc, w := toolConfig(req); tc != nil || len(w) > 0 {
+	if tc, w := toolConfig(req, shape); tc != nil || len(w) > 0 {
 		warns = append(warns, w...)
 		if tc != nil {
 			body["toolConfig"] = tc
@@ -189,6 +211,15 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 			Reason: "budget below Anthropic's 1024-token minimum; thinking disabled",
 		})
 	}
+	// Forced tool use is incompatible with manual thinking, though not with
+	// adaptive. The forced tool is the client's explicit instruction and an
+	// agentic loop depends on it; the reasoning depth is the softer ask.
+	if forcedToolChoice(req.ToolChoice) {
+		return nil, append(warns, ir.Warning{
+			Field: "reasoning", Target: targetName,
+			Reason: "manual thinking is incompatible with a forced tool choice; thinking disabled",
+		})
+	}
 	return map[string]any{
 		"thinking": map[string]any{"type": "enabled", "budget_tokens": budget},
 	}, warns
@@ -215,24 +246,93 @@ func disabledThinking(t *adapter.Target) (map[string]any, []ir.Warning) {
 	return map[string]any{"thinking": map[string]any{"type": "disabled"}}, nil
 }
 
-func inferenceConfig(req *ir.Request) map[string]any {
+// claudeShape is what a Claude generation refuses. The zero restrictions —
+// free sampling and nothing refused — belong to another publisher's model and
+// to a Claude model the catalog does not know, which is sent as the client
+// asked.
+type claudeShape struct {
+	freeSampling       bool
+	noPrefill          bool
+	thinkingAlwaysOn   bool
+	noForcedToolChoice bool
+}
+
+func claudeShapeOf(t *adapter.Target) claudeShape {
+	if !isAnthropicModel(t.Model) || !t.Info.TraitsKnown {
+		return claudeShape{freeSampling: true}
+	}
+	return claudeShape{
+		freeSampling:       t.Info.FreeSampling,
+		noPrefill:          t.Info.NoPrefill,
+		thinkingAlwaysOn:   t.Info.ThinkingAlwaysOn,
+		noForcedToolChoice: t.Info.NoForcedToolChoice,
+	}
+}
+
+func thinkingEnabled(extra map[string]any) bool {
+	th, _ := extra["thinking"].(map[string]any)
+	return th != nil && th["type"] != "disabled"
+}
+
+func forcedToolChoice(tc *ir.ToolChoice) bool {
+	return tc != nil && (tc.Mode == "any" || tc.Mode == "tool")
+}
+
+// endsInPrefill reports whether the conversation ends in the prefill idiom: a
+// trailing assistant turn holding only text.
+func endsInPrefill(msgs []ir.Message) bool {
+	if len(msgs) == 0 {
+		return false
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != ir.RoleAssistant || len(last.Content) == 0 {
+		return false
+	}
+	for _, b := range last.Content {
+		if b.Type != ir.BlockText {
+			return false
+		}
+	}
+	return true
+}
+
+func inferenceConfig(req *ir.Request, shape claudeShape, thinking bool) (map[string]any, []ir.Warning) {
+	var warns []ir.Warning
+	drop := func(field, reason string) {
+		warns = append(warns, ir.Warning{Field: field, Target: targetName, Reason: reason})
+	}
+	const sealed = "this model rejects any non-default sampling parameter"
 	cfg := map[string]any{}
 	if req.MaxTokens != nil {
 		cfg["maxTokens"] = *req.MaxTokens
 	}
 	if req.Temperature != nil {
-		cfg["temperature"] = *req.Temperature
+		switch {
+		case !shape.freeSampling:
+			drop("temperature", sealed)
+		case thinking:
+			drop("temperature", "rejected by Anthropic alongside thinking")
+		default:
+			cfg["temperature"] = *req.Temperature
+		}
 	}
 	if req.TopP != nil {
-		cfg["topP"] = *req.TopP
+		switch {
+		case !shape.freeSampling:
+			drop("top_p", sealed)
+		case thinking && (*req.TopP < 0.95 || *req.TopP > 1):
+			drop("top_p", "with thinking on, Anthropic accepts top_p only between 0.95 and 1")
+		default:
+			cfg["topP"] = *req.TopP
+		}
 	}
 	if len(req.StopSequences) > 0 {
 		cfg["stopSequences"] = req.StopSequences
 	}
-	return cfg
+	return cfg, warns
 }
 
-func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
+func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warning) {
 	if len(req.Tools) == 0 {
 		return nil, nil
 	}
@@ -276,7 +376,15 @@ func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 		return nil, warns
 	}
 	cfg := map[string]any{"tools": tools}
-	if tc := req.ToolChoice; tc != nil {
+	tc := req.ToolChoice
+	if shape.noForcedToolChoice && forcedToolChoice(tc) {
+		warns = append(warns, ir.Warning{
+			Field: "tool_choice", Target: targetName,
+			Reason: "this model rejects a forced tool choice; downgraded to auto",
+		})
+		tc = &ir.ToolChoice{Mode: "auto"}
+	}
+	if tc != nil {
 		switch tc.Mode {
 		case "any":
 			cfg["toolChoice"] = map[string]any{"any": map[string]any{}}

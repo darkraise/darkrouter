@@ -619,3 +619,127 @@ func TestDisabledReasoningIsSentExplicitlyWhereTheModelHasAnOffSwitch(t *testing
 		}
 	}
 }
+
+// Converse forwards inferenceConfig, toolChoice and the conversation to
+// Claude's native request, so every shape a generation refuses — and every
+// control Anthropic rejects alongside thinking — refuses here too.
+func TestClaudeRequestShapeRestrictionsHoldOnBedrock(t *testing.T) {
+	temp, lowTopP, highTopP := 0.2, 0.5, 0.97
+	withTool := func(req *ir.Request, mode string) {
+		req.Tools = []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}}
+		req.ToolChoice = &ir.ToolChoice{Mode: mode, Name: "f"}
+	}
+	prefill := func(req *ir.Request) {
+		req.Messages = append(req.Messages, ir.Message{Role: ir.RoleAssistant,
+			Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}})
+	}
+	sampling := func(body map[string]any) map[string]any {
+		cfg, _ := body["inferenceConfig"].(map[string]any)
+		return cfg
+	}
+
+	t.Run("sealed sampling", func(t *testing.T) {
+		req := simple()
+		req.Temperature, req.TopP = &temp, &highTopP
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-5"), req)
+		if cfg := sampling(body); cfg["temperature"] != nil || cfg["topP"] != nil {
+			t.Errorf("inferenceConfig = %#v, want no sampling on a sealed model", cfg)
+		}
+		if !hasWarning(warns, "temperature") || !hasWarning(warns, "top_p") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("sampling beside thinking", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		req.Temperature, req.TopP = &temp, &lowTopP
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if cfg := sampling(body); cfg["temperature"] != nil || cfg["topP"] != nil {
+			t.Errorf("inferenceConfig = %#v, want temperature and a narrow top_p dropped", cfg)
+		}
+		if !hasWarning(warns, "temperature") || !hasWarning(warns, "top_p") {
+			t.Errorf("warnings = %+v", warns)
+		}
+
+		req.Temperature, req.TopP = nil, &highTopP
+		body, _, _ = build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if cfg := sampling(body); cfg["topP"] != highTopP {
+			t.Errorf("inferenceConfig = %#v, want top_p 0.97 kept beside thinking", cfg)
+		}
+
+		req.Reasoning, req.Temperature = nil, &temp
+		body, _, _ = build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if cfg := sampling(body); cfg["temperature"] != temp {
+			t.Errorf("inferenceConfig = %#v, want temperature kept without thinking", cfg)
+		}
+	})
+
+	t.Run("no forced tool choice", func(t *testing.T) {
+		req := simple()
+		withTool(req, "tool")
+		body, _, warns := build(t, catalogTarget(t, "global.anthropic.claude-fable-5"), req)
+		choice, _ := body["toolConfig"].(map[string]any)["toolChoice"].(map[string]any)
+		if _, auto := choice["auto"]; !auto {
+			t.Errorf("toolChoice = %#v, want auto", choice)
+		}
+		if !hasWarning(warns, "tool_choice") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("manual thinking yields to a forced tool", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		withTool(req, "any")
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if extra, sent := body["additionalModelRequestFields"]; sent {
+			t.Errorf("additionalModelRequestFields = %#v beside a forced tool", extra)
+		}
+		choice, _ := body["toolConfig"].(map[string]any)["toolChoice"].(map[string]any)
+		if _, forced := choice["any"]; !forced {
+			t.Errorf("toolChoice = %#v, want the client's any", choice)
+		}
+		if !hasWarning(warns, "reasoning") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("prefill", func(t *testing.T) {
+		for _, c := range []struct {
+			model     string
+			reasoning *ir.Reasoning
+		}{
+			{"anthropic.claude-opus-5", nil},
+			{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", &ir.Reasoning{Budget: 2048}},
+		} {
+			req := simple()
+			req.Reasoning = c.reasoning
+			prefill(req)
+			body, _, warns := build(t, catalogTarget(t, c.model), req)
+			if n := len(body["messages"].([]any)); n != 1 {
+				t.Errorf("%s: %d messages, want the prefill dropped", c.model, n)
+			}
+			if !hasWarning(warns, "messages[last].assistant_prefill") {
+				t.Errorf("%s: warnings = %+v", c.model, warns)
+			}
+		}
+	})
+
+	t.Run("other publishers are untouched", func(t *testing.T) {
+		req := simple()
+		req.Temperature = &temp
+		withTool(req, "tool")
+		prefill(req)
+		body, _, warns := build(t, catalogTarget(t, "amazon.nova-pro-v1:0"), req)
+		if cfg := sampling(body); cfg["temperature"] != temp {
+			t.Errorf("inferenceConfig = %#v", cfg)
+		}
+		if n := len(body["messages"].([]any)); n != 2 {
+			t.Errorf("%d messages, want the assistant turn kept", n)
+		}
+		if len(warns) != 0 {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+}
