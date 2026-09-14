@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { api, stream, type StreamStart } from "../../../lib/api"
-import { chatBody, parseTools, type ChatState } from "./request"
+import { chatBody, requestProblem, type ChatState } from "./request"
 import { drainSSE, extractUnaryReasoning, extractUnaryText } from "./stream"
 import {
   NO_METRICS,
@@ -120,8 +120,7 @@ export function useChatRun(
 
   async function send(prompt: string) {
     const state: ChatState = { ...config, messages }
-    const toolsError = parseTools(state.toolsRaw).error
-    if (busy || state.model === "" || prompt === "" || toolsError !== undefined) return
+    if (busy || state.model === "" || prompt === "" || requestProblem(state) !== undefined) return
     const dialect = state.dialect
     const doStream = state.stream
     const turns = [...state.messages, { role: "user", content: prompt } satisfies PlaygroundMessage]

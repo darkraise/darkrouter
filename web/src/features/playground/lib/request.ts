@@ -52,6 +52,22 @@ export function parseSchema(raw: string): { schema?: unknown; error?: string } {
   return { schema: parsed }
 }
 
+/**
+ * Why this request must not be sent, if anything.
+ *
+ * chatBody drops a field it cannot parse rather than send it broken, so a
+ * request sent anyway asks a different question from the one the pane shows.
+ * One check for every surface that sends, so Chat and Compare cannot disagree
+ * about what is sendable. A schema the dialect never carries is not checked:
+ * the pane has already said it will not be sent.
+ */
+export function requestProblem(config: PlaygroundConfig): string | undefined {
+  const tools = parseTools(config.toolsRaw).error
+  if (tools !== undefined) return tools
+  if (supports(config.dialect, "schema")) return parseSchema(config.schemaRaw).error
+  return undefined
+}
+
 export function chatBody(state: ChatState): PlaygroundChatBody {
   const body: PlaygroundChatBody = {
     model: state.model,

@@ -146,3 +146,22 @@ describe("a Compare column that stops being watched", () => {
     expect(screen.getByRole("button", { name: "Add model" })).toBeEnabled()
   })
 })
+
+describe("a Compare run under settings that cannot be sent", () => {
+  beforeEach(() => {
+    streamMock.mockReset()
+    hangs()
+  })
+
+  it("holds Run and says why when the tools are not JSON", async () => {
+    // chatBody drops tools it cannot parse, so every column would be asked a
+    // different question from the one the pane shows.
+    renderCompare({ ...emptyConfig(), toolsRaw: "[{" })
+    await nameEveryColumn()
+    await userEvent.type(screen.getByPlaceholderText("Prompt"), "compare these")
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled()
+    expect(screen.getAllByText(/^tools must be JSON/).length).toBeGreaterThan(0)
+    await userEvent.click(screen.getByRole("button", { name: "Run" }))
+    expect(streamMock).not.toHaveBeenCalled()
+  })
+})

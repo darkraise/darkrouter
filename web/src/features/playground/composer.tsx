@@ -37,7 +37,7 @@ export function Composer({
   model,
   busy,
   error,
-  toolsError,
+  problem,
   disabled = false,
   onSend,
   onStop,
@@ -45,13 +45,13 @@ export function Composer({
   model: string
   busy: boolean
   error: string
-  toolsError?: string
+  problem?: string
   disabled?: boolean
   onSend: (prompt: string) => void
   onStop: () => void
 }) {
   const [draft, setDraft] = useState("")
-  const blocked = disabled || model === "" || draft.trim() === "" || toolsError !== undefined
+  const blocked = disabled || model === "" || draft.trim() === "" || problem !== undefined
 
   return (
     <div className="flex shrink-0 flex-col gap-2">
@@ -110,8 +110,8 @@ export function Composer({
           unfinished panel rather than as space kept for a failure that has
           not happened. Starting a new conversation used to live here too;
           it is the icon on the conversations panel's own header now. */}
-      {(toolsError || error) && (
-        <p className="text-sm text-destructive">{toolsError || error}</p>
+      {(problem || error) && (
+        <p className="text-sm text-destructive">{problem || error}</p>
       )}
     </div>
   )

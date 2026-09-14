@@ -16,7 +16,7 @@ import {
 } from "../lib/conversations"
 import { useChatRun, type CompletedTurn } from "../lib/use-chat-run"
 import { emptyConfig, type PlaygroundConfig } from "../config"
-import { parseTools, seedFromTrace } from "../lib/request"
+import { requestProblem, seedFromTrace } from "../lib/request"
 import { ConfigPane } from "../config-pane/config-pane"
 import { NO_METRICS, type StreamMetrics } from "../metrics"
 import { TokenPanel, consumptionOf } from "../token-panel"
@@ -424,7 +424,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
                     model={config.model}
                     busy={run.busy}
                     error={run.error}
-                    toolsError={parseTools(config.toolsRaw).error}
+                    problem={requestProblem(config)}
                     disabled={selectionPending}
                     onSend={(p) => void run.send(p)}
                     onStop={run.stop}
