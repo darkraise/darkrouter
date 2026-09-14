@@ -66,8 +66,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	entries, dropped, err := scrapeRegistry(filepath.Join(*omni, "open-sse/config/providers/registry"),
-		droppedFamilies(filepath.Join(*omni, "src/shared/constants/providers")))
+	families, err := droppedFamilies(filepath.Join(*omni, "src/shared/constants/providers"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	entries, dropped, err := scrapeRegistry(filepath.Join(*omni, "open-sse/config/providers/registry"), families)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -256,19 +259,22 @@ func dropReason(e entry, drop map[string]bool) string {
 
 // droppedFamilies collects the ids of every entry in a family spec §3.2 drops
 // wholesale.
-func droppedFamilies(constants string) map[string]bool {
+func droppedFamilies(constants string) (map[string]bool, error) {
 	out := map[string]bool{}
 	idRe := regexp.MustCompile(`(?m)^\s{2,4}id: "([^"]+)"`)
 	for _, f := range []string{"web-cookie.ts", "cloud-agent.ts", "upstream-proxy.ts", "system.ts", "search.ts"} {
+		// Not skippable: most web-cookie entries pass every structural rule in
+		// dropReason, so a family file upstream moved would emit them as
+		// ordinary presets.
 		raw, err := os.ReadFile(filepath.Join(constants, f))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read excluded family %s: %w", f, err)
 		}
 		for _, m := range idRe.FindAllStringSubmatch(string(raw), -1) {
 			out[m[1]] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 var kindOf = map[string]string{"openai": "openaicompat", "claude": "anthropic", "gemini": "gemini"}

@@ -51,6 +51,32 @@ retired:
 	}
 }
 
+// The family list is the only rule that drops most browser-cookie entries,
+// which otherwise pass every structural check. A family file upstream moved
+// must stop generation, not quietly shrink the exclusions.
+func TestDroppedFamiliesRefusesAMissingFamilyFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"cloud-agent.ts", "upstream-proxy.ts", "system.ts", "search.ts"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("export const X = [\n  {\n    id: \"x-"+f+"\",\n  },\n];\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := droppedFamilies(dir); err == nil || !strings.Contains(err.Error(), "web-cookie.ts") {
+		t.Fatalf("err = %v, want one naming the missing web-cookie.ts", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "web-cookie.ts"), []byte("export const W = [\n  {\n    id: \"lmarena\",\n  },\n];\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := droppedFamilies(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["lmarena"] || !got["x-search.ts"] {
+		t.Errorf("families = %v", got)
+	}
+}
+
 func TestCarryQuirksToleratesAMissingFile(t *testing.T) {
 	presets := catalog.Presets{"x": {Name: "X"}}
 	if n, err := carryQuirks(presets, filepath.Join(t.TempDir(), "absent.yaml")); err != nil || n != 0 {
