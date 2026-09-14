@@ -21,7 +21,7 @@ import { NumberBox } from "../shell/number-box"
 import { api, ApiError } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
-import type { ModelCapabilities, ModelOverride } from "../../lib/api-types"
+import type { ModelCapabilities, ModelOverride, ModelOverrideView } from "../../lib/api-types"
 import { ConfirmButton } from "../shell/confirm-button"
 
 function overridePath(provider: string, model: string) {
@@ -31,19 +31,28 @@ function overridePath(provider: string, model: string) {
   return `/api/models/${encodeURIComponent(provider)}/${encodeURIComponent(model)}/override`
 }
 
-async function fetchOverride(provider: string, model: string): Promise<ModelOverride | null> {
+type LoadedOverride = {
+  override: ModelOverride | null
+  catalogCapabilities: ModelCapabilities | null
+}
+
+async function fetchOverride(provider: string, model: string): Promise<LoadedOverride> {
   // No override is the ordinary case for most of the catalog, and the
-  // gateway answers it with an empty body rather than a 404 so the browser
-  // console stays quiet; an empty body is "none", not an override of nothing.
-  let o: ModelOverride | undefined
+  // gateway answers it with a body carrying no override fields rather than a
+  // 404 so the browser console stays quiet; that body is "none", not an
+  // override of nothing.
+  let o: ModelOverrideView | undefined
   try {
-    o = await api.get<ModelOverride>(overridePath(provider, model))
+    o = await api.get<ModelOverrideView>(overridePath(provider, model))
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return { override: null, catalogCapabilities: null }
     throw err
   }
-  const empty = !o || (o.surfaces === undefined && o.capabilities === undefined && o.context_window === undefined)
-  return empty ? null : o
+  if (!o) return { override: null, catalogCapabilities: null }
+  const { catalog_capabilities, ...override } = o
+  const empty =
+    override.surfaces === undefined && override.capabilities === undefined && override.context_window === undefined
+  return { override: empty ? null : override, catalogCapabilities: catalog_capabilities ?? null }
 }
 
 const CAPABILITIES = ["tools", "vision", "reasoning"] as const
@@ -76,7 +85,7 @@ export function OverrideEditor({
     queryKey: keys.override(provider, model),
     queryFn: () => fetchOverride(provider, model),
   })
-  const existing = query.data ?? null
+  const existing = query.data?.override ?? null
 
   const [draftContextWindow, setDraftContextWindow] = useState<string | null>(null)
   const [draftCapabilities, setDraftCapabilities] = useState<ModelCapabilities | null>(null)
@@ -115,8 +124,12 @@ export function OverrideEditor({
     (existing?.context_window !== undefined ? String(existing.context_window) : "")
   const surfacesValue = draftSurfaces ?? existing?.surfaces?.join(", ") ?? ""
 
+  function loadedCapability(key: keyof ModelCapabilities): boolean {
+    return existing?.capabilities?.[key] ?? query.data?.catalogCapabilities?.[key] ?? false
+  }
+
   function capability(key: keyof ModelCapabilities): boolean {
-    return draftCapabilities?.[key] ?? existing?.capabilities?.[key] ?? false
+    return draftCapabilities?.[key] ?? loadedCapability(key)
   }
 
   function setCapability(key: keyof ModelCapabilities, value: boolean) {
@@ -125,17 +138,24 @@ export function OverrideEditor({
 
   // Built from the displayed values, not the drafts alone: PUT is a full
   // replace, so a field left at its loaded value still has to be resent or
-  // the replace writes it away. This is also why capabilities is always sent
-  // whole — capability() already merges a partial draft over the loaded
-  // object one key at a time.
+  // the replace writes it away. Capabilities go whole — capability() merges
+  // a partial draft over the loaded values one key at a time — but only when
+  // an override already holds them or the operator changed one: the stored
+  // override is three plain bools that replace the catalog's, so sending the
+  // catalog's own values back would pin them against the next discovery.
   function buildPatch(): Partial<ModelOverride> {
     const patch: Partial<ModelOverride> = {}
     if (contextWindowValue.trim() !== "") {
       patch.context_window = Number(contextWindowValue)
     }
-    const capabilities: ModelCapabilities = {}
-    for (const key of CAPABILITIES) capabilities[key] = capability(key)
-    patch.capabilities = capabilities
+    if (
+      existing?.capabilities !== undefined ||
+      CAPABILITIES.some((key) => capability(key) !== loadedCapability(key))
+    ) {
+      const capabilities: ModelCapabilities = {}
+      for (const key of CAPABILITIES) capabilities[key] = capability(key)
+      patch.capabilities = capabilities
+    }
     patch.surfaces = surfacesValue
       .split(",")
       .map((s) => s.trim())
