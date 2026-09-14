@@ -71,6 +71,12 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 	out.Header.Set("Content-Type", "application/json")
 	// anthropic-version is a body field here, not a header. Sending only the
 	// header is a 400: Vertex reads the body.
+	//
+	// anthropic-beta, unlike the version, stays a header on Vertex; Anthropic's
+	// Vertex client sends it unchanged.
+	if beta := hr.Header.Get("anthropic-beta"); beta != "" {
+		out.Header.Set("anthropic-beta", beta)
+	}
 	return out, warns, nil
 }
 
