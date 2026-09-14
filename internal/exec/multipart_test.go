@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -177,6 +178,53 @@ func TestParseFormRefusesAnOversizedUpload(t *testing.T) {
 	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
 		t.Errorf("err = %v; it must be distinguishable so the route answers 413", err)
 	}
+}
+
+func requirePayloadTooLarge(t *testing.T, err error) {
+	t.Helper()
+	var ie *ir.Error
+	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
+		t.Fatalf("err = %v, want payload_too_large", err)
+	}
+}
+
+// Part headers are held for the life of the request, so they are spent from
+// the same budget as part values. Otherwise a client sends megabytes of
+// headers on empty parts and the budget barely moves.
+func TestParseFormChargesPartHeadersAgainstTheBudget(t *testing.T) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for range 16 {
+		h := textproto.MIMEHeader{
+			"Content-Disposition": {`form-data; name="pad"`},
+			"X-Pad":               {strings.Repeat("h", 1024)},
+		}
+		if _, err := w.CreatePart(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseForm(t, buf.String(), w.FormDataContentType(), 8<<10)
+	requirePayloadTooLarge(t, err)
+}
+
+// Every part costs memory beyond its encoded bytes, so a flood of empty parts
+// whose encoding alone fits must still exhaust the budget.
+func TestParseFormChargesEachPartAgainstTheBudget(t *testing.T) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for range 4000 {
+		if err := w.WriteField("x", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseForm(t, buf.String(), w.FormDataContentType(), int64(buf.Len())*2)
+	requirePayloadTooLarge(t, err)
 }
 
 func TestParseFormRejectsANonMultipartBody(t *testing.T) {
