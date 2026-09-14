@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -177,7 +178,11 @@ func partToIR(p wirePart) (ir.ContentBlock, bool) {
 func ParseResponse(resp *http.Response) (*ir.Response, error) {
 	defer resp.Body.Close()
 	var w wireResponse
-	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+	body, err := adapter.ReadResponse(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&w); err != nil {
 		return nil, err
 	}
 	if w.Error != nil {

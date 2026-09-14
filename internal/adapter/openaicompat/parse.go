@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
@@ -82,7 +83,11 @@ func decodeResponse(r io.Reader) (*ir.Response, error) {
 		} `json:"choices"`
 		Usage wireUsage `json:"usage"`
 	}
-	if err := json.NewDecoder(r).Decode(&w); err != nil {
+	raw, err := adapter.ReadResponse(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&w); err != nil {
 		return nil, err
 	}
 	out := &ir.Response{ID: w.ID, Model: w.Model, Usage: w.Usage.toIR()}
