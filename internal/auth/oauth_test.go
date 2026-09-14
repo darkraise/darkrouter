@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -259,6 +261,49 @@ func TestATransientFailureDoesNotDisable(t *testing.T) {
 	}
 	if _, disabled := tokens.disabledReason("cred-1"); disabled {
 		t.Error("a 5xx from the token endpoint must not disable the credential")
+	}
+}
+
+// A captive portal or a CDN error page can answer 200 with HTML. That says
+// nothing about the credential, so it must not end in a disable that only a
+// manual reconnection undoes.
+func TestAMalformedSuccessResponseIsTransient(t *testing.T) {
+	for name, body := range map[string]string{
+		"html":      `<html><body>maintenance</body></html>`,
+		"truncated": `{"access_token":"at-`,
+		"no token":  `{"token_type":"Bearer"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(srv.Close)
+			tokens := newMemTokens()
+			m := NewManager(Deps{
+				Tokens: tokens,
+				OAuth:  fixedPresets{cfg: OAuthConfig{TokenURL: srv.URL, ClientID: "client"}},
+				HTTP:   srv.Client(),
+			})
+			az := oauthAz(t, m, expiring(t, -time.Minute))
+
+			for i := 0; i < 2; i++ {
+				err := az(context.Background(), blank(t))
+				if err == nil {
+					t.Fatal("a response with no usable token must be an error")
+				}
+				if errors.Is(err, ErrNeedsReconnect) {
+					t.Fatalf("error = %v; a malformed response is not a refusal", err)
+				}
+			}
+			if _, disabled := tokens.disabledReason("cred-1"); disabled {
+				t.Error("a malformed token response disabled the credential")
+			}
+			if calls.Load() != 2 {
+				t.Errorf("token endpoint called %d times, want a retry on the second call", calls.Load())
+			}
+		})
 	}
 }
 
