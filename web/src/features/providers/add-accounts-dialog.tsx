@@ -104,6 +104,26 @@ function draftFor(provider?: Provider): AccountDraft {
     : emptyAccounts
 }
 
+/** Where a cloud provider's endpoint lives. The release cannot ship these:
+ *  Bedrock's host is derived from the region, and Vertex puts the project and
+ *  location in every request path, so a row created without them can reach
+ *  nothing. */
+export type EndpointDraft = { region: string; project: string; location: string }
+
+const emptyEndpoint: EndpointDraft = { region: "", project: "", location: "" }
+
+export function endpointFieldsFor(kind?: string): (keyof EndpointDraft)[] {
+  if (kind === "bedrock") return ["region"]
+  if (kind === "vertex") return ["project", "location"]
+  return []
+}
+
+const ENDPOINT_FIELD: Record<keyof EndpointDraft, { label: string; placeholder: string }> = {
+  region: { label: "Region", placeholder: "us-east-1" },
+  project: { label: "Project", placeholder: "my-project" },
+  location: { label: "Location", placeholder: "us-central1" },
+}
+
 function distinctSorted(values: string[]): string[] {
   return [...new Set(values)].sort()
 }
@@ -272,6 +292,7 @@ export function AddAccountsDialog({
   const [freeTier, setFreeTier] = useState(false)
   const [selected, setSelected] = useState<Preset | null>(null)
   const [accounts, setAccounts] = useState<AccountDraft>(() => draftFor(provider))
+  const [endpoint, setEndpoint] = useState<EndpointDraft>(emptyEndpoint)
   const [progress, setProgress] = useState<AddProgress | null>(null)
   // What the last run could not store, and why. Held in the dialog as well as
   // toasted, because the form stays open for a retry and a toast does not.
@@ -302,6 +323,7 @@ export function AddAccountsDialog({
     setStep(0)
     setSelected(null)
     setAccounts(draftFor(settled))
+    setEndpoint(emptyEndpoint)
     setProgress(null)
     setNotAdded([])
     setQ("")
@@ -317,6 +339,10 @@ export function AddAccountsDialog({
     : target
       ? planFor(target, existing)
       : null
+  // Asked only of a row about to be created: an existing one already holds
+  // them, and its settings are where they change.
+  const endpointFields = plan?.needsProvider ? endpointFieldsFor(chosen?.kind) : []
+  const endpointMissing = endpointFields.some((f) => endpoint[f].trim() === "")
 
   const submit = useApiMutation({
     mutationFn: async () => {
@@ -331,6 +357,7 @@ export function AddAccountsDialog({
           id: chosen.id,
           preset: chosen.id,
           free_models_only: accounts.freeModelsOnly,
+          ...Object.fromEntries(endpointFields.map((f) => [f, endpoint[f].trim()])),
         })
       } else if (freeOnlyChange(accounts, plan)) {
         // Against a provider that already exists the flag is a setting to be
@@ -431,6 +458,7 @@ export function AddAccountsDialog({
                 // stored on, and probed against, this one. A provider that
                 // already exists brings its own free-models setting.
                 setAccounts(draftFor(existing.find((e) => e.id === p.id)))
+                setEndpoint(emptyEndpoint)
                 setSelected(p)
                 setStep(step + 1)
               }}
@@ -482,6 +510,27 @@ export function AddAccountsDialog({
                 chosen.auth_style || chosen.auth_kind,
               )}
             />
+
+            {endpointFields.length > 0 && (
+              <div className="flex flex-wrap items-end gap-3 border-t pt-4">
+                {endpointFields.map((f) => (
+                  <div key={f} className="flex flex-col gap-1.5">
+                    <Label htmlFor={`endpoint-${f}`}>{ENDPOINT_FIELD[f].label}</Label>
+                    <Input
+                      id={`endpoint-${f}`}
+                      value={endpoint[f]}
+                      onChange={(e) => setEndpoint({ ...endpoint, [f]: e.target.value })}
+                      placeholder={ENDPOINT_FIELD[f].placeholder}
+                      spellCheck={false}
+                      className="w-40 font-mono"
+                    />
+                  </div>
+                ))}
+                <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
+                  Where this provider's endpoint is. Its requests go nowhere without it.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -530,13 +579,19 @@ export function AddAccountsDialog({
             <div className="ml-auto flex items-center gap-2">
               {phase === "accounts" && (
                 <>
-                  {count === 0 && (
+                  {count === 0 ? (
                     <span className="text-sm text-[hsl(var(--legend))]">
                       Add at least one key to continue
                     </span>
+                  ) : (
+                    endpointMissing && (
+                      <span className="text-sm text-[hsl(var(--legend))]">
+                        Fill in {endpointFields.map((f) => ENDPOINT_FIELD[f].label.toLowerCase()).join(" and ")} to continue
+                      </span>
+                    )
                   )}
                   <Button
-                    disabled={count === 0 || submit.isPending}
+                    disabled={count === 0 || endpointMissing || submit.isPending}
                     onClick={() => submit.mutate(undefined)}
                   >
                     {submit.isPending ? "Adding…" : addAccountsLabel(count)}

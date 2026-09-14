@@ -433,6 +433,53 @@ describe("the wizard opened from an unconfigured preset", () => {
     })
   })
 
+  it("asks a Bedrock provider it creates for its region, and sends it", async () => {
+    const bedrock = preset({ id: "bedrock", name: "Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4" })
+    const fetchMock = stub([bedrock])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={bedrock} />)
+
+    await userEvent.type(await screen.findByLabelText(/aws access key/i), "doc")
+    const add = screen.getByRole("button", { name: /add credential/i })
+    // No endpoint exists without one, so the row cannot be created yet.
+    expect(add).toBeDisabled()
+    await userEvent.type(screen.getByLabelText(/region/i), "us-east-1")
+    await userEvent.click(add)
+
+    await waitFor(() => {
+      const create = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+      )
+      expect(JSON.parse(String((create?.[1] as RequestInit).body))).toMatchObject({
+        id: "bedrock",
+        preset: "bedrock",
+        region: "us-east-1",
+      })
+    })
+  })
+
+  it("asks a Vertex provider it creates for its project and location", async () => {
+    const vertex = preset({ id: "vertex", name: "Vertex", kind: "vertex", base_url: "", auth_kind: "gcp-sa" })
+    const fetchMock = stub([vertex])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={vertex} />)
+
+    await userEvent.type(await screen.findByLabelText(/service account/i), "doc")
+    const add = screen.getByRole("button", { name: /add credential/i })
+    await userEvent.type(screen.getByLabelText(/project/i), "my-project")
+    expect(add).toBeDisabled()
+    await userEvent.type(screen.getByLabelText(/location/i), "us-central1")
+    await userEvent.click(add)
+
+    await waitFor(() => {
+      const create = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+      )
+      expect(JSON.parse(String((create?.[1] as RequestInit).body))).toMatchObject({
+        project: "my-project",
+        location: "us-central1",
+      })
+    })
+  })
+
   it("does not recreate a row that appeared while the page was open", async () => {
     // A second POST would 409 against the row that is already there.
     const fetchMock = stub(
