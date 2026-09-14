@@ -121,7 +121,7 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 
 	var w wireToken
 	// A body that is not JSON is still a failure worth reporting by status.
-	_ = json.Unmarshal(raw, &w)
+	decodeErr := json.Unmarshal(raw, &w)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if terminal(resp.StatusCode, w.Error) {
@@ -129,8 +129,15 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 		}
 		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, describe(w))
 	}
-	if w.AccessToken == "" {
-		return Token{}, fmt.Errorf("%w: the token endpoint returned no access token", ErrNeedsReconnect)
+	if decodeErr != nil || w.AccessToken == "" {
+		// A success status with no token in it is a page from something in
+		// the way — a captive portal, a CDN, a truncated read — rather than
+		// the provider refusing this credential. Only an explicit refusal
+		// code is evidence enough to disable an account.
+		if decodeErr == nil && terminal(0, w.Error) {
+			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(w))
+		}
+		return Token{}, fmt.Errorf("token endpoint returned %s with no usable token", resp.Status)
 	}
 
 	tok := Token{
