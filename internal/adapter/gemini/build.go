@@ -244,6 +244,31 @@ func budgetCap(model string) int {
 	return budgetCapPro
 }
 
+// Budget floors, also per family and also rejected rather than clamped. Pro
+// has no off switch at all: its floor is the closest it comes to off. An
+// unrecognized id gets no floor, so a client's own budget goes through.
+const (
+	budgetFloorPro       = 128
+	budgetFloorFlashLite = 512
+)
+
+func budgetFloor(model string) int {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "flash-lite"):
+		return budgetFloorFlashLite
+	case isPro(m):
+		return budgetFloorPro
+	}
+	return 0
+}
+
+// isPro reports a model that cannot turn thinking off: 2.5 Pro takes no zero
+// budget, and Gemini 3 Pro takes no minimal level.
+func isPro(model string) bool {
+	return strings.Contains(strings.ToLower(model), "-pro")
+}
+
 // isGemini3 reports whether the model takes thinkingLevel rather than a
 // token budget. Gemini 3 ignores thinkingBudget on some variants and rejects
 // it on others; the level is the control the generation documents.
@@ -284,7 +309,17 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 		return nil, nil
 	}
 	if r.Disabled {
-		return map[string]any{"thinkingBudget": 0}, nil
+		if !isPro(model) {
+			return map[string]any{"thinkingBudget": 0}, nil
+		}
+		warns := []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model cannot turn thinking off; sent with the least thinking it accepts",
+		}}
+		if isGemini3(model) {
+			return map[string]any{"thinkingLevel": "low"}, warns
+		}
+		return map[string]any{"thinkingBudget": budgetFloorPro}, warns
 	}
 	cap := budgetCap(model)
 	if isGemini3(model) {
@@ -293,6 +328,9 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 			effort = xlate.BudgetEffort(r.Budget)
 		}
 		if level := thinkingLevel(effort); level != "" {
+			if level == "minimal" && isPro(model) {
+				level = "low"
+			}
 			warns := []ir.Warning(nil)
 			if r.Effort == "" {
 				warns = append(warns, ir.Warning{
@@ -318,6 +356,13 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 			Reason: "above the model family's thinking ceiling; clamped to " + strconv.Itoa(cap),
 		})
 		budget = cap
+	}
+	if floor := budgetFloor(model); budget < floor {
+		warns = append(warns, ir.Warning{
+			Field: "reasoning.budget", Target: targetName,
+			Reason: "below the model family's thinking floor; raised to " + strconv.Itoa(floor),
+		})
+		budget = floor
 	}
 	return map[string]any{"thinkingBudget": budget, "includeThoughts": true}, warns
 }
