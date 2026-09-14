@@ -494,6 +494,22 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		e.recordAttempt(rec, c, o, 0, fmt.Errorf("%s: %w", msg, err), 0, path)
 		return attemptResult{Outcome: o, Path: path, Err: &ir.Error{Type: typ, Message: msg}}
 	}
+	// failRender classifies a request the adapter could not build. An adapter
+	// that names the error type is reporting something about the request
+	// itself, which the client needs in order to fix it, and every target
+	// would refuse it the same way. Anything else is this target's own
+	// configuration — a Vertex row with no project, a publisher the adapter
+	// does not serve — and says nothing about the next target, so the chain
+	// steps past it the way it steps past a model the provider lacks.
+	failRender := func(err error) attemptResult {
+		var ie *ir.Error
+		if errors.As(err, &ie) && ie.Type != "" {
+			res := failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ie.Type)
+			res.Err = ie
+			return res
+		}
+		return failBefore(adapter.OutcomeRetryableModel, err, msgRenderFailed, ir.ErrDarkrouter)
+	}
 
 	apiKey, authorizer, credErr := e.credentialFor(ctx, p, c)
 	if credErr != nil {
@@ -553,7 +569,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 						Method: pt.Method, Query: pt.Query,
 					})
 					if berr != nil {
-						return failBefore(adapter.OutcomeFatal, berr, msgRenderFailed, ir.ErrDarkrouter)
+						return failRender(berr)
 					}
 					hr, fw, pop, strip, streaming, path = built, f, po, injected, pt.Stream, PathPassthrough
 				}
@@ -564,16 +580,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		built, buildWarns, err := op.Build(ctx, tgt, ac.Adapter)
 		ac.Warns = append(ac.Warns, buildWarns...)
 		if err != nil {
-			// An adapter that names the error type is reporting something
-			// about the request itself, which the client needs in order to
-			// fix it; anything else is the gateway's own failure.
-			var ie *ir.Error
-			if errors.As(err, &ie) && ie.Type != "" {
-				res := failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ie.Type)
-				res.Err = ie
-				return res
-			}
-			return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
+			return failRender(err)
 		}
 		hr = built
 	}

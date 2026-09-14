@@ -20,6 +20,7 @@ import (
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -1097,6 +1098,57 @@ func TestABuildErrorNamingAClientFaultReachesTheClient(t *testing.T) {
 	}
 	if hits.Load() != 0 {
 		t.Errorf("upstream was called %d times", hits.Load())
+	}
+}
+
+// A render failure the adapter does not name as the client's is a fact about
+// that target's configuration. A later target configured correctly can still
+// serve the request, so the chain must reach it.
+func TestAMisconfiguredTargetFailsOverToTheNext(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(ok200))
+	defer up.Close()
+
+	vx := providertest.Keyed("vx", "vertex", up.URL, "sk", "m")
+	vx.Priority = 10
+	good := providertest.Keyed("good", "openaicompat", up.URL, "sk", "m")
+	logger := &captureLogger{}
+	e := executorFor(t, nil, providertest.NewSource(vx, good), map[string]adapter.Adapter{
+		"vertex": vertexadapter.New(), "openaicompat": openaicompat.New(),
+	}, Deps{Log: logger})
+
+	w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "pong") {
+		t.Fatalf("status = %d body = %s; the configured target was never tried", w.Code, w.Body.String())
+	}
+	r := logger.only(t)
+	if len(r.Attempts) != 2 || r.Attempts[0].ProviderID != "vx" || r.FinalProviderID != "good" {
+		t.Fatalf("attempts = %+v final = %q", r.Attempts, r.FinalProviderID)
+	}
+}
+
+// The other half of the rule: a refusal the adapter names as the client's is
+// one every target would repeat, so it still ends the chain.
+func TestARenderFailureNamingAClientFaultDoesNotFailOver(t *testing.T) {
+	var hits atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		ok200(w, r)
+	}))
+	defer up.Close()
+
+	refusing := providertest.Keyed("refusing", "capture", up.URL, "sk", "m")
+	refusing.Priority = 10
+	good := providertest.Keyed("good", "openaicompat", up.URL, "sk", "m")
+	e := executorFor(t, nil, providertest.NewSource(refusing, good), map[string]adapter.Adapter{
+		"capture":      &captureAdapter{buildErr: &ir.Error{Type: ir.ErrInvalidRequest, Message: "bad"}},
+		"openaicompat": openaicompat.New(),
+	}, Deps{})
+
+	if w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want the client's 400", w.Code, w.Body.String())
+	}
+	if hits.Load() != 0 {
+		t.Errorf("a client fault failed over to %d more targets", hits.Load())
 	}
 }
 
