@@ -100,6 +100,9 @@ export type RequestOptions = {
   /** TanStack Query's, so a query whose screen unmounted stops mid-flight
    *  rather than landing in a cache nobody is reading. */
   signal?: AbortSignal
+  /** Sent as If-Match, for a route that refuses a write pinned to a table
+   *  another admin has since changed. */
+  ifMatch?: string
 }
 
 /** Peeks at a 401 body without consuming it, to tell the two reasons apart. */
@@ -125,6 +128,7 @@ async function request<T>(
     // is worthless and one the client never received cannot be guessed.
     headers["X-CSRF-Token"] = csrfToken
   }
+  if (opts?.ifMatch !== undefined) headers["If-Match"] = opts.ifMatch
 
   const res = await fetch(path, {
     method,
@@ -153,6 +157,38 @@ async function request<T>(
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+/**
+ * Like api.get, but also hands back the response's ETag — request() has no
+ * way to return headers alongside its parsed body, and only a route that
+ * hands the ETag back as If-Match on a later write needs one.
+ */
+export async function getWithETag<T>(
+  path: string,
+  opts?: RequestOptions,
+): Promise<{ data: T; etag: string | null }> {
+  const res = await fetch(path, {
+    method: "GET",
+    credentials: "same-origin",
+    signal: opts?.signal,
+  })
+  if (res.status === 401) {
+    const expected = opts?.expectedRejection !== undefined && (await isExpectedRejection(res, opts.expectedRejection))
+    if (!expected) loggedOut()
+  }
+  if (!res.ok) {
+    let message = res.statusText
+    try {
+      const parsed = (await res.json()) as { error?: string }
+      if (parsed.error) message = parsed.error
+    } catch {
+      // A non-JSON error body means something upstream of the API answered.
+      // The status line is all there is to report.
+    }
+    throw new ApiError(res.status, message)
+  }
+  return { data: (await res.json()) as T, etag: res.headers.get("ETag") }
 }
 
 export const api = {

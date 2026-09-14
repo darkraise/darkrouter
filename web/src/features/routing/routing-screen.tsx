@@ -1,9 +1,10 @@
 import { useId, useMemo, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronUp, Plus } from "lucide-react"
 import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useAliases, useModels, usePolicy, useProviders } from "../../lib/queries"
+import { keys, useAliasesForEditing, useModels, usePolicy, useProviders } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Aliases, RouteCandidate, RoutePreview, RouteSkip } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
@@ -178,12 +179,18 @@ type AliasesSaveResult = {
 
 export function AliasEditor({
   aliases,
+  revision = null,
   knownProviders,
   context = EMPTY_CONTEXT,
   candidates = [],
   onPreview,
 }: {
   aliases: Aliases
+  /** The ETag `aliases` was read against. Sent back as If-Match on Save, so
+   *  a draft built from a copy another admin has since changed is refused
+   *  rather than silently overwriting their edit. Null skips the check --
+   *  a caller with no revision to offer gets today's unguarded write. */
+  revision?: string | null
   knownProviders: string[]
   /** Live provider, catalogue and breaker state, so each target can say what
    *  the router would make of it right now rather than only whether it parses. */
@@ -229,15 +236,28 @@ export function AliasEditor({
   const [editing, setEditing] = useState<string | null>(null)
   const [dragTarget, setDragTarget] = useState<{ name: string; index: number } | null>(null)
 
+  const queryClient = useQueryClient()
   const save = useApiMutation({
     mutationFn: async (next: Aliases) => {
-      const res = await api.put<AliasesSaveResult>("/api/aliases", next)
-      // A 200 here can still mean the write never took effect: the rows
-      // committed but the router could not republish, and the previous
-      // configuration is still what is serving. Thrown so the mutation
-      // reports it as the failure it is instead of toasting "saved".
-      if (!res.valid) throw new Error(res.error ?? "the new aliases did not take effect")
-      return res
+      try {
+        const res = await api.put<AliasesSaveResult>("/api/aliases", next, {
+          ifMatch: revision ?? undefined,
+        })
+        // A 200 here can still mean the write never took effect: the rows
+        // committed but the router could not republish, and the previous
+        // configuration is still what is serving. Thrown so the mutation
+        // reports it as the failure it is instead of toasting "saved".
+        if (!res.valid) throw new Error(res.error ?? "the new aliases did not take effect")
+        return res
+      } catch (err) {
+        // Another admin's edit landed first. The draft that was just
+        // refused is against a table that no longer exists; refetching is
+        // how the next Save gets one it can actually be pinned to.
+        if (err instanceof ApiError && err.status === 409) {
+          void queryClient.invalidateQueries({ queryKey: keys.aliases })
+        }
+        throw err
+      }
     },
     success: "Aliases saved",
     // The catalogue too: its alias column is read from the same map.
@@ -535,7 +555,7 @@ const ROUTING_FIELDS = ["alias"] as const
 
 export function RoutingScreen() {
   const [filters, setFilter] = useSearchFilters(ROUTING_FIELDS)
-  const aliases = useAliases()
+  const aliases = useAliasesForEditing()
   const providers = useProviders()
   const models = useModels()
   const policy = usePolicy()
@@ -566,7 +586,7 @@ export function RoutingScreen() {
   // router expands targets through rules 2 and 3 only, so an alias suggested
   // there could never resolve; the preview box answers rule 1 as well.
   const chainCandidates = useMemo(() => modelCandidates({ models: modelRows }), [modelRows])
-  const aliasNames = useMemo(() => Object.keys(aliases.data ?? {}), [aliases.data])
+  const aliasNames = useMemo(() => Object.keys(aliases.data?.aliases ?? {}), [aliases.data])
   const previewCandidates = useMemo(
     () => modelCandidates({ models: modelRows, aliases: aliasNames }),
     [modelRows, aliasNames],
@@ -586,7 +606,8 @@ export function RoutingScreen() {
 
       {aliases.data && (
         <AliasEditor
-          aliases={aliases.data}
+          aliases={aliases.data.aliases}
+          revision={aliases.data.revision}
           knownProviders={providerRows.map((p) => p.id)}
           context={context}
           candidates={chainCandidates}
