@@ -183,9 +183,18 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	}
 	// Structured output is generally available: no beta header, and the schema
 	// lives under output_config.format.
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
-		outputConfig["format"] = map[string]any{
-			"type": "json_schema", "schema": req.ResponseFormat.Schema,
+	if rf := req.ResponseFormat; rf != nil {
+		switch rf.Type {
+		case "json_schema":
+			outputConfig["format"] = map[string]any{"type": "json_schema", "schema": rf.Schema}
+		case "json_object":
+			// Anthropic has no schema-free JSON mode, and a bare object schema
+			// is refused: every object must list its properties and set
+			// additionalProperties false.
+			warns = append(warns, ir.Warning{
+				Field: "response_format", Target: targetName,
+				Reason: "Anthropic has no JSON mode without a schema; the response is unconstrained",
+			})
 		}
 	}
 	if len(outputConfig) > 0 {

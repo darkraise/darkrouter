@@ -356,6 +356,21 @@ func TestBuildRequestRendersToolsAndChoice(t *testing.T) {
 	}
 }
 
+// Anthropic structured output takes a schema and has no schema-free JSON
+// mode, so a json_object request cannot be honored and must not pass silently.
+func TestBuildRequestWarnsOnJSONObjectMode(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages:       []ir.Message{userMsg("hi")},
+		ResponseFormat: &ir.ResponseFormat{Type: "json_object"},
+	})
+	if !hasWarning(warns, "response_format") {
+		t.Errorf("warnings = %+v", warns)
+	}
+	if oc, ok := body["output_config"]; ok {
+		t.Errorf("output_config = %v; there is no schema to constrain with", oc)
+	}
+}
+
 func TestBuildRequestEmitsStructuredOutputAndWarnsOnSafety(t *testing.T) {
 	_, body, warns := built(t, &ir.Request{
 		Messages: []ir.Message{userMsg("hi")},
