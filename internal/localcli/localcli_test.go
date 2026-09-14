@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 )
 
 // fakeCLI answers without spawning anything, so the transport's own behaviour
@@ -209,6 +211,34 @@ func TestAStreamThatFailsBeforeSayingAnythingReportsTheError(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "[DONE]") {
 		t.Errorf("the stream did not terminate: %s", b)
+	}
+}
+
+// The executor reads a CLI stream with the OpenAI parser, which stops at
+// [DONE]. A failure announced after it is never seen, and a truncated answer
+// is served as a complete one.
+func TestAStreamThatFailsMidwayEndsInAnErrorTheParserSees(t *testing.T) {
+	f := &fakeCLI{chunks: []string{"half an "}, err: errors.New("auggie exited 1: killed")}
+	resp := do(t, f, "POST", "fake://cli/v1/chat/completions",
+		`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	defer resp.Body.Close()
+
+	var text strings.Builder
+	var streamErr error
+	for ev, err := range openaicompat.ParseStream(resp.Body, 1<<20) {
+		if err != nil {
+			streamErr = err
+			break
+		}
+		if ev.Delta != nil {
+			text.WriteString(ev.Delta.Text)
+		}
+	}
+	if text.String() != "half an " {
+		t.Errorf("text = %q, want the part the program produced", text.String())
+	}
+	if streamErr == nil || !strings.Contains(streamErr.Error(), "killed") {
+		t.Fatalf("stream error = %v, want the program's failure", streamErr)
 	}
 }
 
