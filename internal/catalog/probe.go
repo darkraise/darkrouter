@@ -247,6 +247,12 @@ func ParseListPage(kind string, body []byte) ([]Discovered, string, error) {
 		return out, page.LastID, nil
 	case "openaicompat":
 		out, err := parseDataList(body)
+		if err != nil || len(out) > 0 {
+			return out, "", err
+		}
+		// Ollama Cloud chats OpenAI-compatibly but documents only its native
+		// /api/tags as a listing, which names models under models[].
+		out, err = parseOllamaTags(body)
 		return out, "", err
 	default:
 		return nil, "", fmt.Errorf("%w: %s", ErrKindNotDiscoverable, kind)
@@ -304,6 +310,30 @@ func parseDataList(body []byte) ([]Discovered, error) {
 		}
 		at[m.ID] = len(out)
 		out = append(out, Discovered{ModelID: m.ID, Pricing: price})
+	}
+	return out, nil
+}
+
+func parseOllamaTags(body []byte) ([]Discovered, error) {
+	var doc struct {
+		Models []struct {
+			Name  string `json:"name"`
+			Model string `json:"model"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, fmt.Errorf("parse listing: %w", err)
+	}
+	out := make([]Discovered, 0, len(doc.Models))
+	for _, m := range doc.Models {
+		id := m.Name
+		if id == "" {
+			id = m.Model
+		}
+		if id == "" {
+			continue
+		}
+		out = append(out, Discovered{ModelID: id})
 	}
 	return out, nil
 }
