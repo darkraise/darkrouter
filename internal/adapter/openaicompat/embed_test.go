@@ -112,7 +112,7 @@ func TestParseEmbeddingReadsFloatVectors(t *testing.T) {
 	out, err := New().ParseEmbedding(jsonResp(`{
 	  "object":"list","model":"text-embedding-3-small",
 	  "data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},
-	          {"object":"embedding","index":1,"embedding":[0.3]}],
+	          {"object":"embedding","index":1,"embedding":[0.3,0.4]}],
 	  "usage":{"prompt_tokens":7,"total_tokens":7}}`))
 	if err != nil {
 		t.Fatal(err)

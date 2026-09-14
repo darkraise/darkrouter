@@ -107,6 +107,9 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 		out.Embeddings = append(out.Embeddings, ir.Embedding{Index: i, Float: p.Embeddings.Values})
 		out.Usage.InputTokens += p.Embeddings.Statistics.TokenCount
 	}
+	if err := adapter.ValidateEmbeddings(out.Embeddings); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
