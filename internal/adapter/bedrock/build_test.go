@@ -579,3 +579,43 @@ func TestReasoningTakesTheAdaptiveShapeOnAdaptiveOnlyModels(t *testing.T) {
 		t.Errorf("thinking = %#v on a manual-capable model", extra["thinking"])
 	}
 }
+
+// Opus 5 and Sonnet 5 think adaptively when the thinking field is absent, so
+// a client's "no thinking" has to be sent as the explicit off switch. Models
+// that always think reject that switch, and models before adaptive thinking
+// never had one: omitting the field is what off means there.
+func TestDisabledReasoningIsSentExplicitlyWhereTheModelHasAnOffSwitch(t *testing.T) {
+	disabled := func(model string, anthropicEdge bool) (map[string]any, []ir.Warning) {
+		req := simple()
+		if anthropicEdge {
+			req.Metadata = map[string]string{"anthropic_thinking_type": "disabled"}
+		} else {
+			req.Reasoning = &ir.Reasoning{Disabled: true}
+		}
+		body, _, warns := build(t, catalogTarget(t, model), req)
+		extra, _ := body["additionalModelRequestFields"].(map[string]any)
+		return extra, warns
+	}
+	for _, model := range []string{"anthropic.claude-opus-5", "us.anthropic.claude-sonnet-5", "us.anthropic.claude-opus-4-7"} {
+		for _, viaEdge := range []bool{false, true} {
+			extra, _ := disabled(model, viaEdge)
+			if th, _ := extra["thinking"].(map[string]any); th["type"] != "disabled" {
+				t.Errorf("%s (anthropic edge %v): thinking = %#v, want type disabled", model, viaEdge, extra["thinking"])
+			}
+		}
+	}
+
+	extra, warns := disabled("global.anthropic.claude-fable-5", false)
+	if th, sent := extra["thinking"]; sent {
+		t.Errorf("fable-5: thinking = %#v sent to a model that rejects the off switch", th)
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("fable-5: thinking stays on without a warning: %+v", warns)
+	}
+
+	for _, model := range []string{"anthropic.claude-3-7-sonnet-20250219-v1:0", "amazon.nova-pro-v1:0"} {
+		if extra, _ := disabled(model, false); extra != nil {
+			t.Errorf("%s: additionalModelRequestFields = %#v, want none", model, extra)
+		}
+	}
+}

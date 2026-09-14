@@ -137,7 +137,10 @@ func isAnthropicModel(model string) bool {
 // differently or not at all, and sending it to them is a ValidationException.
 func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.Warning) {
 	r := req.Reasoning
-	if r == nil || r.Disabled {
+	if (r != nil && r.Disabled) || req.Metadata["anthropic_thinking_type"] == "disabled" {
+		return disabledThinking(t)
+	}
+	if r == nil {
 		return nil, nil
 	}
 	if !isAnthropicModel(t.Model) {
@@ -189,6 +192,27 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 	return map[string]any{
 		"thinking": map[string]any{"type": "enabled", "budget_tokens": budget},
 	}, warns
+}
+
+// disabledThinking renders a client's request for no thinking. A Claude model
+// with adaptive thinking may think when the field is absent — Opus 5 and
+// Sonnet 5 do by default — so only the explicit off switch turns it off. A
+// model that always thinks rejects that switch, and one from before adaptive
+// thinking has none; omitting the field is the only request either accepts.
+func disabledThinking(t *adapter.Target) (map[string]any, []ir.Warning) {
+	if !isAnthropicModel(t.Model) || !t.Info.TraitsKnown {
+		return nil, nil
+	}
+	if t.Info.ThinkingAlwaysOn {
+		return nil, []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model cannot turn thinking off; the request was sent with thinking on",
+		}}
+	}
+	if !t.Info.Adaptive {
+		return nil, nil
+	}
+	return map[string]any{"thinking": map[string]any{"type": "disabled"}}, nil
 }
 
 func inferenceConfig(req *ir.Request) map[string]any {
