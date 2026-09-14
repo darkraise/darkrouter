@@ -120,7 +120,7 @@ func TestMergeReadsCacheWritePricingFromAnUnjoinedRow(t *testing.T) {
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
 		CacheReadMicrosPerMTok: 30_000, CacheWriteMicrosPerMTok: 375_000,
 		PriceKnown: true,
-	}, "", Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
+	}, "", Preset{}, Doc{}, LiteLLMDoc{}, FreeCatalog{}, store.ModelOverride{})
 
 	if got.Source != SourceInferred {
 		t.Fatalf("source = %v, want the row to be the source", got.Source)
@@ -244,5 +244,55 @@ func TestASyncedLiteLLMIndexReachesTheSnapshot(t *testing.T) {
 	}
 	if m.Pricing.Source != SourceLiteLLM || m.Pricing.InputMicrosPerMTok != 590_000 {
 		t.Errorf("pricing = %+v, want the synced index's 590000", m.Pricing)
+	}
+}
+
+// The router's veto reads the tier carried on the model, so a free-tier
+// grading the daily sync changed must reach the snapshot, not only the import
+// filter.
+func TestASyncedFreeTierReachesTheSnapshot(t *testing.T) {
+	const model = "freshly-graded-model"
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = 'groq' WHERE id = 'p'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p",
+		[]store.DiscoveredModel{{ModelID: model}}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: "groq"}}}
+	cat := NewStore(db, src)
+	if _, ok := FreeModels().Tier("groq", model); ok {
+		t.Fatal("the embedded catalogue already grades the model; the test proves nothing")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`
+export const FREE_CATALOG_CURATED_AT = "2026-09-01";
+export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
+  { provider: "groq", modelId: "` + model + `", displayName: "Fresh", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "groq", tos: "avoid" },
+];
+`))
+	}))
+	defer srv.Close()
+
+	syncer := NewFreeSyncer(FreeSyncOptions{URL: srv.URL, OnUpdate: func(c context.Context) {
+		if err := cat.Rebuild(c); err != nil {
+			t.Error(err)
+		}
+	}})
+	cat.SetFreeTiers(syncer.Catalog)
+	if err := syncer.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok := cat.Snapshot().Lookup("p", model)
+	if !ok {
+		t.Fatalf("%s is not in the snapshot", model)
+	}
+	if !m.FreeTier.Vetoed() {
+		t.Errorf("free tier = %+v, want the synced avoid grading", m.FreeTier)
 	}
 }

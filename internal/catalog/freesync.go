@@ -25,6 +25,10 @@ type FreeSyncOptions struct {
 	URL      string
 	Interval time.Duration
 	Timeout  time.Duration
+	// OnUpdate is called after a fetch replaces the catalogue. Snapshot models
+	// carry their free tier, so without it a changed grading stays unread by
+	// routing until something else rebuilds.
+	OnUpdate func(context.Context)
 }
 
 func (o FreeSyncOptions) withDefaults() FreeSyncOptions {
@@ -114,6 +118,9 @@ func (s *FreeSyncer) SyncOnce(ctx context.Context) error {
 	// gateway imports, and an operator looking at a catalogue that grew by
 	// forty models needs somewhere to see why.
 	slog.Info("free catalogue synced", "curated_at", fetched.CuratedAt, "models", fetched.count(), "providers", len(fetched.Providers), "was_curated_at", previous.CuratedAt, "was_models", previous.count())
+	if s.opts.OnUpdate != nil {
+		s.opts.OnUpdate(ctx)
+	}
 	return nil
 }
 

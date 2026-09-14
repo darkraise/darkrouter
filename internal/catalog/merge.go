@@ -16,6 +16,9 @@ type MergeInput struct {
 	Presets   Presets
 	Doc       Doc
 	LiteLLM   LiteLLMDoc
+	// Free is the curated free-tier catalogue. Empty means the one embedded at
+	// build time.
+	Free      FreeCatalog
 	Rows      []store.ModelRow
 	Overrides []store.ModelOverride
 }
@@ -36,6 +39,11 @@ func Merge(in MergeInput) []Model {
 		overrides[[2]string{o.ProviderID, o.ModelID}] = o
 	}
 
+	free := in.Free
+	if len(free.Providers) == 0 {
+		free = FreeModels()
+	}
+
 	out := make([]Model, 0, len(in.Rows))
 	for _, row := range in.Rows {
 		p, ok := byID[row.ProviderID]
@@ -45,7 +53,7 @@ func Merge(in MergeInput) []Model {
 			continue
 		}
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
-		m := mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM,
+		m := mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM, free,
 			overrides[[2]string{row.ProviderID, row.ModelID}])
 		// Bedrock's preset declares no rules of its own. The Claude models it
 		// serves are Anthropic's generations whichever endpoint answers, and
@@ -81,7 +89,7 @@ func freeCatalogKey(p provider.Provider) string {
 }
 
 func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
-	litellm LiteLLMDoc, override store.ModelOverride) Model {
+	litellm LiteLLMDoc, free FreeCatalog, override store.ModelOverride) Model {
 
 	m := Model{
 		ProviderID: row.ProviderID,
@@ -145,7 +153,7 @@ func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
 	// Carried on the model rather than looked up per request: the router reads
 	// the vendor's grading of this access before it selects the model, and a
 	// lookup at that point would put the curated catalogue on the request path.
-	if tier, ok := FreeModels().Tier(presetID, row.ModelID); ok {
+	if tier, ok := free.Tier(presetID, row.ModelID); ok {
 		m.FreeTier = tier
 	}
 
