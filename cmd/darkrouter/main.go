@@ -193,6 +193,14 @@ func runServer(args []string) error {
 	if err := store.CheckWritable(dbPath); err != nil {
 		return err
 	}
+	// Held until the process exits. rotate-key takes the same lock, and a
+	// rotation run beside this process would be undone by the next credential
+	// it writes under the key it started with.
+	unlock, err := store.Lock(dbPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	db, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -305,6 +313,17 @@ func runRotateKey(args []string) error {
 	if oldMaster == "" {
 		return errors.New("DARKROUTER_MASTER_KEY must hold the current master key")
 	}
+
+	// Before the prompt, so an operator is not asked for a key only to be
+	// turned away.
+	unlock, err := store.Lock(*dbPath)
+	if errors.Is(err, store.ErrDatabaseInUse) {
+		return fmt.Errorf("stop the gateway before rotating the key: %w", err)
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	fmt.Fprint(os.Stderr, "New master key: ")
 	newMaster, err := readLine(os.Stdin)

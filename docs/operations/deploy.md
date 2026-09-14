@@ -251,9 +251,26 @@ changes.
 
 ## Command line
 
+`rotate-key` re-encrypts every stored credential under a new master key. **Stop
+the gateway first.** A running gateway keeps the key it started with and seals
+every credential it writes afterwards — a refreshed OAuth token, a key added in
+the console — under that key, so a rotation beside it leaves rows the next start
+cannot decrypt. The command refuses rather than letting that happen: the
+gateway holds an exclusive lock on `data/darkrouter.db.lock` for as long as it
+runs, and `rotate-key` exits with "stop the gateway before rotating the key"
+while it is held. A second gateway started on the same `data/` is refused the
+same way.
+
 ```bash
-docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest rotate-key -db …
+docker compose -f compose.prod.yml stop darkrouter
+docker run --rm -i -v ./data:/data --env-file .env \
+  --entrypoint darkrouter darkraise/darkrouter:latest rotate-key -db /data/darkrouter.db
+# set DARKROUTER_MASTER_KEY in .env to the new key, then
+docker compose -f compose.prod.yml up -d darkrouter
 ```
 
 The entrypoint is the gateway itself, which is why the override is needed.
-`rotate-key` reads the new key from stdin.
+`rotate-key` reads the current key from `DARKROUTER_MASTER_KEY` and the new one
+from stdin, hence `-i`. The lock file stays in `data/` after either process
+exits; it is not a sign that anything is still running, and it must not be
+deleted while the gateway is up.
