@@ -168,6 +168,22 @@ func TestParseRequestAcceptsALegacyFunctionMessage(t *testing.T) {
 	}
 }
 
+func TestParseRequestPairsALegacyFunctionResultWithItsCall(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[
+		{"role":"user","content":"weather?"},
+		{"role":"assistant","content":null,"function_call":{"name":"get_weather","arguments":"{}"}},
+		{"role":"function","name":"get_weather","content":"17C"}]}`)
+	use := req.Messages[1].Content[0].ToolUse
+	tr := req.Messages[2].Content[0].ToolResult
+	if use == nil || tr == nil {
+		t.Fatalf("messages = %+v", req.Messages)
+	}
+	if tr.ToolUseID != use.ID {
+		t.Errorf("result id = %q, call id = %q; a result must name the call it answers",
+			tr.ToolUseID, use.ID)
+	}
+}
+
 func TestParseRequestAcceptsLegacyFunctionDeclarations(t *testing.T) {
 	req := parsed(t, `{"model":"m","messages":[{"role":"user","content":"hi"}],
 		"functions":[{"name":"f","description":"d","parameters":{"type":"object"}}],

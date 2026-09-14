@@ -153,8 +153,9 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		})
 	}
 	req.Extra = captureExtra(body)
+	var pending []string
 	for i, m := range w.Messages {
-		msg, warns, err := parseMessage(i, m)
+		msg, warns, err := parseMessage(i, m, &pending)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -349,9 +350,10 @@ func parseToolChoice(raw json.RawMessage) *ir.ToolChoice {
 }
 
 // parseMessage converts one wire message. The turn index is needed because a
-// legacy function message carries no call id and one has to be synthesized
-// from its position.
-func parseMessage(turn int, m wireMessage) (ir.Message, []ir.Warning, error) {
+// legacy function call carries no id and one has to be synthesized from its
+// position; pending carries those ids, in order, forward to the results that answer
+// them, since a legacy function message names only the function.
+func parseMessage(turn int, m wireMessage, pending *[]string) (ir.Message, []ir.Warning, error) {
 	role := mapRole(m.Role)
 	blocks, warns, err := parseContent(m.Content)
 	if err != nil {
@@ -367,7 +369,11 @@ func parseMessage(turn int, m wireMessage) (ir.Message, []ir.Warning, error) {
 	if role == ir.RoleTool {
 		id := m.ToolCallID
 		if id == "" {
-			id = xlate.SyntheticToolCallID(turn, 0)
+			if len(*pending) > 0 {
+				id, *pending = (*pending)[0], (*pending)[1:]
+			} else {
+				id = xlate.SyntheticToolCallID(turn, 0)
+			}
 		}
 		return ir.Message{Role: role, Content: []ir.ContentBlock{{
 			Type:       ir.BlockToolResult,
@@ -382,10 +388,14 @@ func parseMessage(turn int, m wireMessage) (ir.Message, []ir.Warning, error) {
 		}}, blocks...)
 	}
 
+	if role == ir.RoleAssistant {
+		*pending = nil
+	}
 	for i, tc := range m.ToolCalls {
 		id := tc.ID
 		if id == "" {
 			id = xlate.SyntheticToolCallID(turn, i)
+			*pending = append(*pending, id)
 		}
 		blocks = append(blocks, ir.ContentBlock{
 			Type: ir.BlockToolUse,
@@ -396,10 +406,12 @@ func parseMessage(turn int, m wireMessage) (ir.Message, []ir.Warning, error) {
 		})
 	}
 	if m.FunctionCall != nil {
+		id := xlate.SyntheticToolCallID(turn, len(m.ToolCalls))
+		*pending = append(*pending, id)
 		blocks = append(blocks, ir.ContentBlock{
 			Type: ir.BlockToolUse,
 			ToolUse: &ir.ToolUse{
-				ID: xlate.SyntheticToolCallID(turn, len(m.ToolCalls)), Name: m.FunctionCall.Name,
+				ID: id, Name: m.FunctionCall.Name,
 				Input: json.RawMessage(argumentsOrEmpty(m.FunctionCall.Arguments)),
 			},
 		})
