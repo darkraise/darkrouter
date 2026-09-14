@@ -102,8 +102,33 @@ func TestBuildRequestSendsJSONObjectModeWithoutASchema(t *testing.T) {
 	if cfg["responseMimeType"] != "application/json" {
 		t.Fatalf("generationConfig = %v", cfg)
 	}
-	if _, ok := cfg["responseSchema"]; ok {
+	if _, ok := cfg["responseJsonSchema"]; ok {
 		t.Fatalf("generationConfig = %v; json_object carries no schema", cfg)
+	}
+}
+
+// responseSchema and parameters take Gemini's OpenAPI subset, which has no
+// $defs, $ref or additionalProperties. A client's JSON Schema belongs in the
+// fields that accept one.
+func TestBuildRequestSendsJSONSchemaThroughTheJSONSchemaFields(t *testing.T) {
+	schema := json.RawMessage(`{"$defs":{"city":{"type":"string"}},"type":"object","properties":{"city":{"$ref":"#/$defs/city"}},"additionalProperties":false}`)
+	body, _ := builtFor(t, "gemini-2.5-flash", &ir.Request{
+		Tools:          []ir.Tool{{Name: "lookup", Schema: schema}},
+		ResponseFormat: &ir.ResponseFormat{Type: "json_schema", Schema: schema},
+	})
+	cfg := body["generationConfig"].(map[string]any)
+	if _, ok := cfg["responseSchema"]; ok {
+		t.Errorf("generationConfig = %v; responseSchema is the OpenAPI subset", cfg)
+	}
+	if got, _ := cfg["responseJsonSchema"].(map[string]any); got["$defs"] == nil {
+		t.Errorf("generationConfig = %v", cfg)
+	}
+	decl := body["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)
+	if _, ok := decl["parameters"]; ok {
+		t.Errorf("declaration = %v; parameters is the OpenAPI subset", decl)
+	}
+	if got, _ := decl["parametersJsonSchema"].(map[string]any); got["$defs"] == nil {
+		t.Errorf("declaration = %v", decl)
 	}
 }
 
