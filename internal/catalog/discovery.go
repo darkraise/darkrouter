@@ -276,7 +276,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// Ahead of the listing probe, because that probe refuses exactly the kinds
 	// seeding exists for.
 	if seeded := SeedFromPreset(preset, d.doc()); len(seeded) > 0 {
-		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset))
+		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset, cred.Secret))
 		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
 			slog.Warn("discovery: seeding failed", "provider", p.ID, "err", err)
 		}
@@ -332,7 +332,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// the sweep just fetched, before any of it is recorded. Narrowing at
 	// routing time instead would leave the catalogue full of models the
 	// operator asked not to have.
-	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, d.freeRules(p, preset))
+	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, d.freeRules(p, preset, cred.Secret))
 
 	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, dropped, now); err != nil {
 		slog.Error("discovery: recording success failed", "provider", p.ID, "err", err)
@@ -365,12 +365,19 @@ func (d *Discoverer) recordFailure(ctx context.Context, providerID string, at ti
 // Keyed on the preset rather than the provider row's id, because the curated
 // catalogue is a fact about the upstream vendor. A provider row an operator
 // named something else still routes to the same free tier.
-func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
+//
+// operatorKey is the secret of the credential the sweep chose. A keyless style
+// holding one is reached on the operator's account, which the keyless fallback
+// must not treat as having no account to bill.
+func (d *Discoverer) freeRules(p provider.Provider, preset Preset, operatorKey string) FreeRules {
 	style := p.AuthStyle
 	if style == "" {
 		style = preset.Auth.Style
 	}
-	rules := FreeRules{Price: d.priceLookup(preset), Keyless: auth.IsKeyless(style)}
+	rules := FreeRules{
+		Price:   d.priceLookup(preset),
+		Keyless: auth.IsKeyless(style) && operatorKey == "",
+	}
 	key := freeCatalogKey(p)
 	free := FreeModels()
 	if d.opts.FreeTiers != nil {

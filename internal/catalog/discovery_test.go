@@ -448,7 +448,7 @@ func TestFreeRulesCarryTheProvidersCuratedTier(t *testing.T) {
 	// Keyed on the preset, because the curated catalogue is a fact about the
 	// upstream vendor rather than about the row an operator named.
 	d := &Discoverer{opts: DiscoveryOptions{}}
-	rules := d.freeRules(provider.Provider{ID: "my-groq", Preset: "groq"}, Preset{ModelsDevID: "groq"})
+	rules := d.freeRules(provider.Provider{ID: "my-groq", Preset: "groq"}, Preset{ModelsDevID: "groq"}, "")
 	if rules.Curated == nil {
 		t.Fatal("a provider the catalogue covers must carry its curated rule")
 	}
@@ -462,7 +462,7 @@ func TestFreeRulesCarryTheProvidersCuratedTier(t *testing.T) {
 
 func TestFreeRulesFallBackToTheProviderIDForAnUnpresetedRow(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{}}
-	rules := d.freeRules(provider.Provider{ID: "groq"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "groq"}, Preset{}, "")
 	if rules.Curated == nil || !rules.Curated("openai/gpt-oss-20b") {
 		t.Error("a row with no preset must fall back to its own id")
 	}
@@ -470,7 +470,7 @@ func TestFreeRulesFallBackToTheProviderIDForAnUnpresetedRow(t *testing.T) {
 
 func TestFreeRulesLeaveAnUncoveredProviderToItsPrices(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{}}
-	rules := d.freeRules(provider.Provider{ID: "nobody", Preset: "nobody"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "nobody", Preset: "nobody"}, Preset{}, "")
 	if rules.Curated != nil {
 		t.Error("a provider no catalogue covers must carry no curated rule")
 	}
@@ -484,7 +484,7 @@ func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
 		"newcomer": {"m": {FreeType: "recurring-daily"}},
 	}}
 	d := &Discoverer{opts: DiscoveryOptions{FreeTiers: func() FreeCatalog { return live }}}
-	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{}, "")
 	if rules.Curated == nil || !rules.Curated("m") {
 		t.Error("the synced catalogue did not reach the import filter")
 	}
@@ -493,7 +493,7 @@ func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
 func TestFreeRulesFallBackToTheEmbeddedCatalogue(t *testing.T) {
 	for _, tiers := range []func() FreeCatalog{nil, func() FreeCatalog { return FreeCatalog{} }} {
 		d := &Discoverer{opts: DiscoveryOptions{FreeTiers: tiers}}
-		rules := d.freeRules(provider.Provider{ID: "groq", Preset: "groq"}, Preset{})
+		rules := d.freeRules(provider.Provider{ID: "groq", Preset: "groq"}, Preset{}, "")
 		if rules.Curated == nil || !rules.Curated("openai/gpt-oss-120b") {
 			t.Error("an unsynced gateway lost the catalogue its release shipped with")
 		}
@@ -617,7 +617,7 @@ func TestTheFreeFilterVetoesAnUnsanctionedTier(t *testing.T) {
 			}}
 			rules := d.freeRules(provider.Provider{
 				ID: "p", Preset: "opencode", AllowUnsanctionedFree: tc.optedIn,
-			}, Preset{})
+			}, Preset{}, "")
 			rules.Price = zeroPriced
 
 			out, dropped := SelectModelsForImport(
@@ -650,7 +650,7 @@ func TestTheVetoSurvivesTheKeylessFallback(t *testing.T) {
 	}}
 	rules := d.freeRules(provider.Provider{
 		ID: "p", Preset: "opencode", AuthStyle: "optional",
-	}, Preset{})
+	}, Preset{}, "")
 	if !rules.Keyless {
 		t.Fatal("the fixture is not keyless; the fallback is not under test")
 	}
@@ -674,10 +674,32 @@ func TestTheKeylessFallbackStillKeepsAnUnvetoedModel(t *testing.T) {
 	}}
 	rules := d.freeRules(provider.Provider{
 		ID: "p", Preset: "uncovered", AuthStyle: "none",
-	}, Preset{})
+	}, Preset{}, "")
 	out, dropped := SelectModelsForImport(discovered("a", "b"), true, rules)
 	if !slices.Equal(kept(out), []string{"a", "b"}) || dropped != nil {
 		t.Errorf("kept = %v dropped = %v, want both models and no drops", kept(out), dropped)
+	}
+}
+
+func TestTheKeylessFallbackIsNotForAnOperatorsKey(t *testing.T) {
+	// An optional-auth provider holding the operator's key lists what that
+	// account can buy. Matching nothing free there means nothing is free, not
+	// that there is no account to bill.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"paid-a"},{"id":"paid-b"}]}`))
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "p")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "p", Kind: "openaicompat", BaseURL: srv.URL + "/v1", AuthStyle: "optional",
+		FreeModelsOnly: true,
+		Credentials:    []provider.Credential{{ID: "k", Secret: "sk-paid", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if got := modelIDs(t, db); len(got) != 0 {
+		t.Errorf("imported %v under a free-only filter with the operator's key", got)
 	}
 }
 
@@ -691,7 +713,7 @@ func TestAWithdrawnTierDoesNotVeto(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{
 		FreeTiers: func() FreeCatalog { return live },
 	}}
-	rules := d.freeRules(provider.Provider{ID: "p", Preset: "opencode"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "p", Preset: "opencode"}, Preset{}, "")
 	rules.Price = zeroPriced
 	if rules.Unsanctioned("withdrawn") {
 		t.Error("a withdrawn tier vetoed; only a live grading may")
@@ -709,7 +731,7 @@ func TestAnUncoveredProviderKeepsNilRules(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{
 		FreeTiers: func() FreeCatalog { return unsanctionedFixture() },
 	}}
-	rules := d.freeRules(provider.Provider{ID: "p", Preset: "other"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "p", Preset: "other"}, Preset{}, "")
 	if rules.Curated != nil {
 		t.Error("an uncovered provider must keep a nil Curated rule")
 	}
@@ -726,7 +748,7 @@ func TestOptingInClearsTheVeto(t *testing.T) {
 	}}
 	rules := d.freeRules(provider.Provider{
 		ID: "p", Preset: "opencode", AllowUnsanctionedFree: true,
-	}, Preset{})
+	}, Preset{}, "")
 	if rules.Unsanctioned != nil {
 		t.Error("an opted-in provider must carry no veto")
 	}
