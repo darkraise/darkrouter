@@ -75,8 +75,8 @@ type Deps struct {
 	// routes, which is what every test that does not exercise them wants.
 	Flows *auth.FlowStore
 
-	// HTTP is the client used for token exchange and credential probes. Nil
-	// uses http.DefaultClient.
+	// HTTP is the client used for token exchange and credential probes. A
+	// client without a timeout, or nil, is bounded by discovery's timeout.
 	HTTP *http.Client
 
 	// Auth resolves a non-static credential into an authorizer, so the probe

@@ -267,9 +267,28 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// defaultUpstreamTimeout is discovery's own default, for a server built
+// without a config.
+const defaultUpstreamTimeout = 15 * time.Second
+
+// httpClient is the configured client bounded by discovery's timeout when it
+// carries no timeout of its own. The token exchange runs on a request context
+// with no deadline, so an upstream that accepts the connection and never
+// answers would otherwise hold the admin request for good.
 func (s *Server) httpClient() *http.Client {
-	if s.deps.HTTP != nil {
-		return s.deps.HTTP
+	c := s.deps.HTTP
+	if c == nil {
+		c = &http.Client{}
 	}
-	return http.DefaultClient
+	if c.Timeout > 0 {
+		return c
+	}
+	bounded := *c
+	bounded.Timeout = defaultUpstreamTimeout
+	if s.deps.Config != nil {
+		if t := s.deps.Config.Current().Catalog.Discovery.Timeout; t > 0 {
+			bounded.Timeout = t
+		}
+	}
+	return &bounded
 }
