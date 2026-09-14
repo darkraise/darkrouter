@@ -8,7 +8,10 @@ import (
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func build(t *testing.T, tgt *adapter.Target, req *ir.Request) (map[string]any, string, []ir.Warning) {
@@ -476,46 +479,82 @@ func TestTypedServerToolsAreWarnedAndDropped(t *testing.T) {
 	}
 }
 
-// The catalog's per-generation traits are what decide the thinking shape
-// everywhere else. Bedrock read only the model id, so a generation that takes
-// the adaptive shape was sent a manual budget it refuses, and a model that
-// always thinks was sent a budget it does not accept either.
-func TestReasoningHonoursTheCatalogThinkingTraits(t *testing.T) {
-	adaptiveOnly := anthropicTarget("us.anthropic.claude-opus-4-7-v1:0")
-	adaptiveOnly.Info = adapter.ModelInfo{
-		TraitsKnown: true, Adaptive: true, ManualBudget: false, MaxOutputTokens: 64000,
+// catalogTarget resolves a model's traits the way a live request does, through
+// the shipped presets and the catalog merge, rather than stating them. Stated
+// traits hid that the bedrock preset yields none at all.
+func catalogTarget(t *testing.T, model string) *adapter.Target {
+	t.Helper()
+	presets, err := catalog.LoadPresets()
+	if err != nil {
+		t.Fatal(err)
 	}
-	req := simple()
-	req.Reasoning = &ir.Reasoning{Budget: 2048}
-
-	body, _, warns := build(t, adaptiveOnly, req)
-	if extra, ok := body["additionalModelRequestFields"].(map[string]any); ok {
-		if _, sent := extra["reasoning_config"]; sent {
-			t.Errorf("sent a manual reasoning_config to a model the catalog says takes "+
-				"only the adaptive shape: %#v", extra["reasoning_config"])
-		}
+	got := catalog.Merge(catalog.MergeInput{
+		Providers: []provider.Provider{{ID: "p", Kind: "bedrock", Preset: "bedrock"}},
+		Presets:   presets,
+		Rows:      []store.ModelRow{{ProviderID: "p", ModelID: model, State: "live"}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("%s: merged to %d models", model, len(got))
 	}
-	if !hasWarn(warns, "reasoning") {
-		t.Error("dropped the reasoning request without warning")
+	tr := got[0].Traits
+	tgt := anthropicTarget(model)
+	tgt.Info = adapter.ModelInfo{
+		MaxOutputTokens:    64000,
+		Adaptive:           tr.Adaptive,
+		ManualBudget:       tr.ManualBudget,
+		FreeSampling:       tr.FreeSampling,
+		TraitsKnown:        tr.Known,
+		NoPrefill:          tr.NoPrefill,
+		ThinkingAlwaysOn:   tr.ThinkingAlwaysOn,
+		NoForcedToolChoice: tr.NoForcedToolChoice,
 	}
-
-	// A model whose traits are known and manual-capable still gets the budget.
-	manual := anthropicTarget("us.anthropic.claude-sonnet-4-20250514-v1:0")
-	manual.Info = adapter.ModelInfo{
-		TraitsKnown: true, Adaptive: true, ManualBudget: true, MaxOutputTokens: 64000,
-	}
-	body, _, _ = build(t, manual, req)
-	cfg := body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
-	if cfg["budget_tokens"] != float64(2048) {
-		t.Errorf("budget_tokens = %v on a manual-capable model", cfg["budget_tokens"])
-	}
+	return tgt
 }
 
-func hasWarn(warns []ir.Warning, field string) bool {
-	for _, w := range warns {
-		if w.Field == field {
-			return true
+// A generation that dropped the manual budget refuses one, so it is sent the
+// adaptive shape Converse carries in additionalModelRequestFields, with the
+// client's depth expressed as an effort.
+func TestReasoningTakesTheAdaptiveShapeOnAdaptiveOnlyModels(t *testing.T) {
+	for _, c := range []struct {
+		model      string
+		reasoning  ir.Reasoning
+		wantEffort string
+	}{
+		{"us.anthropic.claude-opus-4-7", ir.Reasoning{Budget: 2048}, "low"},
+		{"anthropic.claude-opus-5", ir.Reasoning{Effort: "high"}, "high"},
+		{"global.anthropic.claude-fable-5", ir.Reasoning{Effort: "medium"}, "medium"},
+	} {
+		req := simple()
+		req.Reasoning = &c.reasoning
+		body, _, warns := build(t, catalogTarget(t, c.model), req)
+
+		extra, ok := body["additionalModelRequestFields"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: additionalModelRequestFields = %#v", c.model, body["additionalModelRequestFields"])
+		}
+		if cfg, sent := extra["reasoning_config"]; sent {
+			t.Errorf("%s: sent a manual budget the model refuses: %#v", c.model, cfg)
+		}
+		if th, _ := extra["thinking"].(map[string]any); th["type"] != "adaptive" {
+			t.Errorf("%s: thinking = %#v, want type adaptive", c.model, extra["thinking"])
+		}
+		if oc, _ := extra["output_config"].(map[string]any); oc["effort"] != c.wantEffort {
+			t.Errorf("%s: output_config = %#v, want effort %q", c.model, extra["output_config"], c.wantEffort)
+		}
+		if hasWarning(warns, "reasoning") {
+			t.Errorf("%s: warned about a reasoning request the model can serve: %+v", c.model, warns)
 		}
 	}
-	return false
+
+	// A generation that still takes a budget keeps it.
+	req := simple()
+	req.Reasoning = &ir.Reasoning{Budget: 2048}
+	body, _, _ := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-20250514-v1:0"), req)
+	extra := body["additionalModelRequestFields"].(map[string]any)
+	if cfg, _ := extra["reasoning_config"].(map[string]any); cfg["budget_tokens"] != float64(2048) {
+		t.Errorf("reasoning_config = %#v on a manual-capable model", extra["reasoning_config"])
+	}
+	if _, sent := extra["thinking"]; sent {
+		t.Errorf("thinking = %#v sent beside the manual budget", extra["thinking"])
+	}
 }

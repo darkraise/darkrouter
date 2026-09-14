@@ -146,16 +146,26 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 		}}
 	}
 	// The catalog, not the model id, knows which shape a generation takes. A
-	// generation that dropped the manual budget refuses reasoning_config, and
-	// Converse has no field for the adaptive shape, so the honest move is to
-	// drop the ask and say so rather than send a request that cannot serve.
-	// TraitsKnown false keeps the permissive fallback an unrecognized or
-	// proxied model has always had.
+	// generation that dropped the manual budget refuses reasoning_config and
+	// takes Anthropic's native adaptive fields, which Converse passes through
+	// additionalModelRequestFields. TraitsKnown false keeps the permissive
+	// fallback an unrecognized or proxied model has always had.
 	if t.Info.TraitsKnown && !t.Info.ManualBudget {
-		return nil, []ir.Warning{{
-			Field: "reasoning", Target: targetName,
-			Reason: "this model takes the adaptive thinking shape, which Converse cannot express; reasoning dropped",
-		}}
+		if !t.Info.Adaptive {
+			return nil, []ir.Warning{{
+				Field: "reasoning", Target: targetName,
+				Reason: "this model takes neither a thinking budget nor adaptive thinking; reasoning dropped",
+			}}
+		}
+		fields := map[string]any{"thinking": map[string]any{"type": "adaptive"}}
+		effort := xlate.AnthropicEffort(r.Effort)
+		if r.Effort == "" {
+			effort = xlate.BudgetEffort(r.Budget)
+		}
+		if effort != "" {
+			fields["output_config"] = map[string]any{"effort": effort}
+		}
+		return fields, nil
 	}
 
 	var warns []ir.Warning

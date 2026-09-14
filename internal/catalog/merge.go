@@ -45,8 +45,16 @@ func Merge(in MergeInput) []Model {
 			continue
 		}
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
-		out = append(out, mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM,
-			overrides[[2]string{row.ProviderID, row.ModelID}]))
+		m := mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM,
+			overrides[[2]string{row.ProviderID, row.ModelID}])
+		// Bedrock's preset declares no rules of its own. The Claude models it
+		// serves are Anthropic's generations whichever endpoint answers, and
+		// every anthropic rule names a Claude-only fragment, so another
+		// publisher's id matches none of them and stays unknown.
+		if len(preset.ModelTraits) == 0 && p.Kind == "bedrock" {
+			m.Traits = traitsFor(in.Presets["anthropic"], row.ModelID)
+		}
+		out = append(out, m)
 	}
 	// Deterministic order: a snapshot rebuild must not reorder the candidate
 	// list a request sees.
