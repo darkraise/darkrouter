@@ -50,10 +50,14 @@ func (a *Adapter) BuildEmbedding(ctx context.Context, t *adapter.Target,
 	for _, text := range req.Input {
 		instances = append(instances, map[string]any{"content": text})
 	}
-	body := map[string]any{"instances": instances}
+	// autoTruncate defaults to true, which embeds only the prefix of an input
+	// past the model's token limit. The OpenAI contract rejects such an input,
+	// and false makes Vertex do the same.
+	params := map[string]any{"autoTruncate": false}
 	if req.Dimensions > 0 {
-		body["parameters"] = map[string]any{"outputDimensionality": req.Dimensions}
+		params["outputDimensionality"] = req.Dimensions
 	}
+	body := map[string]any{"instances": instances, "parameters": params}
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, nil, err
@@ -82,7 +86,8 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 			Embeddings struct {
 				Values     []float32 `json:"values"`
 				Statistics struct {
-					TokenCount int `json:"token_count"`
+					TokenCount int  `json:"token_count"`
+					Truncated  bool `json:"truncated"`
 				} `json:"statistics"`
 			} `json:"embeddings"`
 		} `json:"predictions"`
@@ -95,6 +100,9 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 	}
 	out := &ir.EmbeddingResponse{Embeddings: make([]ir.Embedding, 0, len(env.Predictions))}
 	for i, p := range env.Predictions {
+		if p.Embeddings.Statistics.Truncated {
+			return nil, fmt.Errorf("embedding %d was computed from a truncated input", i)
+		}
 		// The index is ours to assign: predictions carry order only.
 		out.Embeddings = append(out.Embeddings, ir.Embedding{Index: i, Float: p.Embeddings.Values})
 		out.Usage.InputTokens += p.Embeddings.Statistics.TokenCount
