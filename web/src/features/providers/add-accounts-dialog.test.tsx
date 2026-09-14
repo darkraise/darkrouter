@@ -400,6 +400,14 @@ describe("the wizard opened from an unconfigured preset", () => {
     expect(screen.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
   })
 
+  it("asks for the credential its auth style takes, not an API key", async () => {
+    const vertex = preset({ id: "vertex", name: "Vertex", auth_kind: "gcp-sa" })
+    stub([vertex])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={vertex} />)
+    expect(await screen.findByLabelText(/service account/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument()
+  })
+
   it("creates the provider row with the first account", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(

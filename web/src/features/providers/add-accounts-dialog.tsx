@@ -128,7 +128,7 @@ const PHASE_LABEL: Record<Phase, string> = {
 }
 
 /** What the accounts are being added to. A preset and a provider disagree
- *  about most things and agree about these four, which is all the summary
+ *  about most things and agree about these, which is all the summary
  *  strips and the write path need. */
 type Chosen = {
   id: string
@@ -139,6 +139,10 @@ type Chosen = {
    *  imported from config can carry a different one — reading `id` there shows
    *  an anonymous monogram beside a detail page showing the real mark. */
   preset?: string
+  /** How it authenticates — a provider's own, or the preset's — which decides
+   *  what shape of secret the gateway will parse. */
+  auth_style?: string
+  auth_kind?: string
 }
 
 /* Hand-rolled on purpose. darkraise-ui ships `Steps`, and it was tried here:
@@ -473,7 +477,10 @@ export function AddAccountsDialog({
               value={accounts}
               onChange={setAccounts}
               autoFocus
-              field={secretFieldFor(chosen.preset ?? chosen.id)}
+              field={secretFieldFor(
+                chosen.preset ?? chosen.id,
+                chosen.auth_style || chosen.auth_kind,
+              )}
             />
           </div>
         )}
