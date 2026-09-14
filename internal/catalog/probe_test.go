@@ -368,6 +368,31 @@ func TestParseListLeavesAnUnpricedListingNil(t *testing.T) {
 	}
 }
 
+// Ollama Cloud documents /api/tags as its only listing, and the preset lists
+// there. Read as a data[] listing it reported no models on every sweep.
+func TestParseListReadsOllamaCloudTags(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-ollama-cloud.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList(Embedded()["ollama-cloud"].Kind, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 20 {
+		t.Errorf("got %d models, want the fixture's 20", len(got))
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ModelID] = true
+	}
+	for _, want := range []string{"gpt-oss:120b", "glm-5.3", "gemma4:31b"} {
+		if !ids[want] {
+			t.Errorf("%s missing from %v", want, ids)
+		}
+	}
+}
+
 func TestParseListRefusesAmbiguousNumericPromptRates(t *testing.T) {
 	// chutes.ai reuses openrouter's "prompt"/"completion" names for numbers
 	// that mean dollars per million, not per token. Reading them as per-token
