@@ -116,7 +116,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		// arcs is worse than an overview that fails to load.
 		edges = []store.FailoverEdge{}
 	}
-	series, err := s.deps.DB.UsageBy(r.Context(), 30, store.UsageByDayOnly)
+	series, err := s.deps.DB.UsageBy(r.Context(), time.Now(), 30, store.UsageByDayOnly)
 	if err != nil {
 		series = []store.UsageRow{}
 	}
@@ -179,7 +179,8 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.deps.DB.UsageBy(r.Context(), days, dim)
+	now := time.Now()
+	rows, err := s.deps.DB.UsageBy(r.Context(), now, days, dim)
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -200,7 +201,11 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	resp := map[string]any{"days": out, "priced": priced}
+	first, last := store.UsageWindow(now, days)
+	// The window is served rather than left to the console to derive, so a
+	// chart and a Requests drilldown agree with it whatever the browser clock
+	// says.
+	resp := map[string]any{"days": out, "priced": priced, "first_day": first, "last_day": last}
 	// Omitted only when there is no group_by: existing consumers parse this
 	// response today and must see the exact shape they always have.
 	if groupBy != "" {

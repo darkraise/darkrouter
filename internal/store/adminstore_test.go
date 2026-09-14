@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -613,7 +614,7 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 		}
 	}
 
-	rows, err := db.UsageBy(ctx, 30, UsageByAlias)
+	rows, err := db.UsageBy(ctx, usageNow, 30, UsageByAlias)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +627,7 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 	}
 
 	// The day-only rollup still aggregates across aliases.
-	flat, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	flat, err := db.UsageBy(ctx, usageNow, 30, UsageByDayOnly)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,13 +636,12 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 	}
 }
 
-// TestUsageByLimitsDaysNotRows is the fixture that tells a day-bounded LIMIT
+// TestUsageByLimitsDaysNotRows is the fixture that tells a day-bounded window
 // apart from a row-bounded one. Three days x two providers is six rows.
 // Asking UsageBy for 2 days must return every row from the two newest days:
 // four rows spanning exactly two distinct days. A row-bounded `LIMIT 2`
 // instead returns the first two rows the query happens to emit, which cover
-// only one day -- so this test fails against that bug and passes against a
-// correct day-scoped LIMIT.
+// only one day.
 func TestUsageByLimitsDaysNotRows(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
@@ -655,7 +655,7 @@ func TestUsageByLimitsDaysNotRows(t *testing.T) {
 		}
 	}
 
-	rows, err := db.UsageBy(ctx, 2, UsageByProvider)
+	rows, err := db.UsageBy(ctx, usageNow, 2, UsageByProvider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,10 +679,9 @@ func TestUsageByLimitsDaysNotRows(t *testing.T) {
 
 // TestUsageByClampsDays pins the 1..365 clamp: days=0, a negative value and
 // an oversized value must all read as if days=30 had been asked for. Without
-// the clamp, days=0 would query LIMIT 0 (zero days back) and days=10000
-// would place no bound at all, so an unclamped implementation returns a
-// different row count than a clamped one on this fixture -- this test fails
-// if the clamp is removed.
+// the clamp, days=0 and a negative value would open a window ending before it
+// starts, so an unclamped implementation returns no rows on this fixture --
+// this test fails if the clamp is removed.
 func TestUsageByClampsDays(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
@@ -692,7 +691,7 @@ func TestUsageByClampsDays(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	base, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	base, err := db.UsageBy(ctx, usageNow, 30, UsageByDayOnly)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +700,7 @@ func TestUsageByClampsDays(t *testing.T) {
 	}
 
 	for _, days := range []int{0, -5, 10000} {
-		got, err := db.UsageBy(ctx, days, UsageByDayOnly)
+		got, err := db.UsageBy(ctx, usageNow, days, UsageByDayOnly)
 		if err != nil {
 			t.Fatalf("days=%d: %v", days, err)
 		}
@@ -709,6 +708,36 @@ func TestUsageByClampsDays(t *testing.T) {
 			t.Errorf("days=%d: want %d rows (clamped to 30), got %d",
 				days, len(base), len(got))
 		}
+	}
+}
+
+// usageNow is the clock the usage fixtures are dated against.
+var usageNow = time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+
+// A range is calendar days ending today, not the newest days that happen to
+// have traffic: on a sparse gateway those can reach back months.
+func TestUsageByCountsCalendarDaysNotActiveDates(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 25, 23, 30, 0, 0, time.UTC)
+	for _, day := range []string{"2026-06-01", "2026-08-18", "2026-08-19", "2026-08-25"} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+			 VALUES (?, 'groq', 'm', '', 1)`, day); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.UsageBy(ctx, now, 7, UsageByDayOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.Day)
+	}
+	if want := []string{"2026-08-19", "2026-08-25"}; !slices.Equal(got, want) {
+		t.Fatalf("7 days = %v, want %v", got, want)
 	}
 }
 
