@@ -127,6 +127,30 @@ func TestParseStreamCarriesThoughtsAndSignatures(t *testing.T) {
 	}
 }
 
+func TestParseStreamWarnsWhenItDropsGeneratedMedia(t *testing.T) {
+	body := data(`{"responseId":"r1","candidates":[{"content":{"parts":[{"text":"Here:"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0K"}}]},"finishReason":"STOP"}]}`)
+	evs, err := collect(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := evs[len(evs)-1]
+	if stop.Type != ir.EventMessageStop {
+		t.Fatalf("last event = %+v", stop)
+	}
+	var warned bool
+	for _, w := range stop.Warnings {
+		warned = warned || strings.Contains(w.Field, "inlineData")
+	}
+	if !warned {
+		t.Errorf("warnings = %+v; dropped media must be reported", stop.Warnings)
+	}
+	for _, ev := range evs {
+		if ev.Type == ir.EventContentDelta && ev.Delta.Type == ir.BlockText && ev.Delta.Text == "" {
+			t.Errorf("media became an empty text delta: %+v", evs)
+		}
+	}
+}
+
 func TestParseStreamReportsABlockedPrompt(t *testing.T) {
 	_, err := collect(t, data(`{"promptFeedback":{"blockReason":"SAFETY"},"candidates":[]}`))
 	var e *ir.Error
