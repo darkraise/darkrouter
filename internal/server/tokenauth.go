@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/darkraise/darkrouter/internal/store"
 )
 
 // tokenCacheTTL bounds two things at once: how often an accepted token's use
@@ -17,7 +15,7 @@ type proxyTokenSource interface {
 	// ProxyTokenValid reports whether the secret names a live token and
 	// records its use.
 	ProxyTokenValid(ctx context.Context, secret string) (bool, error)
-	ProxyTokens(ctx context.Context) ([]store.ProxyToken, error)
+	ProxyTokensIssued(ctx context.Context) (bool, error)
 }
 
 // tokenAuth answers the per-request proxy-token check from memory.
@@ -34,11 +32,15 @@ type tokenAuth struct {
 
 	mu       sync.Mutex
 	accepted map[string]time.Time
-	// anyAt is when anyTokens was last read. Whether any token exists at all
+	// anyAt is when anyTokens was last read. Whether a token was ever issued
 	// decides whether an unauthenticated request is allowed, which is asked
 	// on every request that carries no valid token.
 	anyAt     time.Time
 	anyTokens bool
+	// issued latches once the store has said a token was issued: issuance is
+	// permanent, so no later answer may turn authentication back off. A store
+	// error refuses for one window but does not latch, since it proves nothing.
+	issued bool
 }
 
 func newTokenAuth(src proxyTokenSource) *tokenAuth {
@@ -70,15 +72,20 @@ func (a *tokenAuth) accept(ctx context.Context, secret string) bool {
 	return true
 }
 
-// configured reports whether any per-client token exists. A store that cannot
-// answer is treated as "yes": refusing an unauthenticated request is the safe
-// answer when the store cannot say.
+// configured reports whether a per-client token has ever been issued, whether
+// or not any is still live. A store that cannot answer is treated as "yes":
+// refusing an unauthenticated request is the safe answer when the store cannot
+// say.
 func (a *tokenAuth) configured(ctx context.Context) bool {
 	if a.src == nil {
 		return false
 	}
 	now := a.now()
 	a.mu.Lock()
+	if a.issued {
+		a.mu.Unlock()
+		return true
+	}
 	if !a.anyAt.IsZero() && now.Sub(a.anyAt) < tokenCacheTTL {
 		v := a.anyTokens
 		a.mu.Unlock()
@@ -86,10 +93,13 @@ func (a *tokenAuth) configured(ctx context.Context) bool {
 	}
 	a.mu.Unlock()
 
-	toks, err := a.src.ProxyTokens(ctx)
-	v := err != nil || len(toks) > 0
+	issued, err := a.src.ProxyTokensIssued(ctx)
+	v := err != nil || issued
 	a.mu.Lock()
 	a.anyAt, a.anyTokens = now, v
+	if err == nil && issued {
+		a.issued = true
+	}
 	a.mu.Unlock()
 	return v
 }

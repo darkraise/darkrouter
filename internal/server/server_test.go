@@ -704,3 +704,38 @@ func TestReadyzStaysUpThroughUnusableStoredSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestRevokingTheLastTokenKeepsAuthenticationOn(t *testing.T) {
+	s := newTestServer(t, nil)
+	ctx := context.Background()
+	tok, err := s.db.CreateProxyToken(ctx, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(secret string) int {
+		r := httptest.NewRequest("GET", "/v1/models", nil)
+		if secret != "" {
+			r.Header.Set("Authorization", "Bearer "+secret)
+		}
+		rec := httptest.NewRecorder()
+		s.ProxyHandler().ServeHTTP(rec, r)
+		return rec.Code
+	}
+	if code := get(""); code != http.StatusUnauthorized {
+		t.Fatalf("with a token issued, an empty header got %d", code)
+	}
+	if removed, err := s.db.DeleteProxyToken(ctx, tok.ID); err != nil || !removed {
+		t.Fatalf("revoke: removed=%v err=%v", removed, err)
+	}
+	// Past every cache window, so the answer is the store's and not a
+	// remembered one.
+	later := time.Now().Add(tokenCacheTTL + time.Second)
+	s.tokens.now = func() time.Time { return later }
+
+	if code := get(""); code != http.StatusUnauthorized {
+		t.Errorf("after revoking the last token, an empty header got %d, want 401", code)
+	}
+	if code := get(tok.Secret); code != http.StatusUnauthorized {
+		t.Errorf("after revoking the last token, the revoked token got %d, want 401", code)
+	}
+}

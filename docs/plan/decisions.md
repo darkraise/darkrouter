@@ -293,8 +293,16 @@ after.**
 
 **`server.proxy_token` was not removed when per-client tokens landed.**
 Removing it in the release that adds them stops every existing client on
-upgrade. Both are accepted, and authentication is off only when neither
-exists.
+upgrade. Both are accepted, and authentication is off only when the shared
+secret is unset and no proxy token has **ever** been issued.
+
+**Revoking the last proxy token does not turn authentication off.** The rule
+was once "off when neither exists", read from the live token table — so
+revoking the last token, typically because it leaked, opened the gateway to
+every caller, the revoked one included. A settings row records the first
+issue and is never removed; migration 0024 writes it for a database that
+already held a token. A database whose tokens were all revoked before that
+migration cannot be told apart from a fresh install, and stays open.
 
 **Proxy tokens are hashed with SHA-256, not the password KDF.** The token is
 256 bits this process generated, so there is nothing to brute-force, and a

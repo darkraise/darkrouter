@@ -410,9 +410,9 @@ func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		// Authentication is off only when neither mechanism is configured: a
-		// gateway with proxy tokens issued must not accept an empty header
-		// just because the shared secret is unset.
+		// Authentication is off only when the shared secret is unset and no
+		// proxy token has ever been issued. Issued, not live: revoking the
+		// last token must refuse its clients, not open the gateway to all.
 		if shared == "" && !s.tokens.configured(r.Context()) {
 			h(w, r)
 			return

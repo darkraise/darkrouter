@@ -36,8 +36,11 @@ service.
 The proxy accepts each dialect's native credential form — `Authorization:
 Bearer`, `x-api-key`, `x-goog-api-key`, `?key=`. Both a shared
 `server.proxy_token` and per-client proxy tokens are accepted; authentication
-is off only when **neither** exists. A gateway with tokens issued does not
-accept an empty header just because the shared secret is unset.
+is off only when the shared secret is unset and **no proxy token has ever been
+issued**. A gateway with tokens issued does not accept an empty header just
+because the shared secret is unset, and revoking the last token keeps it that
+way: the first issue is recorded in `settings` and never cleared, so a
+revocation refuses its clients instead of opening the gateway.
 
 Comparison hashes both sides before a constant-time compare, specifically so
 the comparison's length-based early return cannot leak token length.

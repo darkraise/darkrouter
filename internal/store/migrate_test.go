@@ -706,3 +706,56 @@ func TestMigration23DropsTheSharedPasswordRows(t *testing.T) {
 		t.Errorf("shared password rows still present: %d", n)
 	}
 }
+
+func TestUpgradeMarksAnExistingTokenAsIssued(t *testing.T) {
+	// A database written before the marker existed: whether it has issued a
+	// token can only be read from the table itself.
+	for _, tc := range []struct {
+		name      string
+		withToken bool
+	}{{"a token exists", true}, {"no token was ever issued", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openTest(t)
+			ms, err := loadMigrations()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Write.ExecContext(ctx,
+				`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Write.ExecContext(ctx,
+				`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range ms {
+				if m.version > 23 {
+					continue
+				}
+				if err := db.applyMigration(ctx, m); err != nil {
+					t.Fatalf("apply %04d: %v", m.version, err)
+				}
+			}
+			if tc.withToken {
+				if _, err := db.Write.ExecContext(ctx,
+					`INSERT INTO proxy_tokens (id, name, prefix, hash, created_at)
+					 VALUES ('t', 'laptop', 'dr_abcdef', 'digest', 0)`); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := db.Migrate(ctx); err != nil {
+				t.Fatalf("upgrade from version 23: %v", err)
+			}
+
+			_, issued, err := db.GetSetting(ctx, "proxy_tokens.issued")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issued != tc.withToken {
+				t.Errorf("issued marker present = %v, want %v", issued, tc.withToken)
+			}
+		})
+	}
+}
