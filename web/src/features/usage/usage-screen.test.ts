@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   chartSeries,
   costTick,
+  keyLabel,
   rankingHeading,
   readDimension,
   readRange,
@@ -51,6 +52,20 @@ describe("the Total view's series", () => {
     const series = chartSeries([row({ key: "groq" }), row({ key: "nebius" })], "provider")
     expect(series.keys).toEqual(["groq", "nebius"])
   })
+
+  it("plots requests with no alias as their own series", () => {
+    const rows = [row({ key: "", requests: 5 }), row({ key: "fast", requests: 2 })]
+    const series = chartSeries(rows, "alias")
+    expect(series.keys).toEqual(["", "fast"])
+    expect(stackByDay(series.rows, series.keys, (r) => r.requests)).toEqual([
+      { day: "2026-08-26", "": 5, fast: 2 },
+    ])
+  })
+
+  it("names the no-alias series instead of leaving it blank", () => {
+    expect(keyLabel("")).toBe("(none)")
+    expect(keyLabel("fast")).toBe("fast")
+  })
 })
 
 describe("the URL's parameters", () => {
@@ -74,40 +89,55 @@ describe("the ranking heading", () => {
 
 describe("summarise", () => {
   it("sums a key across days", () => {
-    const got = summarise([
-      row({ key: "groq", requests: 3, tokens_in: 10 }),
-      row({ key: "groq", requests: 4, tokens_in: 5, day: "2026-08-25" }),
-    ])
+    const got = summarise(
+      [
+        row({ key: "groq", requests: 3, tokens_in: 10 }),
+        row({ key: "groq", requests: 4, tokens_in: 5, day: "2026-08-25" }),
+      ],
+      "provider",
+    )
     expect(got).toHaveLength(1)
     expect(got[0]?.requests).toBe(7)
     expect(got[0]?.tokensIn).toBe(15)
   })
 
   it("keeps a total unpriced only while every row is", () => {
-    expect(summarise([row({ key: "a" }), row({ key: "a" })])[0]?.cost).toBeNull()
+    expect(summarise([row({ key: "a" }), row({ key: "a" })], "provider")[0]?.cost).toBeNull()
     // One priced row makes the total real, if partial: reporting it as unknown
     // would hide money that was actually spent.
     expect(
-      summarise([row({ key: "a" }), row({ key: "a", cost_micros: 500 })])[0]?.cost,
+      summarise([row({ key: "a" }), row({ key: "a", cost_micros: 500 })], "provider")[0]?.cost,
     ).toBe(500)
   })
 
-  it("falls back to the day when a dimension has no key", () => {
-    expect(summarise([row({ requests: 2 })])[0]?.key).toBe("2026-08-26")
+  it("keys the Total view by day", () => {
+    expect(summarise([row({ requests: 2 })], "day")[0]?.key).toBe("2026-08-26")
+  })
+
+  it("keeps requests with no alias under an empty key rather than a date", () => {
+    // A request for a model by name resolves no alias. Keying it by its day
+    // listed dates as alias names and linked them to Requests as filters.
+    const got = summarise(
+      [row({ key: "", requests: 2 }), row({ key: "", requests: 1, day: "2026-08-25" })],
+      "alias",
+    )
+    expect(got).toHaveLength(1)
+    expect(got[0]?.key).toBe("")
+    expect(got[0]?.requests).toBe(3)
   })
 
   it("orders by volume so the busiest key leads", () => {
-    const got = summarise([
-      row({ key: "quiet", requests: 1 }),
-      row({ key: "busy", requests: 9 }),
-    ])
+    const got = summarise(
+      [row({ key: "quiet", requests: 1 }), row({ key: "busy", requests: 9 })],
+      "provider",
+    )
     expect(got.map((r) => r.key)).toEqual(["busy", "quiet"])
   })
 
   it("carries attempts separately from requests", () => {
     // Attempts exceed requests exactly when something failed over, which is
     // what explains a cost the request count alone does not.
-    const got = summarise([row({ key: "a", requests: 1, attempts: 3 })])
+    const got = summarise([row({ key: "a", requests: 1, attempts: 3 })], "provider")
     expect(got[0]?.attempts).toBe(3)
   })
 })

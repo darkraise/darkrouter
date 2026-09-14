@@ -20,11 +20,11 @@ type Cell = Record<string, number | string | null>
  * or `vendor/model:free` is not a valid custom-property name, so the series
  * drew with no colour, and a hostile id could write CSS of its own.
  */
-function plotted(data: Cell[], keys: string[]) {
+function plotted(data: Cell[], keys: string[], labels: string[]) {
   const ids = keys.map((_, i) => `s${i}`)
   const config: ChartConfig = {}
   keys.forEach((k, i) => {
-    config[`s${i}`] = { label: k, color: `hsl(var(--chart-${(i % 5) + 1}))` }
+    config[`s${i}`] = { label: labels[i] ?? k, color: `hsl(var(--chart-${(i % 5) + 1}))` }
   })
   const rows = data.map((cell) => {
     const row: Cell = { day: cell.day ?? null }
@@ -42,14 +42,17 @@ function plotted(data: Cell[], keys: string[]) {
 export function StackedAreaChart({
   data,
   keys,
+  labels = keys,
   legend = false,
 }: {
   data: Cell[]
   keys: string[]
+  /** How each key reads in the legend and tooltip, index for index. */
+  labels?: string[]
   /** Named series get a legend; a single total does not need one. */
   legend?: boolean
 }) {
-  const { ids, config, rows } = plotted(data, keys)
+  const { ids, config, rows } = plotted(data, keys, labels)
   return (
     <div className="chart-scope h-56">
       <ChartContainer config={config} className="h-full w-full">
@@ -78,17 +81,20 @@ export function StackedAreaChart({
 export function CostLineChart({
   data,
   keys,
+  labels = keys,
   formatValue,
   legend = false,
 }: {
   data: Cell[]
   keys: string[]
+  /** How each key reads in the legend and tooltip, index for index. */
+  labels?: string[]
   /** Kept out of this module: the null-vs-zero distinction is the usage
    *  screen's business rule, not a charting concern. */
   formatValue: (v: number | null) => string
   legend?: boolean
 }) {
-  const { ids, config, rows } = plotted(data, keys)
+  const { ids, config, rows } = plotted(data, keys, labels)
   return (
     <div className="chart-scope h-56">
       <ChartContainer config={config} className="h-full w-full">

@@ -67,13 +67,19 @@ export function readRange(raw: string): (typeof RANGES)[number] {
 export function topKeys(rows: UsageRow[], n: number): string[] {
   const total = new Map<string, number>()
   for (const r of rows) {
-    if (!r.key) continue
+    if (r.key === undefined) continue
     total.set(r.key, (total.get(r.key) ?? 0) + r.requests)
   }
   return [...total.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([k]) => k)
+}
+
+/** How a dimension key reads on screen. The empty key is real: a request for
+ *  a model by name resolves no alias. */
+export function keyLabel(key: string): string {
+  return key === "" ? "(none)" : key
 }
 
 /** What the charts plot for a dimension: its top keys, or on the Total view
@@ -110,7 +116,7 @@ export function stackByDay(
   const seen = new Map<string, Set<string>>()
 
   for (const r of rows) {
-    if (!r.key || !keys.includes(r.key)) continue
+    if (r.key === undefined || !keys.includes(r.key)) continue
     let day = byDay.get(r.day)
     if (!day) {
       day = { day: r.day }
@@ -170,7 +176,10 @@ export function costTick(micros: number | null): string {
 
 /** Rows summed per key, so a dimension reads as totals rather than as one
  *  line per key per day. */
-export function summarise(rows: UsageRow[]): {
+export function summarise(
+  rows: UsageRow[],
+  dimension: Dimension,
+): {
   key: string
   requests: number
   attempts: number
@@ -180,7 +189,7 @@ export function summarise(rows: UsageRow[]): {
 }[] {
   const acc = new Map<string, ReturnType<typeof summarise>[number]>()
   for (const row of rows) {
-    const key = row.key || row.day
+    const key = dimension === "day" ? row.day : (row.key ?? "")
     const cur = acc.get(key) ?? {
       key,
       requests: 0,
@@ -229,7 +238,7 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
     <div className="chart-scope flex flex-col gap-2">
       {rows.slice(0, 10).map((r, i) => (
         <div key={r.key} className="flex items-center gap-3">
-          <span className="w-40 shrink-0 truncate font-mono text-sm">{r.key}</span>
+          <span className="w-40 shrink-0 truncate font-mono text-sm">{keyLabel(r.key)}</span>
           <div className="h-4 min-w-0 flex-1 rounded-sm bg-[hsl(var(--muted))]">
             <div
               className="h-full rounded-sm"
@@ -271,7 +280,7 @@ export function UsageScreen() {
   const days = range.days
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
-  const rows = summarise(usageRows)
+  const rows = summarise(usageRows, dimension)
   const series = chartSeries(usageRows, dimension)
   const legend = dimension !== "day"
   // Nothing to filter by on the day view -- there is no dimension key, only
@@ -350,6 +359,7 @@ export function UsageScreen() {
             <StackedAreaChart
               data={stackByDay(series.rows, series.keys, (r) => r.requests)}
               keys={series.keys}
+              labels={series.keys.map(keyLabel)}
               legend={legend}
             />
           </Card>
@@ -359,6 +369,7 @@ export function UsageScreen() {
             <StackedAreaChart
               data={stackByDay(series.rows, series.keys, (r) => r.tokens_in + r.tokens_out)}
               keys={series.keys}
+              labels={series.keys.map(keyLabel)}
               legend={legend}
             />
           </Card>
@@ -368,6 +379,7 @@ export function UsageScreen() {
             <CostLineChart
               data={stackByDay(series.rows, series.keys, (r) => r.cost_micros)}
               keys={series.keys}
+              labels={series.keys.map(keyLabel)}
               formatValue={costTick}
               legend={legend}
             />
@@ -394,7 +406,9 @@ export function UsageScreen() {
                 {rows.map((r) => (
                   <TableRow key={r.key}>
                     <TableCell className="font-mono text-sm">
-                      {clickable ? (
+                      {/* Requests reads an empty filter as no filter, so the
+                          no-alias bucket has nothing to link to. */}
+                      {clickable && r.key !== "" ? (
                         <Link
                           to="/requests"
                           search={requestsSearch(dimension, r.key, days)}
@@ -403,7 +417,7 @@ export function UsageScreen() {
                           {r.key}
                         </Link>
                       ) : (
-                        r.key
+                        keyLabel(r.key)
                       )}
                     </TableCell>
                     <TableCell className="tabular-nums">{count(r.requests)}</TableCell>
