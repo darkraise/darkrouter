@@ -218,8 +218,9 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   // What fixes the settings is a turn existing, not the send that made it:
   // a conversation reopened from the rail has turns and no send behind it,
-  // and its settings are every bit as committed to.
-  const locked = run.messages.length > 0
+  // and its settings are every bit as committed to. A send that ended with
+  // nothing said is on screen but in no conversation, so it fixes nothing.
+  const locked = run.history.length > 0
 
   // The trace drawer's "Open in playground" arrives as ?seed=. It carried
   // its model and dialect into Lab's request pane, which is this screen now.

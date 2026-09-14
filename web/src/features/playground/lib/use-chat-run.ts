@@ -53,7 +53,12 @@ export type TurnThinking = {
 const HYDRATE_CONCURRENCY = 4
 
 export type ChatRun = {
+  /** The transcript on screen. */
   messages: PlaygroundMessage[]
+  /** The exchanges the conversation actually holds: `messages` without the
+   *  ones that ended with nothing said and nothing reported. What the next
+   *  request sends, and what fixes a conversation's settings. */
+  history: PlaygroundMessage[]
   routes: Record<number, TurnRoute>
   thinking: Record<number, TurnThinking>
   busy: boolean
@@ -92,6 +97,11 @@ export function useChatRun(
   // with a conversation, so a reopened turn has none -- what the model was
   // thinking is a reading about this run, not part of the exchange.
   const [thinking, setThinking] = useState<Record<number, TurnThinking>>({})
+  // The assistant index of each exchange that ended with nothing streamed and
+  // was not reported. It stays on screen, where the error under it is read,
+  // but it is not part of the conversation: sent on, a provider reads the
+  // unanswered prompt and the empty reply as the model's own.
+  const [dropped, setDropped] = useState<ReadonlySet<number>>(() => new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const abort = useRef<AbortController | null>(null)
@@ -101,6 +111,10 @@ export function useChatRun(
   // stop() deliberately does not bump: a stopped run keeps its half answer
   // on screen. Either way the run still reports its turn.
   const generation = useRef(0)
+
+  const history = messages.filter(
+    (m, i) => !dropped.has(i) && !(m.role === "user" && dropped.has(i + 1)),
+  )
 
   // A functional update, and it has to be: a stream appends many times inside
   // one render, and a version that read the turns this render closed over
@@ -123,7 +137,8 @@ export function useChatRun(
     if (busy || state.model === "" || prompt === "" || requestProblem(state) !== undefined) return
     const dialect = state.dialect
     const doStream = state.stream
-    const turns = [...state.messages, { role: "user", content: prompt } satisfies PlaygroundMessage]
+    const asked = { role: "user", content: prompt } satisfies PlaygroundMessage
+    const turns = [...state.messages, asked]
     // The assistant turn this run will fill in, and the index its route lands
     // under when the trace arrives.
     const answerAt = turns.length
@@ -185,7 +200,7 @@ export function useChatRun(
     try {
       for await (const chunk of stream(
         "/api/playground",
-        chatBody({ ...state, messages: turns }),
+        chatBody({ ...state, messages: [...history, asked] }),
         // The id arrives with the headers, before the body this is rendering.
         (s: StreamStart) => {
           liveRequestId = s.requestId
@@ -280,6 +295,8 @@ export function useChatRun(
     // dropping it here loses it from the thread that paid for it.
     if (answer !== "" || (!failed && !aborted)) {
       onTurn?.({ prompt, answer, requestId: liveRequestId })
+    } else if (!superseded()) {
+      setDropped((prev) => new Set(prev).add(answerAt))
     }
   }
 
@@ -303,6 +320,7 @@ export function useChatRun(
   function clear() {
     generation.current++
     setMessages([])
+    setDropped(new Set())
     setRoutes({})
     setThinking({})
     setError("")
@@ -356,6 +374,7 @@ export function useChatRun(
     abort.current?.abort()
     const mine = generation.current
     setMessages(next)
+    setDropped(new Set())
     setRoutes(nextRoutes)
     // A stored turn keeps no reasoning, so a reopened conversation shows
     // none rather than the previous conversation's.
@@ -369,5 +388,7 @@ export function useChatRun(
     void hydrate(nextRoutes, mine)
   }
 
-  return { messages, routes, thinking, busy, error, epoch: generation.current, send, stop, clear, load }
+  return {
+    messages, history, routes, thinking, busy, error, epoch: generation.current, send, stop, clear, load,
+  }
 }

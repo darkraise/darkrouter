@@ -576,6 +576,23 @@ describe("Chat mode", () => {
     expect(screen.getByLabelText("System prompt")).toBeDisabled()
   })
 
+  it("leaves the settings open after a first message that failed", async () => {
+    // Nothing was answered and nothing stored, so no exchange was produced
+    // under these settings; fixing them would leave the operator to start
+    // over to correct the setting that most likely caused the failure.
+    streamMock.mockImplementation(async function* () {
+      throw new Error("upstream refused")
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("hello")
+    expect(await screen.findByText("upstream refused")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    expect(screen.getByLabelText("System prompt")).toBeEnabled()
+  })
+
   it("sends what was typed into the pane beside the transcript", async () => {
     // The pane edits until the first message, and what it holds is what the
     // next send carries — the same value the dialog would have set.
