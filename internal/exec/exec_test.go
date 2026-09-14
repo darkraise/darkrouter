@@ -1026,7 +1026,8 @@ func TestExecutorFallsBackWithoutACatalog(t *testing.T) {
 // captureAdapter records the Target it was built with and otherwise behaves
 // exactly as an OpenAI-compatible adapter.
 type captureAdapter struct {
-	onBuild func(*adapter.Target)
+	onBuild  func(*adapter.Target)
+	buildErr error
 }
 
 func (c *captureAdapter) Kind() string { return "capture" }
@@ -1034,6 +1035,9 @@ func (c *captureAdapter) Kind() string { return "capture" }
 func (c *captureAdapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	if c.onBuild != nil {
 		c.onBuild(t)
+	}
+	if c.buildErr != nil {
+		return nil, nil, c.buildErr
 	}
 	return openaicompat.New().BuildRequest(ctx, t, req)
 }
@@ -1048,6 +1052,35 @@ func (c *captureAdapter) ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.Stre
 
 func (c *captureAdapter) Classify(resp *http.Response, err error) adapter.Outcome {
 	return openaicompat.New().Classify(resp, err)
+}
+
+func TestABuildErrorNamingAClientFaultReachesTheClient(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer upstream.Close()
+
+	refusing := &captureAdapter{buildErr: &ir.Error{
+		Type: ir.ErrPayloadTooLarge, Message: "media fetched from URLs is too large",
+	}}
+	src := providertest.NewSource(providertest.Keyed("p", "capture", upstream.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"capture": refusing}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d; a request the adapter refused as too large is the client's to shrink", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "media fetched from URLs is too large") {
+		t.Errorf("body = %s; the adapter's reason must reach the client", w.Body.String())
+	}
+	if hits.Load() != 0 {
+		t.Errorf("upstream was called %d times", hits.Load())
+	}
 }
 
 func TestTargetCarriesTheCatalogFacts(t *testing.T) {

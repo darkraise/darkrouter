@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -18,14 +19,23 @@ import (
 // targetName labels the warnings this kind produces.
 const targetName = "gemini"
 
-// DefaultMaxInlineBytes bounds what one URL may contribute to a request.
+// DefaultMaxInlineBytes bounds what the gateway fetches for one request, per
+// URL and in total. Gemini caps a whole request carrying inline data at 20MB,
+// so media fetched past that could only be rejected upstream after the
+// gateway had already held all of it in memory.
 const DefaultMaxInlineBytes int64 = 20 << 20
 
 var (
 	errUnsupportedScheme = errors.New("gemini: only http and https URLs are inlined")
 	errFetchStatus       = errors.New("gemini: the URL did not return 2xx")
 	errTooLarge          = errors.New("gemini: the URL exceeded the inline cap")
+	errBudget            = errors.New("gemini: fetched media exceeded the request's inline budget")
 )
+
+// inlineBudget is what one request may still fetch. It spans every message,
+// tool results included, so a request cannot multiply the per-URL cap by
+// listing more URLs.
+type inlineBudget struct{ left int64 }
 
 // Fetcher downloads a public URL so it can be inlined as base64.
 //
@@ -37,7 +47,8 @@ var (
 // redirects, a byte cap enforced on the reader rather than read off
 // Content-Length, and a short timeout.
 type Fetcher struct {
-	Client   *http.Client
+	Client *http.Client
+	// MaxBytes caps one URL and the sum of every URL a request fetches.
 	MaxBytes int64
 	// Inline gates the outbound fetch. False drops a remote URL rather than
 	// retrieving it; everything that needs no request is unaffected.
@@ -98,11 +109,14 @@ func passthroughURI(u string) bool {
 // part renders one media block. It returns nil when the block cannot be
 // expressed, always with a warning: the model can still answer about the rest
 // of the prompt, and the trace records what did not arrive.
-func (f *Fetcher) part(ctx context.Context, m *ir.Media, field string) (map[string]any, []ir.Warning) {
-	drop := func(reason string) (map[string]any, []ir.Warning) {
+//
+// The one error is an exhausted budget, which fails the request: dropping
+// media silently from an oversized request would answer a different prompt.
+func (f *Fetcher) part(ctx context.Context, m *ir.Media, field string, budget *inlineBudget) (map[string]any, []ir.Warning, error) {
+	drop := func(reason string) (map[string]any, []ir.Warning, error) {
 		return nil, []ir.Warning{{
 			Field: "messages[]." + field, Target: targetName, Reason: reason,
-		}}
+		}}, nil
 	}
 	if m == nil {
 		return drop("media block carried nothing")
@@ -111,12 +125,12 @@ func (f *Fetcher) part(ctx context.Context, m *ir.Media, field string) (map[stri
 	case m.Data != "":
 		return map[string]any{"inlineData": map[string]any{
 			"mimeType": m.MIME, "data": m.Data,
-		}}, nil
+		}}, nil, nil
 
 	case m.FileID != "":
 		return map[string]any{"fileData": map[string]any{
 			"mimeType": m.MIME, "fileUri": m.FileID,
-		}}, nil
+		}}, nil, nil
 
 	case m.URL == "":
 		return drop("media block carried neither data nor a URL")
@@ -124,23 +138,30 @@ func (f *Fetcher) part(ctx context.Context, m *ir.Media, field string) (map[stri
 	case passthroughURI(m.URL):
 		return map[string]any{"fileData": map[string]any{
 			"mimeType": m.MIME, "fileUri": m.URL,
-		}}, nil
+		}}, nil, nil
 	}
 
 	if !f.Inline {
 		return drop("media inlining is disabled")
 	}
-	mime, data, err := f.inline(ctx, m.URL)
+	mime, data, err := f.inline(ctx, m.URL, budget)
+	if errors.Is(err, errBudget) {
+		return nil, nil, &ir.Error{
+			Type: ir.ErrPayloadTooLarge,
+			Message: fmt.Sprintf("media fetched from URLs exceeds %d bytes in total; "+
+				"send large media as a file URI instead", f.MaxBytes),
+		}
+	}
 	if err != nil {
 		return drop("could not inline the URL: " + err.Error())
 	}
 	if m.MIME != "" {
 		mime = m.MIME
 	}
-	return map[string]any{"inlineData": map[string]any{"mimeType": mime, "data": data}}, nil
+	return map[string]any{"inlineData": map[string]any{"mimeType": mime, "data": data}}, nil, nil
 }
 
-func (f *Fetcher) inline(ctx context.Context, raw string) (mime, data string, err error) {
+func (f *Fetcher) inline(ctx context.Context, raw string, budget *inlineBudget) (mime, data string, err error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return "", "", err
@@ -171,6 +192,10 @@ func (f *Fetcher) inline(ctx context.Context, raw string) (mime, data string, er
 	if int64(len(body)) > f.MaxBytes {
 		return "", "", errTooLarge
 	}
+	if int64(len(body)) > budget.left {
+		return "", "", errBudget
+	}
+	budget.left -= int64(len(body))
 
 	mime = resp.Header.Get("Content-Type")
 	if i := strings.IndexByte(mime, ';'); i >= 0 {

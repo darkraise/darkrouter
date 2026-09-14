@@ -10,7 +10,10 @@ import (
 
 func contents(t *testing.T, req *ir.Request) ([]map[string]any, []ir.Warning) {
 	t.Helper()
-	raw, warns := NewFetcher().renderContents(context.Background(), req)
+	raw, warns, err := NewFetcher().renderContents(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	b, err := json.Marshal(raw)
 	if err != nil {
 		t.Fatal(err)
