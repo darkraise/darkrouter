@@ -71,6 +71,50 @@ func TestShippedAnthropicTraits(t *testing.T) {
 	}
 }
 
+// The subscription preset and Vertex's Anthropic publisher declare no rules of
+// their own either, and reach the same Claude generations through the same
+// request builder. Unknown traits there sent assistant prefill to models that
+// refuse it.
+func TestAlternateAnthropicPresetsTakeAnthropicTraits(t *testing.T) {
+	presets, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	merge := func(kind, preset, model string) Traits {
+		t.Helper()
+		got := Merge(MergeInput{
+			Providers: []provider.Provider{{ID: "p", Kind: kind, Preset: preset}},
+			Presets:   presets,
+			Rows:      []store.ModelRow{{ProviderID: "p", ModelID: model, State: "live"}},
+		})
+		if len(got) != 1 {
+			t.Fatalf("%s: merged to %d models", model, len(got))
+		}
+		return got[0].Traits
+	}
+	for _, c := range []struct{ kind, preset, model, anthropic string }{
+		{"anthropic", "anthropic-oauth", "claude-opus-4-7", "claude-opus-4-7"},
+		{"anthropic", "anthropic-oauth", "claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
+		{"vertex", "vertex-anthropic", "claude-opus-4-7@default", "claude-opus-4-7"},
+		{"vertex", "vertex-anthropic", "claude-opus-4-6@eu", "claude-opus-4-6"},
+	} {
+		got := merge(c.kind, c.preset, c.model)
+		want := merge("anthropic", "anthropic", c.anthropic)
+		if !got.Known {
+			t.Errorf("%s on %s: traits unknown", c.model, c.preset)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s on %s: traits = %+v, want the anthropic preset's %+v", c.model, c.preset, got, want)
+		}
+	}
+
+	// Vertex's Google publisher shares the kind and must not borrow Claude's.
+	if got := merge("vertex", "vertex", "claude-opus-4-7"); got.Known {
+		t.Errorf("the Google publisher lent Claude traits: %+v", got)
+	}
+}
+
 func TestUnknownAnthropicModelHasNoTraits(t *testing.T) {
 	// A proxied model whose name says nothing about its generation is the case
 	// the deleted name heuristic got wrong. Unknown is the honest answer: the
