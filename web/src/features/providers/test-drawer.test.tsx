@@ -377,6 +377,56 @@ describe("the conversation", () => {
     })
   })
 
+  it("does not send a failed answer back as the model's own words", async () => {
+    let first = true
+    stubRoutes(() => {
+      if (!first) return new Response(sse(OK_FRAME))
+      first = false
+      return new Response(
+        JSON.stringify({ error: { message: "provider refused the credential" } }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findAllByText(/refused the credential/i)
+
+    await userEvent.type(screen.getByLabelText("Test message"), "and again")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    await waitFor(() => expect(playgroundBodies()).toHaveLength(2))
+    expect(playgroundBodies()[1]?.messages).toEqual([{ role: "user", content: "and again" }])
+  })
+
+  it("does not send the empty turn a failed setup left behind", async () => {
+    stubRoutes()
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    let failCreate = true
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) === "/api/providers" && init?.method === "POST" && failCreate) {
+          failCreate = false
+          return new Response(JSON.stringify({ error: "database is locked" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          })
+        }
+        return routes(url, init)
+      },
+    )
+    mount(<TestDrawer row={keylessRow} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findAllByText(/database is locked/i)
+
+    await userEvent.type(screen.getByLabelText("Test message"), "and again")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    await waitFor(() => expect(playgroundBodies()).toHaveLength(1))
+    expect(playgroundBodies()[0]?.messages).toEqual([{ role: "user", content: "and again" }])
+  })
+
   it("clears back to a fresh probe", async () => {
     stubFetch(
       () =>
