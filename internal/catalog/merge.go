@@ -55,11 +55,12 @@ func Merge(in MergeInput) []Model {
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
 		m := mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM, free,
 			overrides[[2]string{row.ProviderID, row.ModelID}])
-		// Bedrock's preset declares no rules of its own. The Claude models it
-		// serves are Anthropic's generations whichever endpoint answers, and
-		// every anthropic rule names a Claude-only fragment, so another
-		// publisher's id matches none of them and stays unknown.
-		if len(preset.ModelTraits) == 0 && p.Kind == "bedrock" {
+		// Bedrock, the subscription preset and Vertex's Anthropic publisher
+		// declare no rules of their own. The Claude models they serve are
+		// Anthropic's generations whichever endpoint answers, and every
+		// anthropic rule names a Claude-only fragment, so another publisher's
+		// id matches none of them and stays unknown.
+		if len(preset.ModelTraits) == 0 && servesAnthropicShape(p, preset) {
 			m.Traits = traitsFor(in.Presets["anthropic"], row.ModelID)
 		}
 		out = append(out, m)
@@ -73,6 +74,20 @@ func Merge(in MergeInput) []Model {
 		return out[i].ModelID < out[j].ModelID
 	})
 	return out
+}
+
+// servesAnthropicShape reports whether a provider's requests go through an
+// Anthropic request builder, which is where the anthropic preset's traits are
+// read. Vertex shares one kind across publishers, so its preset's publisher
+// decides.
+func servesAnthropicShape(p provider.Provider, preset Preset) bool {
+	switch p.Kind {
+	case "anthropic", "bedrock":
+		return true
+	case "vertex":
+		return preset.Publisher == "publishers/anthropic"
+	}
+	return false
 }
 
 // freeCatalogKey is the catalogue entry a provider row reads.
