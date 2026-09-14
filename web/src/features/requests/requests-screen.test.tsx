@@ -390,3 +390,26 @@ describe("loading older requests", () => {
     expect(screen.queryByText("REPEATED")).toBeNull()
   })
 })
+
+describe("a requests list that fails to load", () => {
+  it("shows a load error instead of the empty state", async () => {
+    mockByPath(() => json({ error: "log unavailable" }, 500))
+    await renderAt("/requests")
+
+    expect(await screen.findByText(/the requests did not load/i)).toBeInTheDocument()
+    expect(screen.queryByText(/point a client at the proxy/i)).not.toBeInTheDocument()
+  })
+
+  it("offers to try again", async () => {
+    let fail = true
+    mockByPath(() =>
+      fail ? json({ error: "log unavailable" }, 500) : json({ requests: [row({ id: "r1" })] }),
+    )
+    await renderAt("/requests")
+    await screen.findByText(/the requests did not load/i)
+
+    fail = false
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }))
+    await waitFor(() => expect(screen.queryByText(/the requests did not load/i)).toBeNull())
+  })
+})
