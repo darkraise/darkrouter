@@ -10,6 +10,7 @@
         },
         {
           "cachePoint": {
+            "ttl": "5m",
             "type": "default"
           }
         }
@@ -23,6 +24,7 @@
     },
     {
       "cachePoint": {
+        "ttl": "1h",
         "type": "default"
       }
     }
