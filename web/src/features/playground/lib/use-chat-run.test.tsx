@@ -215,6 +215,40 @@ describe("running one chat turn", () => {
     expect(turns).toHaveLength(0)
   })
 
+  it.each([
+    ["stopped before the first token", Object.assign(new Error("aborted"), { name: "AbortError" })],
+    ["failed with nothing streamed", new Error("upstream refused")],
+  ])("leaves an exchange %s out of the next request", async (_why, thrown) => {
+    // It stays on screen, but nothing was said and nothing was kept: sent on,
+    // the next request carries a prompt nobody answered and an empty
+    // assistant turn the provider reads as the model's own reply.
+    streamMock.mockImplementationOnce(async function* () {
+      throw thrown
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    traceMock.mockResolvedValue(null)
+    const { result } = renderHook(() => useChatRun({ ...emptyConfig(), model: "m" }, () => {}))
+    await act(() => result.current.send("first"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.messages).toHaveLength(2)
+    const afterFirst = result.current.history
+
+    yields(frame("ok"))
+    await act(() => result.current.send("second"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    const body = streamMock.mock.calls[1]![1] as { messages: unknown[] }
+    expect(body.messages).toEqual([{ role: "user", content: "second" }])
+    // Nothing fixed the settings in between: no exchange existed to have been
+    // produced under them.
+    expect(afterFirst).toEqual([])
+    expect(result.current.history).toEqual([
+      { role: "user", content: "second" },
+      { role: "assistant", content: "ok" },
+    ])
+  })
+
   it("is ready to send the moment a conversation is loaded", async () => {
     // load aborts whatever was in flight, but the abort clears busy a
     // microtask later. Until it did, the composer sat disabled on a
