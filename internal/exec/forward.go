@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -74,7 +75,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 		if !committed {
 			if re.ErrPayload != "" {
-				return ac.reclassifyStream(errors.New(re.ErrPayload))
+				return ac.reclassifyStream(forwardedStreamError(fw, raw, maxLine, re.ErrPayload))
 			}
 			if re.Content {
 				commit()
@@ -168,6 +169,22 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		commit()
 	}
 	return adapter.OutcomeSuccess, nil
+}
+
+// forwardedStreamError types an error event the recognizer flagged by reading
+// it back through the adapter's own stream parser, which is where the
+// provider's error vocabulary is mapped on the translated path. The two paths
+// then classify the same event the same way. A payload the parser does not
+// turn into an error stays untyped, which classifies as a provider fault.
+func forwardedStreamError(fw adapter.Forwarder, raw []byte, maxLine int, payload string) error {
+	if ad, ok := fw.(adapter.Adapter); ok {
+		for _, err := range ad.ParseStream(bytes.NewReader(raw), maxLine) {
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return errors.New(payload)
 }
 
 // streamErrorWriter renders a terminal in-stream error in the inbound

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
 )
 
@@ -50,6 +51,71 @@ func TestStreamFailsOverOnAnInStreamErrorBeforeCommit(t *testing.T) {
 	}
 	if got := sc.order(); len(got) != 2 || got[0] != "g1" || got[1] != "c1" {
 		t.Errorf("order = %v, want [g1 c1]", got)
+	}
+}
+
+func sseErrorOf(typ string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"error\":{\"message\":\"refused\",\"type\":\"" + typ + "\"}}\n\n"))
+	}
+}
+
+// An in-stream error the adapter typed keeps its type. A rejected credential
+// or a per-key rate limit says nothing about the provider's other keys, and a
+// content filter is the provider answering: the same outcomes a status line
+// or a unary body would have produced. Both renderings must agree.
+func TestATypedInStreamErrorAdvancesLikeItsStatusWould(t *testing.T) {
+	const (
+		openaiStream    = `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`
+		anthropicStream = `{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`
+	)
+	for _, render := range []struct {
+		name string
+		post func(*testing.T, *Executor, string) *httptest.ResponseRecorder
+		body string
+	}{
+		{"forwarded", post, openaiStream},
+		{"translated", postAnthropic, anthropicStream},
+	} {
+		for _, tc := range []struct {
+			typ  string
+			want []string
+		}{
+			{"authentication_error", []string{"g1", "g2"}},
+			{"rate_limit_exceeded", []string{"g1", "g2"}},
+			{"content_filter", []string{"g1"}},
+		} {
+			t.Run(render.name+"/"+tc.typ, func(t *testing.T) {
+				sc := &scripted{by: map[string]http.HandlerFunc{
+					"g1": sseErrorOf(tc.typ), "g2": sseOK, "c1": sseOK,
+				}}
+				up := httptest.NewServer(sc)
+				defer up.Close()
+
+				e, _ := loopExecutor(t, up, twoProviderFleet(), &captureLogger{}, nil)
+				render.post(t, e, render.body)
+				if got := sc.order(); strings.Join(got, ",") != strings.Join(tc.want, ",") {
+					t.Errorf("order = %v, want %v", got, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// The breaker cools a 429 at once rather than counting it toward trip_after,
+// and an in-stream rate limit is a 429 in everything but its status line.
+func TestAnInStreamRateLimitReachesTheBreakerAsA429(t *testing.T) {
+	up := httptest.NewServer(sseErrorOf("rate_limit_exceeded"))
+	defer up.Close()
+	h := &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Health: h}, 0)
+
+	post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
+
+	if _, s := h.only(t); s.Outcome != adapter.OutcomeRetryableProvider || s.StatusCode != 429 {
+		t.Errorf("signal = %+v, want retryable_provider with 429", s)
 	}
 }
 

@@ -655,6 +655,12 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
 			Path: path, Committed: true, Issued: true}
 	}
+	if outcome == adapter.OutcomeRetryableProvider && aerr != nil {
+		// An in-body rate limit steps to the next credential as a 429 would.
+		if s := statusForParseError(aerr); s != 0 {
+			statusCode = s
+		}
+	}
 	return attemptResult{Outcome: outcome, Status: statusCode, Err: aerr,
 		Path: path, Committed: cw.Committed(), Issued: true}
 }
@@ -805,7 +811,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 // last candidate.
 func (ac *AttemptCtx) reclassifyStream(err error) (adapter.Outcome, *ir.Error) {
 	outcome := ac.readOutcome(err)
-	ac.recordHealth(outcome, ac.resp)
+	ac.recordFailure(outcome, ac.resp, err)
 	demoteLastAttempt(ac.Rec, outcome, false)
 	if n := len(ac.Rec.Attempts); n > 0 {
 		ac.Rec.Attempts[n-1].Error = err.Error()
@@ -813,7 +819,20 @@ func (ac *AttemptCtx) reclassifyStream(err error) (adapter.Outcome, *ir.Error) {
 	if outcome == adapter.OutcomeClientCancelled {
 		return outcome, errorFor(outcome, err)
 	}
+	var ie *ir.Error
+	if errors.As(err, &ie) {
+		return outcome, ie
+	}
 	return outcome, &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
+}
+
+// recordFailure emits the breaker signal for a failure read from a 2xx body,
+// with the status a typed error stands for.
+func (ac *AttemptCtx) recordFailure(o adapter.Outcome, resp *http.Response, err error) {
+	if o == adapter.OutcomeRetryableProvider {
+		resp = withStatus(resp, statusForParseError(err))
+	}
+	ac.recordHealth(o, resp)
 }
 
 var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
@@ -1164,14 +1183,52 @@ func routerError(err error) *ir.Error {
 	}
 }
 
-// outcomeForParseError separates "this provider is broken" from "this provider
-// answered, and the answer was a refusal". Only the first is a health signal.
+// outcomeForParseError classifies an error the provider reported inside a 2xx
+// body — a unary error envelope or an in-stream error event — the way the
+// same error under its own status line would have been. An adapter that typed
+// it has already read the provider's vocabulary; discarding that here would
+// skip a provider's healthy credentials over one rejected key, and fail over
+// a refusal every model in the chain will repeat. Anything untyped is a body
+// the provider could not deliver, which is a provider fault.
 func outcomeForParseError(err error) adapter.Outcome {
 	var e *ir.Error
-	if errors.As(err, &e) && e.Type == ir.ErrContentFilter {
-		return adapter.OutcomeFatal
+	if !errors.As(err, &e) {
+		return adapter.OutcomeRetryableProvider
 	}
-	return adapter.OutcomeRetryableProvider
+	switch e.Type {
+	case ir.ErrContentFilter, ir.ErrInvalidRequest, ir.ErrPayloadTooLarge, ir.ErrUnsupportedMedia:
+		return adapter.OutcomeFatal
+	case ir.ErrAuthentication, ir.ErrPermission:
+		return adapter.OutcomeRetryableCredential
+	case ir.ErrNotFound:
+		return adapter.OutcomeRetryableModel
+	default:
+		return adapter.OutcomeRetryableProvider
+	}
+}
+
+// statusForParseError is the status line a typed in-body error stands for,
+// where the breaker and the advance rule read one. Only a rate limit needs it:
+// it is the one provider outcome that cools at once and steps to the next
+// credential instead of skipping the provider. Zero means the real status.
+func statusForParseError(err error) int {
+	var e *ir.Error
+	if errors.As(err, &e) && e.Type == ir.ErrRateLimit {
+		return http.StatusTooManyRequests
+	}
+	return 0
+}
+
+// withStatus is resp as a breaker signal should read it when a body error
+// stands for another status. The copy is shallow: the signal reads only the
+// status and the Retry-After header.
+func withStatus(resp *http.Response, status int) *http.Response {
+	if resp == nil || status == 0 {
+		return resp
+	}
+	cp := *resp
+	cp.StatusCode = status
+	return &cp
 }
 
 func errorFor(o adapter.Outcome, err error) *ir.Error {
