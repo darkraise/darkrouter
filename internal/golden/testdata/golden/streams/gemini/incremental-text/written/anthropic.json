@@ -56,7 +56,7 @@
   {
     "data": {
       "content_block": {
-        "id": "",
+        "id": "call_r-2_1",
         "input": {},
         "name": "lookup",
         "type": "tool_use"

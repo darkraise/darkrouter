@@ -2,9 +2,12 @@ package gemini
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -142,7 +145,44 @@ func finishReason(s string, hasCall bool) (ir.StopReason, bool) {
 	}
 }
 
-func partToIR(p wirePart) (ir.ContentBlock, bool) {
+// callIDs names the function calls of one response. Gemini's ids are optional
+// and usually absent, while every other dialect's client correlates a result
+// with its call by id and Anthropic and Bedrock reject an empty one.
+//
+// The id derives from the response id so a replayed fixture renders the same,
+// and falls back to a random base so two turns of one conversation never name
+// a call alike. Only [A-Za-z0-9_-] survives, the alphabet Anthropic and
+// Bedrock accept for a tool-use id.
+type callIDs struct {
+	base string
+	n    int
+}
+
+func newCallIDs(responseID string) *callIDs {
+	base := strings.Map(func(r rune) rune {
+		if r == '_' || r == '-' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
+			return r
+		}
+		return -1
+	}, responseID)
+	if base == "" {
+		var b [8]byte
+		_, _ = rand.Read(b[:])
+		base = hex.EncodeToString(b[:])
+	}
+	return &callIDs{base: base}
+}
+
+// next returns the supplied id, or a new one when Gemini gave none.
+func (c *callIDs) next(supplied string) string {
+	if supplied != "" {
+		return supplied
+	}
+	c.n++
+	return "call_" + c.base + "_" + strconv.Itoa(c.n)
+}
+
+func partToIR(p wirePart, ids *callIDs) (ir.ContentBlock, bool) {
 	switch {
 	case p.FunctionCall != nil:
 		args := p.FunctionCall.Args
@@ -150,7 +190,7 @@ func partToIR(p wirePart) (ir.ContentBlock, bool) {
 			args = json.RawMessage(`{}`)
 		}
 		return ir.ContentBlock{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
-			ID: p.FunctionCall.ID, Name: p.FunctionCall.Name, Input: args,
+			ID: ids.next(p.FunctionCall.ID), Name: p.FunctionCall.Name, Input: args,
 			Signature: p.ThoughtSignature,
 		}}, true
 	case p.Thought:
@@ -214,8 +254,9 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 
 	c := w.Candidates[0]
 	hasCall := false
+	ids := newCallIDs(w.ResponseID)
 	for _, p := range c.Content.Parts {
-		blk, ok := partToIR(p)
+		blk, ok := partToIR(p, ids)
 		if !ok {
 			continue
 		}

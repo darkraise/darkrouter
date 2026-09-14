@@ -14,7 +14,7 @@
                 "arguments": "{\"city\":\"Oslo\"}",
                 "name": "lookup"
               },
-              "id": "",
+              "id": "call_r-1_1",
               "type": "function"
             }
           ]
