@@ -317,10 +317,22 @@ cat
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "argv:--print --quiet --permission terminal:deny "+
-		"--permission read:deny --permission edit:deny --permission write:deny "+
-		"--model sonnet4.6 --") {
-		t.Errorf("argv = %q", got)
+	argv := strings.SplitN(got, "\n", 2)[0]
+	if !strings.HasPrefix(argv, "argv:--print --quiet ") || !strings.HasSuffix(argv, " --model sonnet4.6 --") {
+		t.Errorf("argv = %q", argv)
+	}
+	for _, tool := range []string{
+		"view", "save-file", "remove-files", "str-replace-editor", "apply_patch",
+		"launch-process", "kill-process", "read-process", "write-process", "list-processes",
+		"web-fetch", "grep-search", "view-range-untruncated", "search-untruncated",
+		"codebase-retrieval-raw", "view-session",
+	} {
+		if !strings.Contains(argv, " --remove-tool "+tool+" ") {
+			t.Errorf("tool %q is not removed: %q", tool, argv)
+		}
+	}
+	if strings.Contains(argv, "--permission") {
+		t.Errorf("tools are withheld by removal, not by --permission rules: %q", argv)
 	}
 	if !strings.Contains(got, "hello there") {
 		t.Errorf("the prompt did not reach stdin: %q", got)
