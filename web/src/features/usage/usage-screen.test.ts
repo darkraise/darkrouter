@@ -42,7 +42,7 @@ describe("the Total view's series", () => {
     const rows = [row({ requests: 3 }), row({ requests: 4, day: "2026-08-25" })]
     const series = chartSeries(rows, "day")
     expect(series.keys).toEqual(["total"])
-    expect(stackByDay(series.rows, series.keys, (r) => r.requests)).toEqual([
+    expect(stackByDay(series.rows, series.keys, (r) => r.requests, ["2026-08-25", "2026-08-26"])).toEqual([
       { day: "2026-08-25", total: 4 },
       { day: "2026-08-26", total: 3 },
     ])
@@ -57,7 +57,7 @@ describe("the Total view's series", () => {
     const rows = [row({ key: "", requests: 5 }), row({ key: "fast", requests: 2 })]
     const series = chartSeries(rows, "alias")
     expect(series.keys).toEqual(["", "fast"])
-    expect(stackByDay(series.rows, series.keys, (r) => r.requests)).toEqual([
+    expect(stackByDay(series.rows, series.keys, (r) => r.requests, ["2026-08-26"])).toEqual([
       { day: "2026-08-26", "": 5, fast: 2 },
     ])
   })
@@ -153,6 +153,7 @@ describe("stackByDay", () => {
         [at("2026-08-25", "groq", 3), at("2026-08-25", "nebius", 1), at("2026-08-26", "groq", 2)],
         ["groq", "nebius"],
         (r) => r.requests,
+        ["2026-08-25", "2026-08-26"],
       ),
     ).toEqual([
       { day: "2026-08-25", groq: 3, nebius: 1 },
@@ -163,8 +164,27 @@ describe("stackByDay", () => {
   it("zero-fills a key absent on a day rather than leaving a gap", () => {
     // A stacked area with a missing key renders a hole through the stack,
     // which reads as traffic stopping everywhere rather than at one provider.
-    const out = stackByDay([at("2026-08-25", "groq", 3)], ["groq", "nebius"], (r) => r.requests)
+    const out = stackByDay([at("2026-08-25", "groq", 3)], ["groq", "nebius"], (r) => r.requests, [
+      "2026-08-25",
+    ])
     expect(out[0]?.nebius).toBe(0)
+  })
+
+  it("zero-fills a day with no traffic at all rather than dropping it", () => {
+    // The x-axis is categorical, so a missing day is not a gap: its
+    // neighbours close up and idle days vanish from the timeline.
+    const out = stackByDay(
+      [at("2026-08-24", "groq", 3), at("2026-08-27", "groq", 5)],
+      ["groq"],
+      (r) => r.cost_micros,
+      ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"],
+    )
+    expect(out).toEqual([
+      { day: "2026-08-24", groq: null },
+      { day: "2026-08-25", groq: 0 },
+      { day: "2026-08-26", groq: 0 },
+      { day: "2026-08-27", groq: null },
+    ])
   })
 
   it("ignores a key not in the series list", () => {
@@ -172,6 +192,7 @@ describe("stackByDay", () => {
       [at("2026-08-25", "groq", 3), at("2026-08-25", "other", 9)],
       ["groq"],
       (r) => r.requests,
+      ["2026-08-25"],
     )
     expect(out[0]).toEqual({ day: "2026-08-25", groq: 3 })
   })
@@ -185,6 +206,7 @@ describe("stackByDay with a nullable value", () => {
       [at("2026-08-25", "groq", 1, null), at("2026-08-25", "groq", 1, null)],
       ["groq"],
       (r) => r.cost_micros,
+      ["2026-08-25"],
     )
     expect(out[0]?.groq).toBeNull()
   })
@@ -196,6 +218,7 @@ describe("stackByDay with a nullable value", () => {
       [at("2026-08-25", "groq", 1, null), at("2026-08-25", "groq", 1, 500)],
       ["groq"],
       (r) => r.cost_micros,
+      ["2026-08-25"],
     )
     expect(out[0]?.groq).toBe(500)
   })
