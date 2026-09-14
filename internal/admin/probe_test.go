@@ -392,3 +392,55 @@ func TestListingProvidersDoesNotClaimTheProbe(t *testing.T) {
 		t.Error("listing providers claimed the probe; no request can reach the credential")
 	}
 }
+
+// headerGatedUpstream lists models only to a request carrying want in header.
+func headerGatedUpstream(header, want string, models ...string) http.HandlerFunc {
+	list := listingUpstream(models...)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(header) != want {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		list(w, r)
+	}
+}
+
+func TestAProbeSendsTheKeyWhereTheProvidersOwnStyleSays(t *testing.T) {
+	cases := []struct {
+		name, body, header, want string
+	}{
+		{
+			// A token-protected vLLM: the preset ships style none, and the row
+			// overrides it to bearer.
+			name:   "bearer over a keyless preset",
+			body:   `{"id":"vl","preset":"vllm","base_url":"URL","auth_style":"bearer"}`,
+			header: "Authorization", want: "Bearer sk-seed-abcdef1234",
+		},
+		{
+			name:   "x-api-key on a custom provider",
+			body:   `{"id":"vl","name":"vl","kind":"openaicompat","base_url":"URL","auth_style":"x-api-key"}`,
+			header: "x-api-key", want: "sk-seed-abcdef1234",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(headerGatedUpstream(tc.header, tc.want, "m1"))
+			defer upstream.Close()
+
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers",
+				strings.Replace(tc.body, "URL", upstream.URL, 1)); w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			if w := do(t, s, cookie, token, "POST", "/api/providers/vl/keys",
+				`{"label":"primary","secret":"sk-seed-abcdef1234"}`); w.Code != http.StatusCreated {
+				t.Fatalf("key: %d %s", w.Code, w.Body.String())
+			}
+			got := probeProvider(t, s, cookie, token, "vl")
+			if !got.OK || got.ModelCount != 1 {
+				t.Errorf("ok = %v, model_count = %d, error = %q", got.OK, got.ModelCount, got.Error)
+			}
+		})
+	}
+}
