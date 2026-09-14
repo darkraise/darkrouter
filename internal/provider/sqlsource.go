@@ -20,9 +20,19 @@ type SQLSource struct {
 	db  *store.DB
 	key *crypto.Key
 
+	// reloading serializes Reload against itself, from its first read through
+	// its publish. Admin mutations each reload after committing, and without
+	// it the reload that read older rows can publish last — restoring a
+	// credential an operator just disabled. The request path never takes it.
+	reloading sync.Mutex
+
 	mu        sync.RWMutex
 	providers []Provider
 	rev       uint64
+
+	// beforePublish runs between a reload's reads and its publish. A test
+	// seam: nil outside tests.
+	beforePublish func()
 }
 
 func NewSQLSource(db *store.DB, key *crypto.Key) *SQLSource {
@@ -35,6 +45,9 @@ func NewSQLSource(db *store.DB, key *crypto.Key) *SQLSource {
 // so a failure leaves the previous set live — the same rule the config store
 // applies to a broken edit.
 func (s *SQLSource) Reload(ctx context.Context) error {
+	s.reloading.Lock()
+	defer s.reloading.Unlock()
+
 	rows, err := s.db.Read.QueryContext(ctx,
 		`SELECT id, preset, kind, base_url, auth_style, priority, region, project, location,
 		        free_models_only, allow_unsanctioned_free
@@ -100,6 +113,9 @@ func (s *SQLSource) Reload(ctx context.Context) error {
 		})
 	}
 
+	if s.beforePublish != nil {
+		s.beforePublish()
+	}
 	rev := revisionOf(out)
 	s.mu.Lock()
 	s.providers, s.rev = out, rev
