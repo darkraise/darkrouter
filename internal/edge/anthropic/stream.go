@@ -74,6 +74,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		usage     ir.Usage
 		started   bool
 		wireOf    = map[int]int{}
+		nextWire  int
 		stop      = ir.StopEndTurn
 	)
 
@@ -100,7 +101,10 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		if err := start(); err != nil {
 			return 0, err
 		}
-		wire := len(wireOf)
+		// A wire index is a position in the final content array, so a closed
+		// block keeps its slot.
+		wire := nextWire
+		nextWire++
 		wireOf[irIdx] = wire
 		body := blockStartBody(d)
 		return wire, send("content_block_start", map[string]any{
