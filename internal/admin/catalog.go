@@ -151,12 +151,18 @@ func (s *Server) collectModels(r *http.Request, optedIn map[string]bool) []model
 	surface := q.Get("surface")
 	minContext, _ := strconv.Atoi(q.Get("min_context"))
 	wantTools := q.Get("tools") == "true"
+	// Narrowed to one provider before the fold, so every value on a row is
+	// that provider's own rather than the first provider's in id order.
+	onlyProvider := q.Get("provider")
 
 	byModel := map[string]*modelView{}
 	tiers := map[string]catalog.FreeTier{}
 	optInDue := map[string]bool{}
 	order := []string{}
 	for _, m := range s.deps.Catalog.Snapshot().All() {
+		if onlyProvider != "" && m.ProviderID != onlyProvider {
+			continue
+		}
 		if search != "" && !strings.Contains(strings.ToLower(m.ModelID), search) {
 			continue
 		}

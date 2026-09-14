@@ -483,3 +483,52 @@ func TestAWithdrawnUnsanctionedTierAsksForNothing(t *testing.T) {
 		t.Errorf("the withdrawn record won the fold over a live one: %+v", got)
 	}
 }
+
+func TestTheCatalogNarrowedToOneProviderShowsThatProvidersOwnRow(t *testing.T) {
+	// Folded by model name, a row takes its price and capabilities from
+	// whichever provider sorts first. A provider's own page has to show what
+	// that provider charges and supports, not what another one does.
+	s, _ := testServerFull(t)
+	c := &catalog.Store{}
+	c.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "cerebras", ModelID: "llama", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, ContextWindow: 8000,
+			Capabilities: catalog.Capabilities{Known: true, Tools: false},
+			Pricing:      catalog.Pricing{InputMicrosPerMTok: 100, OutputMicrosPerMTok: 200, Known: true}},
+		{ProviderID: "groq", ModelID: "llama", State: catalog.StateLive,
+			Surfaces: []ir.Surface{ir.SurfaceLLM}, ContextWindow: 128000,
+			Capabilities: catalog.Capabilities{Known: true, Tools: true},
+			Pricing:      catalog.Pricing{InputMicrosPerMTok: 900, OutputMicrosPerMTok: 1800, Known: true}},
+	}, []string{"cerebras", "groq"}))
+	s.deps.Catalog = c
+
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/models?provider=groq", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Models []struct {
+			Model         string   `json:"model"`
+			Providers     []string `json:"providers"`
+			ContextWindow int      `json:"context_window"`
+			Tools         bool     `json:"tools"`
+			Pricing       *struct {
+				InputMicros int64 `json:"input_micros"`
+			} `json:"pricing"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Models) != 1 {
+		t.Fatalf("models = %+v, want groq's one row", body.Models)
+	}
+	got := body.Models[0]
+	if got.Pricing == nil || got.Pricing.InputMicros != 900 || !got.Tools || got.ContextWindow != 128000 {
+		t.Errorf("row = %+v, want groq's price, tools and context", got)
+	}
+	if len(got.Providers) != 1 || got.Providers[0] != "groq" {
+		t.Errorf("providers = %v, want [groq]", got.Providers)
+	}
+}

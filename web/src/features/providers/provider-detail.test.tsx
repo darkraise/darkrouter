@@ -153,6 +153,35 @@ describe("a configured provider", () => {
     expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument()
     expect(screen.getByText(/priority 10/)).toBeInTheDocument()
   })
+
+  it("shows the models as this provider serves them, not as the fold does", async () => {
+    // The unnarrowed catalogue is one row per model with another provider's
+    // price and capabilities on it; only the narrowed view is groq's own.
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    const model = (input: number, tools: boolean) => ({
+      model: "llama", providers: ["cerebras", "groq"], surfaces: ["llm"],
+      context_window: 8000, max_output_tokens: 0, tools, vision: false, reasoning: false,
+      inferred: false, state: "live", free_tier: null, merge_source: "discovered",
+      pricing: { input_micros: input, output_micros: input, price_source: "", price_grade: "" },
+    })
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        const path = String(url)
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } })
+        if (path === "/api/models?provider=groq") {
+          return json({ models: [{ ...model(9_000_000, true), providers: ["groq"] }], aliases: [] })
+        }
+        if (path.startsWith("/api/models")) return json({ models: [model(1_000_000, false)], aliases: [] })
+        return routes(url, init)
+      },
+    )
+    await renderProvider("groq")
+
+    expect(await screen.findByText(/\$9\.00/)).toBeInTheDocument()
+    expect(screen.queryByText(/\$1\.00/)).not.toBeInTheDocument()
+  })
 })
 
 describe("waiting for a sweep", () => {
