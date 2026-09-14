@@ -72,6 +72,8 @@ func TestRecognizeEventOnChunks(t *testing.T) {
 			`{"choices":[{"index":0,"delta":{"content":"He"}}]}`, true, false},
 		{"a reasoning delta commits",
 			`{"choices":[{"index":0,"delta":{"reasoning_content":"hm"}}]}`, true, false},
+		{"an OpenRouter reasoning delta commits",
+			`{"choices":[{"index":0,"delta":{"reasoning":"hm"}}]}`, true, false},
 		{"a name-only first tool_calls delta does not commit",
 			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"f"}}]}}]}`, false, false},
 		{"a tool call delta with arguments commits",
