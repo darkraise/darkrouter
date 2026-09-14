@@ -1,6 +1,6 @@
 # Hand-reviewed corrections merged over the generated presets on every
-# presetgen run. A non-zero field here wins; an id absent from the generated
-# set is added outright.
+# presetgen run. A field declared here wins, even an explicit "", [] or false;
+# an id absent from the generated set is added outright.
 
 anthropic:
   litellm_id: anthropic
