@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -199,6 +200,10 @@ type oauthAccount struct {
 	// secret is the stored value tok was read from or last persisted as. A
 	// write from this account lands only while the row still holds it.
 	secret string
+	// unpersisted marks a tok the vendor issued that the store has not yet
+	// accepted. The predecessor in the row may already be dead at the vendor,
+	// so tok is kept and its write retried rather than read back over.
+	unpersisted bool
 	// dead marks a credential whose refresh was terminally refused. Checked
 	// before the endpoint is called again, so "no retries" holds within the
 	// process as well as across ticks.
@@ -299,7 +304,11 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	acct.mu.Lock()
 	defer acct.mu.Unlock()
 
-	if acct.stale.Load() {
+	if acct.unpersisted {
+		err := m.persist(ctx, acct, credID, acct.tok)
+		acct.unpersisted = err != nil && !errors.Is(err, ErrCredentialChanged)
+	}
+	if acct.stale.Load() && !acct.unpersisted {
 		if err := m.reload(ctx, acct, credID); err != nil {
 			return "", err
 		}
@@ -339,14 +348,21 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	// Persisted BEFORE the in-memory pair is replaced. A crash between the two
 	// then loses a refresh rather than the account: the durable row already
 	// names the token the vendor now expects.
-	raw, err := next.Marshal()
+	err = m.persist(ctx, acct, credID, next)
+	if errors.Is(err, ErrCredentialChanged) {
+		// The pair just minted descends from a secret the row no longer
+		// holds. It is dropped, and the next caller reads the row.
+		acct.unpersisted = false
+		return "", err
+	}
 	if err != nil {
-		return "", err
+		// The vendor accepted the refresh, so the new pair is the only one
+		// known to work: the one in the row may already be dead. It serves,
+		// and the write is retried on the next call.
+		slog.Error("oauth refresh could not be persisted; retrying on next use",
+			"credential", credID, "err", err)
 	}
-	if err := m.persist(ctx, acct, credID, next, string(raw)); err != nil {
-		return "", err
-	}
-	acct.tok, acct.secret = next, string(raw)
+	acct.tok, acct.unpersisted = next, err != nil
 	return next.Header(), nil
 }
 
@@ -366,23 +382,28 @@ func (m *Manager) reload(ctx context.Context, acct *oauthAccount, credID string)
 	return fmt.Errorf("load credential %s: %w", credID, err)
 }
 
-func (m *Manager) persist(ctx context.Context, acct *oauthAccount, credID string, tok Token, raw string) error {
+// persist writes tok over the secret the account's pair descends from, and on
+// success records it as that secret. Called with the account mutex held.
+func (m *Manager) persist(ctx context.Context, acct *oauthAccount, credID string, tok Token) error {
 	if m.deps.Tokens == nil {
 		return nil
 	}
+	raw, err := tok.Marshal()
+	if err != nil {
+		return err
+	}
 	// WithoutCancel: this runs on a request's context, and a client that hangs
 	// up mid-refresh must not leave the rotated pair unpersisted.
-	err := m.deps.Tokens.ReplaceCredentialSecret(
-		context.WithoutCancel(ctx), credID, acct.secret, raw, tok.Unix())
+	err = m.deps.Tokens.ReplaceCredentialSecret(
+		context.WithoutCancel(ctx), credID, acct.secret, string(raw), tok.Unix())
+	if err == nil {
+		acct.secret = string(raw)
+		return nil
+	}
 	if errors.Is(err, ErrCredentialChanged) {
-		// The pair just minted descends from a secret the row no longer
-		// holds. It is dropped, and the next caller reads the row.
 		acct.stale.Store(true)
 	}
-	if err != nil {
-		return fmt.Errorf("persist refreshed credential: %w", err)
-	}
-	return nil
+	return fmt.Errorf("persist refreshed credential: %w", err)
 }
 
 // refuse records a terminal refusal: the account stops calling the endpoint
