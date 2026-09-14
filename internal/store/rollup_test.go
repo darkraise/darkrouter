@@ -356,6 +356,65 @@ func TestRollupAttributesUsageToTheAttemptsOwnProvider(t *testing.T) {
 	}
 }
 
+// A gateway stopped between hourly runs and restarted days later still owes
+// usage_daily the requests it logged after its last run: a window of only
+// yesterday and today would never reach their day again.
+func TestRollupCatchesUpTheDaysSinceItsLastRun(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	lastRun := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+
+	insertRequest(t, db, "before", lastRun.Add(-time.Hour), "groq", "m", 10, 20, nil)
+	if err := db.Rollup(ctx, lastRun); err != nil {
+		t.Fatal(err)
+	}
+	insertRequest(t, db, "after", lastRun.Add(30*time.Minute), "groq", "m", 5, 7, nil)
+
+	if err := db.Rollup(ctx, lastRun.AddDate(0, 0, 3)); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, in int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day = '2026-08-22'`).
+		Scan(&requests, &in); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || in != 15 {
+		t.Errorf("2026-08-22 = %d requests, %d tokens in; want 2 and 15", requests, in)
+	}
+}
+
+// The catch-up has to happen at startup: the first interval is most of an
+// hour, and retention's first prune could remove the rows it owes by then.
+func TestRunRollupRunsOnceAtStartup(t *testing.T) {
+	db := migrated(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	insertRequest(t, db, "a", time.Now(), "groq", "m", 1, 1, nil)
+
+	done := make(chan error, 1)
+	go func() { done <- RunRollup(ctx, db, time.Hour) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var n int
+		if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM usage_daily`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no rollup ran at startup")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestRollupKeepsADayWhoseRequestsWerePruned(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
