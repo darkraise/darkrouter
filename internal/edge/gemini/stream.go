@@ -89,6 +89,8 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		stop    = ir.StopEndTurn
 		calls   = map[int]*pendingCall{}
 		sendErr error
+		// malformed records a call dropped for unparseable arguments.
+		malformed bool
 	)
 
 	partChunk := func(parts []any) error {
@@ -110,6 +112,14 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		args := json.RawMessage(pc.args)
 		if len(args) == 0 {
 			args = json.RawMessage(`{}`)
+		}
+		// Arguments cut off mid-object, typically by an output limit, cannot
+		// be rendered as a functionCall; failing the marshal would leave the
+		// array form unterminated, so the call is dropped and the finish
+		// reason says why.
+		if !json.Valid(args) {
+			malformed = true
+			return nil
 		}
 		call := map[string]any{"name": pc.name, "args": args}
 		if pc.id != "" {
@@ -260,7 +270,13 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 	if err := flushAllCalls(); err != nil {
 		return err
 	}
-	if err := terminal(finishReasonWire(stop)); err != nil {
+	reason := finishReasonWire(stop)
+	// MAX_TOKENS stays: it names the cause, and a client acts on it by
+	// raising the limit.
+	if malformed && stop != ir.StopMaxTokens {
+		reason = "MALFORMED_FUNCTION_CALL"
+	}
+	if err := terminal(reason); err != nil {
 		return err
 	}
 	return cw.close()
