@@ -49,7 +49,7 @@ func (u *wireUsage) toIR() ir.Usage {
 	}
 	return ir.Usage{
 		InputTokens:     in,
-		OutputTokens:    u.CandidatesTokenCount,
+		OutputTokens:    u.CandidatesTokenCount + u.ThoughtsTokenCount,
 		CacheReadTokens: u.CachedContentTokenCount,
 		ReasoningTokens: u.ThoughtsTokenCount,
 	}

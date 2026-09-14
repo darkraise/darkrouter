@@ -87,16 +87,6 @@ func TestAnUnknownCacheWriteRateCostsNothingRatherThanGuessing(t *testing.T) {
 	}
 }
 
-func TestReasoningTokensAreBilledAtTheOutputRate(t *testing.T) {
-	// Gemini reports thoughts separately from candidates and bills them as
-	// output. Leaving them out under-reports every reasoning request.
-	p := Pricing{Known: true, InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 2_000_000}
-	got := p.Cost(Tokens{Input: 1000, Output: 500, Reasoning: 250})
-	if got == nil || *got != 1000+1000+500 {
-		t.Fatalf("cost = %v, want 2500", got)
-	}
-}
-
 func TestCacheWritesAreBilledByTTL(t *testing.T) {
 	// Anthropic prices a 5-minute write at 1.25x input and a 1-hour write
 	// at 2x. The catalog's single cache-write rate covers only the writes

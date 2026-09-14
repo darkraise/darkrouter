@@ -306,6 +306,12 @@ type Request struct {
 	Warnings []Warning
 }
 
+// Usage is one response's token counts.
+//
+// OutputTokens includes ReasoningTokens, which is only the breakdown of it a
+// provider reported. That is how OpenAI, Anthropic and Bedrock count; an
+// adapter for a provider that counts reasoning beside its output, as Gemini
+// does, adds the two together, and a writer for such a dialect splits them.
 type Usage struct {
 	InputTokens      int
 	OutputTokens     int

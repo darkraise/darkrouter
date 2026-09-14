@@ -32,7 +32,7 @@ func TestWriteResponseProducesTheCandidateShape(t *testing.T) {
 			{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
 				ID: "call_a", Name: "f", Input: json.RawMessage(`{"x":1}`)}},
 		},
-		Usage: ir.Usage{InputTokens: 10, OutputTokens: 4, CacheReadTokens: 3, ReasoningTokens: 6},
+		Usage: ir.Usage{InputTokens: 10, OutputTokens: 10, CacheReadTokens: 3, ReasoningTokens: 6},
 	})
 	cands := got["candidates"].([]any)
 	c := cands[0].(map[string]any)
@@ -58,10 +58,11 @@ func TestWriteResponseProducesTheCandidateShape(t *testing.T) {
 	if _, ok := fc["args"].(map[string]any); !ok {
 		t.Errorf("args = %#v; Gemini takes an object", fc["args"])
 	}
+	// Gemini counts thoughts beside candidates, and its total includes both.
 	u := got["usageMetadata"].(map[string]any)
 	if u["promptTokenCount"].(float64) != 13 || u["candidatesTokenCount"].(float64) != 4 ||
 		u["cachedContentTokenCount"].(float64) != 3 || u["thoughtsTokenCount"].(float64) != 6 ||
-		u["totalTokenCount"].(float64) != 17 {
+		u["totalTokenCount"].(float64) != 23 {
 		t.Errorf("usageMetadata = %v", u)
 	}
 	if got["modelVersion"] != "gemini-2.0-flash" || got["responseId"] != "r1" {

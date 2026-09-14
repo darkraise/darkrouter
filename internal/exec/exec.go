@@ -842,7 +842,7 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
 		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
 			rec.CostMicros = m.Pricing.Cost(catalog.Tokens{
-				Input: rec.TokensIn, Output: rec.TokensOut, Reasoning: rec.ReasoningTokens,
+				Input: rec.TokensIn, Output: rec.TokensOut,
 				CacheRead: rec.CacheReadTokens, CacheWrite: rec.CacheWriteTokens,
 				CacheWrite5m: rec.CacheWrite5mTokens, CacheWrite1h: rec.CacheWrite1hTokens,
 			})
