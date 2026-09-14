@@ -455,6 +455,51 @@ describe("the conversation", () => {
   })
 })
 
+describe("stopping a run", () => {
+  /** A provider that never sends headers, until the request is aborted. */
+  function stallPlayground() {
+    const signals: AbortSignal[] = []
+    stubRoutes()
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) !== "/api/playground") return routes(url, init)
+        const signal = init?.signal ?? undefined
+        signals.push(signal as AbortSignal)
+        return new Promise<Response>((_, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("The operation was aborted.", "AbortError")),
+          )
+        })
+      },
+    )
+    return signals
+  }
+
+  it("cancels a request that is still waiting on the provider", async () => {
+    const signals = stallPlayground()
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await userEvent.click(await screen.findByRole("button", { name: /stop/i }))
+
+    await waitFor(() => expect(signals[0]?.aborted).toBe(true))
+    expect(await screen.findByRole("button", { name: /send/i })).toBeInTheDocument()
+    expect(screen.queryByText(/served in/i)).not.toBeInTheDocument()
+  })
+
+  it("cancels the request when the drawer goes away", async () => {
+    const signals = stallPlayground()
+    const { unmount } = mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findByRole("button", { name: /stop/i })
+
+    unmount()
+    expect(signals[0]?.aborted).toBe(true)
+  })
+})
+
 describe("aiming the drawer at another provider", () => {
   it("starts that provider from nothing rather than carrying the last one's run over", async () => {
     // The drawer is mounted once for the whole list. Without a reset the

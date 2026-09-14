@@ -88,6 +88,7 @@ export type Verdict =
   | { kind: "running" }
   | { kind: "served"; totalMs: number }
   | { kind: "refused"; reason: string }
+  | { kind: "stopped" }
 
 /**
  * The one sentence the drawer exists to produce.
@@ -110,6 +111,14 @@ function VerdictLine({ verdict }: { verdict: Verdict }) {
       <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
         <span className="size-[var(--icon-size)] animate-pulse rounded-full bg-[hsl(var(--muted-foreground))]" />
         Waiting for the provider…
+      </p>
+    )
+  }
+  if (verdict.kind === "stopped") {
+    return (
+      <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+        <CircleSlash className="size-[var(--icon-size)]" aria-hidden="true" />
+        Stopped before the reply finished
       </p>
     )
   }
@@ -252,7 +261,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   // remembered here or the next send would try to make it again.
   const [created, setCreated] = useState(false)
   const needsCreating = !!row?.keyless && !row.provider && !created
-  const abort = useRef(false)
+  const inFlight = useRef<AbortController | null>(null)
   const transcript = useRef<HTMLDivElement>(null)
 
   // A functional update: a stream appends many times inside one render, and a
@@ -282,6 +291,11 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     })
   }
 
+  // Closing the drawer, or aiming it at another provider, unmounts this
+  // session; a request left running would go on generating, and billing, for
+  // a transcript nobody can see.
+  useEffect(() => () => inFlight.current?.abort(), [])
+
   // Follows the reply as it arrives, which is what makes a transcript feel
   // live rather than something to scroll after the fact.
   useEffect(() => {
@@ -299,7 +313,8 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   async function run() {
     const prompt = draft.trim()
     if (!row || !target || !prompt || running) return
-    abort.current = false
+    const controller = new AbortController()
+    inFlight.current = controller
     setRunning(true)
     setDraft("")
     setMetrics(NO_METRICS)
@@ -343,6 +358,12 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     }
     say("info", `POST /api/playground → ${target}`)
 
+    const stopped = () => {
+      say("info", `stopped at ${at()}`)
+      setVerdict({ kind: "stopped" })
+      failOpenTurn("Stopped before the provider answered")
+    }
+
     let firstToken = 0
     let liveRequestId = ""
     try {
@@ -359,8 +380,9 @@ function TestSession({ row }: { row: ProviderRow | null }) {
           liveRequestId = s.requestId
           say("info", `request ${s.requestId} · headers at ${at()}`)
         },
+        controller.signal,
       )) {
-        if (abort.current) break
+        if (controller.signal.aborted) break
         buffer += chunk
         const { text, rest } = drainSSE(buffer, "openai")
         buffer = rest
@@ -372,8 +394,12 @@ function TestSession({ row }: { row: ProviderRow | null }) {
           appendToOpenTurn(text)
         }
       }
+      if (controller.signal.aborted) {
+        stopped()
+        return
+      }
       const totalMs = performance.now() - started
-      say("info", abort.current ? `stopped at ${at()}` : `complete in ${at()}`)
+      say("info", `complete in ${at()}`)
       const measured: StreamMetrics = {
         ...NO_METRICS,
         ttftMs: firstToken === 0 ? null : firstToken - started,
@@ -382,10 +408,14 @@ function TestSession({ row }: { row: ProviderRow | null }) {
       setMetrics(measured)
       setVerdict({ kind: "served", totalMs })
       if (liveRequestId) {
-        const trace = await traceWhenWritten(liveRequestId)
+        const trace = await traceWhenWritten(liveRequestId, controller.signal)
         if (trace) setMetrics(metricsFromTrace(measured, trace))
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        stopped()
+        return
+      }
       // The failure is the answer here as often as the reply is: a refused
       // credential, a model the provider does not serve, a base URL that is a
       // web page. The verdict says which without opening the log.
@@ -517,7 +547,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
               className="max-h-32 min-h-0 flex-1 resize-none"
             />
             {running ? (
-              <Button variant="secondary" onClick={() => (abort.current = true)}>
+              <Button variant="secondary" onClick={() => inFlight.current?.abort()}>
                 <Square className="size-[var(--icon-size)]" />
                 Stop
               </Button>
