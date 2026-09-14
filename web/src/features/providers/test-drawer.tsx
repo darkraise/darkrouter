@@ -384,7 +384,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
       )) {
         if (controller.signal.aborted) break
         buffer += chunk
-        const { text, rest } = drainSSE(buffer, "openai")
+        const { text, rest, error } = drainSSE(buffer, "openai")
         buffer = rest
         if (text) {
           if (firstToken === 0) {
@@ -393,11 +393,15 @@ function TestSession({ row }: { row: ProviderRow | null }) {
           }
           appendToOpenTurn(text)
         }
+        // A provider failing after the 200 went out can only say so in the
+        // stream, so this frame is the run's real outcome.
+        if (error !== undefined) throw new Error(error)
       }
       if (controller.signal.aborted) {
         stopped()
         return
       }
+      if (firstToken === 0) throw new Error("The stream ended without a reply")
       const totalMs = performance.now() - started
       say("info", `complete in ${at()}`)
       const measured: StreamMetrics = {
