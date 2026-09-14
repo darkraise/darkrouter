@@ -91,6 +91,19 @@ func (a *Auggie) env() []string {
 	return env
 }
 
+// withheldTools is every tool of the pinned CLI (AUGGIE_VERSION in the
+// Dockerfile) that reaches files, processes, the network or other sessions,
+// named as `auggie tools list` prints them. Removal is used, not --permission
+// deny rules: the CLI accepts a rule for a tool name it does not have without
+// complaint, and the names its permissions docs use (terminal, read, edit,
+// write) are not the names 0.36.0 lists. A version bump must re-list them.
+var withheldTools = []string{
+	"view", "save-file", "remove-files", "str-replace-editor", "apply_patch",
+	"launch-process", "kill-process", "read-process", "write-process", "list-processes",
+	"web-fetch", "grep-search", "view-range-untruncated", "search-untruncated",
+	"codebase-retrieval-raw", "view-session",
+}
+
 // runDir creates an empty directory for one invocation to run in, so a CLI
 // asked to read a file finds nothing of the gateway's, and returns a cleanup
 // that removes it. The caller must defer the cleanup only after the process
@@ -244,17 +257,13 @@ func (a *Auggie) Run(ctx context.Context, model, prompt string, out io.Writer) e
 	defer cleanup()
 
 	// The prompt is arbitrary user text reaching an agentic CLI, so its tools
-	// are denied rather than trusted to refuse on their own: a proxied
+	// are withheld rather than trusted to refuse on their own: a proxied
 	// request has no business running shell commands or touching files.
-	// (https://docs.augmentcode.com/cli/permissions#the-permission-cli-flag)
 	// The trailing -- ends the options, so nothing after it can be read as a
 	// flag even if the CLI's parser changes.
-	args := []string{
-		"--print", "--quiet",
-		"--permission", "terminal:deny",
-		"--permission", "read:deny",
-		"--permission", "edit:deny",
-		"--permission", "write:deny",
+	args := []string{"--print", "--quiet"}
+	for _, tool := range withheldTools {
+		args = append(args, "--remove-tool", tool)
 	}
 	if safe != "" {
 		args = append(args, "--model", safe)
