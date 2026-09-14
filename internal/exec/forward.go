@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,7 +74,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 		if !committed {
 			if re.ErrPayload != "" {
-				return adapter.OutcomeRetryableProvider, ac.reclassifyStream(re.ErrPayload)
+				return ac.reclassifyStream(errors.New(re.ErrPayload))
 			}
 			if re.Content {
 				commit()
@@ -82,8 +83,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				return adapter.OutcomeSuccess, nil
 			}
 			if cap := cfg.Server.SSE.MaxPrecommitBytes; cap > 0 && pendingBytes+len(raw) > cap {
-				return adapter.OutcomeRetryableProvider,
-					ac.reclassifyStream(ErrPreCommitBufferFull.Error())
+				return ac.reclassifyStream(ErrPreCommitBufferFull)
 			}
 			// Counted against the cap either way — a flood shaped like the
 			// injected summary must still trip it — but only kept for replay
@@ -119,7 +119,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 			}
 			if serr != nil {
 				if !committed {
-					return adapter.OutcomeRetryableProvider, ac.reclassifyStream(serr.Error())
+					return ac.reclassifyStream(serr)
 				}
 				// Spec §6: past commit the recognizer's opinion no longer
 				// matters. What is already in the carry still owes the client
@@ -137,7 +137,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		if rerr != nil {
 			if rerr != io.EOF {
 				if !committed {
-					return adapter.OutcomeRetryableProvider, ac.reclassifyStream(rerr.Error())
+					return ac.reclassifyStream(rerr)
 				}
 				// Spec §9: after commit a failure becomes an in-stream error.
 				// Whatever the splitter still holds goes out first, so the
