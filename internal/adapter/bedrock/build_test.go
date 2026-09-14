@@ -479,6 +479,24 @@ func TestTypedServerToolsAreWarnedAndDropped(t *testing.T) {
 	}
 }
 
+func TestBuiltInToolsFromAnotherDialectAreWarnedAndDropped(t *testing.T) {
+	// A Gemini built-in has no name, and a toolSpec with an empty name is a
+	// validation error on every request that carries one.
+	req := simple()
+	req.Tools = []ir.Tool{
+		{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}},
+		{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["toolSpec"].(map[string]any)["name"] != "f" {
+		t.Errorf("tools = %#v", tools)
+	}
+	if !hasWarning(warns, "tools[].googleSearch") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
 // catalogTarget resolves a model's traits the way a live request does, through
 // the shipped presets and the catalog merge, rather than stating them. Stated
 // traits hid that the bedrock preset yields none at all.

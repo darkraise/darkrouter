@@ -614,6 +614,33 @@ func TestRenderToolsReEmitsServerToolsAndCacheControl(t *testing.T) {
 	}
 }
 
+// A Gemini built-in has no name; rendered as a client tool it would be a
+// nameless function carrying a field Anthropic rejects.
+func TestBuiltInToolsFromAnotherDialectAreWarnedAndDropped(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools: []ir.Tool{
+			{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}},
+			{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+		},
+	})
+	tools := body["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["name"] != "f" {
+		t.Errorf("tools = %v", tools)
+	}
+	if !hasWarning(warns, "tools[].googleSearch") {
+		t.Errorf("warnings = %+v", warns)
+	}
+
+	_, body, _ = built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools:    []ir.Tool{{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}}},
+	})
+	if _, ok := body["tools"]; ok {
+		t.Errorf("tools = %v; nothing was left to declare", body["tools"])
+	}
+}
+
 func TestToolCacheControlCountsTowardTheBreakpointBudget(t *testing.T) {
 	cc := &ir.CacheControl{Type: "ephemeral"}
 	_, body, warns := built(t, &ir.Request{

@@ -215,6 +215,17 @@ func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 	var warns []ir.Warning
 	tools := make([]any, 0, len(req.Tools))
 	for _, t := range req.Tools {
+		// Another provider's built-in, such as Gemini's googleSearch, has no
+		// name, and a toolSpec without one fails validation.
+		if t.BuiltIn() {
+			for k := range t.Extra {
+				warns = append(warns, ir.Warning{
+					Field: "tools[]." + k, Target: targetName,
+					Reason: "another provider's built-in tool has no Converse equivalent; dropped",
+				})
+			}
+			continue
+		}
 		// A typed tool runs on its own provider's side. Rendering it as a
 		// toolSpec would have the model call a function nobody implements.
 		if _, typed := t.Extra["type"]; typed {
