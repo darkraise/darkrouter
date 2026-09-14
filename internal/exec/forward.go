@@ -2,6 +2,7 @@ package exec
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/sse"
 )
 
 // forwardStream pipes a forwarded SSE response to the client, recognizing
@@ -187,6 +189,33 @@ func forwardedStreamError(fw adapter.Forwarder, raw []byte, maxLine int, payload
 	return errors.New(payload)
 }
 
+// errUnservableJSON is a 2xx body that is not JSON at all.
+var errUnservableJSON = errors.New("upstream returned a 2xx body that is not valid JSON")
+
+// unservableBody reports why a complete 2xx JSON body must not be forwarded
+// as an answer: it is not JSON, or it is the provider's error envelope. The
+// envelope is recognized by the same adapter code that finds an error event
+// in a forwarded stream, whose payload is the same JSON object, and typed by
+// the adapter's response parser where that parser types it. Forwarded, either
+// is recorded as a success and resets the breaker for a provider that failed.
+func unservableBody(fw adapter.Forwarder, resp *http.Response, body []byte) error {
+	if !json.Valid(body) {
+		return errUnservableJSON
+	}
+	if fw == nil || fw.RecognizeEvent(sse.Event{Data: string(body)}).ErrPayload == "" {
+		return nil
+	}
+	if ad, ok := fw.(adapter.Adapter); ok {
+		parsed := *resp
+		parsed.Body = io.NopCloser(bytes.NewReader(body))
+		var ie *ir.Error
+		if _, err := ad.ParseResponse(&parsed); errors.As(err, &ie) {
+			return ie
+		}
+	}
+	return fmt.Errorf("upstream returned an error body under status %d", resp.StatusCode)
+}
+
 // streamErrorWriter renders a terminal in-stream error in the inbound
 // dialect's wire form. passthroughOp satisfies it; the forwarder holds only
 // this slice of it.
@@ -251,6 +280,12 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 		// Nothing has reached the client, so this is still a failover, and
 		// a 200 that cannot be read counts against the provider like a 5xx.
 		return failedParse(ac, resp, fmt.Errorf("%s: %w", msgUpstreamReadFailed, rerr))
+	}
+
+	if !oversize {
+		if err := unservableBody(fw, resp, body); err != nil {
+			return failedParse(ac, resp, err)
+		}
 	}
 
 	warns := ac.Warns

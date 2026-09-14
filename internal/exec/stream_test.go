@@ -119,6 +119,41 @@ func TestAnInStreamRateLimitReachesTheBreakerAsA429(t *testing.T) {
 	}
 }
 
+// A forwarded unary body goes out as it arrived, so a 200 carrying the
+// provider's error envelope, or a body that is not JSON at all, must be caught
+// before commit: served, it is recorded as a success and resets the breaker.
+func TestAForwardedUnaryErrorBodyUnder200FailsOver(t *testing.T) {
+	for name, body := range map[string]string{
+		"error envelope": `{"error":{"message":"overloaded","type":"server_error"}}`,
+		"malformed":      `{"id":"x","choices":[`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			sc := &scripted{by: map[string]http.HandlerFunc{
+				"g1": func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(body))
+				},
+				"c1": ok200,
+			}}
+			up := httptest.NewServer(sc)
+			defer up.Close()
+
+			logger := &captureLogger{}
+			e, _ := loopExecutor(t, up, twoProviderFleet(), logger, nil)
+			w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+			if w.Code != 200 || !strings.Contains(w.Body.String(), "pong") {
+				t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+			}
+			if got := sc.order(); strings.Join(got, ",") != "g1,c1" {
+				t.Errorf("order = %v, want [g1 c1]", got)
+			}
+			if r := logger.only(t); r.Attempts[0].Path != PathPassthrough || r.Attempts[0].Outcome == "success" {
+				t.Errorf("first attempt = %+v, want a failed passthrough", r.Attempts[0])
+			}
+		})
+	}
+}
+
 // The client must see exactly one coherent stream, not two spliced together.
 func TestStreamReplaysPreCommitEventsExactlyOnce(t *testing.T) {
 	sc := &scripted{by: map[string]http.HandlerFunc{"g1": sseOK}}
