@@ -238,24 +238,30 @@ describe("row click-through", () => {
     // requestsSearch feeds a TanStack <Link search={...}>, not a URL string:
     // `to="/requests?..."` does not typecheck against the router's registered
     // route union, and no Link in this codebase builds a query that way.
-    const search = requestsSearch("provider", "groq", 7)
+    const search = requestsSearch("provider", "groq", "2026-08-20", 7)
     expect(search.provider).toBe("groq")
-    expect(search.since_ms).toBeDefined()
-    expect(Number(search.since_ms)).toBeLessThan(Date.now())
+  })
+
+  it("starts where the chart's window starts, not a rolling span back from now", () => {
+    // The charts cover whole UTC days from the served first_day. A rolling
+    // now-minus-7-days boundary cut part of that first day out of the
+    // drilldown, or let in part of the day before it.
+    expect(requestsSearch("provider", "groq", "2026-08-20", 7).since_ms).toBe(
+      String(Date.UTC(2026, 7, 20)),
+    )
   })
 
   it("filters by alias when the alias dimension is showing", () => {
-    expect(requestsSearch("alias", "fast", 30).alias).toBe("fast")
+    expect(requestsSearch("alias", "fast", "2026-08-20", 30).alias).toBe("fast")
   })
 
   it("carries a time window Requests' own picker can echo truthfully", () => {
-    // Requests' range pills are 1h/24h/7d; a bare since_ms with no matching
-    // pill renders that control as "All" while a filter is still active.
-    // "7d" lines up with Requests' own "7d" pill exactly; wider spans (this
-    // screen goes to 365d, Requests does not) land on no pill rather than a
-    // false "All" -- still true, just less specific.
-    expect(requestsSearch("provider", "groq", 7).range).toBe("7d")
-    expect(requestsSearch("provider", "groq", 90).range).toBe("90d")
+    // Requests' pills are rolling 1h/24h/7d. Calendar days match none of them,
+    // so the range names no pill -- lighting "7d" would claim a rolling window
+    // the filter is not, and an empty range would show a false "All".
+    const range = requestsSearch("provider", "groq", "2026-08-20", 7).range
+    expect(range).toBeTruthy()
+    expect(["1h", "24h", "7d", "all"]).not.toContain(range)
   })
 })
 

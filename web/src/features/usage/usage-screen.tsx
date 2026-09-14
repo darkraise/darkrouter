@@ -15,7 +15,7 @@ import {
 import { useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import { count, money } from "../../lib/format"
-import { utcDays } from "../../lib/time"
+import { utcDayStartMs, utcDays } from "../../lib/time"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
 import { EmptyState, GhostChart } from "../shell/empty-state"
 import { LoadError, LoadingRows } from "../shell/screen-state"
@@ -158,23 +158,25 @@ export function stackByDay(
  * the idiom the router supports -- the root route's `validateSearch` already
  * turns any string-keyed record into the URL's query params.
  *
+ * The window starts at UTC midnight of the served `firstDay`, the same
+ * boundary the charts were aggregated over, and runs to now as they do.
+ *
  * `range` rides along so Requests' own time-range pills don't lie: a URL
  * carrying `since_ms` with no `range` shows that control as "All" while a
- * filter is actually active. "7d" happens to match Requests' own "7d" pill
- * exactly; wider spans (this screen goes to 365d, Requests tops out at 7d)
- * land on no pill rather than a false "All" -- still honest, just less
- * specific than a highlighted pill would be.
+ * filter is actually active. Those pills are rolling windows, which a span of
+ * calendar days never equals, so the value names no pill rather than lighting
+ * one whose span differs.
  */
 export function requestsSearch(
   dimension: UsageDimension,
   key: string,
+  firstDay: string,
   days: number,
 ): Record<string, string> {
-  const since = Date.now() - days * 24 * 60 * 60 * 1000
   return {
     [dimension]: key,
-    since_ms: String(Math.round(since)),
-    range: `${days}d`,
+    since_ms: String(utcDayStartMs(firstDay)),
+    range: `${days}-utc-days`,
   }
 }
 
@@ -291,7 +293,8 @@ export function UsageScreen() {
   const days = range.days
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
-  const windowDays = usage.data ? utcDays(usage.data.first_day, usage.data.last_day) : []
+  const firstDay = usage.data?.first_day ?? ""
+  const windowDays = utcDays(firstDay, usage.data?.last_day ?? "")
   const rows = summarise(usageRows, dimension)
   const series = chartSeries(usageRows, dimension)
   const legend = dimension !== "day"
@@ -423,7 +426,7 @@ export function UsageScreen() {
                       {clickable && r.key !== "" ? (
                         <Link
                           to="/requests"
-                          search={requestsSearch(dimension, r.key, days)}
+                          search={requestsSearch(dimension, r.key, firstDay, days)}
                           className="underline"
                         >
                           {r.key}
