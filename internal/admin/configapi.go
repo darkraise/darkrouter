@@ -224,10 +224,16 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 	defer cancel()
 	written, err := s.deps.Config.Update(ctx, p)
 	var rejected config.RejectedError
+	var conflict config.ConflictError
 	var publish config.PublishError
 	switch {
 	case errors.As(err, &rejected):
 		writeError(w, http.StatusBadRequest, rejected.Error())
+	case errors.As(err, &conflict):
+		// 409, not 400: the save itself is fine, it was computed against a
+		// table that has since moved. A retry that reloads first can succeed
+		// where repeating this exact body never would.
+		writeError(w, http.StatusConflict, conflict.Error())
 	case errors.As(err, &publish):
 		// 200 rather than 500: the write was performed and its outcome is the
 		// answer. The rows are durable; what failed is the republish, and the

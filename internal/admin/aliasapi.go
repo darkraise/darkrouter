@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -25,6 +26,10 @@ func (s *Server) handleAliases(w http.ResponseWriter, r *http.Request) {
 	if aliases == nil {
 		aliases = map[string][]string{}
 	}
+	// Lets a save name the exact table it was read against: PUT echoes this
+	// back as If-Match, and a table another admin has since changed answers
+	// 409 rather than silently taking the edit.
+	w.Header().Set("ETag", `"`+config.AliasesRevision(aliases)+`"`)
 	writeJSON(w, http.StatusOK, aliases)
 }
 
@@ -42,7 +47,13 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 	if aliases == nil {
 		aliases = map[string][]string{}
 	}
-	s.commitConfig(w, r, config.Patch{Aliases: aliases})
+	patch := config.Patch{Aliases: aliases}
+	// Optional: a caller that never read the ETag gets today's behaviour
+	// rather than a refusal it has no way to satisfy.
+	if match := strings.Trim(r.Header.Get("If-Match"), `"`); match != "" {
+		patch.AliasesRevision = &match
+	}
+	s.commitConfig(w, r, patch)
 }
 
 func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {

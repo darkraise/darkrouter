@@ -23,6 +23,12 @@ type Patch struct {
 	// an empty non-nil map deletes every alias, which is what an operator who
 	// removed the last one meant.
 	Aliases map[string][]string
+	// AliasesRevision pins an Aliases write to the table it was read against.
+	// Nil skips the check; a non-nil value that no longer matches what
+	// AliasesRevision(current) computes is a ConflictError, because Aliases
+	// was built from a copy another admin has since changed and would
+	// otherwise silently replace their edit.
+	AliasesRevision *string
 }
 
 // RejectedError is a write refused for what it says rather than for a failure
@@ -46,6 +52,14 @@ type PublishError struct{ Err error }
 
 func (e PublishError) Error() string { return e.Err.Error() }
 func (e PublishError) Unwrap() error { return e.Err }
+
+// ConflictError is a write refused because the table it was pinned to has
+// since changed. The admin API answers 409 for it, distinct from
+// RejectedError's 400: the body itself is fine, but it was computed against
+// a state that no longer exists.
+type ConflictError struct{ Msg string }
+
+func (e ConflictError) Error() string { return e.Msg }
 
 // bootstrapVars names the settings the environment owns. A save that names one
 // is told where the value actually lives rather than that the key is unknown,

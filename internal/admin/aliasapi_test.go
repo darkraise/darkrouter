@@ -3,6 +3,8 @@ package admin
 import (
 	"encoding/json"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +36,73 @@ func TestAliasWritesAreVisibleThroughBothSurfaces(t *testing.T) {
 	}
 	if live := s.deps.Config.Current().Aliases["fast"]; len(live) != 1 {
 		t.Errorf("the live config does not carry it: %v", s.deps.Config.Current().Aliases)
+	}
+}
+
+// putIfMatch is do("PUT", "/api/aliases", ...) with an If-Match header, which
+// do has no way to set.
+func putIfMatch(t *testing.T, s *Server, cookie *http.Cookie, token, etag, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest("PUT", "/api/aliases", strings.NewReader(body))
+	r.AddCookie(cookie)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set(csrfHeader, token)
+	r.Header.Set("Content-Type", "application/json")
+	if etag != "" {
+		r.Header.Set("If-Match", etag)
+	}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w
+}
+
+// A save built against a table another admin has since changed must be
+// refused rather than silently replacing that admin's edit: PUT sent no
+// version check at all, so a stale in-memory copy of the alias map always
+// won the race regardless of who wrote last.
+func TestPutAliasesRejectsAStaleIfMatch(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+
+	get := do(t, s, cookie, token, "GET", "/api/aliases", "")
+	etag := get.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET /api/aliases did not set an ETag")
+	}
+
+	// Another admin's edit, using the same starting ETag, lands first.
+	if w := putIfMatch(t, s, cookie, token, etag, `{"fast":["groq/a"]}`); w.Code != 200 {
+		t.Fatalf("first PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	// This save still carries the ETag from before that write.
+	w := putIfMatch(t, s, cookie, token, etag, `{"fast":["groq/b"],"slow":["groq/c"]}`)
+	if w.Code != 409 {
+		t.Fatalf("PUT with a stale If-Match = %d, want 409: %s", w.Code, w.Body.String())
+	}
+
+	stored, err := s.deps.DB.Aliases(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored["fast"]) != 1 || stored["fast"][0] != "groq/a" {
+		t.Errorf("the stale write overwrote the other admin's edit: %v", stored)
+	}
+	if _, ok := stored["slow"]; ok {
+		t.Error("the stale write's new alias was committed anyway")
+	}
+}
+
+// A save carrying no If-Match at all -- a caller that never read the ETag --
+// keeps working exactly as before: the check is opt-in, not a new
+// requirement every caller of this endpoint must satisfy.
+func TestPutAliasesWithNoIfMatchStillWrites(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	if w := do(t, s, cookie, token, "PUT", "/api/aliases", `{"fast":["groq/a"]}`); w.Code != 200 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
 	}
 }
 

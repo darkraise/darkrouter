@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query"
-import { api, POLL } from "./api"
+import { api, getWithETag, POLL } from "./api"
 import type {
   Aliases,
   BreakerEntry,
@@ -213,6 +213,30 @@ export function useAliases(extra?: Extra<Aliases>) {
   return useQuery({
     queryKey: keys.aliases,
     queryFn: ({ signal }) => api.get<Aliases>("/api/aliases", { signal }),
+    ...extra,
+  })
+}
+
+/** What GET /api/aliases answers the one caller that writes the map back. */
+export type AliasesForEditing = { aliases: Aliases; revision: string | null }
+
+/**
+ * Like useAliases, but for the editor that saves: it also needs the revision
+ * its copy was read against, so a save built from a stale one is refused
+ * rather than silently overwriting another admin's edit in between.
+ *
+ * A distinct query key rather than useAliases' own: the two queries parse the
+ * same response differently, and sharing a key would have whichever one
+ * resolved last decide what every consumer of the other sees. Invalidating
+ * `keys.aliases` still reaches this one, since TanStack matches by prefix.
+ */
+export function useAliasesForEditing(extra?: Extra<AliasesForEditing>) {
+  return useQuery({
+    queryKey: [...keys.aliases, "editable"] as const,
+    queryFn: async ({ signal }) => {
+      const { data, etag } = await getWithETag<Aliases>("/api/aliases", { signal })
+      return { aliases: data, revision: etag }
+    },
     ...extra,
   })
 }

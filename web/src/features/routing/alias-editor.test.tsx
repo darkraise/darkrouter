@@ -290,6 +290,41 @@ describe("saving", () => {
     ).toBe(false)
   })
 
+  it("refuses a stale save and refetches rather than overwrite another admin's edit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "aliases changed since you loaded them; reload and try again" }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <Toaster />
+        <AliasEditor
+          aliases={{ chain: ["groq/a"] }}
+          revision="rev-1"
+          knownProviders={["groq"]}
+          context={context}
+        />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("status").some((s) => /reload and try again/.test(s.textContent ?? "")),
+      ).toBe(true)
+    })
+    expect(
+      invalidated.mock.calls.some(([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(["aliases"])),
+    ).toBe(true)
+    // The revision this draft was read against travelled as If-Match.
+    const call = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+    const headers = call[1].headers as Record<string, string>
+    expect(headers["If-Match"]).toBe("rev-1")
+  })
+
   it("does not shout when it cannot save", () => {
     // A disabled filled button is still the loudest thing on the card. The
     // outline reads as "not now" rather than "press me".
