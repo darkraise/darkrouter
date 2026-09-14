@@ -258,6 +258,11 @@ func (s *Server) listPage(ctx context.Context, pr catalog.Probe, cursor string) 
 	if cursor != "" {
 		catalog.SetListCursor(req, pr.Kind, cursor)
 	}
+	if pr.Authorize != nil {
+		if err := pr.Authorize(ctx, req); err != nil {
+			return nil, "", err
+		}
+	}
 	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return nil, "", err
@@ -457,16 +462,33 @@ func (s *Server) probeOAuth(ctx context.Context, row store.ProviderRow,
 	if err != nil {
 		return "refresh", 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://refresh.invalid", nil)
+	pr, err := catalog.ProbeFor(provider.Provider{
+		ID: row.ID, Kind: row.Kind, BaseURL: row.BaseURL, Preset: row.Preset,
+		AuthStyle: auth.StyleOAuth,
+	}, s.deps.Presets[row.Preset], "")
 	if err != nil {
-		return "refresh", 0, err
+		return "completion", 0, fmt.Errorf(
+			"this provider kind has no listing endpoint: %w", err)
 	}
-	if err := az(ctx, req); err != nil {
+	// Authorized here rather than inside the listing, so a refused refresh is
+	// reported as one. A cached, unexpired token refreshes nothing, which is
+	// why the listing still has to be sent: only the provider can say whether
+	// that token was revoked.
+	refreshed := false
+	pr.Authorize = func(ctx context.Context, req *http.Request) error {
+		if err := az(ctx, req); err != nil {
+			return err
+		}
+		refreshed = true
+		return nil
+	}
+	count, err := s.countListing(ctx, pr)
+	if err != nil && !refreshed {
 		if errors.Is(err, auth.ErrNeedsReconnect) {
 			return "refresh", 0, rejectedCredential{fmt.Errorf(
 				"this account must be reconnected: the provider refused the refresh")}
 		}
 		return "refresh", 0, err
 	}
-	return "refresh", 1, nil
+	return "listing", count, err
 }

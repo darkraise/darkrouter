@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,22 +203,68 @@ func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 	}
 }
 
-func TestOAuthProbeRefreshes(t *testing.T) {
+// oauthProviderListingAt creates the anthropic-oauth provider pointed at a
+// listing server, so its probe never leaves the test.
+func oauthProviderListingAt(t *testing.T, s *Server, cookie *http.Cookie, token string,
+	listing http.HandlerFunc) string {
+
+	t.Helper()
+	srv := httptest.NewServer(listing)
+	t.Cleanup(srv.Close)
+	w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"sub","preset":"anthropic-oauth","base_url":"`+srv.URL+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create oauth provider: %d %s", w.Code, w.Body.String())
+	}
+	return "sub"
+}
+
+func TestOAuthProbeRefreshesAndLists(t *testing.T) {
 	fake, srv := newFakeAuthServer(t)
 	s, cookie, token, db := strategyServer(t,
 		oauthPresets(srv.URL, catalog.Redirect{Style: "manual"}), srv.Client())
-	id := oauthProvider(t, s, cookie, token)
+	id := oauthProviderListingAt(t, s, cookie, token,
+		headerGatedUpstream("Authorization", "Bearer the-access-token-1", "m1", "m2"))
 	seedOAuthCredential(t, db, s, id, -time.Minute)
 
 	got := probeProvider(t, s, cookie, token, id)
 	if !got.OK {
 		t.Fatalf("probe failed: %s", got.Error)
 	}
-	if got.Probe != "refresh" {
-		t.Errorf("probe = %q, want refresh", got.Probe)
+	if got.Probe != "listing" || got.ModelCount != 2 {
+		t.Errorf("probe = %q, model_count = %d; want the listing the refreshed token reached",
+			got.Probe, got.ModelCount)
 	}
 	if fake.refreshCount() == 0 {
 		t.Error("the probe did not refresh")
+	}
+}
+
+func TestOAuthProbeReachesTheProviderWithAnUnexpiredToken(t *testing.T) {
+	// A cached token needs no refresh, so only a request to the provider can
+	// tell a working account from a revoked one.
+	fake, srv := newFakeAuthServer(t)
+	s, cookie, token, db := strategyServer(t,
+		oauthPresets(srv.URL, catalog.Redirect{Style: "manual"}), srv.Client())
+	var listed atomic.Int32
+	id := oauthProviderListingAt(t, s, cookie, token, func(w http.ResponseWriter, r *http.Request) {
+		listed.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	seedOAuthCredential(t, db, s, id, time.Hour)
+
+	got := probeProvider(t, s, cookie, token, id)
+	if listed.Load() == 0 {
+		t.Fatal("the probe never contacted the provider")
+	}
+	if got.OK {
+		t.Fatal("a token the provider refuses must not probe OK")
+	}
+	if !got.Rejected {
+		t.Error("a refused token is a rejected credential")
+	}
+	if fake.refreshCount() != 0 {
+		t.Error("an unexpired token was refreshed")
 	}
 }
 
@@ -229,12 +276,15 @@ func TestOAuthProbeReportsAnExpiredGrant(t *testing.T) {
 
 	s, cookie, token, db := strategyServer(t,
 		oauthPresets(srv.URL, catalog.Redirect{Style: "manual"}), srv.Client())
-	id := oauthProvider(t, s, cookie, token)
+	id := oauthProviderListingAt(t, s, cookie, token, listingUpstream("m1"))
 	seedOAuthCredential(t, db, s, id, -time.Minute)
 
 	got := probeProvider(t, s, cookie, token, id)
 	if got.OK {
 		t.Fatal("a refused refresh must not report success")
+	}
+	if got.Probe != "refresh" {
+		t.Errorf("probe = %q; a refused refresh is not a listing failure", got.Probe)
 	}
 	if !strings.Contains(strings.ToLower(got.Error), "reconnect") {
 		t.Errorf("the operator must be told to reconnect: %q", got.Error)
@@ -248,7 +298,7 @@ func TestNoProbeResponseCarriesCredentialMaterial(t *testing.T) {
 	_, srv := newFakeAuthServer(t)
 	s, cookie, token, db := strategyServer(t,
 		oauthPresets(srv.URL, catalog.Redirect{Style: "manual"}), srv.Client())
-	id := oauthProvider(t, s, cookie, token)
+	id := oauthProviderListingAt(t, s, cookie, token, listingUpstream("m1"))
 	seedOAuthCredential(t, db, s, id, -time.Minute)
 
 	raw := do(t, s, cookie, token, "POST", "/api/providers/"+id+"/test", "").Body.String()
