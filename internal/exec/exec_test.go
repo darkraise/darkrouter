@@ -273,6 +273,23 @@ func TestAServingAttemptWithNoUsageStaysUnpriced(t *testing.T) {
 	}
 }
 
+// A response that reported no usage is unknown, not free: the served
+// attempt is left unpriced for exactly that reason, and the request row must
+// not claim otherwise beside it.
+func TestARequestWithNoUsageStaysUnpriced(t *testing.T) {
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.CostMicros != nil {
+		t.Fatalf("a request that reported no usage was priced at %d", *rec.CostMicros)
+	}
+}
+
 func TestACacheOnlySuccessStillReachesTheAggregates(t *testing.T) {
 	// A fully cached prompt has in=0 after the adapters subtract the cached
 	// subset, and an empty completion is a legitimate success. Neither token

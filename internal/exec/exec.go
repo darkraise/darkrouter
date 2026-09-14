@@ -851,7 +851,13 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	if snap == nil {
 		return
 	}
-	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
+	// A response that reported no usage leaves every count at zero, and a
+	// priced zero would claim the request was free. The attempt rows below
+	// follow the same rule.
+	burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
+		rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
+		rec.ReasoningTokens != 0
+	if rec.CostMicros == nil && burned && rec.FinalProviderID != "" && rec.FinalModel != "" {
 		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
 			rec.CostMicros = m.Pricing.Cost(catalog.Tokens{
 				Input: rec.TokensIn, Output: rec.TokensOut,
@@ -887,9 +893,6 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			// agreeing. Guarded on the record's own burn, not the attempt's
 			// copied in/out tokens, so a fully cached prompt still carries its
 			// cost even though the attempt row has nowhere to show it came from.
-			burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
-				rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
-				rec.ReasoningTokens != 0
 			if rec.CostMicros != nil && burned {
 				c := *rec.CostMicros
 				a.CostMicros = &c
