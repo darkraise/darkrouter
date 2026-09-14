@@ -32,17 +32,22 @@ func TestOneHungEndpointDoesNotStopTheRest(t *testing.T) {
 	// and the hung handler is one.
 	defer close(release)
 
+	tokens := newMemTokens()
 	m := NewManager(Deps{
-		Tokens: newMemTokens(),
+		Tokens: tokens,
 		OAuth:  fixedPresets{cfg: OAuthConfig{TokenURL: srv.URL, ClientID: "client"}},
 		HTTP:   srv.Client(),
 	})
-	w := NewRefreshWorker(m, &expiringFake{rows: []StoredCredential{
+	rows := []StoredCredential{
 		{ID: "hung", ProviderID: "sub", Kind: "oauth", Style: StyleOAuth,
 			Preset: "anthropic-oauth", Secret: tokenWithRefresh(t, "rt-hang")},
 		{ID: "behind", ProviderID: "sub", Kind: "oauth", Style: StyleOAuth,
 			Preset: "anthropic-oauth", Secret: tokenWithRefresh(t, "rt-0")},
-	}}, RefreshOptions{PerCredential: 100 * time.Millisecond})
+	}
+	for _, r := range rows {
+		tokens.seed(r.ID, r.Secret)
+	}
+	w := NewRefreshWorker(m, &expiringFake{rows: rows}, RefreshOptions{PerCredential: 100 * time.Millisecond})
 
 	done := make(chan struct{})
 	go func() { defer close(done); w.Once(context.Background()) }()
