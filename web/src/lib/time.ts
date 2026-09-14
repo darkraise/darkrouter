@@ -12,6 +12,11 @@ export function utcDays(first: string, last: string): string[] {
   return out
 }
 
+/** Epoch milliseconds at the UTC midnight that starts `day` (YYYY-MM-DD). */
+export function utcDayStartMs(day: string): number {
+  return Date.parse(`${day}T00:00:00Z`)
+}
+
 /** Relative until it stops being useful. "3 min ago" is the reading an
  *  operator wants while tailing; a wall clock is the one they want an hour
  *  later, and past a day the date is the only part that carries. */
