@@ -387,7 +387,8 @@ func responsesContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 		case "input_file", "file":
 			// A file part carries file_url or inline file_data, not image_url.
 			// Reading only the latter would drop the document silently.
-			m := &ir.Media{FileID: p.FileID, URL: p.FileURL, Data: p.FileData}
+			mime, data := splitDataURI(p.FileData)
+			m := &ir.Media{FileID: p.FileID, URL: p.FileURL, MIME: mime, Data: data}
 			out = append(out, ir.ContentBlock{Type: ir.BlockDocument, Media: m})
 		default:
 			return nil, fmt.Errorf("content part type %q is not supported", p.Type)
