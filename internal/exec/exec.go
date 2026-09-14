@@ -1016,6 +1016,14 @@ func applyAuthorizer(ctx context.Context, hr *http.Request, a auth.Authorizer) e
 // credentialFor returns the target's authorizer and the api key the adapter
 // should write. Exactly one of them is ever non-zero: a non-static style leaves
 // the key empty so no adapter writes a token document into its own header.
+//
+// A style that names where the key goes — x-api-key, a header of its own, a
+// query parameter — is written by an authorizer too, not by the adapter: an
+// adapter knows only its kind's usual header, and a provider that declares
+// another rejects the key sent there. Bearer and its keyless variants keep the
+// adapter's default, because bearer is also the column default every row
+// without a declared style carries, and an Anthropic or Gemini row created
+// that way authenticates with its adapter's own header.
 func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
 	c router.Candidate) (string, auth.Authorizer, error) {
 
@@ -1024,6 +1032,14 @@ func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
 		style = presetStyle(p.Preset)
 	}
 	secret := secretOf(p, c.KeyID, style)
+	switch style {
+	case auth.StyleXAPIKey, auth.StyleAPIKey, auth.StyleQueryParam:
+		pa := presetAuth(p.Preset)
+		return "", func(_ context.Context, hr *http.Request) error {
+			catalog.ApplyStaticAuth(hr, style, pa.Header, pa.QueryParam, secret)
+			return nil
+		}, nil
+	}
 	if auth.IsStatic(style) {
 		return secret, nil, nil
 	}

@@ -1680,6 +1680,66 @@ func TestHandleRefusesACompressedBodyWith415(t *testing.T) {
 	}
 }
 
+// A preset that names its own header is reached only that way: the upstream
+// rejects a key sent as a bearer token. Both renderings must honour it.
+func TestAStaticStyleDecidesWhereTheKeyIsSent(t *testing.T) {
+	for _, tc := range []struct{ preset, header string }{
+		{"pioneer", "x-api-key"},
+		{"ideogram", "Api-Key"},
+		{"haiper", "HAIPER_KEY"},
+	} {
+		for _, kind := range []string{"openaicompat", "probe"} {
+			t.Run(tc.preset+"/"+kind, func(t *testing.T) {
+				var got http.Header
+				up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					got = r.Header.Clone()
+					ok200(w, r)
+				}))
+				defer up.Close()
+
+				p := providertest.Keyed("p", kind, up.URL, "sk", "m")
+				p.Preset = tc.preset
+				e := executorFor(t, nil, providertest.NewSource(p),
+					map[string]adapter.Adapter{kind: openaicompat.New()}, Deps{})
+				if w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); w.Code != 200 {
+					t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+				}
+				if v := got.Get(tc.header); v != "sk" {
+					t.Errorf("%s = %q, want the key", tc.header, v)
+				}
+				if v := got.Get("Authorization"); v != "" {
+					t.Errorf("Authorization = %q, want none beside the declared header", v)
+				}
+			})
+		}
+	}
+}
+
+// bearer is also the column default of every provider row created without a
+// style, so it must not override an adapter whose kind authenticates with its
+// own header.
+func TestABearerRowKeepsItsAdaptersHeader(t *testing.T) {
+	var got http.Header
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer up.Close()
+
+	p := providertest.Keyed("ant", "anthropic", up.URL, "sk", "m")
+	p.AuthStyle = "bearer"
+	e := executorFor(t, nil, providertest.NewSource(p),
+		map[string]adapter.Adapter{"anthropic": anthropicadapter.New()}, Deps{})
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	if v := got.Get("x-api-key"); v != "sk" {
+		t.Errorf("x-api-key = %q, want the key", v)
+	}
+	if v := got.Get("Authorization"); v != "" {
+		t.Errorf("Authorization = %q, want none", v)
+	}
+}
+
 func TestAnAnonymousProviderSendsThePublishedKey(t *testing.T) {
 	// The candidate for a keyless provider carries no credential id, so the
 	// secret has to come from somewhere: for the anonymous style it is the
