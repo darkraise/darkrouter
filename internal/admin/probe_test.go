@@ -393,6 +393,34 @@ func TestListingProvidersDoesNotClaimTheProbe(t *testing.T) {
 	}
 }
 
+func TestAProbeCountsEveryPageOfTheListing(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("after_id") == "m2" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"m3"}],"has_more":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"},{"id":"m2"}],"has_more":true,"last_id":"m2"}`))
+	}))
+	defer upstream.Close()
+
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"an","name":"an","kind":"anthropic","base_url":"`+upstream.URL+`","auth_style":"x-api-key"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers/an/keys",
+		`{"label":"primary","secret":"sk-seed-abcdef1234"}`); w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	got := probeProvider(t, s, cookie, token, "an")
+	if !got.OK || got.ModelCount != 3 {
+		t.Errorf("ok = %v, model_count = %d, error = %q; want all 3 models across both pages",
+			got.OK, got.ModelCount, got.Error)
+	}
+}
+
 // headerGatedUpstream lists models only to a request carrying want in header.
 func headerGatedUpstream(header, want string, models ...string) http.HandlerFunc {
 	list := listingUpstream(models...)

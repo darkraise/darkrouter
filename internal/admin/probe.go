@@ -208,13 +208,59 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 			"this provider kind has no listing endpoint: %w", err)
 	}
 
+	count, err := s.countListing(ctx, pr)
+	return "listing", count, err
+}
+
+// maxProbePages bounds how far a listing's cursor is followed, matching the
+// bound discovery applies to the same listing.
+const maxProbePages = 100
+
+// countListing reads every page of a listing, as discovery does, so the count
+// is the number of models discovery will import rather than one page of them.
+func (s *Server) countListing(ctx context.Context, pr catalog.Probe) (int, error) {
+	seen := map[string]bool{}
+	cursors := map[string]bool{}
+	cursor := ""
+	for page := 0; ; page++ {
+		if page == maxProbePages {
+			return 0, fmt.Errorf("the listing did not end within %d pages", maxProbePages)
+		}
+		models, next, err := s.listPage(ctx, pr, cursor)
+		if err != nil {
+			return 0, err
+		}
+		for _, m := range models {
+			seen[m.ModelID] = true
+		}
+		if next == "" {
+			break
+		}
+		if cursors[next] {
+			return 0, fmt.Errorf("the listing repeated the page cursor %q", next)
+		}
+		cursors[next] = true
+		cursor = next
+	}
+	if len(seen) == 0 {
+		return 0, errors.New("listing reported no models")
+	}
+	return len(seen), nil
+}
+
+func (s *Server) listPage(ctx context.Context, pr catalog.Probe, cursor string) (
+	[]catalog.Discovered, string, error) {
+
 	req, err := catalog.BuildListRequest(ctx, pr)
 	if err != nil {
-		return "listing", 0, err
+		return nil, "", err
+	}
+	if cursor != "" {
+		catalog.SetListCursor(req, pr.Kind, cursor)
 	}
 	resp, err := s.httpClient().Do(req)
 	if err != nil {
-		return "listing", 0, err
+		return nil, "", err
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -222,7 +268,7 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 	}()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "listing", 0, rejectedCredential{
+		return nil, "", rejectedCredential{
 			errors.New("the provider rejected this credential: " + resp.Status)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -231,19 +277,15 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 		// sends the operator looking for a network problem, when the reply
 		// already said to run auggie login.
 		if why := upstreamMessage(resp.Body); why != "" {
-			return "listing", 0, errors.New(resp.Status + ": " + why)
+			return nil, "", errors.New(resp.Status + ": " + why)
 		}
-		return "listing", 0, errors.New("the provider returned " + resp.Status)
+		return nil, "", errors.New("the provider returned " + resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
 	if err != nil {
-		return "listing", 0, err
+		return nil, "", err
 	}
-	models, err := catalog.ParseList(pr.Kind, body)
-	if err != nil {
-		return "listing", 0, err
-	}
-	return "listing", len(models), nil
+	return catalog.ParseListPage(pr.Kind, body)
 }
 
 // upstreamMessage reads the message out of an OpenAI-shaped error body, which
