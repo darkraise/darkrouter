@@ -47,6 +47,7 @@ type Fleet interface {
 	LastUsedSnapshot() map[health.CredKey]time.Time
 	MarkUsed(ck health.CredKey, at time.Time)
 	Available(k health.Key) bool
+	ReleaseProbe(k health.Key)
 }
 
 // CatalogSource supplies the live catalog. It is an interface rather than
@@ -651,8 +652,28 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	// outcome after bytes have gone out is describing a post-commit failure,
 	// and phase 3's rule says the chain ends there regardless — a second
 	// attempt would concatenate two half-responses on one connection.
+	//
+	// Ending the chain does not make the failure a success. The attempt row
+	// keeps its success, because it did serve, but the breaker hears the
+	// failure and the request row carries it. A client that hung up gets
+	// neither: the provider did nothing wrong and the response was not an
+	// error.
 	if cw.Committed() && outcome != adapter.OutcomeSuccess {
-		rec.ErrorCode = string(ir.ErrAPI)
+		var cause error
+		if aerr != nil {
+			cause = aerr
+		}
+		ac.recordFailure(outcome, resp, cause)
+		if outcome != adapter.OutcomeClientCancelled {
+			code := ir.ErrAPI
+			if aerr != nil && aerr.Type != "" {
+				code = aerr.Type
+			}
+			rec.ErrorCode = string(code)
+			if n := len(rec.Attempts); n > 0 && aerr != nil {
+				rec.Attempts[n-1].Error = aerr.Message
+			}
+		}
 		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
 			Path: path, Committed: true, Issued: true}
 	}
@@ -771,6 +792,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 	// response must not be killed, while a provider that goes silent must be.
 	ac.resetIdle()
 
+	var streamErr error
 	events := func(yield func(ir.StreamEvent, error) bool) {
 		for _, buffered := range buf.events() {
 			if !yield(buffered, nil) {
@@ -791,6 +813,8 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 					applyUsage(rec, ev.Usage)
 				}
 				streamWarns = append(streamWarns, ev.Warnings...)
+			} else {
+				streamErr = err
 			}
 			if !yield(ev, err) {
 				return
@@ -804,7 +828,22 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 	}
 	_ = d.WriteStream(cw, events)
 	rec.Warnings = warningStrings(append(ac.Warns, streamWarns...))
+	if streamErr != nil {
+		return ac.failedAfterCommit(streamErr)
+	}
 	return adapter.OutcomeSuccess, nil
+}
+
+// failedAfterCommit classifies a failure that ended a response the client had
+// already started receiving. The loop ends the chain whatever it returns; the
+// outcome is what the breaker and the request row are told.
+func (ac *AttemptCtx) failedAfterCommit(err error) (adapter.Outcome, *ir.Error) {
+	outcome := ac.readOutcome(err)
+	var ie *ir.Error
+	if !errors.As(err, &ie) {
+		ie = &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
+	}
+	return outcome, ie
 }
 
 // reclassifyStream records a pre-commit stream failure against health and the
