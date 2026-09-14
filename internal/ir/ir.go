@@ -371,9 +371,13 @@ const (
 	EventContentDelta EventType = "content_delta"
 	EventBlockStop    EventType = "content_block_stop"
 	EventMessageDelta EventType = "message_delta"
-	EventMessageStop  EventType = "message_stop"
-	EventPing         EventType = "ping"
-	EventError        EventType = "error"
+	// EventMessageStop ends the content, not the stream: OpenAI-compatible
+	// and Bedrock upstreams report usage in a message_delta after it. A
+	// writer whose terminal frame carries usage writes that frame when the
+	// sequence ends.
+	EventMessageStop EventType = "message_stop"
+	EventPing        EventType = "ping"
+	EventError       EventType = "error"
 )
 
 // Delta carries incremental content for exactly one block kind.
