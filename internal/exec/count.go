@@ -76,7 +76,13 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 
 	// The body cannot carry a marker: clients parse these responses strictly.
 	w.Header().Set("X-Darkrouter-Estimated", "true")
-	tokens := tokenize.Count(req, model)
+	tokens, err := tokenize.Count(r.Context(), req, model)
+	if err != nil {
+		// Only cancellation fails an estimate, and a client that went away
+		// has no one to read an answer.
+		rec.Status = "cancelled"
+		return
+	}
 	rec.Status = "success"
 	rec.TokensIn = int64(tokens)
 	rec.Warnings = []string{"count -> " + d.Name() + ": estimated locally"}
