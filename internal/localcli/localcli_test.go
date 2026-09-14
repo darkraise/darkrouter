@@ -317,7 +317,9 @@ cat
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "argv:--print --quiet --model sonnet4.6 --") {
+	if !strings.Contains(got, "argv:--print --quiet --permission terminal:deny "+
+		"--permission read:deny --permission edit:deny --permission write:deny "+
+		"--model sonnet4.6 --") {
 		t.Errorf("argv = %q", got)
 	}
 	if !strings.Contains(got, "hello there") {
@@ -412,6 +414,98 @@ printf 'set=%s' "${AUGMENT_SESSION_AUTH+yes}"
 	}
 	if strings.Contains(out.String(), "set=yes") {
 		t.Errorf("the variable was set with no session configured: %s", out.String())
+	}
+}
+
+func TestTheChildEnvironmentIsAllowlistedNotInherited(t *testing.T) {
+	// The gateway's own environment can hold its master key and provider
+	// credentials. A prompt-driven CLI must not see any of it, even though it
+	// still needs the session credential the operator configured.
+	t.Setenv("DARKROUTER_MASTER_KEY", "gateway-secret-should-not-leak")
+	bin := stubAuggie(t, `
+cat >/dev/null
+printf 'secret=%s session=%s' "${DARKROUTER_MASTER_KEY+yes}" "$AUGMENT_SESSION_AUTH"
+`)
+	a := (&Auggie{Bin: bin}).WithSession("the-configured-session")
+	var out strings.Builder
+	if err := a.Run(context.Background(), "m", "hi", &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Contains(got, "secret=yes") {
+		t.Errorf("a gateway secret reached the child: %q", got)
+	}
+	if !strings.Contains(got, "session=the-configured-session") {
+		t.Errorf("the configured session did not reach the child: %q", got)
+	}
+}
+
+func TestARunUsesAFreshEmptyDirectoryRemovedAfterwards(t *testing.T) {
+	// os.MkdirTemp resolves its parent from TMPDIR in this (the gateway's) own
+	// process, so pointing it at a directory the test controls lets the test
+	// see exactly where the run directory was created without the stub having
+	// to report anything back.
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	bin := stubAuggie(t, `
+cat >/dev/null
+printf '%s\n' "$PWD"
+ls -A | wc -l
+`)
+	var out strings.Builder
+	if err := (&Auggie{Bin: bin}).Run(context.Background(), "m", "hi", &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.SplitN(strings.TrimRight(out.String(), "\n"), "\n", 2)
+	if len(lines) != 2 {
+		t.Fatalf("stub output = %q", out.String())
+	}
+	dir, count := lines[0], strings.TrimSpace(lines[1])
+	if !strings.HasPrefix(dir, root) {
+		t.Errorf("the run directory %q was not created under TMPDIR %q", dir, root)
+	}
+	if count != "0" {
+		t.Errorf("the run directory was not empty: %s entries", count)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the run directory %q still exists after the process exited", dir)
+	}
+}
+
+func TestModelListingAlsoGetsAFreshDirectoryRemovedAfterwards(t *testing.T) {
+	// Models discards stdout/stderr on success, so the stub reports the
+	// directory it saw through a forced failure instead, which Models' error
+	// path carries back verbatim.
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	bin := stubAuggie(t, `
+case "$1 $2" in
+  "model list")
+    echo "DIR:$PWD:COUNT:$(ls -A | wc -l)" >&2
+    exit 1 ;;
+esac
+exit 64
+`)
+	_, err := (&Auggie{Bin: bin}).Models(context.Background())
+	if err == nil {
+		t.Fatal("expected the stub's forced failure")
+	}
+	msg := err.Error()
+	dirStart := strings.Index(msg, "DIR:") + len("DIR:")
+	countIdx := strings.Index(msg, ":COUNT:")
+	if dirStart < len("DIR:") || countIdx < 0 {
+		t.Fatalf("could not find the reported directory in %q", msg)
+	}
+	dir := msg[dirStart:countIdx]
+	count := strings.TrimSpace(msg[countIdx+len(":COUNT:"):])
+	if !strings.HasPrefix(dir, root) {
+		t.Errorf("the model-list run directory %q was not created under TMPDIR %q", dir, root)
+	}
+	if count != "0" {
+		t.Errorf("the model-list run directory was not empty: %s entries", count)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("the model-list run directory %q still exists after the process exited", dir)
 	}
 }
 
