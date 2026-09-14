@@ -407,14 +407,11 @@ export function AddAccountsDialog({
                 // Re-reporting the row already chosen must not advance the
                 // wizard a second time, which a click on a selected row does.
                 if (!p || p.id === selected?.id) return
-                // A provider that already exists brings its own free-models
-                // setting; the box has to show that rather than whatever the
-                // last-looked-at provider left behind.
-                const target = existing.find((e) => e.id === p.id)
-                setAccounts((a) => ({
-                  ...a,
-                  freeModelsOnly: target?.free_models_only ?? false,
-                }))
+                // A fresh draft, not the last one with its setting swapped: a
+                // key typed for the provider left behind would otherwise be
+                // stored on, and probed against, this one. A provider that
+                // already exists brings its own free-models setting.
+                setAccounts(draftFor(existing.find((e) => e.id === p.id)))
                 setSelected(p)
                 setStep(step + 1)
               }}
