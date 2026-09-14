@@ -592,3 +592,21 @@ func processGone(pid string) bool {
 	}
 	return false
 }
+
+func TestARelativeBinaryStillResolvesFromTheGatewaysDirectory(t *testing.T) {
+	// Each run's working directory is a fresh temp directory, and exec resolves
+	// a relative path containing a separator against that, not against the
+	// directory the operator configured the path from.
+	bin := stubAuggie(t, `echo ok`)
+	t.Chdir(filepath.Dir(filepath.Dir(bin)))
+	rel := filepath.Join(".", filepath.Base(filepath.Dir(bin)), "auggie")
+
+	var out strings.Builder
+	if err := (&Auggie{Bin: rel}).Run(context.Background(), "", "hi", &out); err != nil {
+		t.Fatalf("Bin %q: %v", rel, err)
+	}
+	t.Setenv("AUGGIE_BIN", rel)
+	if err := (&Auggie{}).Run(context.Background(), "", "hi", io.Discard); err != nil {
+		t.Fatalf("AUGGIE_BIN %q: %v", rel, err)
+	}
+}

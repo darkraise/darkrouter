@@ -132,10 +132,10 @@ func (a *Auggie) Scheme() string { return AuggieScheme }
 // the CLI, or mounts it, has to restart the gateway before it is found.
 func (a *Auggie) resolveBin() string {
 	if a.Bin != "" {
-		return a.Bin
+		return absPath(a.Bin)
 	}
 	if env := strings.TrimSpace(os.Getenv("AUGGIE_BIN")); env != "" {
-		return env
+		return absPath(env)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, c := range []string{
@@ -150,6 +150,19 @@ func (a *Auggie) resolveBin() string {
 	// PATH last. LookPath failing is not decided here: the spawn reports it,
 	// with the message the operator needs.
 	return "auggie"
+}
+
+// absPath anchors a relative path with a separator to this process's working
+// directory. Each run's working directory is its own temp directory, and exec
+// resolves such a path against that instead. A bare name is left for PATH.
+func absPath(p string) string {
+	if filepath.IsAbs(p) || !strings.ContainsRune(p, filepath.Separator) {
+		return p
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 // modelName is the shape a model id may take before it is placed in argv.
