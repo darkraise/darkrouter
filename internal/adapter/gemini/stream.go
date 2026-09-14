@@ -32,7 +32,8 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			// hasCall spans the whole candidate: the call arrives in one
 			// chunk and the finish reason in a later one, and STOP on that
 			// later chunk means tool_use only if this remembers the call.
-			hasCall bool
+			hasCall      bool
+			droppedMedia bool
 		)
 
 		closeAll := func() bool {
@@ -139,6 +140,12 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 						return
 					}
 
+				case p.InlineData != nil:
+					// The IR delta has no slot for media and no client writer
+					// renders it, so generated media cannot reach a translated
+					// client; it is dropped, but never silently.
+					droppedMedia = true
+
 				case p.Thought:
 					idx, ok := openBlock(&thoughtIdx, ir.BlockThinking)
 					if !ok {
@@ -189,6 +196,12 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					stop.Warnings = append(stop.Warnings, ir.Warning{
 						Field: "finishReason", Target: targetName,
 						Reason: "unrecognized value " + c.FinishReason + "; reported as end_turn",
+					})
+				}
+				if droppedMedia {
+					stop.Warnings = append(stop.Warnings, ir.Warning{
+						Field: "candidates[].content.parts[].inlineData", Target: targetName,
+						Reason: "generated media cannot be streamed to this client; it was dropped",
 					})
 				}
 				if !yield(stop, nil) {

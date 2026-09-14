@@ -54,6 +54,7 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 				Parts []struct {
 					Text         string          `json:"text"`
 					FunctionCall json.RawMessage `json:"functionCall"`
+					InlineData   json.RawMessage `json:"inlineData"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
@@ -80,7 +81,9 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 			// delta on the IR path, which is not content-bearing there either.
 			// A literal "functionCall": null decodes to a four-byte
 			// RawMessage, so its length alone cannot tell it from a real call.
-			if p.Text != "" || (len(p.FunctionCall) > 0 && string(p.FunctionCall) != "null") {
+			// Generated media commits like text: an image-only response
+			// would otherwise buffer until the end of the stream.
+			if p.Text != "" || present(p.FunctionCall) || present(p.InlineData) {
 				out.Content = true
 			}
 		}
@@ -91,6 +94,8 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 	}
 	return out
 }
+
+func present(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
 
 func (a *Adapter) RecognizeUsage(body []byte) *ir.Usage {
 	var env struct {
