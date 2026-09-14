@@ -282,6 +282,38 @@ describe("the verdict", () => {
     expect(await screen.findByText(/served in/i)).toBeInTheDocument()
   })
 
+  it("fails a run whose stream carries an error after it started", async () => {
+    // The edge reports a provider failing mid-stream as an error frame on a
+    // 200, because the status line has already been sent.
+    stubRoutes(
+      () =>
+        new Response(
+          sse(
+            OK_FRAME.replace('"ok"', '"o"'),
+            'data: {"error":{"message":"upstream exploded","type":"api_error"}}\n\n',
+            "data: [DONE]\n\n",
+          ),
+        ),
+    )
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    expect((await screen.findAllByText(/upstream exploded/i)).length).toBeGreaterThan(0)
+    await screen.findByRole("button", { name: /send/i })
+    expect(screen.queryByText(/served in/i)).not.toBeInTheDocument()
+  })
+
+  it("does not call a reply with no text served", async () => {
+    stubRoutes(() => new Response(sse("data: [DONE]\n\n")))
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    expect((await screen.findAllByText(/without a reply/i)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/served in/i)).not.toBeInTheDocument()
+  })
+
   it("carries the reason a refusal happened, not just that it did", async () => {
     // "Refused" alone sends an operator to the log, whose first useful line
     // is the one already in hand.
