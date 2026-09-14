@@ -45,7 +45,9 @@ export function TestLogTab({ providerId }: { providerId: string }) {
   // executor and lands in the same log a client's request does, so without the
   // filter this panel would fill with production traffic an operator did not
   // come here to read — and the one test they just sent would be buried in it.
-  const page = useRequests({ provider: providerId, source: "console", limit: "20" })
+  // Any attempt on the provider rather than the one that served: a test that
+  // failed on every attempt names no serving provider at all.
+  const page = useRequests({ attempted_provider: providerId, source: "console", limit: "20" })
   const rows = page.data?.requests ?? []
 
   if (page.isPending) {

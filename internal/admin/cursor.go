@@ -16,12 +16,15 @@ import (
 // and so a new filter is a compile error at every call site rather than a
 // silently ignored query parameter.
 type RequestFilters struct {
-	Provider  string
-	Model     string
-	Status    string
-	Alias     string
-	Surface   string
-	ErrorCode string
+	Provider string
+	// AttemptedProvider matches any attempt on the provider rather than only
+	// the one that served.
+	AttemptedProvider string
+	Model             string
+	Status            string
+	Alias             string
+	Surface           string
+	ErrorCode         string
 	// Source separates console traffic from a client's. Part of the hash like
 	// every other filter: a cursor minted while looking at test requests must
 	// not silently page into production ones.
@@ -38,7 +41,7 @@ type RequestFilters struct {
 // scroll.
 func (f RequestFilters) Hash() string {
 	h := sha256.New()
-	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface, f.ErrorCode, f.Source} {
+	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface, f.ErrorCode, f.Source, f.AttemptedProvider} {
 		h.Write([]byte(s))
 		// A separator, so {Provider:"ab"} and {Provider:"a", Model:"b"} differ.
 		h.Write([]byte{0})

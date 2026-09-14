@@ -470,6 +470,13 @@ func TestFiltersNarrowTheResult(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "01A" {
 		t.Errorf("provider filter = %+v", got)
 	}
+	got, err = db.ListRequests(ctx, RequestQuery{Limit: 10, AttemptedProvider: "groq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "01A" {
+		t.Errorf("attempted provider filter on a row with no attempts = %+v", got)
+	}
 	got, err = db.ListRequests(ctx, RequestQuery{Limit: 10, Surface: "embedding"})
 	if err != nil {
 		t.Fatal(err)
@@ -708,6 +715,44 @@ func TestUsageByClampsDays(t *testing.T) {
 			t.Errorf("days=%d: want %d rows (clamped to 30), got %d",
 				days, len(base), len(got))
 		}
+	}
+}
+
+// A provider's usage counts every attempt made on it, so the requests behind
+// that usage include ones it failed before another provider served, and ones
+// that no provider served at all.
+func TestTheAttemptedProviderFilterMatchesAnyAttempt(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{
+		{ID: "01FAILOVER", TS: time.UnixMilli(4), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "nebius", FinalModel: "m", Status: "success",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider"},
+				{Seq: 2, ProviderID: "nebius", Model: "m", Outcome: "success"},
+			}},
+		{ID: "01ALLFAILED", TS: time.UnixMilli(3), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", Status: "error",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider"},
+			}},
+		{ID: "01ELSEWHERE", TS: time.UnixMilli(2), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "nebius", FinalModel: "m", Status: "success",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "nebius", Model: "m", Outcome: "success"},
+			}},
+	})
+
+	got, err := db.ListRequests(ctx, RequestQuery{Limit: 10, AttemptedProvider: "groq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range got {
+		ids = append(ids, r.ID)
+	}
+	if want := []string{"01FAILOVER", "01ALLFAILED"}; !slices.Equal(ids, want) {
+		t.Fatalf("attempted groq = %v, want %v", ids, want)
 	}
 }
 
