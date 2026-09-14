@@ -132,7 +132,8 @@ func isAnthropicModel(model string) bool {
 }
 
 // additionalFields renders what Converse only accepts per model family.
-// reasoning_config is Anthropic's; other publishers spell thinking
+// Converse hands these fields to the model's native request, so Claude's are
+// Anthropic's own thinking and output_config. Other publishers spell thinking
 // differently or not at all, and sending it to them is a ValidationException.
 func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.Warning) {
 	r := req.Reasoning
@@ -142,13 +143,12 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 	if !isAnthropicModel(t.Model) {
 		return nil, []ir.Warning{{
 			Field: "reasoning", Target: targetName,
-			Reason: "reasoning_config is an Anthropic-only additional field; dropped for this publisher",
+			Reason: "thinking is an Anthropic-only additional field; dropped for this publisher",
 		}}
 	}
 	// The catalog, not the model id, knows which shape a generation takes. A
-	// generation that dropped the manual budget refuses reasoning_config and
-	// takes Anthropic's native adaptive fields, which Converse passes through
-	// additionalModelRequestFields. TraitsKnown false keeps the permissive
+	// generation that dropped the manual budget refuses one and takes the
+	// adaptive shape instead. TraitsKnown false keeps the permissive
 	// fallback an unrecognized or proxied model has always had.
 	if t.Info.TraitsKnown && !t.Info.ManualBudget {
 		if !t.Info.Adaptive {
@@ -187,7 +187,7 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 		})
 	}
 	return map[string]any{
-		"reasoning_config": map[string]any{"type": "enabled", "budget_tokens": budget},
+		"thinking": map[string]any{"type": "enabled", "budget_tokens": budget},
 	}, warns
 }
 
