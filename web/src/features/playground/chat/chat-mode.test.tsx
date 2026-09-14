@@ -355,6 +355,127 @@ describe("Chat mode", () => {
     )
   })
 
+  it("saves a half answer to its own conversation when another one is opened mid-stream", async () => {
+    // Opening a conversation whose detail is at hand replaces the transcript
+    // and ends the request in flight, the way leaving the screen does. The
+    // exchange already paid for still belongs to the thread that sent it.
+    postMock.mockImplementation((path: string) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: "first" })
+        : Promise.resolve({ seq: 0 }),
+    )
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+
+    let signal: AbortSignal | undefined
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+      requestSignal?: AbortSignal,
+    ) {
+      signal = requestSignal
+      onStart?.({ requestId: "01HALF" })
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: "half an" } }] })}\n\n`
+      await new Promise<void>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+        })
+      })
+    })
+    await send("second")
+    expect(await screen.findByText("half an")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+    expect(signal?.aborted).toBe(true)
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(5))
+    const turns = postMock.mock.calls
+      .slice(3)
+      .map((c) => [c[0], c[1]] as [string, unknown])
+    expect(turns).toEqual([
+      ["/api/playground/conversations/new1/messages", { role: "user", content: "second", request_id: "" }],
+      ["/api/playground/conversations/new1/messages", { role: "assistant", content: "half an", request_id: "01HALF" }],
+    ])
+    expect(screen.queryByText("half an")).toBeNull()
+  })
+
+  it("creates a new thread under its own title and settings when another is opened before its trace", async () => {
+    // The answer is whole and the run is waiting on its trace. Nothing has
+    // been stored yet, so the conversation is created now -- after the
+    // screen has already taken the opened conversation's title and model.
+    traceMock.mockImplementation(
+      (_id: string, signal?: AbortSignal) =>
+        new Promise((resolve) => signal?.addEventListener("abort", () => resolve(null))),
+    )
+    postMock.mockImplementation((path: string) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: "left before its trace" })
+        : Promise.resolve({ seq: 0 }),
+    )
+    mounted()
+    await chooseModel("gpt")
+    await send("left before its trace")
+    expect(await screen.findByText("an answer")).toBeInTheDocument()
+    await waitFor(() => expect(traceMock).toHaveBeenCalled())
+    expect(postMock).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+    expect(postMock.mock.calls[0]![0]).toBe("/api/playground/conversations")
+    expect(postMock.mock.calls[0]![1]).toMatchObject({ title: "left before its trace", model: "gpt" })
+    expect(postMock.mock.calls.slice(1).map((c) => [c[0], c[1]])).toEqual([
+      ["/api/playground/conversations/new1/messages", { role: "user", content: "left before its trace", request_id: "" }],
+      ["/api/playground/conversations/new1/messages", { role: "assistant", content: "an answer", request_id: "01NEW" }],
+    ])
+    expect(screen.getByLabelText("Conversation title")).toHaveValue(stored.title)
+  })
+
+  it("keeps a new thread's first turn out of the unsaved thread it replaced", async () => {
+    // The thread left mid-answer creates its conversation after New
+    // conversation has already started the next one; the next one's first
+    // turn must make its own rather than share the one being created.
+    postMock.mockImplementation((path: string, body: unknown) => {
+      if (path !== "/api/playground/conversations") return Promise.resolve({ seq: 0 })
+      const title = (body as { title: string }).title
+      return Promise.resolve({ ...stored, id: title === "left thread" ? "left1" : "next1", title })
+    })
+    streamMock.mockImplementationOnce(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+      requestSignal?: AbortSignal,
+    ) {
+      onStart?.({ requestId: "01LEFT" })
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: "half" } }] })}\n\n`
+      await new Promise<void>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+        })
+      })
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("left thread")
+    expect(await screen.findByText("half")).toBeInTheDocument()
+
+    await chooseModel("gpt")
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+    await send("next thread")
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(6))
+    const byPath = (p: string) =>
+      postMock.mock.calls.filter((c) => c[0] === p).map((c) => (c[1] as { content: string }).content)
+    expect(byPath("/api/playground/conversations/left1/messages")).toEqual(["left thread", "half"])
+    expect(byPath("/api/playground/conversations/next1/messages")).toEqual(["next thread", "an answer"])
+    expect(screen.getByLabelText("Conversation title")).toHaveValue("next thread")
+  })
+
   it("aborts the live request when Chat becomes inactive", async () => {
     let signal: AbortSignal | undefined
     streamMock.mockImplementation(async function* (
