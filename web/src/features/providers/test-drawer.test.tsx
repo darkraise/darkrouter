@@ -65,6 +65,43 @@ function stubFetch(playground: () => Response) {
   )
 }
 
+/** A gateway that answers every route the drawer calls, with the playground
+ *  reply supplied per call. No request id, so no run waits on a trace. */
+function stubRoutes(playground: () => Response = () => new Response(sse(OK_FRAME))) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        })
+      const u = String(url)
+      if (u.startsWith("/api/models")) {
+        return json({
+          models: [{ model: "llama-3.3", providers: ["groq", "ollama"], surfaces: ["llm"] }],
+          aliases: [],
+        })
+      }
+      if (u === "/api/providers" && init?.method === "POST") return json({ id: "ollama" }, 201)
+      if (u === "/api/playground") return playground()
+      return json({ providers: [], requests: [] })
+    }),
+  )
+}
+
+const OK_FRAME = 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+
+function fetchCalls() {
+  return (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls
+}
+
+function playgroundBodies(): { messages: { role: string; content: string }[] }[] {
+  return fetchCalls()
+    .filter(([u]) => String(u) === "/api/playground")
+    .map(([, i]) => JSON.parse((i as RequestInit).body as string))
+}
+
 beforeEach(() => vi.unstubAllGlobals())
 
 describe("the provider test drawer", () => {
@@ -168,6 +205,27 @@ describe("a keyless provider with no row yet", () => {
         id: "ollama", preset: "ollama",
       })
     })
+  })
+
+  it("is added once, not again on the next message", async () => {
+    // The drawer's row is a snapshot taken when it opened, so it goes on
+    // saying "no provider" after the first send has made one.
+    stubRoutes()
+    mount(<TestDrawer row={keylessRow} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findByText("ok")
+    await screen.findByRole("button", { name: /send/i })
+
+    await userEvent.type(screen.getByLabelText("Test message"), "and again")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    await waitFor(() => expect(playgroundBodies()).toHaveLength(2))
+    expect(
+      fetchCalls().filter(
+        ([u, i]) => String(u) === "/api/providers" && (i as RequestInit)?.method === "POST",
+      ),
+    ).toHaveLength(1)
   })
 
   it("says so before it does it", async () => {
