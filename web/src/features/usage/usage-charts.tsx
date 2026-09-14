@@ -10,14 +10,30 @@ import { Area, AreaChart, Line, LineChart, XAxis, YAxis } from "recharts"
 
 type Cell = Record<string, number | string | null>
 
-/** One `--color-<key>` per series, from the ramp chart-scope.css sets: five
- *  hues kept clear of the red, amber and green that mean a state here. */
-function chartConfig(keys: string[]): ChartConfig {
+/**
+ * One `--color-<id>` per series, from the ramp chart-scope.css sets: five hues
+ * kept clear of the red, amber and green that mean a state here.
+ *
+ * The series are plotted under positional ids, with their names kept only as
+ * labels. The names are provider and model ids from upstream, and
+ * ChartContainer writes every config key unescaped into a stylesheet: `gpt-4.1`
+ * or `vendor/model:free` is not a valid custom-property name, so the series
+ * drew with no colour, and a hostile id could write CSS of its own.
+ */
+function plotted(data: Cell[], keys: string[]) {
+  const ids = keys.map((_, i) => `s${i}`)
   const config: ChartConfig = {}
   keys.forEach((k, i) => {
-    config[k] = { label: k, color: `hsl(var(--chart-${(i % 5) + 1}))` }
+    config[`s${i}`] = { label: k, color: `hsl(var(--chart-${(i % 5) + 1}))` }
   })
-  return config
+  const rows = data.map((cell) => {
+    const row: Cell = { day: cell.day ?? null }
+    keys.forEach((k, i) => {
+      if (k in cell) row[`s${i}`] = cell[k] ?? null
+    })
+    return row
+  })
+  return { ids, config, rows }
 }
 
 // Axis text takes its size from chart-scope.css (`--text-sm`), never from a
@@ -33,15 +49,16 @@ export function StackedAreaChart({
   /** Named series get a legend; a single total does not need one. */
   legend?: boolean
 }) {
+  const { ids, config, rows } = plotted(data, keys)
   return (
     <div className="chart-scope h-56">
-      <ChartContainer config={chartConfig(keys)} className="h-full w-full">
-        <AreaChart data={data}>
+      <ChartContainer config={config} className="h-full w-full">
+        <AreaChart data={rows}>
           <XAxis dataKey="day" tickLine={false} axisLine={false} minTickGap={24} />
           <YAxis tickLine={false} axisLine={false} width={44} />
           <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
           {legend && <ChartLegend content={<ChartLegendContent />} />}
-          {keys.map((k) => (
+          {ids.map((k) => (
             <Area
               key={k}
               dataKey={k}
@@ -71,10 +88,11 @@ export function CostLineChart({
   formatValue: (v: number | null) => string
   legend?: boolean
 }) {
+  const { ids, config, rows } = plotted(data, keys)
   return (
     <div className="chart-scope h-56">
-      <ChartContainer config={chartConfig(keys)} className="h-full w-full">
-        <LineChart data={data}>
+      <ChartContainer config={config} className="h-full w-full">
+        <LineChart data={rows}>
           <XAxis dataKey="day" tickLine={false} axisLine={false} minTickGap={24} />
           <YAxis
             tickLine={false}
@@ -93,7 +111,7 @@ export function CostLineChart({
             }
           />
           {legend && <ChartLegend content={<ChartLegendContent />} />}
-          {keys.map((k) => (
+          {ids.map((k) => (
             <Line
               key={k}
               dataKey={k}
