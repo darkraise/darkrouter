@@ -143,6 +143,26 @@ describe("a provider nobody has configured", () => {
   })
 })
 
+describe("a provider list that did not load", () => {
+  it("says so rather than rendering nothing", async () => {
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) =>
+        String(url) === "/api/providers"
+          ? new Response(JSON.stringify({ error: "database is locked" }), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            })
+          : routes(url, init),
+    )
+    await renderProvider("groq")
+
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument()
+  })
+})
+
 describe("a configured provider", () => {
   it("renders the full page", async () => {
     stub([configured], [preset])

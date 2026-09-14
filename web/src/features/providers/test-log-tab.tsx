@@ -7,6 +7,7 @@ import {
 import { useRequests } from "../../lib/queries"
 import { duration } from "@/lib/format"
 import { relativeTime } from "../../lib/time"
+import { LoadError } from "../shell/screen-state"
 import type { RequestRow } from "../../lib/api-types"
 
 /** The fields an expanded row shows, in the order an operator reads them. */
@@ -49,6 +50,17 @@ export function TestLogTab({ providerId }: { providerId: string }) {
 
   if (page.isPending) {
     return <p className="p-4 text-sm text-[hsl(var(--muted-foreground))]">Loading the log…</p>
+  }
+
+  if (page.isError && !page.data) {
+    return (
+      <LoadError
+        what="The log"
+        error={page.error}
+        onRetry={() => void page.refetch()}
+        className="m-4"
+      />
+    )
   }
 
   if (rows.length === 0) {

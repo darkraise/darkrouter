@@ -117,6 +117,42 @@ beforeEach(() => {
   localStorage.clear()
 })
 
+describe("a provider list that did not load", () => {
+  it("says so rather than showing every provider as unconfigured", async () => {
+    const fetchMock = stub([groq])
+    const routes = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) =>
+      String(url) === "/api/providers"
+        ? new Response(JSON.stringify({ error: "database is locked" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          })
+        : routes(url, init),
+    )
+    await renderScreen()
+
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Cerebras" })).not.toBeInTheDocument()
+  })
+
+  it("says when credential health did not load", async () => {
+    const fetchMock = stub([groq])
+    const routes = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) =>
+      String(url) === "/api/health/providers"
+        ? new Response(JSON.stringify({ error: "breaker unavailable" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          })
+        : routes(url, init),
+    )
+    await renderScreen()
+
+    expect(await screen.findByText(/breaker unavailable/i)).toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: "Groq" })).toBeInTheDocument()
+  })
+})
+
 describe("the providers list", () => {
   it("opens a provider through its name, and keeps the row a row", async () => {
     // A <tr role="button"> takes the row out of table semantics: a screen
