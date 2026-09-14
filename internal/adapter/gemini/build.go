@@ -154,9 +154,12 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 	if rf := req.ResponseFormat; rf != nil {
 		switch rf.Type {
 		case "json_schema":
-			// A responseSchema without the MIME type is ignored outright.
+			// The IR schema is JSON Schema. responseSchema takes Gemini's
+			// OpenAPI subset, which rejects $defs, $ref and
+			// additionalProperties; responseJsonSchema takes JSON Schema.
+			// Either is ignored outright without the MIME type.
 			cfg["responseMimeType"] = "application/json"
-			cfg["responseSchema"] = rf.Schema
+			cfg["responseJsonSchema"] = rf.Schema
 		case "json_object":
 			cfg["responseMimeType"] = "application/json"
 		}
@@ -211,8 +214,10 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object"}`)
 		}
+		// parametersJsonSchema, not parameters, for the same reason as
+		// responseJsonSchema.
 		decls = append(decls, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parameters": schema,
+			"name": tool.Name, "description": tool.Description, "parametersJsonSchema": schema,
 		})
 	}
 	if len(decls) > 0 {

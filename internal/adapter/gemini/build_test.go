@@ -82,8 +82,8 @@ func TestBuildRequestDeclaresEveryFunctionInOneToolsEntry(t *testing.T) {
 	if decls[0].(map[string]any)["name"] != "a" {
 		t.Errorf("declaration = %v", decls[0])
 	}
-	if _, ok := decls[0].(map[string]any)["parameters"]; !ok {
-		t.Errorf("declaration = %v; Gemini names the schema parameters", decls[0])
+	if _, ok := decls[0].(map[string]any)["parametersJsonSchema"]; !ok {
+		t.Errorf("declaration = %v; a JSON Schema goes in parametersJsonSchema", decls[0])
 	}
 }
 
@@ -140,7 +140,7 @@ func TestBuildRequestFillsGenerationConfig(t *testing.T) {
 	if cfg["responseMimeType"] != "application/json" {
 		t.Errorf("responseMimeType = %v; a schema without it is ignored", cfg["responseMimeType"])
 	}
-	if _, ok := cfg["responseSchema"]; !ok {
+	if _, ok := cfg["responseJsonSchema"]; !ok {
 		t.Errorf("generationConfig = %v", cfg)
 	}
 	th := cfg["thinkingConfig"].(map[string]any)
