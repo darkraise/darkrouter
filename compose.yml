@@ -23,6 +23,12 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
+    # The server's own shutdown budget (config.ShutdownGrace, default 10s in
+    # internal/config/load.go) plus its 500ms terminalGrace and final worker
+    # flush (internal/server/server.go) can run right up against Compose's
+    # 10s default, so a slow drain gets SIGKILLed mid-flush. This has to stay
+    # above ShutdownGrace if that setting is ever raised.
+    stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:18081/readyz"]
       interval: 30s
