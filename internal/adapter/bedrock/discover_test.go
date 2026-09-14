@@ -156,6 +156,14 @@ func TestListerUsesTheControlPlaneNotTheRuntime(t *testing.T) {
 	}
 }
 
+// http.DefaultClient never gives up on a peer that accepts the request and
+// then says nothing, and a discovery sweep waits on every listing.
+func TestTheDefaultListerClientHasATimeout(t *testing.T) {
+	if NewLister(nil).client.Timeout <= 0 {
+		t.Error("the default lister client has no timeout")
+	}
+}
+
 var errStop = &stopError{}
 
 type stopError struct{}
