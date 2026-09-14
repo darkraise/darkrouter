@@ -195,17 +195,10 @@ func applyAuth(r *http.Request, p Probe) {
 // load-bearing: spec §5.1 makes a *successful* listing that omits a model the
 // evidence that retires it, so an HTML error page read as "zero models" would
 // retire everything the provider serves.
+//
+// It reads a single page. Discovery follows the cursor ParseListPage reports.
 func ParseList(kind string, body []byte) ([]Discovered, error) {
-	var out []Discovered
-	var err error
-	switch kind {
-	case "gemini":
-		out, err = parseGeminiList(body)
-	case "openaicompat", "anthropic":
-		out, err = parseDataList(body)
-	default:
-		return nil, fmt.Errorf("%w: %s", ErrKindNotDiscoverable, kind)
-	}
+	out, _, err := ParseListPage(kind, body)
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +206,60 @@ func ParseList(kind string, body []byte) ([]Discovered, error) {
 		return nil, errors.New("listing reported no models")
 	}
 	return out, nil
+}
+
+// ParseListPage decodes one page of a listing and returns the cursor for the
+// next one, empty when the listing is complete. An empty page is not an error
+// here: only the whole listing being empty is.
+//
+// Anthropic pages through has_more and last_id, Gemini through nextPageToken.
+// OpenAI's own list is not paginated, so an OpenAI-compatible listing is always
+// one page.
+func ParseListPage(kind string, body []byte) ([]Discovered, string, error) {
+	switch kind {
+	case "gemini":
+		return parseGeminiList(body)
+	case "anthropic":
+		out, err := parseDataList(body)
+		if err != nil {
+			return nil, "", err
+		}
+		var page struct {
+			HasMore bool   `json:"has_more"`
+			LastID  string `json:"last_id"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, "", fmt.Errorf("parse listing: %w", err)
+		}
+		if !page.HasMore {
+			return out, "", nil
+		}
+		if page.LastID == "" {
+			return nil, "", errors.New("listing reported more models but no cursor to reach them")
+		}
+		return out, page.LastID, nil
+	case "openaicompat":
+		out, err := parseDataList(body)
+		return out, "", err
+	default:
+		return nil, "", fmt.Errorf("%w: %s", ErrKindNotDiscoverable, kind)
+	}
+}
+
+// SetListCursor points a listing request at the page after cursor.
+func SetListCursor(r *http.Request, kind, cursor string) {
+	var param string
+	switch kind {
+	case "anthropic":
+		param = "after_id"
+	case "gemini":
+		param = "pageToken"
+	default:
+		return
+	}
+	q := r.URL.Query()
+	q.Set(param, cursor)
+	r.URL.RawQuery = q.Encode()
 }
 
 func parseDataList(body []byte) ([]Discovered, error) {
@@ -437,16 +484,17 @@ func (r listedRate) quotedDollars() (float64, bool) {
 	return r.dollars()
 }
 
-func parseGeminiList(body []byte) ([]Discovered, error) {
+func parseGeminiList(body []byte) ([]Discovered, string, error) {
 	var doc struct {
 		Models []struct {
 			Name             string `json:"name"`
 			InputTokenLimit  int    `json:"inputTokenLimit"`
 			OutputTokenLimit int    `json:"outputTokenLimit"`
 		} `json:"models"`
+		NextPageToken string `json:"nextPageToken"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("parse listing: %w", err)
+		return nil, "", fmt.Errorf("parse listing: %w", err)
 	}
 	out := make([]Discovered, 0, len(doc.Models))
 	for _, m := range doc.Models {
@@ -461,5 +509,5 @@ func parseGeminiList(body []byte) ([]Discovered, error) {
 			MaxOutputTokens: m.OutputTokenLimit,
 		})
 	}
-	return out, nil
+	return out, doc.NextPageToken, nil
 }

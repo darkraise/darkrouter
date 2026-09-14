@@ -2,9 +2,12 @@ package catalog
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -745,6 +748,171 @@ func TestSweepAuthorizesAnOAuthListing(t *testing.T) {
 	if len(rows) != 1 || rows[0].ModelID != "claude-x" {
 		t.Errorf("rows = %+v, want the listed model", rows)
 	}
+}
+
+func TestSweepFollowsAnthropicPagination(t *testing.T) {
+	// /v1/models returns twenty models a page by default, newest first. A
+	// sweep that reads one page omits the oldest models, and three omissions
+	// retire them.
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("x-api-key") != "sk-ant" {
+			t.Errorf("page %q sent x-api-key %q", r.URL.RawQuery, r.Header.Get("x-api-key"))
+		}
+		switch r.URL.Query().Get("after_id") {
+		case "":
+			_, _ = w.Write([]byte(`{"data":[{"id":"m1"},{"id":"m2"}],"has_more":true,"first_id":"m1","last_id":"m2"}`))
+		case "m2":
+			_, _ = w.Write([]byte(`{"data":[{"id":"m3"}],"has_more":false,"first_id":"m3","last_id":"m3"}`))
+		default:
+			t.Errorf("unexpected cursor %q", r.URL.RawQuery)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "a")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "a", Kind: "anthropic", BaseURL: srv.URL + "/v1", AuthStyle: "x-api-key",
+		Credentials: []provider.Credential{{ID: "k", Secret: "sk-ant", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if got := modelIDs(t, db); !slices.Equal(got, []string{"m1", "m2", "m3"}) {
+		t.Errorf("models = %v, want every page's models", got)
+	}
+	if n := requests.Load(); n != 2 {
+		t.Errorf("made %d requests, want 2", n)
+	}
+}
+
+func TestSweepFollowsGeminiPagination(t *testing.T) {
+	// models.list returns fifty models a page by default and continues through
+	// nextPageToken. The key travels as a query parameter, so each page must
+	// keep it alongside the token.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("key") != "g-key" {
+			t.Errorf("page %q lost the key", r.URL.RawQuery)
+		}
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_, _ = w.Write([]byte(`{"models":[{"name":"models/g1"}],"nextPageToken":"tok-2"}`))
+		case "tok-2":
+			_, _ = w.Write([]byte(`{"models":[{"name":"models/g2"}]}`))
+		default:
+			t.Errorf("unexpected token %q", r.URL.RawQuery)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "g")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "g", Kind: "gemini", BaseURL: srv.URL + "/v1beta", AuthStyle: "query-param",
+		Credentials: []provider.Credential{{ID: "k", Secret: "g-key", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if got := modelIDs(t, db); !slices.Equal(got, []string{"g1", "g2"}) {
+		t.Errorf("models = %v, want every page's models", got)
+	}
+}
+
+func TestAnIncompleteListingIsAFailure(t *testing.T) {
+	// A listing that stopped partway is not evidence that the missing models
+	// are gone. Recording it as a success would advance their retirement.
+	for _, tc := range []struct {
+		name     string
+		requests int64
+		page     func(w http.ResponseWriter, r *http.Request)
+	}{
+		{name: "later page fails", requests: 2, page: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("after_id") == "" {
+				_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true,"last_id":"m1"}`))
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}},
+		{name: "more promised with no cursor", requests: 1, page: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true}`))
+		}},
+		{name: "cursor never ends", requests: maxListPages, page: func(w http.ResponseWriter, r *http.Request) {
+			n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Query().Get("after_id"), "m"))
+			_, _ = fmt.Fprintf(w, `{"data":[{"id":"m%d"}],"has_more":true,"last_id":"m%d"}`, n+1, n+1)
+		}},
+		{name: "cursor repeats", requests: 2, page: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true,"last_id":"m1"}`))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				tc.page(w, r)
+			}))
+			defer srv.Close()
+			defer func() {
+				if n := requests.Load(); n != tc.requests {
+					t.Errorf("made %d requests, want %d", n, tc.requests)
+				}
+			}()
+
+			db := discoveryDB(t, "a")
+			src := &staticSource{ps: []provider.Provider{{
+				ID: "a", Kind: "anthropic", BaseURL: srv.URL + "/v1", AuthStyle: "x-api-key",
+				Credentials: []provider.Credential{{ID: "k", Secret: "sk", Enabled: true}},
+			}}}
+			NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+			if got := modelIDs(t, db); len(got) != 0 {
+				t.Errorf("recorded %v from an incomplete listing", got)
+			}
+			states, _ := db.DiscoveryStates(context.Background())
+			if states["a"].ConsecutiveFailures != 1 {
+				t.Errorf("failures = %d, want 1", states["a"].ConsecutiveFailures)
+			}
+		})
+	}
+}
+
+func TestAnOpenAICompatibleListingIsOneRequest(t *testing.T) {
+	// OpenAI's model list is not paginated, so a has_more an aggregator adds
+	// is not a cursor this parser follows.
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true,"last_id":"m1"}`))
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "p")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "p", Kind: "openaicompat", BaseURL: srv.URL + "/v1",
+		Credentials: []provider.Credential{{ID: "k", Secret: "sk", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if n := requests.Load(); n != 1 {
+		t.Errorf("made %d requests, want 1", n)
+	}
+	if got := modelIDs(t, db); !slices.Equal(got, []string{"m1"}) {
+		t.Errorf("models = %v", got)
+	}
+}
+
+func modelIDs(t *testing.T, db *store.DB) []string {
+	t.Helper()
+	rows, err := db.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.ModelID)
+	}
+	slices.Sort(out)
+	return out
 }
 
 func TestSweepSeedsBothVertexPublishers(t *testing.T) {
