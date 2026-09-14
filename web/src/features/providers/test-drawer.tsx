@@ -57,6 +57,25 @@ export type Turn = {
   failed?: boolean
 }
 
+/**
+ * The turns a provider is sent as the conversation so far.
+ *
+ * A failed or empty assistant turn is a diagnostic the drawer drew, not
+ * something the model said, and the prompt it failed to answer goes with it:
+ * sent on, the error text reads to the model as its own previous reply.
+ */
+export function conversationHistory(turns: Turn[]): Turn[] {
+  const out: Turn[] = []
+  for (const turn of turns) {
+    if (turn.role === "assistant" && (turn.failed || turn.content === "")) {
+      if (out[out.length - 1]?.role === "user") out.pop()
+      continue
+    }
+    out.push(turn)
+  }
+  return out
+}
+
 /** The message the composer opens with. A test tool that made an operator
  *  think of a prompt before it would prove anything is one they will not
  *  reach for. */
@@ -250,6 +269,19 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     })
   }
 
+  // In the transcript too: the conversation is where an operator is looking,
+  // and a turn that simply never arrives reads as a hang.
+  function failOpenTurn(reason: string) {
+    setMessages((prev) => {
+      const next = prev.slice()
+      const last = next[next.length - 1]
+      if (last && last.role === "assistant" && last.content === "") {
+        next[next.length - 1] = { ...last, content: reason, failed: true }
+      }
+      return next
+    })
+  }
+
   // Follows the reply as it arrives, which is what makes a transcript feel
   // live rather than something to scroll after the fact.
   useEffect(() => {
@@ -277,8 +309,9 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     // The turns the provider will see, and the empty one it is about to fill.
     // History goes with the request: a second question that could not refer to
     // the first would not be a conversation.
-    const history: Turn[] = [...messages, { role: "user", content: prompt }]
-    setMessages([...history, { role: "assistant", content: "", model }])
+    const asked: Turn = { role: "user", content: prompt }
+    const history = [...conversationHistory(messages), asked]
+    setMessages([...messages, asked, { role: "assistant", content: "", model }])
 
     const started = performance.now()
     const at = () => `${Math.round(performance.now() - started)} ms`
@@ -303,6 +336,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
         const reason = err instanceof Error ? err.message : "could not add the provider"
         say("error", reason)
         setVerdict({ kind: "refused", reason })
+        failOpenTurn(reason)
         setRunning(false)
         return
       }
@@ -358,16 +392,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
       const reason = err instanceof Error ? err.message : "the request failed"
       say("error", reason)
       setVerdict({ kind: "refused", reason })
-      // In the transcript too: the conversation is where an operator is
-      // looking, and a turn that simply never arrives reads as a hang.
-      setMessages((prev) => {
-        const next = prev.slice()
-        const last = next[next.length - 1]
-        if (last && last.role === "assistant" && last.content === "") {
-          next[next.length - 1] = { ...last, content: reason, failed: true }
-        }
-        return next
-      })
+      failOpenTurn(reason)
     } finally {
       setRunning(false)
     }
