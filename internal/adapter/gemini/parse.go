@@ -203,6 +203,11 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 		ID: w.ResponseID, Model: w.ModelVersion,
 		Usage: w.UsageMetadata.toIR(), StopReason: ir.StopEndTurn,
 	}
+	// An explicit empty array is a model that said nothing; no array at all
+	// is a body that is not a response.
+	if w.Candidates == nil {
+		return nil, &ir.Error{Type: ir.ErrAPI, Message: "the upstream response carried no candidates"}
+	}
 	if len(w.Candidates) == 0 {
 		return out, nil
 	}
