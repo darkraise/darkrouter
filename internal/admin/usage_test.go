@@ -155,7 +155,7 @@ func TestUsageRollsUpByDay(t *testing.T) {
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out)
-		 VALUES ('2026-08-21','a','m',5,10,20), ('2026-08-22','a','m',7,14,28)`); err != nil {
+		 VALUES (?,'a','m',5,10,20), (?,'a','m',7,14,28)`, daysAgo(1), daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -187,6 +187,46 @@ func TestUsageRollsUpByDay(t *testing.T) {
 	}
 	if body.Priced {
 		t.Error("priced = true with no cost recorded")
+	}
+}
+
+// daysAgo is a usage_daily day relative to the real clock, which the handler
+// windows by.
+func daysAgo(n int) string {
+	return time.Now().UTC().AddDate(0, 0, -n).Format(time.DateOnly)
+}
+
+// The chart and its Requests drilldown must share one window, so the handler
+// serves the calendar days it covered rather than leaving the console to
+// guess them from its own clock.
+func TestUsageServesTheCalendarWindowItCovered(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
+		`INSERT INTO usage_daily (day, provider_id, model, requests)
+		 VALUES (?,'a','m',1), (?,'a','m',1)`, daysAgo(7), daysAgo(6)); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(t, s, cookie, token, "GET", "/api/usage?days=7", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Days []struct {
+			Day string `json:"day"`
+		} `json:"days"`
+		FirstDay string `json:"first_day"`
+		LastDay  string `json:"last_day"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.FirstDay != daysAgo(6) || body.LastDay != daysAgo(0) {
+		t.Errorf("window = %s..%s, want %s..%s", body.FirstDay, body.LastDay, daysAgo(6), daysAgo(0))
+	}
+	if len(body.Days) != 1 || body.Days[0].Day != daysAgo(6) {
+		t.Errorf("days = %+v, want only %s", body.Days, daysAgo(6))
 	}
 }
 
@@ -319,7 +359,7 @@ func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
-		 VALUES ('2026-08-25','groq','m',5,7,10,20)`); err != nil {
+		 VALUES (?,'groq','m',5,7,10,20)`, daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 	storetest.WriteBatch(t, db, []*store.RequestRecord{{
@@ -383,7 +423,7 @@ func TestUsageGroupByAlias(t *testing.T) {
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
-		 VALUES ('2026-08-25','groq','m','fast-coder',7)`); err != nil {
+		 VALUES (?,'groq','m','fast-coder',7)`, daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -418,7 +458,7 @@ func TestUsageGroupByCarriesAttemptsAlongsideRequests(t *testing.T) {
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
-		 VALUES ('2026-08-25','flaky','m',0,7,140,0)`); err != nil {
+		 VALUES (?,'flaky','m',0,7,140,0)`, daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -460,8 +500,8 @@ func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
-		 VALUES ('2026-08-25','groq','m','fast-coder',7),
-		        ('2026-08-25','groq','m','cheap',3)`); err != nil {
+		 VALUES (?,'groq','m','fast-coder',7),
+		        (?,'groq','m','cheap',3)`, daysAgo(0), daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 	rr := do(t, s, cookie, token, "GET", "/api/usage", "")
