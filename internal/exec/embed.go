@@ -50,6 +50,12 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 	}
 	ac.resetIdle()
 	out, err := em.ParseEmbedding(resp)
+	if err == nil && len(out.Embeddings) != o.req.InputCount() {
+		// Vectors answer inputs by position, so a short or long batch cannot
+		// be matched back to the inputs it was meant to embed.
+		err = fmt.Errorf("embedding response carried %d vectors for %d inputs",
+			len(out.Embeddings), o.req.InputCount())
+	}
 	if err != nil {
 		return failedParse(ac, resp, err)
 	}
