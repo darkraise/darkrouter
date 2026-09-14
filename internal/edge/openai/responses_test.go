@@ -459,6 +459,18 @@ func TestParseResponsesKeepsTheSchemaNameAndStrictness(t *testing.T) {
 	}
 }
 
+func TestParseResponsesSplitsAnInlineFileDataURI(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_file","filename":"a.pdf","file_data":"data:application/pdf;base64,JVBERi0="}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "application/pdf" || m.Data != "JVBERi0=" {
+		t.Errorf("media = %+v; the data URI prefix must not stay inside the base64 payload", m)
+	}
+}
+
 func TestParseResponsesReadsJSONObjectMode(t *testing.T) {
 	req, err := parseResponses(t, `{"model":"m","input":"hi","text":{"format":{"type":"json_object"}}}`)
 	if err != nil {
