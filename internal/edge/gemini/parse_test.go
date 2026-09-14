@@ -154,6 +154,29 @@ func TestParseRequestModeAnyWithoutNamesIsAny(t *testing.T) {
 	}
 }
 
+func TestParseRequestKeepsAnAllowlistOfSeveralFunctions(t *testing.T) {
+	for _, mode := range []string{"ANY", "VALIDATED"} {
+		req := parsed(t, "m:generateContent", "", `{"contents":[],
+		  "tools":[{"functionDeclarations":[{"name":"a"},{"name":"b"},{"name":"c"}]},{"googleSearch":{}}],
+		  "toolConfig":{"functionCallingConfig":{"mode":"`+mode+`","allowedFunctionNames":["a","b"]}}}`)
+		var names []string
+		builtin := false
+		for _, tool := range req.Tools {
+			if tool.Extra != nil {
+				builtin = true
+				continue
+			}
+			names = append(names, tool.Name)
+		}
+		if strings.Join(names, ",") != "a,b" {
+			t.Errorf("%s: functions = %v; a function outside allowedFunctionNames stays callable", mode, names)
+		}
+		if !builtin {
+			t.Errorf("%s: tools = %+v; a built-in tool is not a function declaration", mode, req.Tools)
+		}
+	}
+}
+
 func TestParseCarriesTheURLOperationAndQuery(t *testing.T) {
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
 	r := httptest.NewRequest("POST",
