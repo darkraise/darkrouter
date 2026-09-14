@@ -337,4 +337,56 @@ func TestAManualPresetGetsNoListener(t *testing.T) {
 	}
 }
 
-var _ = config.Config{}
+func TestCompleteGivesUpOnATokenEndpointThatNeverAnswers(t *testing.T) {
+	// The paste request carries no deadline of its own, so the client is the
+	// only thing that can end an exchange the token endpoint accepted and then
+	// never answered.
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(hung.Close)
+	// Runs before Close, which would otherwise wait on the parked handler.
+	t.Cleanup(func() { close(release) })
+
+	db := storetest.Migrated(t)
+	key, err := store.OpenKeyring(context.Background(), db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Deps{
+		DB: db, Key: key,
+		Config: configStoreWith(t, nil, func(c *config.Config) {
+			c.Catalog.Discovery.Timeout = 100 * time.Millisecond
+		}),
+		Presets: oauthPresets(hung.URL, catalog.Redirect{Style: "manual"}),
+		Src:     provider.NewSQLSource(db, key),
+		Breaker: health.New(3, time.Minute),
+		Flows:   auth.NewFlowStore(time.Minute),
+		HTTP:    &http.Client{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, token := login(t, s)
+	id := oauthProvider(t, s, cookie, token)
+	start := startFlow(t, s, cookie, token, id, `{}`)
+	body, _ := json.Marshal(map[string]string{
+		"redirected_url": "http://localhost/callback?code=c&state=" + url.QueryEscape(start.State)})
+
+	done := make(chan int, 1)
+	go func() {
+		done <- do(t, s, cookie, token, "POST", "/api/providers/"+id+"/oauth/complete", string(body)).Code
+	}()
+	select {
+	case code := <-done:
+		if code != http.StatusBadGateway {
+			t.Errorf("status = %d, want 502 for an unreachable token endpoint", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the completion is still waiting on a token endpoint that will never answer")
+	}
+}
