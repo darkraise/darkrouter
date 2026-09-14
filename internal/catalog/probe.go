@@ -116,11 +116,18 @@ func ProbeFor(p provider.Provider, preset Preset, apiKey string) (Probe, error) 
 	if base == "" {
 		return Probe{}, fmt.Errorf("provider %q has no base url", p.ID)
 	}
+	// The preset's listing endpoint belongs to the base it ships with. A row
+	// pointed at another installation lists from that installation, or the
+	// credential goes to the original vendor and imports its inventory.
+	modelsURL := preset.ModelsURL
+	if strings.TrimRight(base, "/") != strings.TrimRight(preset.BaseURL, "/") {
+		modelsURL = ""
+	}
 	return Probe{
 		ProviderID:     p.ID,
 		Kind:           p.Kind,
 		BaseURL:        base,
-		ModelsURL:      preset.ModelsURL,
+		ModelsURL:      modelsURL,
 		APIKey:         apiKey,
 		AuthStyle:      style,
 		AuthHeader:     preset.Auth.Header,
