@@ -41,6 +41,7 @@ import {
 import type { BreakerEntry, DiscoveryHealthRow, Preset, ProbeResult } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
 import { NoMatch } from "../shell/empty-state"
+import { LoadError } from "../shell/screen-state"
 import { TestDrawer } from "./test-drawer"
 import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
 import { ProviderStateMark } from "../shell/status-mark"
@@ -612,6 +613,13 @@ export function ProvidersScreen() {
     [rowActions],
   )
 
+  const listFailure =
+    providers.isError && !providers.data
+      ? providers.error
+      : presets.isError && !presets.data
+        ? presets.error
+        : null
+
   return (
     <>
       {/* Everything above the results stays put while they scroll.
@@ -779,7 +787,39 @@ export function ProvidersScreen() {
       />
 
 
-      {presets.isSuccess && providers.isSuccess && rows.length === 0 ? (
+      {/* A reading that did not arrive is said to be missing. Left to the
+          fallbacks, a failed health poll reads as nothing cooling and a failed
+          discovery poll as nothing ever discovered. */}
+      {health.isError && (
+        <LoadError
+          what="Credential health"
+          error={health.error}
+          onRetry={() => void health.refetch()}
+          className="mb-4"
+        />
+      )}
+      {discovery.isError && (
+        <LoadError
+          what="The discovery readings"
+          error={discovery.error}
+          onRetry={() => void discovery.refetch()}
+          className="mb-4"
+        />
+      )}
+
+      {listFailure ? (
+        // Not the table. Without the provider rows every preset merges in as
+        // unconfigured, which is a claim about providers that may be carrying
+        // traffic.
+        <LoadError
+          what={providers.isError ? "The providers" : "The provider catalogue"}
+          error={listFailure}
+          onRetry={() => {
+            void providers.refetch()
+            void presets.refetch()
+          }}
+        />
+      ) : presets.isSuccess && providers.isSuccess && rows.length === 0 ? (
         // Only ever a filter miss: the list is every provider the release
         // supports, so it is never empty on its own.
         <NoMatch what="providers" onClear={clearFilters} />

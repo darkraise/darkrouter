@@ -26,6 +26,7 @@ import {
 import type { Preset, Provider } from "../../lib/api-types"
 import { ConfirmButton } from "../shell/confirm-button"
 import { EmptyState, GhostRows } from "../shell/empty-state"
+import { LoadError } from "../shell/screen-state"
 import { AddAccountsDialog } from "./add-accounts-dialog"
 import { CredentialRow } from "./credential-row"
 import { DiscoveryPanel } from "./discovery-panel"
@@ -311,6 +312,30 @@ export function ProviderDetail() {
   // the release supports, and clicking one that nobody has configured has to
   // land somewhere that explains it rather than on a deletion notice.
   const preset = presets.data?.presets.find((p) => p.id === id)
+  // Without the lists this page cannot tell a configured provider from an
+  // unconfigured or deleted one, and guessing would be a false claim either way.
+  const listFailure = provider
+    ? null
+    : providers.isError
+      ? providers
+      : providers.isSuccess && !preset && presets.isError
+        ? presets
+        : null
+  if (listFailure) {
+    return (
+      <>
+        <Link to="/providers" className="text-sm text-[hsl(var(--legend))] hover:underline">
+          ← Providers
+        </Link>
+        <LoadError
+          what={listFailure === providers ? "The providers" : "The provider catalogue"}
+          error={listFailure.error}
+          onRetry={() => void listFailure.refetch()}
+          className="mt-4"
+        />
+      </>
+    )
+  }
   if (providers.isSuccess && !provider) {
     if (preset) return <UnconfiguredProvider preset={preset} />
     if (!presets.isSuccess) return null
@@ -349,6 +374,9 @@ export function ProviderDetail() {
   const requests = totalRequests(usage.data?.days ?? [], provider.id)
   const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === provider.id)
   const discovered = discoveryFraction(discoveryRow)
+  const modelsFailed = catalog.isError && !catalog.data
+  const healthFailed = health.isError && !health.data
+  const discoveryFailed = discovery.isError && !discovery.data
 
   return (
     <>
@@ -422,7 +450,9 @@ export function ProviderDetail() {
           caption="credentials usable"
           value={`${accountsSummary.usable}/${accountsSummary.total}`}
           note={
-            accountsSummary.cooling > 0
+            healthFailed
+              ? "cooldowns did not load"
+              : accountsSummary.cooling > 0
               ? `${accountsSummary.cooling} cooling`
               : accountsSummary.disabled > 0
                 ? `${accountsSummary.disabled} disabled`
@@ -430,20 +460,28 @@ export function ProviderDetail() {
                   ? "none configured"
                   : "all available"
           }
-          tone={accountsSummary.cooling > 0 ? "warning" : "muted"}
+          tone={healthFailed || accountsSummary.cooling > 0 ? "warning" : "muted"}
         />
         <Stat
           caption="models offered"
-          value={String(models.length)}
-          note={caps.total > 0 ? `${caps.tools} with tools` : "catalogue empty"}
+          value={modelsFailed ? "—" : String(models.length)}
+          note={
+            modelsFailed
+              ? "did not load"
+              : caps.total > 0
+                ? `${caps.tools} with tools`
+                : "catalogue empty"
+          }
+          tone={modelsFailed ? "warning" : undefined}
         />
         <Stat
           caption="discovery"
           value={discovered ?? "—"}
-          note={discoveryNote(discoveryRow)}
+          note={discoveryFailed ? "did not load" : discoveryNote(discoveryRow)}
           tone={
-            discoveryRow &&
-            (discoveryRow.max_missing_streak > 0 || discoveryRow.total === 0)
+            discoveryFailed ||
+            (discoveryRow &&
+              (discoveryRow.max_missing_streak > 0 || discoveryRow.total === 0))
               ? "warning"
               : "muted"
           }
@@ -528,14 +566,37 @@ export function ProviderDetail() {
 
           <section>
             <h2 className="mb-2 text-sm font-medium">Models</h2>
-            <ProviderModels models={models} loading={catalog.isPending} />
+            {modelsFailed ? (
+              <LoadError
+                what="The models"
+                error={catalog.error}
+                onRetry={() => void catalog.refetch()}
+              />
+            ) : (
+              <ProviderModels models={models} loading={catalog.isPending} />
+            )}
           </section>
 
           <section>
             <h2 className="mb-2 text-sm font-medium">Health</h2>
             <div className="flex flex-col gap-3">
               <ProbePanel providerId={provider.id} />
-              <DiscoveryPanel providerId={provider.id} />
+              {healthFailed && (
+                <LoadError
+                  what="Credential health"
+                  error={health.error}
+                  onRetry={() => void health.refetch()}
+                />
+              )}
+              {discoveryFailed ? (
+                <LoadError
+                  what="The discovery readings"
+                  error={discovery.error}
+                  onRetry={() => void discovery.refetch()}
+                />
+              ) : (
+                <DiscoveryPanel providerId={provider.id} />
+              )}
             </div>
           </section>
         </div>
