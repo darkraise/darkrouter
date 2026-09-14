@@ -75,6 +75,8 @@ type memTokens struct {
 	secrets  map[string]string
 	writes   int
 	disabled map[string]string
+	// failWrites is how many upcoming secret writes fail as a database would.
+	failWrites int
 }
 
 func newMemTokens() *memTokens {
@@ -101,6 +103,10 @@ func (m *memTokens) CredentialSecret(_ context.Context, id string) (string, erro
 func (m *memTokens) ReplaceCredentialSecret(_ context.Context, id, prev, secret string, _ *int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failWrites > 0 {
+		m.failWrites--
+		return errors.New("database is locked")
+	}
 	if s, ok := m.secrets[id]; !ok || s != prev {
 		return fmt.Errorf("%w: credential %s", ErrCredentialChanged, id)
 	}
@@ -231,6 +237,96 @@ func TestRotationIsPersistedBeforeTheOldPairIsDropped(t *testing.T) {
 	tokens.mu.Unlock()
 	if writes != 1 {
 		t.Errorf("persisted %d times, want exactly 1", writes)
+	}
+}
+
+// The vendor has rotated rt-0 to rt-1, and the database refuses the write. The
+// old refresh token is dead at the vendor, so presenting it again is a refusal
+// that disables an account nothing was wrong with.
+func TestARotationThatFailedToPersistIsNotDiscarded(t *testing.T) {
+	a, srv := newAuthServer(t)
+	// Inside the refresh delta, so every call refreshes.
+	a.expiresIn = 30
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1
+	tokens.mu.Unlock()
+	_ = az(context.Background(), blank(t))
+
+	r := blank(t)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if _, disabled := tokens.disabledReason("cred-1"); disabled {
+		t.Fatal("the credential was disabled: the rotated-away refresh token was presented again")
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-2" {
+		t.Errorf("Authorization = %q, want the second rotation's token", got)
+	}
+	stored, err := ParseToken([]byte(tokens.stored("cred-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RefreshToken != "rt-2" {
+		t.Errorf("stored refresh token = %q, want rt-2", stored.RefreshToken)
+	}
+}
+
+// A second rotation lands while the first is still unpersisted, and its own
+// write succeeds. That write covers the first, so nothing is left to retry.
+func TestARotationPersistedOverAnUnpersistedOneClearsIt(t *testing.T) {
+	a, srv := newAuthServer(t)
+	a.expiresIn = 30
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 2 // the first rotation's write and its retry
+	tokens.mu.Unlock()
+	_ = az(context.Background(), blank(t))
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	tokens.mu.Lock()
+	before := tokens.writes
+	tokens.mu.Unlock()
+
+	// at-2 is inside the delta too, so this refreshes once more; a stale
+	// retry of an already-covered pair would add a write of its own first.
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	tokens.mu.Lock()
+	after := tokens.writes
+	tokens.mu.Unlock()
+	if after-before != 1 {
+		t.Errorf("writes on the third call = %d, want 1", after-before)
+	}
+}
+
+// Nothing else writes the pair again once the database recovers, and a
+// restart would load the dead predecessor from the row.
+func TestAnUnpersistedRotationIsRetriedOnTheNextCall(t *testing.T) {
+	_, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1
+	tokens.mu.Unlock()
+	_ = az(context.Background(), blank(t))
+
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := ParseToken([]byte(tokens.stored("cred-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RefreshToken != "rt-1" {
+		t.Errorf("stored refresh token = %q, want the rotation persisted on retry", stored.RefreshToken)
 	}
 }
 
