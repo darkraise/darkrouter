@@ -1,4 +1,4 @@
 data: {"candidates":[{"content":{"parts":[{"text":"From "}],"role":"model"}}]}
 
-data: {"candidates":[{"content":{"parts":[{"text":"Google."}],"role":"model"}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}
+data: {"candidates":[{"content":{"parts":[{"text":"Google."}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}
 

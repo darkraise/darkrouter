@@ -3,12 +3,15 @@ package gemini
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
+
+var errStreamTruncated = fmt.Errorf("upstream stream ended before a finish reason: %w", io.ErrUnexpectedEOF)
 
 // ParseStream reads Gemini's alt=sse stream.
 //
@@ -52,7 +55,9 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		for {
 			raw, err := reader.Next()
 			if errors.Is(err, io.EOF) {
-				closeAll()
+				// A finish reason returns from the loop, so reaching the end
+				// of the body means the candidate never finished.
+				yield(ir.StreamEvent{}, errStreamTruncated)
 				return
 			}
 			if err != nil {

@@ -251,7 +251,7 @@ func TestParseStreamRemembersACallAcrossChunks(t *testing.T) {
 }
 
 func TestParseStreamKeepsThoughtTextNextToItsSignature(t *testing.T) {
-	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true,"thoughtSignature":"sig-1"},{"text":"No.","thoughtSignature":"sig-2"}]}}]}`)
+	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true,"thoughtSignature":"sig-1"},{"text":"No.","thoughtSignature":"sig-2"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)

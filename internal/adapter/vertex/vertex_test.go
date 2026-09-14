@@ -202,7 +202,8 @@ func TestParseStreamDispatchesOnThePrefix(t *testing.T) {
 	anthropicSSE := "event: message_start\n" +
 		`data: {"type":"message_start","message":{"id":"m","model":"claude","usage":{"input_tokens":1}}}` + "\n\n" +
 		"event: content_block_delta\n" +
-		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"A"}}` + "\n\n"
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"A"}}` + "\n\n" +
+		"event: message_stop\n" + `data: {"type":"message_stop"}` + "\n\n"
 	var text string
 	for ev, err := range parseStream(strings.NewReader(anthropicSSE), 1<<20) {
 		if err != nil {
@@ -216,7 +217,7 @@ func TestParseStreamDispatchesOnThePrefix(t *testing.T) {
 		t.Errorf("anthropic stream text = %q", text)
 	}
 
-	geminiSSE := `data: {"candidates":[{"content":{"parts":[{"text":"B"}],"role":"model"}}]}` + "\n\n"
+	geminiSSE := `data: {"candidates":[{"content":{"parts":[{"text":"B"}],"role":"model"},"finishReason":"STOP"}]}` + "\n\n"
 	text = ""
 	for ev, err := range parseStream(strings.NewReader(geminiSSE), 1<<20) {
 		if err != nil {
