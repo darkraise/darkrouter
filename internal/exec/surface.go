@@ -102,6 +102,10 @@ type AttemptCtx struct {
 	// resp is the upstream response, kept so the breaker signal can read its
 	// status and Retry-After whichever path emits it.
 	resp *http.Response
+	// inbound is the client's request context and upstream the attempt's own,
+	// kept so a failed body read is classified by what cancelled it, exactly
+	// as a failed send is.
+	inbound, upstream context.Context
 	// healthDone guards the one breaker signal an attempt may emit. The first
 	// caller wins: a surface reporting a pre-commit fault beats the loop's
 	// deferred record on the way out, and a success reported once the body
@@ -116,6 +120,21 @@ func (ac *AttemptCtx) recordHealth(o adapter.Outcome, resp *http.Response) {
 	}
 	ac.healthDone = true
 	ac.Exec.recordHealthFor(ac.Cand, o, resp)
+}
+
+// readOutcome classifies a failure that happened after the upstream answered:
+// a body that could not be read or parsed, or a stream that failed. Reading
+// the body is cancelled by the same two sources as the send, and they are
+// told apart in the same order classify uses, so a client that hangs up
+// mid-body is never recorded against the provider.
+func (ac *AttemptCtx) readOutcome(err error) adapter.Outcome {
+	if ac.upstream != nil && errors.Is(context.Cause(ac.upstream), errDarkrouterTimeout) {
+		return adapter.OutcomeRetryableProvider
+	}
+	if ac.inbound != nil && errors.Is(ac.inbound.Err(), context.Canceled) {
+		return adapter.OutcomeClientCancelled
+	}
+	return outcomeForParseError(err)
 }
 
 // resetIdle moves the attempt's bound from the pre-commit deadline to

@@ -484,6 +484,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	})
 	defer timer.Stop()
 	ac.Timer = timer
+	ac.inbound, ac.upstream = r.Context(), ctx
 
 	path := PathIR
 	// failBefore is an exit that never reached the provider. It still leaves
@@ -736,7 +737,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 			// A 2xx whose stream fails before commit is classified from the
 			// stream error, not the status line. Anthropic delivers
 			// overloaded_error as an in-stream event under a 200.
-			return adapter.OutcomeRetryableProvider, ac.reclassifyStream(err.Error())
+			return ac.reclassifyStream(err)
 		}
 		if ev.Usage != nil {
 			applyUsage(rec, ev.Usage)
@@ -749,7 +750,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 		if berr := buf.add(ev); berr != nil {
 			// A cap breach is an attempt failure, not a client error: the
 			// provider is misbehaving and another one may not.
-			return adapter.OutcomeRetryableProvider, ac.reclassifyStream(berr.Error())
+			return ac.reclassifyStream(berr)
 		}
 	}
 
@@ -800,14 +801,19 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 }
 
 // reclassifyStream records a pre-commit stream failure against health and the
-// attempt row, and returns the error to serve if this was the last candidate.
-func (ac *AttemptCtx) reclassifyStream(msg string) *ir.Error {
-	ac.recordHealth(adapter.OutcomeRetryableProvider, ac.resp)
-	demoteLastAttempt(ac.Rec, adapter.OutcomeRetryableProvider, false)
+// attempt row, and returns the outcome and the error to serve if this was the
+// last candidate.
+func (ac *AttemptCtx) reclassifyStream(err error) (adapter.Outcome, *ir.Error) {
+	outcome := ac.readOutcome(err)
+	ac.recordHealth(outcome, ac.resp)
+	demoteLastAttempt(ac.Rec, outcome, false)
 	if n := len(ac.Rec.Attempts); n > 0 {
-		ac.Rec.Attempts[n-1].Error = msg
+		ac.Rec.Attempts[n-1].Error = err.Error()
 	}
-	return &ir.Error{Type: ir.ErrAPI, Message: msg}
+	if outcome == adapter.OutcomeClientCancelled {
+		return outcome, errorFor(outcome, err)
+	}
+	return outcome, &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
 }
 
 var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")

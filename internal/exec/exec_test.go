@@ -891,6 +891,67 @@ func TestClientDisconnectIsNotAProviderFailure(t *testing.T) {
 	}
 }
 
+// A client that hangs up after the upstream's headers arrived, while the body
+// is still being read, cancels the read. That failure is the client's on every
+// rendering, not the provider's.
+func TestClientDisconnectDuringTheBodyIsNotAProviderFailure(t *testing.T) {
+	const (
+		partialJSON = `{"id":"x","model":"m",`
+		roleOnly    = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+	)
+	for _, tc := range []struct {
+		name, path, body, contentType, partial string
+		dialect                                edge.Dialect
+	}{
+		{"forwarded unary", "/v1/chat/completions",
+			`{"model":"m","messages":[{"role":"user","content":"ping"}]}`,
+			"application/json", partialJSON, openaiedge.New()},
+		{"forwarded stream", "/v1/chat/completions",
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			"text/event-stream", roleOnly, openaiedge.New()},
+		{"translated unary", "/v1/messages", anthropicPing,
+			"application/json", partialJSON, anthropicedge.New()},
+		{"translated stream", "/v1/messages",
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			"text/event-stream", roleOnly, anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent, release := make(chan struct{}), make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				_, _ = w.Write([]byte(tc.partial))
+				w.(http.Flusher).Flush()
+				close(sent)
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			h, logger := &captureHealth{}, &captureLogger{}
+			e := newExecutorWith(t, up.URL, Deps{Health: h, Log: logger}, 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(httptest.NewRecorder(), r, tc.dialect)
+			}()
+			<-sent
+			time.Sleep(30 * time.Millisecond)
+			cancel()
+			<-done
+
+			if _, s := h.only(t); s.Outcome != adapter.OutcomeClientCancelled {
+				t.Errorf("Outcome = %q, want client_cancelled", s.Outcome)
+			}
+			if got := logger.only(t).Status; got != "cancelled" {
+				t.Errorf("Status = %q, want cancelled", got)
+			}
+		})
+	}
+}
+
 // A Darkrouter-imposed deadline is a provider timeout and must be recorded.
 func TestDarkrouterDeadlineIsAProviderFailure(t *testing.T) {
 	release := make(chan struct{})

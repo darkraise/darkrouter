@@ -100,14 +100,14 @@ var _ SurfaceOp = (*embedOp)(nil)
 // recorded as fatal, which proves the provider reachable without failing over
 // to re-ask a question every model in the chain will refuse.
 func failedParse(ac *AttemptCtx, resp *http.Response, err error) (adapter.Outcome, *ir.Error) {
-	outcome := outcomeForParseError(err)
+	outcome := ac.readOutcome(err)
 	if last := len(ac.Rec.Attempts) - 1; last >= 0 {
 		ac.Rec.Attempts[last].Outcome = string(outcome)
 		ac.Rec.Attempts[last].Error = err.Error()
 	}
 	ac.recordHealth(outcome, resp)
 	var ie *ir.Error
-	if errors.As(err, &ie) {
+	if outcome != adapter.OutcomeClientCancelled && errors.As(err, &ie) {
 		return outcome, ie
 	}
 	return outcome, errorFor(outcome, err)
