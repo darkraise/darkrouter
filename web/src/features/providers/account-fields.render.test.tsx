@@ -26,6 +26,20 @@ describe("the account field", () => {
     expect(screen.getByText(/name\|account\|key/i)).toBeInTheDocument()
   })
 
+  it("offers no bulk import for a credential that is a whole document", () => {
+    // Bulk splits on lines, so a pasted JSON document would become one broken
+    // credential per line of it.
+    render(
+      <AccountFields
+        value={emptyAccounts}
+        onChange={() => {}}
+        field={{ label: "Service account key", placeholder: "{}", multiline: true }}
+      />,
+    )
+    expect(screen.queryByRole("radio", { name: /bulk import/i })).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/service account key/i)).toBeInTheDocument()
+  })
+
   it("reports what was typed into it", async () => {
     const onChange = vi.fn()
     const user = userEvent.setup()

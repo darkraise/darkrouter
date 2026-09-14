@@ -127,6 +127,23 @@ describe("secretFieldFor", () => {
     // done inside the container needs no account at all.
     expect(field.help).toMatch(/Leave this empty/)
   })
+
+  it("asks a signed-request provider for its AWS key pair document", () => {
+    // The sigv4 strategy parses the secret as JSON; a bare access key id
+    // pasted into an "API key" box is refused on every request.
+    const field = secretFieldFor("bedrock", "sigv4")
+    expect(field.label).not.toBe("API key")
+    expect(field.multiline).toBe(true)
+    expect(field.placeholder).toContain("access_key_id")
+    expect(field.placeholder).toContain("secret_access_key")
+  })
+
+  it("asks a service-account provider for the key file", () => {
+    const field = secretFieldFor("vertex", "gcp-sa")
+    expect(field.label).not.toBe("API key")
+    expect(field.multiline).toBe(true)
+    expect(field.placeholder).toContain("service_account")
+  })
 })
 
 describe("a provider whose endpoint carries an account", () => {
