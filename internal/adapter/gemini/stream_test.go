@@ -56,7 +56,7 @@ func TestParseStreamAppendsTextFragments(t *testing.T) {
 
 func TestParseStreamOpensOneTextBlockOnly(t *testing.T) {
 	body := data(`{"candidates":[{"content":{"parts":[{"text":"a"}]}}]}`) +
-		data(`{"candidates":[{"content":{"parts":[{"text":"b"}]}}]}`)
+		data(`{"candidates":[{"content":{"parts":[{"text":"b"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestParseStreamEmitsAFunctionCallWhole(t *testing.T) {
 }
 
 func TestParseStreamCarriesThoughtsAndSignatures(t *testing.T) {
-	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true},{"text":"","thought":true,"thoughtSignature":"sig-1"}]}}]}`)
+	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true},{"text":"","thought":true,"thoughtSignature":"sig-1"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestParseStreamWarnsOnAnUnknownFinishReason(t *testing.T) {
 }
 
 func TestParseStreamIgnoresAnUnparseableChunk(t *testing.T) {
-	body := "data: {not json\n\n" + data(`{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`)
+	body := "data: {not json\n\n" + data(`{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatalf("a bad chunk must not kill the stream: %v", err)

@@ -95,5 +95,16 @@
     "ID": "",
     "Model": "",
     "Warnings": null
+  },
+  {
+    "Type": "message_stop",
+    "Index": 0,
+    "Delta": null,
+    "Usage": null,
+    "StopReason": "end_turn",
+    "Err": null,
+    "ID": "",
+    "Model": "",
+    "Warnings": null
   }
 ]
