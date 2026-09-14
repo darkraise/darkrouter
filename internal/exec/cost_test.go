@@ -1,8 +1,17 @@
 package exec
 
 import (
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
+	bedrockadapter "github.com/darkraise/darkrouter/internal/adapter/bedrock"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -332,6 +341,71 @@ func TestLogCarriesTheGradeOntoTheServedAttempt(t *testing.T) {
 				t.Fatalf("served attempt PriceGrade = %q, want %q: its cost reaches "+
 					"the spend total, so an unmarked row hides the estimate",
 					a.PriceGrade, tc.want)
+			}
+		})
+	}
+}
+
+func TestEachAdapterUsageShapeIsPricedOnce(t *testing.T) {
+	// Every case is 1000 input tokens and 1000 output tokens, 800 of them
+	// reasoning where the provider breaks that out, so every one must cost
+	// 1000*1 + 1000*2 micros. OpenAI counts reasoning inside
+	// completion_tokens, Gemini counts thoughts beside candidates, and
+	// Anthropic and Bedrock count thinking inside output without a breakdown.
+	const (
+		openaiBody = `{"id":"x","model":"m","choices":[{"message":{"content":"ok"},` +
+			`"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":1000,` +
+			`"completion_tokens_details":{"reasoning_tokens":800}}}`
+		geminiBody = `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},` +
+			`"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1000,` +
+			`"candidatesTokenCount":200,"thoughtsTokenCount":800,"totalTokenCount":2000}}`
+		anthropicBody = `{"id":"msg_1","type":"message","role":"assistant","model":"m",` +
+			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",` +
+			`"usage":{"input_tokens":1000,"output_tokens":1000}}`
+		bedrockBody = `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},` +
+			`"stopReason":"end_turn","usage":{"inputTokens":1000,"outputTokens":1000,"totalTokens":2000}}`
+	)
+	for _, tc := range []struct {
+		name          string
+		ad            adapter.Adapter
+		body          string
+		wantReasoning int64
+	}{
+		{"openaicompat", openaicompat.New(), openaiBody, 800},
+		{"gemini", geminiadapter.New(), geminiBody, 800},
+		{"vertex google", vertexadapter.New(), geminiBody, 800},
+		{"anthropic", anthropicadapter.New(), anthropicBody, 0},
+		{"vertex anthropic", vertexadapter.New(), anthropicBody, 0},
+		{"bedrock", bedrockadapter.New(), bedrockBody, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := tc.ad.ParseResponse(&http.Response{
+				StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
+				Body: io.NopCloser(strings.NewReader(tc.body)),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := &store.RequestRecord{FinalProviderID: "p", FinalModel: "m"}
+			applyUsage(rec, &resp.Usage)
+			e := &Executor{deps: Deps{Catalog: catalogOf(catalog.Model{
+				ProviderID: "p", ModelID: "m",
+				Pricing: catalog.Pricing{
+					InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 2_000_000, Known: true,
+				},
+			})}}
+			e.priceRecord(rec)
+
+			if rec.TokensIn != 1000 || rec.TokensOut != 1000 || rec.ReasoningTokens != tc.wantReasoning {
+				t.Errorf("recorded in/out/reasoning = %d/%d/%d, want 1000/1000/%d: the "+
+					"console shows reasoning as a share of the output count",
+					rec.TokensIn, rec.TokensOut, rec.ReasoningTokens, tc.wantReasoning)
+			}
+			if rec.CostMicros == nil {
+				t.Fatal("priced model: CostMicros is nil")
+			}
+			if *rec.CostMicros != 3000 {
+				t.Fatalf("cost = %d micros, want 3000", *rec.CostMicros)
 			}
 		})
 	}
