@@ -240,6 +240,83 @@ describe("Chat mode", () => {
     expect(creates).toHaveLength(1)
   })
 
+  it("saves a second exchange only after the whole first one", async () => {
+    // seq is assigned in arrival order, and one exchange is two writes. A
+    // second exchange finishing while the first user turn is still saving
+    // used to queue its user turn between the first exchange's two.
+    let releaseFirst = () => {}
+    const held = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const order: string[] = []
+    postMock.mockImplementation(async (path: string, body: { content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      order.push(body.content ?? "")
+      if (body.content === "first") await held
+      return { seq: order.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await waitFor(() => expect(order).toEqual(["first"]))
+    await send("second")
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument())
+
+    releaseFirst()
+    await waitFor(() => expect(order).toHaveLength(4))
+    expect(order).toEqual(["first", "an answer", "second", "an answer"])
+  })
+
+  it("resumes an exchange whose save failed part-way before saving the next", async () => {
+    // The user turn was stored and the answer was not. Abandoned, reopening
+    // the conversation shows a question with no reply; retried whole, it
+    // stores the question twice.
+    let answers = 0
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && answers++ === 0) throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+
+    await send("second")
+    await waitFor(() => expect(posts).toHaveLength(5))
+    expect(posts).toEqual([
+      "user:first",
+      "assistant:an answer",
+      "assistant:an answer",
+      "user:second",
+      "assistant:an answer",
+    ])
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+  })
+
+  it("retries an unsaved exchange on request", async () => {
+    let failing = true
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && failing) throw new TypeError("Failed to fetch")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    failing = false
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+    expect(posts).toEqual(["user:first", "assistant:an answer", "assistant:an answer"])
+  })
+
   it("reopens a conversation with its system prompt intact", async () => {
     mounted()
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))

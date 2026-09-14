@@ -25,6 +25,7 @@ import { Composer } from "../composer"
 import { HistoryRail } from "./history-rail"
 import { ConversationHeader } from "./conversation-header"
 import { NewConversationDialog } from "./new-conversation-dialog"
+import { ApiError } from "../../../lib/api"
 import type {
   PlaygroundConversation,
   PlaygroundConversationDetail,
@@ -64,6 +65,24 @@ import { PanelLeft } from "lucide-react"
 /** The name a conversation carries until it has one. Anything else in the
  *  field is the operator's own, and outranks a title derived from the prompt. */
 const UNTITLED = "New chat"
+
+/** The thread an exchange was sent from, as of the render that sent it. */
+type ExchangeOwner = { id: string; selection: number; title: string; config: PlaygroundConfig }
+
+type PendingExchange = {
+  turn: CompletedTurn
+  owner: ExchangeOwner
+  /** The conversation it is stored in, once one exists. */
+  id: string
+  /** Set once the question is stored, so a retry sends only the answer. */
+  userSeq: number | null
+}
+
+/** A network failure or a server fault can pass on a later try; a refusal
+ *  answers the same way every time. */
+function mayPassOnRetry(err: unknown): boolean {
+  return !(err instanceof ApiError) || err.status >= 500
+}
 
 export function ChatMode({ active = true }: { active?: boolean }) {
   const [config, setConfig] = useState<PlaygroundConfig>(emptyConfig)
@@ -127,15 +146,55 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // its turn belongs to however far the ref has moved on by the time it ends.
   const [selection, setSelection] = useState(0)
 
-  async function persistTurn(
-    turn: CompletedTurn,
-    owner: { id: string; selection: number; title: string; config: PlaygroundConfig },
-  ) {
+  // Every completed exchange, oldest first, until it is stored whole. One
+  // drain saves them one exchange at a time: seq is assigned in arrival
+  // order and an exchange is two writes, so saving per write let a second
+  // exchange's question land between the first one's question and answer.
+  // An exchange records how far it got, so a retry resumes rather than
+  // storing its question twice.
+  const backlog = useRef<PendingExchange[]>([])
+  const draining = useRef(false)
+  // How many are held after a failure that may pass on retry. Later exchanges
+  // wait behind them, because saving past one would scramble the order too.
+  const [unsaved, setUnsaved] = useState(0)
+
+  function persistTurn(turn: CompletedTurn, owner: ExchangeOwner) {
+    backlog.current.push({ turn, owner, id: owner.id, userSeq: null })
+    void drain()
+  }
+
+  async function drain() {
+    if (draining.current) return
+    draining.current = true
+    try {
+      for (;;) {
+        const next = backlog.current[0]
+        if (next === undefined) break
+        try {
+          await saveExchange(next)
+        } catch (err) {
+          // useApiMutation has already reported it through the toaster.
+          // Losing a saved turn must not take the transcript on screen down
+          // with it. A refusal -- saving switched off, the conversation
+          // deleted -- will refuse again, so only a failure that can pass is
+          // held for another try.
+          if (mayPassOnRetry(err)) break
+        }
+        backlog.current.shift()
+      }
+    } finally {
+      draining.current = false
+      setUnsaved(backlog.current.length)
+    }
+  }
+
+  async function saveExchange(exchange: PendingExchange) {
+    const { turn, owner } = exchange
     try {
       // Ownership is captured by the render that starts the request. Reading
       // conversationRef here would file a slow answer under whichever thread
       // the operator selected while it was still streaming.
-      let id = owner.id
+      let id = exchange.id
       if (id === "") {
         let pending = creating.current.get(owner.selection)
         if (pending === undefined) {
@@ -152,6 +211,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
         }
         const made = await pending
         id = made.id
+        exchange.id = id
         if (selectionGeneration.current === owner.selection) {
           conversationRef.current = id
           setActiveId(id)
@@ -161,9 +221,13 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           setTitle(made.title)
         }
       }
-      const user = await append.mutateAsync({
-        id, role: "user", content: turn.prompt, requestId: "",
-      })
+      if (exchange.userSeq === null) {
+        const user = await append.mutateAsync({
+          id, role: "user", content: turn.prompt, requestId: "",
+        })
+        exchange.userSeq = user.seq
+      }
+      const userSeq = exchange.userSeq
       const assistant = await append.mutateAsync({
         id, role: "assistant", content: turn.answer, requestId: turn.requestId,
       })
@@ -181,7 +245,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
             preview: turn.prompt,
             messages: [
               ...old.messages,
-              { seq: user.seq, role: "user", content: turn.prompt, request_id: "", created_at: at },
+              { seq: userSeq, role: "user", content: turn.prompt, request_id: "", created_at: at },
               {
                 seq: assistant.seq,
                 role: "assistant",
@@ -193,19 +257,18 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           },
       )
       void queryClient.invalidateQueries({ queryKey: keys.playgroundConversation(id) })
-    } catch {
-      // useApiMutation has already reported it through the toaster. Losing a
-      // saved turn must not take the transcript on screen down with it.
+    } catch (err) {
       // Cleared so a failed create does not make every later send await the
       // same rejected promise.
-      creating.current.delete(owner.selection)
+      if (exchange.id === "") creating.current.delete(owner.selection)
+      throw err
     }
   }
 
   const run = useChatRun(
     config,
     setMetrics,
-    (turn) => void persistTurn(turn, { id: activeId, selection, title, config }),
+    (turn) => persistTurn(turn, { id: activeId, selection, title, config }),
   )
 
   useEffect(() => {
@@ -376,6 +439,19 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           <p role="alert" className="text-sm text-[hsl(var(--destructive))]">
             Could not load the selected conversation. Select another conversation and try again.
           </p>
+        ) : null}
+        {unsaved > 0 ? (
+          <div role="alert" className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-[hsl(var(--destructive))]">
+              {unsaved === 1
+                ? "1 exchange was not saved. Newer exchanges wait for it"
+                : `${unsaved} exchanges were not saved. Newer exchanges wait for them`}
+              , so the stored conversation keeps the order they were sent in.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => void drain()}>
+              Retry saving
+            </Button>
+          </div>
         ) : null}
         <ConversationHeader
           config={config}
