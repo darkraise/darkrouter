@@ -15,6 +15,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/localcli"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -34,10 +35,43 @@ var authStyles = []string{
 	auth.StyleSigV4, auth.StyleGCPSA, auth.StyleOAuth,
 }
 
-func validBaseURL(raw string) bool {
-	u, err := url.Parse(raw)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+// checkEndpoint refuses a row no request could be sent from. Bedrock and
+// Vertex derive their host from region, project and location, so an empty
+// base_url is an endpoint for them once those are set; Vertex needs its
+// project and location in the request path whatever the host.
+func checkEndpoint(row store.ProviderRow) error {
+	if row.Kind == "vertex" && (row.Project == "" || row.Location == "") {
+		return fmt.Errorf("a vertex provider needs a project and a location")
+	}
+	if row.BaseURL == "" {
+		switch row.Kind {
+		case "bedrock":
+			if row.Region == "" {
+				return fmt.Errorf("a bedrock provider with no base_url needs a region")
+			}
+			return nil
+		case "vertex":
+			return nil
+		}
+		return fmt.Errorf("base_url is required")
+	}
+	// The account placeholder is filled per credential, so the shape is
+	// checked with a stand-in: in Snowflake's URL it is the hostname, which
+	// url.Parse refuses while the braces are still there.
+	resolved, err := provider.ResolveBaseURL(row.BaseURL, "account")
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(resolved)
+	if err != nil || u.Host == "" || !slices.Contains(endpointSchemes, u.Scheme) {
+		return fmt.Errorf("base_url must be an %s URL", strings.Join(endpointSchemes, ", "))
+	}
+	return nil
 }
+
+// endpointSchemes are the schemes a provider client can reach: the network,
+// and the local programs whose transports the server registers.
+var endpointSchemes = []string{"http", "https", localcli.AuggieScheme}
 
 // validateProviderRow checks the fields a create or a patch can set. The
 // kind check is skipped when no registry was supplied, which is a test
@@ -46,8 +80,8 @@ func (s *Server) validateProviderRow(row store.ProviderRow) error {
 	if !providerIDPattern.MatchString(row.ID) {
 		return fmt.Errorf("id must match %s", providerIDPattern.String())
 	}
-	if !validBaseURL(row.BaseURL) {
-		return fmt.Errorf("base_url must be an http or https URL")
+	if err := checkEndpoint(row); err != nil {
+		return err
 	}
 	if s.deps.Kinds != nil && !slices.Contains(s.deps.Kinds, row.Kind) {
 		return fmt.Errorf("kind %q is not one this build serves", row.Kind)
@@ -255,9 +289,9 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 			row.AuthStyle = p.Auth.Style
 		}
 	}
-	if row.Kind == "" || row.BaseURL == "" {
+	if row.Kind == "" {
 		writeError(w, http.StatusBadRequest,
-			"kind and base_url are required unless a preset supplies them")
+			"kind is required unless a preset supplies it")
 		return
 	}
 	if row.Name == "" {
@@ -320,6 +354,12 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Priority != nil {
 		next.Priority = *patch.Priority
+	}
+	if patch.Region != nil {
+		next.Region = *patch.Region
+	}
+	if patch.Project != nil {
+		next.Project = *patch.Project
 	}
 	if err := s.validateProviderRow(next); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

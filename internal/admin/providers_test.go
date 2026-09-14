@@ -115,6 +115,64 @@ func TestCreatingAProviderWithNeitherPresetNorKindIsRejected(t *testing.T) {
 	}
 }
 
+func TestEveryShippedEndpointShapeCanBeCreatedFromItsPreset(t *testing.T) {
+	cases := map[string]string{
+		// Region and project are endpoint properties: the URL is derived.
+		"bedrock":          `{"id":"bedrock","preset":"bedrock","region":"us-east-1"}`,
+		"vertex":           `{"id":"vertex","preset":"vertex","project":"p","location":"us-central1"}`,
+		"vertex-anthropic": `{"id":"va","preset":"vertex-anthropic","project":"p","location":"us-east5"}`,
+		// A local program served by its own transport.
+		"auggie": `{"id":"auggie","preset":"auggie"}`,
+		// The account identifier lands in the hostname.
+		"snowflake": `{"id":"snowflake","preset":"snowflake"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAnAuggieProviderCanBePatched(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	// Written as an import leaves it, so the patch is the only thing on trial.
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "auggie", Name: "Auggie", Preset: "auggie", Kind: "openaicompat",
+		BaseURL: "auggie://cli/v1", AuthStyle: "optional", Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/auggie", `{"priority":3}`); w.Code != http.StatusOK {
+		t.Errorf("patch: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAnEndpointThatCannotBeReachedIsRejected(t *testing.T) {
+	cases := map[string]string{
+		"bedrock with no region":  `{"id":"b","preset":"bedrock"}`,
+		"vertex with no project":  `{"id":"v","preset":"vertex","location":"us-central1"}`,
+		"vertex with no location": `{"id":"v","preset":"vertex","project":"p"}`,
+		"custom with no base url": `{"id":"c","kind":"openaicompat"}`,
+		"an unserved scheme":      `{"id":"c","kind":"openaicompat","base_url":"ftp://x/v1"}`,
+		"a broken templated host": `{"id":"c","kind":"openaicompat","base_url":"https://{account_id} x.example"}`,
+		"an unknown placeholder":  `{"id":"c","kind":"openaicompat","base_url":"https://{tenant}.example"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestPatchingAProviderChangesOnlyWhatItNames(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)
