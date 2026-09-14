@@ -172,7 +172,16 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		URL:      cfg.Catalog.FreeCatalogURL,
 		Interval: cfg.Catalog.FreeCatalogInterval,
 		Timeout:  cfg.Catalog.SyncTimeout,
+		OnUpdate: func(c context.Context) {
+			if err := cat.Rebuild(c); err != nil {
+				slog.Warn("catalog rebuild after free catalogue sync failed", "err", err)
+			}
+		},
 	})
+	// The same catalogue reaches the snapshot, whose models carry the free tier
+	// the router vetoes on. Reading only the embedded one there let routing and
+	// the import filter disagree about a tier the sync had regraded.
+	cat.SetFreeTiers(freeSync.Catalog)
 
 	// The price index has no embedded fallback, so the store is wired to the
 	// syncer whether or not the worker runs: with the refresh off it simply
