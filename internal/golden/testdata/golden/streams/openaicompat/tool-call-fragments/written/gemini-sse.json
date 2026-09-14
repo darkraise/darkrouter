@@ -56,10 +56,10 @@
       "modelVersion": "target-model",
       "usageMetadata": {
         "cachedContentTokenCount": 0,
-        "candidatesTokenCount": 0,
-        "promptTokenCount": 0,
+        "candidatesTokenCount": 12,
+        "promptTokenCount": 18,
         "thoughtsTokenCount": 0,
-        "totalTokenCount": 0
+        "totalTokenCount": 30
       }
     }
   }

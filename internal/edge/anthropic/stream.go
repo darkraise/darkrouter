@@ -204,6 +204,9 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			}
 
 		case ir.EventMessageStop:
+			// The message is not ended here: OpenAI-compatible and Bedrock
+			// upstreams report usage after their stop, and message_delta has
+			// to carry it.
 			if ev.StopReason != "" {
 				stop = ev.StopReason
 			}
@@ -213,18 +216,11 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			if err := closeAll(); err != nil {
 				return err
 			}
-			if err := send("message_delta", map[string]any{
-				"delta": map[string]any{"stop_reason": stopReasonWire(stop), "stop_sequence": nil},
-				"usage": usageBody(usage),
-			}); err != nil {
-				return err
-			}
-			return send("message_stop", map[string]any{})
 		}
 	}
 
-	// The sequence ended without a message_stop. Close what is open and end the
-	// message anyway, or the client waits forever.
+	// The message ends once the sequence does, whether or not a message_stop
+	// arrived: without one the client would wait forever.
 	if err := start(); err != nil {
 		return err
 	}

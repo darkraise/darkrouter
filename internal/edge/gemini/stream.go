@@ -240,16 +240,13 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 			}
 
 		case ir.EventMessageStop:
+			// The terminal chunk waits for the sequence to end: OpenAI-compatible
+			// and Bedrock upstreams report usage after their stop, and the
+			// terminal chunk has to carry it.
 			if ev.StopReason != "" {
 				stop = ev.StopReason
 			}
-			if err := flushAllCalls(); err != nil {
-				return err
-			}
-			if err := terminal(finishReasonWire(stop)); err != nil {
-				return err
-			}
-			return cw.close()
+			sendErr = flushAllCalls()
 		}
 
 		if sendErr != nil {
@@ -257,8 +254,9 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		}
 	}
 
-	// The sequence ended without a message_stop. Flush and terminate anyway, or
-	// the array form is never closed and the client sees truncated JSON.
+	// Terminate once the sequence ends, whether or not a message_stop arrived:
+	// without it the array form is never closed and the client sees truncated
+	// JSON.
 	if err := flushAllCalls(); err != nil {
 		return err
 	}
