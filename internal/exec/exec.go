@@ -461,7 +461,18 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	allowForward bool) (res attemptResult) {
 
 	c, rec := ac.Cand, ac.Rec
-	defer func() { ac.recordHealth(res.Outcome, ac.resp) }()
+	defer func() {
+		o := res.Outcome
+		// A fatal exit before anything was sent says nothing about the
+		// provider, and the breaker reads Fatal as proof it answered. The
+		// client decides whether its request renders, so it must not be able
+		// to clear a cooling model's ladder with one it knows will be refused.
+		// ClientCancelled is the outcome that only gives back the probe.
+		if o == adapter.OutcomeFatal && !res.Issued {
+			o = adapter.OutcomeClientCancelled
+		}
+		ac.recordHealth(o, ac.resp)
+	}()
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be

@@ -13,7 +13,9 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 // breakerExecutor is loopExecutor with a breaker whose cooldowns are short
@@ -183,5 +185,40 @@ func TestANoAdapterSkipDoesNotClaimTheProbe(t *testing.T) {
 	}
 	if !b.Available(groqKey) {
 		t.Fatal("the no_adapter skip left the credential's probe claimed")
+	}
+}
+
+func TestARequestThatNeverReachedTheProviderLeavesItsLadderAlone(t *testing.T) {
+	// A client controls whether its request can be rendered. If that failure
+	// counted as the provider answering, any token holder could clear a
+	// cooling model's ladder by sending one it knows will be refused.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream must not be called for a request that failed to render")
+	}))
+	defer up.Close()
+
+	b := health.New(3, 20*time.Millisecond)
+	refusing := &captureAdapter{buildErr: &ir.Error{Type: ir.ErrPayloadTooLarge, Message: "too large"}}
+	src := providertest.NewSource(providertest.Keyed("p", "capture", up.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"capture": refusing},
+		Deps{Health: b, Fleet: b})
+
+	k := health.Key{ProviderID: "p", Model: "m"}
+	for range 3 {
+		b.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	}
+	time.Sleep(40 * time.Millisecond)
+	if w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 from the refused build", w.Code)
+	}
+
+	// The tripped ladder survives, so the next failure after expiry re-cools
+	// at once instead of starting a fresh count of three.
+	if !b.Available(k) {
+		t.Fatal("the refused build left the model's probe claimed")
+	}
+	b.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	if b.Available(k) {
+		t.Fatal("the refused build reset the model's ladder: one failure no longer re-cools it")
 	}
 }
