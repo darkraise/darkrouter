@@ -105,19 +105,6 @@ func TestRunClosesSurvivingServerWhenOneListenerFails(t *testing.T) {
 	_ = l.Close()
 }
 
-func TestAnOutOfBandFailureSurfacesOnHealthz(t *testing.T) {
-	// Rehydration and the other startup steps report through RecordError
-	// rather than Reload, and a failure there would otherwise be invisible.
-	store := config.NewStoreOf(testConfigOf(t, nil))
-	store.RecordError(errRehydrationFailed)
-	if store.LastError() == nil {
-		t.Fatal("an out-of-band failure must be visible through LastError")
-	}
-	if !strings.Contains(store.LastError().Error(), "rehydration") {
-		t.Fatalf("unexpected error %v", store.LastError())
-	}
-}
-
 func waitListening(t *testing.T, addr string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -133,11 +120,44 @@ func waitListening(t *testing.T, addr string) {
 	t.Fatalf("%s never started listening", addr)
 }
 
-var errRehydrationFailed = errRehydration{}
+// Restoring breaker health is best effort: the gateway serves without it, so
+// a failed restore is reported but must not take the process out of rotation.
+func TestAFailedRestoreWarnsWithoutFailingReadiness(t *testing.T) {
+	proxyAddr, adminAddr := freePort(t), freePort(t)
+	s := serverOn(t, proxyAddr, adminAddr)
+	if _, err := s.db.Write.Exec(`DROP TABLE health`); err != nil {
+		t.Fatal(err)
+	}
 
-type errRehydration struct{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitListening(t, adminAddr)
 
-func (errRehydration) Error() string { return "health rehydration: could not read" }
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	if rec.Code != 200 {
+		t.Fatalf("readyz = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	var got struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(got.Warnings, func(w string) bool {
+		return strings.Contains(w, "health rehydration")
+	}) {
+		t.Fatalf("warnings = %q, want the failed restore named", got.Warnings)
+	}
+}
 
 // fakeProvider is the one upstream most fixtures in this package declare. It
 // is never called: the tests exercise the wiring around it.

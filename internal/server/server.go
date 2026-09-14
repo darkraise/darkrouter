@@ -73,8 +73,11 @@ type Server struct {
 	// authorizer a request would, under the same per-account mutex.
 	refresher *auth.RefreshWorker
 
-	started  time.Time
-	warnings []string
+	started time.Time
+	// warningsMu guards warnings: Run appends restore failures while a test
+	// may already be serving /healthz from AdminHandler.
+	warningsMu sync.Mutex
+	warnings   []string
 }
 
 // Catalog exposes the live snapshot holder. The listing handlers read it, and
@@ -526,7 +529,9 @@ func (s *Server) AdminHandler() http.Handler {
 		// Startup warnings first, then the configuration's own. The two have
 		// different lifetimes: a startup warning is fixed for the life of the
 		// process, while cfg.Warnings is replaced by every reload.
+		s.warningsMu.Lock()
 		warnings := append(append([]string{}, s.warnings...), cfg.Warnings...)
+		s.warningsMu.Unlock()
 		// Not a startup warning: the console is claimed by creating the first
 		// account while the process runs, and a warning fixed at startup would
 		// keep telling an operator to claim a console they already claimed.
@@ -602,6 +607,13 @@ func (s *Server) AdminHandler() http.Handler {
 	return writeDeadlines(mux, s.idleTimeout)
 }
 
+func (s *Server) addWarning(w string) {
+	slog.Warn(w)
+	s.warningsMu.Lock()
+	defer s.warningsMu.Unlock()
+	s.warnings = append(s.warnings, w)
+}
+
 // Run starts both listeners and blocks until ctx is cancelled, then drains.
 func (s *Server) Run(ctx context.Context) error {
 	// Derived so every goroutine this function starts is cancelled on any exit
@@ -635,14 +647,15 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 
+	// Not fatal, so warnings rather than RecordError: that slot fails
+	// readiness, and an unreadable health table costs a restart's worth of
+	// accuracy -- refusing to serve over it would be worse.
 	if err := s.persist.Restore(workerCtx); err != nil {
-		// Not fatal: an unreadable health table costs a restart's worth of
-		// accuracy, and refusing to serve over it would be worse.
-		s.store.RecordError(fmt.Errorf("health rehydration: %w", err))
+		s.addWarning(fmt.Sprintf("health rehydration: %v", err))
 	}
 
 	if lu, err := s.db.LoadLastUsed(workerCtx); err != nil {
-		s.store.RecordError(fmt.Errorf("credential usage rehydration: %w", err))
+		s.addWarning(fmt.Sprintf("credential usage rehydration: %v", err))
 	} else {
 		s.breaker.RehydrateLastUsed(lu)
 	}
