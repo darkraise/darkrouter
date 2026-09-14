@@ -44,7 +44,10 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// they do for gemini and anthropic.
 	sysBlocks, sysWarns := xlate.CollectSystemBlocks(req, targetName)
 	warns = append(warns, sysWarns...)
-	if sys := renderSystem(sysBlocks); len(sys) > 0 {
+	marks := &cacheMarks{}
+	sys, sw := renderSystem(sysBlocks, marks)
+	warns = append(warns, sw...)
+	if len(sys) > 0 {
 		body["system"] = sys
 	}
 
@@ -61,7 +64,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if dropPrefill {
 		msgs = msgs[:len(msgs)-1]
 	}
-	messages, mw := renderMessages(msgs)
+	messages, mw := renderMessages(msgs, marks)
 	warns = append(warns, mw...)
 	if dropPrefill {
 		reason := "response prefill is rejected while thinking is on; the turn was dropped"
@@ -126,24 +129,46 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	return hr, warns, nil
 }
 
-func renderSystem(blocks []ir.ContentBlock) []any {
+func renderSystem(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warning) {
+	var warns []ir.Warning
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		if b.Type == ir.BlockText && b.Text != "" {
 			out = append(out, map[string]any{"text": b.Text})
 			if b.CacheControl != nil {
-				out = append(out, cachePoint())
+				cp, w := marks.point(b.CacheControl)
+				warns = append(warns, w...)
+				if cp != nil {
+					out = append(out, cp)
+				}
 			}
 		}
 	}
-	return out
+	return out, warns
 }
 
-// cachePoint is Converse's spelling of a cache breakpoint. It is a block of
-// its own placed after the content it closes, rather than an attribute on
-// that content, and it takes no TTL.
-func cachePoint() map[string]any {
-	return map[string]any{"cachePoint": map[string]any{"type": "default"}}
+// cacheMarks tracks the four-breakpoint limit across a whole request. Converse
+// forwards the markers to the model, which rejects a fifth with a message that
+// does not name the surplus one, so it is dropped here and named.
+type cacheMarks struct{ used int }
+
+// point is Converse's spelling of a cache breakpoint: a block of its own placed
+// after the content it closes, rather than an attribute on that content.
+func (c *cacheMarks) point(cc *ir.CacheControl) (map[string]any, []ir.Warning) {
+	if c.used >= xlate.MaxCacheBreakpoints {
+		return nil, []ir.Warning{{
+			Field: "cache_control", Target: targetName,
+			Reason: "more than four breakpoints; the surplus marker was dropped",
+		}}
+	}
+	c.used++
+	cp := map[string]any{"type": "default"}
+	// Omitted, the TTL is the default five minutes, so a one-hour marker
+	// without it silently caches for a twelfth of the time asked.
+	if cc.TTL == "5m" || cc.TTL == "1h" {
+		cp["ttl"] = cc.TTL
+	}
+	return map[string]any{"cachePoint": cp}, nil
 }
 
 // isAnthropicModel reports whether a Bedrock model id names a Claude model.
@@ -407,7 +432,7 @@ func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warnin
 // first thing the tests assert. It also requires strictly alternating roles,
 // and the IR routinely produces two user turns in a row — a tool-result turn
 // follows a user turn in every agentic loop.
-func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
+func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) {
 	var (
 		warns   []ir.Warning
 		out     = make([]any, 0, len(msgs))
@@ -426,7 +451,7 @@ func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
 		if m.Role == ir.RoleAssistant {
 			role = "assistant"
 		}
-		blocks, w := renderBlocks(m.Content)
+		blocks, w := renderBlocks(m.Content, marks)
 		warns = append(warns, w...)
 		if len(blocks) == 0 {
 			continue
@@ -441,11 +466,15 @@ func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
 	return out, warns
 }
 
-func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
+// renderBlocks renders content, placing cache breakpoints only when marks is
+// non-nil: tool-result content is rendered without them, because
+// ToolResultContentBlock has no cachePoint member.
+func renderBlocks(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warning) {
 	var warns []ir.Warning
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		before := len(out)
+		mark := b.CacheControl
 		switch b.Type {
 		case ir.BlockText:
 			if b.Text != "" {
@@ -476,8 +505,15 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 			if b.ToolResult == nil {
 				continue
 			}
-			inner, w := renderBlocks(b.ToolResult.Content)
+			inner, w := renderBlocks(b.ToolResult.Content, nil)
 			warns = append(warns, w...)
+			// A marker inside the result closes the result as a whole, which
+			// is the nearest place Converse admits one.
+			for _, c := range b.ToolResult.Content {
+				if mark == nil && c.CacheControl != nil {
+					mark = c.CacheControl
+				}
+			}
 			res := map[string]any{
 				"toolUseId": b.ToolResult.ToolUseID,
 				"content":   inner,
@@ -513,8 +549,12 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 		}
 		// A breakpoint closes the block that carried it, so it follows only a
 		// block that was actually rendered.
-		if b.CacheControl != nil && len(out) > before {
-			out = append(out, cachePoint())
+		if marks != nil && mark != nil && len(out) > before {
+			cp, w := marks.point(mark)
+			warns = append(warns, w...)
+			if cp != nil {
+				out = append(out, cp)
+			}
 		}
 	}
 	return out, warns

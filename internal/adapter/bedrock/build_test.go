@@ -743,3 +743,77 @@ func TestClaudeRequestShapeRestrictionsHoldOnBedrock(t *testing.T) {
 		}
 	})
 }
+
+// A cachePoint carries the marker's TTL, counts toward the same four-marker
+// limit Anthropic enforces, and is placed only where Converse admits one:
+// ToolResultContentBlock has no cachePoint member, so a marker inside a tool
+// result closes the tool result itself.
+func TestCachePointsKeepTheirTTLTheBudgetAndValidPlacements(t *testing.T) {
+	hour := &ir.CacheControl{Type: "ephemeral", TTL: "1h"}
+	plain := &ir.CacheControl{Type: "ephemeral"}
+	points := func(blocks []any) []map[string]any {
+		var out []map[string]any
+		for _, b := range blocks {
+			if cp, ok := b.(map[string]any)["cachePoint"].(map[string]any); ok {
+				out = append(out, cp)
+			}
+		}
+		return out
+	}
+
+	req := simple()
+	req.System = []ir.ContentBlock{{Type: ir.BlockText, Text: "preamble", CacheControl: hour}}
+	req.Messages = []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+		{Type: ir.BlockText, Text: "a", CacheControl: plain},
+		{Type: ir.BlockText, Text: "b", CacheControl: plain},
+		{Type: ir.BlockText, Text: "c", CacheControl: plain},
+		{Type: ir.BlockText, Text: "d", CacheControl: plain},
+	}}}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	sys := points(body["system"].([]any))
+	if len(sys) != 1 || sys[0]["ttl"] != "1h" || sys[0]["type"] != "default" {
+		t.Errorf("system cachePoints = %#v, want one with ttl 1h", sys)
+	}
+	msg := points(body["messages"].([]any)[0].(map[string]any)["content"].([]any))
+	if len(msg) != 3 {
+		t.Errorf("message cachePoints = %d, want 3: four markers in all", len(msg))
+	}
+	for _, cp := range msg {
+		if _, set := cp["ttl"]; set {
+			t.Errorf("cachePoint = %#v, want no ttl for a marker without one", cp)
+		}
+	}
+	if !hasWarning(warns, "cache_control") {
+		t.Errorf("surplus marker dropped without a warning: %+v", warns)
+	}
+
+	req = simple()
+	req.Messages = append(req.Messages,
+		ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{
+			Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: "c1", Name: "f"},
+		}}},
+		ir.Message{Role: ir.RoleTool, Content: []ir.ContentBlock{{
+			Type: ir.BlockToolResult, ToolResult: &ir.ToolResult{ToolUseID: "c1", Content: []ir.ContentBlock{
+				{Type: ir.BlockText, Text: "result", CacheControl: hour},
+			}},
+		}}},
+	)
+	body, _, _ = build(t, anthropicTarget(req.Model), req)
+	msgs := body["messages"].([]any)
+	content := msgs[len(msgs)-1].(map[string]any)["content"].([]any)
+	var result map[string]any
+	for _, b := range content {
+		if r, ok := b.(map[string]any)["toolResult"].(map[string]any); ok {
+			result = r
+		}
+	}
+	if result == nil {
+		t.Fatalf("content = %#v, want a toolResult", content)
+	}
+	if inner := points(result["content"].([]any)); len(inner) != 0 {
+		t.Errorf("toolResult content carries cachePoints %#v", inner)
+	}
+	if outer := points(content); len(outer) != 1 || outer[0]["ttl"] != "1h" {
+		t.Errorf("content cachePoints = %#v, want one closing the tool result with ttl 1h", outer)
+	}
+}
