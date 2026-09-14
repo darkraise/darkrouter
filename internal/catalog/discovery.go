@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -402,23 +403,71 @@ func (d *Discoverer) doc() Doc {
 	return FallbackDoc()
 }
 
-// list performs the request and classifies the response.
+// maxListPages bounds how far a listing's cursor is followed. At the smallest
+// default page size in use, Anthropic's twenty, it still admits two thousand
+// models, and it stops an upstream whose cursor never ends from holding a
+// sweep slot forever.
+const maxListPages = 100
+
+// list reads every page of the listing. Anything short of the whole listing
+// is an error: a successful listing that omits a model is what retires it, so
+// a partial one must never be recorded as a success.
 func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID string) ([]Discovered, error) {
 	if pr.Lister != nil {
 		// A kind whose model list does not come from one GET. Bedrock needs
 		// two signed calls against the control-plane host.
 		return pr.Lister.List(ctx, pr)
 	}
+	var out []Discovered
+	seen := map[string]bool{}
+	cursors := map[string]bool{}
+	cursor := ""
+	for page := 0; ; page++ {
+		if page == maxListPages {
+			return nil, fmt.Errorf("listing did not end within %d pages", maxListPages)
+		}
+		models, next, err := d.listPage(ctx, pr, providerID, keyID, cursor)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range models {
+			if !seen[m.ModelID] {
+				seen[m.ModelID] = true
+				out = append(out, m)
+			}
+		}
+		if next == "" {
+			break
+		}
+		if cursors[next] {
+			return nil, fmt.Errorf("listing repeated the page cursor %q", next)
+		}
+		cursors[next] = true
+		cursor = next
+	}
+	if len(out) == 0 {
+		return nil, errors.New("listing reported no models")
+	}
+	return out, nil
+}
+
+// listPage performs one page's request and classifies the response.
+func (d *Discoverer) listPage(ctx context.Context, pr Probe, providerID, keyID,
+	cursor string) ([]Discovered, string, error) {
+
 	req, err := BuildListRequest(ctx, pr)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	if cursor != "" {
+		SetListCursor(req, pr.Kind, cursor)
 	}
 	if err := authorize(ctx, pr, req); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -432,19 +481,19 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 			health.Key{ProviderID: providerID, KeyID: keyID},
 			health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: resp.StatusCode},
 		)
-		return nil, fmt.Errorf("listing rejected the credential: %s", resp.Status)
+		return nil, "", fmt.Errorf("listing rejected the credential: %s", resp.Status)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("listing returned %s", resp.Status)
+		return nil, "", fmt.Errorf("listing returned %s", resp.Status)
 	}
 
 	// Bounded: a listing endpoint that streams unbounded data must not be able
 	// to exhaust memory on a background worker nobody is watching.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return ParseList(pr.Kind, body)
+	return ParseListPage(pr.Kind, body)
 }
 
 // authorize runs a non-static style's authorizer on a generic request. The
