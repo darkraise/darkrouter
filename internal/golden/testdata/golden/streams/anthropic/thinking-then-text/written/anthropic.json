@@ -67,7 +67,7 @@
         "text": "",
         "type": "text"
       },
-      "index": 0,
+      "index": 1,
       "type": "content_block_start"
     },
     "event": "content_block_start"
@@ -78,14 +78,14 @@
         "text": "No.",
         "type": "text_delta"
       },
-      "index": 0,
+      "index": 1,
       "type": "content_block_delta"
     },
     "event": "content_block_delta"
   },
   {
     "data": {
-      "index": 0,
+      "index": 1,
       "type": "content_block_stop"
     },
     "event": "content_block_stop"
