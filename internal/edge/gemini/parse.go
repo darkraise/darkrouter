@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -168,6 +169,12 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		default:
 			req.ToolChoice = &ir.ToolChoice{Mode: "auto"}
 		}
+		// The IR's tool choice holds at most one name, so an allowlist is
+		// kept by forwarding only the functions it permits. Gemini reads it
+		// under ANY and VALIDATED alone.
+		if len(cfg.AllowedFunctionNames) > 0 && (cfg.Mode == "ANY" || cfg.Mode == "VALIDATED") {
+			req.Tools = allowedTools(req.Tools, cfg.AllowedFunctionNames)
+		}
 	}
 	for _, s := range w.SafetySettings {
 		req.Safety = append(req.Safety, ir.SafetySetting{Category: s.Category, Threshold: s.Threshold})
@@ -213,6 +220,18 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 
 // parseToolEntry reads one tools entry: its function declarations become
 // named tools, and any other key is a provider built-in carried whole.
+// allowedTools drops the function declarations an allowlist excludes. A
+// built-in tool carried as an extra is not a function and is kept.
+func allowedTools(tools []ir.Tool, allowed []string) []ir.Tool {
+	out := tools[:0:0]
+	for _, t := range tools {
+		if t.Extra != nil || slices.Contains(allowed, t.Name) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func parseToolEntry(entry map[string]json.RawMessage) ([]ir.Tool, error) {
 	var out []ir.Tool
 	keys := make([]string, 0, len(entry))
