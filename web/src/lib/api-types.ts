@@ -389,6 +389,9 @@ export type ProbeResult = {
   latency_ms: number
   model_count?: number
   error?: string
+  /** Set on a failure when the provider refused the credential itself, as
+   *  opposed to a check that could not complete. */
+  rejected?: boolean
 }
 
 // --- playground ---

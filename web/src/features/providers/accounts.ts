@@ -88,6 +88,16 @@ export async function addCredentials(
         added++
         continue
       }
+      if (!probe.rejected) {
+        // The check could not finish -- a timeout, a rate limit, an outage.
+        // That is no evidence against the key, so it stays, as below.
+        added++
+        failed.push({
+          label: item.label,
+          error: `kept unverified: ${probe.error || "the check did not complete"}`,
+        })
+        continue
+      }
       // The provider answered and refused it. Keeping it would leave a key
       // that fails every request it is ever chosen for.
       await api.del(`/api/providers/${providerId}/keys/${created.id}`)
