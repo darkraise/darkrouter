@@ -33,12 +33,13 @@ const stubRouterAdapter: RouterAdapter = {
 
 function mount(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <RouterAdapterProvider value={stubRouterAdapter}>{ui}</RouterAdapterProvider>
       <Toaster />
     </QueryClientProvider>,
   )
+  return { ...view, client }
 }
 
 beforeEach(() => vi.unstubAllGlobals())
@@ -653,6 +654,51 @@ describe("the settings form", () => {
 
     refetch.open()
     await waitFor(() => expect(screen.getByLabelText("Keep request records for")).toBeEnabled())
+  })
+
+  describe("when another operator changes the configuration mid-edit", () => {
+    // The second answer is what a focus refetch brings back after someone
+    // else saved: a new reference, with no save of this screen's behind it.
+    function changedElsewhere(values: Record<string, string>) {
+      let fetches = 0
+      return () => {
+        fetches += 1
+        const base = cfg()
+        return fetches === 1 ? base : { ...base, values: { ...base.values, ...values } }
+      }
+    }
+
+    it("keeps the unsaved edit and takes the other key's new value", async () => {
+      const { saves } = stubSettingsFetch({
+        config: changedElsewhere({ "policy.retry.max_attempts": "5" }),
+      })
+      const user = userEvent.setup()
+      const { client } = mount(<SettingsScreen />)
+
+      const box = await screen.findByLabelText("Keep request records for")
+      await user.clear(box)
+      await user.type(box, "96h")
+      await act(() => client.refetchQueries({ queryKey: ["config"] }))
+
+      await waitFor(() => expect(screen.getByLabelText("Attempts per request")).toHaveValue("5"))
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+      await user.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(saves).toEqual([{ set: { "log.retention": "96h" } }]))
+    })
+
+    it("says so on a row the other operator changed under the edit", async () => {
+      stubSettingsFetch({ config: changedElsewhere({ "log.retention": "24h0m0s" }) })
+      const user = userEvent.setup()
+      const { client } = mount(<SettingsScreen />)
+
+      const box = await screen.findByLabelText("Keep request records for")
+      await user.clear(box)
+      await user.type(box, "96h")
+      await act(() => client.refetchQueries({ queryKey: ["config"] }))
+
+      expect(await screen.findByText(/^Changed elsewhere to 1 day /)).toBeInTheDocument()
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+    })
   })
 
   it("holds the typed value until the refetch that replaces it has landed", async () => {
