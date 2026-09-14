@@ -251,6 +251,26 @@ describe("the wizard", () => {
     release?.()
   })
 
+  it("does not carry one provider's secrets to another picked after Back", async () => {
+    stub([preset({ id: "groq", name: "Groq" }), preset({ id: "cerebras", name: "Cerebras" })])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText("Label"), "work")
+    await userEvent.type(screen.getByLabelText(/api key/i), "gsk-groq-secret")
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "gsk-bulk")
+    await userEvent.click(screen.getByRole("radio", { name: /single credential/i }))
+    await userEvent.click(screen.getByRole("button", { name: /back/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /cerebras/i }))
+
+    expect(screen.getByLabelText(/api key/i)).toHaveValue("")
+    expect(screen.getByLabelText("Label")).toHaveValue("")
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    expect(screen.getByLabelText(/one per line/i)).toHaveValue("")
+    expect(screen.getByRole("button", { name: /add credential/i })).toBeDisabled()
+  })
+
   it("names each pasted account from its own line", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
