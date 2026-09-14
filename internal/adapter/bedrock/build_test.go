@@ -335,7 +335,10 @@ func TestEmptyToolInputIsAnObject(t *testing.T) {
 	}
 }
 
-func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
+// Converse passes additionalModelRequestFields through to Claude's native
+// request, so a manual budget is Anthropic's own thinking field, as AWS's
+// Claude 4 Converse example spells it.
+func TestReasoningBecomesAThinkingBudgetForAnthropicModels(t *testing.T) {
 	req := simple()
 	req.Reasoning = &ir.Reasoning{Budget: 2048}
 	body, _, warns := build(t, anthropicTarget("us.anthropic.claude-sonnet-4-20250514-v1:0"), req)
@@ -344,9 +347,12 @@ func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
 	if !ok {
 		t.Fatalf("additionalModelRequestFields = %#v", body["additionalModelRequestFields"])
 	}
-	cfg, _ := extra["reasoning_config"].(map[string]any)
+	if cfg, sent := extra["reasoning_config"]; sent {
+		t.Errorf("reasoning_config = %#v, want the thinking field", cfg)
+	}
+	cfg, _ := extra["thinking"].(map[string]any)
 	if cfg["type"] != "enabled" || cfg["budget_tokens"] != float64(2048) {
-		t.Errorf("reasoning_config = %#v", cfg)
+		t.Errorf("thinking = %#v", extra["thinking"])
 	}
 	for _, w := range warns {
 		if w.Field == "reasoning" {
@@ -358,7 +364,7 @@ func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
 	// the same request reasons to the same depth here as it does elsewhere.
 	req.Reasoning = &ir.Reasoning{Effort: "high"}
 	body, _, _ = build(t, anthropicTarget("anthropic.claude-3-7-sonnet-20250219-v1:0"), req)
-	cfg = body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	cfg = body["additionalModelRequestFields"].(map[string]any)["thinking"].(map[string]any)
 	if cfg["budget_tokens"] != float64(32768) {
 		t.Errorf("effort high budget = %v", cfg["budget_tokens"])
 	}
@@ -373,7 +379,7 @@ func TestReasoningBudgetIsClampedBelowMaxTokens(t *testing.T) {
 	req.MaxTokens = &max
 	req.Reasoning = &ir.Reasoning{Budget: 8000}
 	body, _, warns := build(t, anthropicTarget("anthropic.claude-3-7-sonnet-20250219-v1:0"), req)
-	cfg := body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	cfg := body["additionalModelRequestFields"].(map[string]any)["thinking"].(map[string]any)
 	if cfg["budget_tokens"] != float64(3999) {
 		t.Errorf("budget = %v, want 3999", cfg["budget_tokens"])
 	}
@@ -383,14 +389,14 @@ func TestReasoningBudgetIsClampedBelowMaxTokens(t *testing.T) {
 }
 
 func TestReasoningIsWarnedForOtherPublishers(t *testing.T) {
-	// reasoning_config is Anthropic's additional field. Sending it to Nova
+	// thinking is Anthropic's additional field. Sending it to Nova
 	// or Llama is a ValidationException, and silently dropping it hides a
 	// request that reasons less than the client asked.
 	req := simple()
 	req.Reasoning = &ir.Reasoning{Effort: "high"}
 	body, _, warns := build(t, anthropicTarget("amazon.nova-pro-v1:0"), req)
 	if _, ok := body["additionalModelRequestFields"]; ok {
-		t.Errorf("reasoning_config sent to a non-Anthropic model: %#v", body["additionalModelRequestFields"])
+		t.Errorf("thinking sent to a non-Anthropic model: %#v", body["additionalModelRequestFields"])
 	}
 	if !hasWarning(warns, "reasoning") {
 		t.Errorf("no warning named reasoning: %+v", warns)
@@ -569,10 +575,7 @@ func TestReasoningTakesTheAdaptiveShapeOnAdaptiveOnlyModels(t *testing.T) {
 	req.Reasoning = &ir.Reasoning{Budget: 2048}
 	body, _, _ := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-20250514-v1:0"), req)
 	extra := body["additionalModelRequestFields"].(map[string]any)
-	if cfg, _ := extra["reasoning_config"].(map[string]any); cfg["budget_tokens"] != float64(2048) {
-		t.Errorf("reasoning_config = %#v on a manual-capable model", extra["reasoning_config"])
-	}
-	if _, sent := extra["thinking"]; sent {
-		t.Errorf("thinking = %#v sent beside the manual budget", extra["thinking"])
+	if th, _ := extra["thinking"].(map[string]any); th["type"] != "enabled" || th["budget_tokens"] != float64(2048) {
+		t.Errorf("thinking = %#v on a manual-capable model", extra["thinking"])
 	}
 }
