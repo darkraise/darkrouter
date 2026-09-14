@@ -96,6 +96,65 @@ func TestARefusalOfAReplacedSecretDoesNotDisableTheReplacement(t *testing.T) {
 	}
 }
 
+// The vendor rotates as soon as it reads the refresh request. A caller that
+// hangs up before the answer arrives cancelled the exchange, discarding rt-1
+// while rt-0 was already dead — and the next call's invalid_grant disabled the
+// account.
+func TestACallerHangingUpDoesNotLoseTheRotation(t *testing.T) {
+	m, tokens, arrived, release := heldRefresh(t,
+		`{"access_token":"at-1","refresh_token":"rt-1","token_type":"Bearer","expires_in":3600}`)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- az(ctx, blank(t)) }()
+	<-arrived
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the caller was held until the exchange finished after it hung up")
+	}
+	close(release)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if tok, err := ParseToken([]byte(tokens.stored("cred-1"))); err == nil && tok.RefreshToken == "rt-1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stored = %s; the rotation the vendor issued was never persisted",
+				tokens.stored("cred-1"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A caller waiting behind a refresh in flight must be able to give up when its
+// own deadline passes, rather than for as long as the token endpoint stalls.
+func TestAWaiterStopsWaitingAtItsDeadline(t *testing.T) {
+	m, _, arrived, release := heldRefresh(t,
+		`{"access_token":"at-1","refresh_token":"rt-1","token_type":"Bearer","expires_in":3600}`)
+	defer close(release)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	go func() { _ = az(context.Background(), blank(t)) }()
+	<-arrived
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- az(ctx, blank(t)) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("waiter error = %v, want its deadline", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter was held past its deadline by another caller's refresh")
+	}
+}
+
 // A refresh is persisted without reloading the router, so the provider set a
 // request carries can still hold the pair the refresh rotated away. An account
 // rebuilt from that after Forget presented the dead refresh token, which a

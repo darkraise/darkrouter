@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -100,7 +99,11 @@ type wireToken struct {
 // tokenClient is what a caller that supplies none gets. Not http.DefaultClient:
 // that has no timeout, so a token endpoint which accepts the connection and
 // then says nothing hangs any call path whose context carries no deadline.
-var tokenClient = &http.Client{Timeout: 30 * time.Second}
+var tokenClient = &http.Client{Timeout: tokenTimeout}
+
+// tokenTimeout bounds one token exchange, and the renewal that carries one on
+// no caller's context.
+const tokenTimeout = 30 * time.Second
 
 func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Values) (Token, error) {
 	if c == nil {
@@ -195,7 +198,7 @@ func describe(w wireToken) string {
 // — and the credential probe takes the same mutex, spec §5.2, because it goes
 // through this same path rather than a private one.
 type oauthAccount struct {
-	mu  sync.Mutex
+	mu  waitMutex
 	tok Token
 	// secret is the stored value tok was read from or last persisted as. A
 	// write from this account lands only while the row still holds it.
@@ -257,7 +260,7 @@ func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authori
 	m.mu.Lock()
 	acct, ok := m.oauth[c.ID]
 	if !ok {
-		acct = &oauthAccount{tok: tok, secret: c.Secret}
+		acct = &oauthAccount{mu: newWaitMutex(), tok: tok, secret: c.Secret}
 		// The row, not the snapshot the caller resolved from, is where a
 		// refreshed pair lives: persisting one does not reload the router.
 		acct.stale.Store(m.deps.Tokens != nil)
@@ -301,8 +304,26 @@ func mergeBeta(existing []string, beta string) string {
 func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	cfg OAuthConfig, credID string) (string, error) {
 
-	acct.mu.Lock()
-	defer acct.mu.Unlock()
+	if err := acct.mu.lock(ctx); err != nil {
+		return "", err
+	}
+	if !acct.stale.Load() && !acct.unpersisted && !acct.dead && acct.tok.AccessToken != "" &&
+		!acct.tok.Expired(time.Now(), DefaultRefreshDelta) {
+		header := acct.tok.Header()
+		acct.mu.unlock()
+		return header, nil
+	}
+	return detach(ctx, func(ctx context.Context) (string, error) {
+		defer acct.mu.unlock()
+		return m.renew(ctx, acct, cfg, credID)
+	})
+}
+
+// renew brings the account's pair up to date: it retries an unpersisted
+// write, re-reads a stale row, and refreshes an expiring token. Called with
+// the account mutex held, on a context no single caller can cancel.
+func (m *Manager) renew(ctx context.Context, acct *oauthAccount,
+	cfg OAuthConfig, credID string) (string, error) {
 
 	if acct.unpersisted {
 		err := m.persist(ctx, acct, credID, acct.tok)
@@ -392,10 +413,7 @@ func (m *Manager) persist(ctx context.Context, acct *oauthAccount, credID string
 	if err != nil {
 		return err
 	}
-	// WithoutCancel: this runs on a request's context, and a client that hangs
-	// up mid-refresh must not leave the rotated pair unpersisted.
-	err = m.deps.Tokens.ReplaceCredentialSecret(
-		context.WithoutCancel(ctx), credID, acct.secret, string(raw), tok.Unix())
+	err = m.deps.Tokens.ReplaceCredentialSecret(ctx, credID, acct.secret, string(raw), tok.Unix())
 	if err == nil {
 		acct.secret = string(raw)
 		return nil
@@ -412,8 +430,7 @@ func (m *Manager) persist(ctx context.Context, acct *oauthAccount, credID string
 // meaningless for what the row now holds.
 func (m *Manager) refuse(ctx context.Context, acct *oauthAccount, credID string, cause error) error {
 	if m.deps.Tokens != nil {
-		err := m.deps.Tokens.DisableCredential(
-			context.WithoutCancel(ctx), credID, acct.secret, reconnectReason)
+		err := m.deps.Tokens.DisableCredential(ctx, credID, acct.secret, reconnectReason)
 		if errors.Is(err, ErrCredentialChanged) {
 			acct.stale.Store(true)
 			return fmt.Errorf("credential %s: %w", credID, err)
