@@ -142,13 +142,22 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					if !ok {
 						return
 					}
-					// Text and signature ride one delta. A part carrying only
-					// a signature yields an empty thought delta, which is
-					// not content-bearing, so a signature alone never
+					// Text and signature go out as two deltas, text first, as
+					// Anthropic streams them: its writer has no event carrying
+					// both and would keep only the signature. A signature-only
+					// delta is not content-bearing, so a signature alone never
 					// commits the response.
-					d := &ir.Delta{Type: ir.BlockThinking, Thinking: p.Text, Signature: p.ThoughtSignature}
-					if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: d}, nil) {
-						return
+					if p.Text != "" {
+						d := &ir.Delta{Type: ir.BlockThinking, Thinking: p.Text}
+						if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: d}, nil) {
+							return
+						}
+					}
+					if p.ThoughtSignature != "" || p.Text == "" {
+						d := &ir.Delta{Type: ir.BlockThinking, Signature: p.ThoughtSignature}
+						if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: d}, nil) {
+							return
+						}
 					}
 
 				case p.Text != "" || p.ThoughtSignature != "":
