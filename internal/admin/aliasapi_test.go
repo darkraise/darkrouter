@@ -2,9 +2,12 @@ package admin
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/catalog"
 )
 
 func TestAliasWritesAreVisibleThroughBothSurfaces(t *testing.T) {
@@ -150,6 +153,55 @@ func TestModelOverrideWriteReadDelete(t *testing.T) {
 	}
 	if w := do(t, s, cookie, token, "GET", path, ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "{}" {
 		t.Errorf("GET after delete = %d %q, want 200 {}", w.Code, w.Body.String())
+	}
+}
+
+func TestModelOverrideGetReportsTheCatalogCapabilitiesPerProvider(t *testing.T) {
+	// The editor starts from these when no capabilities are overridden. The
+	// stored override is three plain bools, so a baseline read from another
+	// provider, or defaulted to false, would be written as a correction.
+	s, _ := testServerFull(t)
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{
+		{ProviderID: "groq", ModelID: "m", State: catalog.StateLive,
+			Capabilities: catalog.Capabilities{Tools: true, Reasoning: true, Known: true}},
+		{ProviderID: "nebius", ModelID: "m", State: catalog.StateLive,
+			Capabilities: catalog.Capabilities{Vision: true}},
+	}, []string{"groq", "nebius"}))
+	s.deps.Catalog = cat
+	cookie, token := login(t, s)
+
+	type view struct {
+		Capabilities        map[string]bool `json:"capabilities"`
+		CatalogCapabilities map[string]bool `json:"catalog_capabilities"`
+	}
+	get := func(path string) view {
+		t.Helper()
+		w := do(t, s, cookie, token, "GET", path, "")
+		if w.Code != 200 {
+			t.Fatalf("GET %s = %d: %s", path, w.Code, w.Body.String())
+		}
+		var v view
+		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	groq := get("/api/models/groq/m/override")
+	if groq.Capabilities != nil {
+		t.Errorf("capabilities = %v, want absent with no override", groq.Capabilities)
+	}
+	want := map[string]bool{"tools": true, "vision": false, "reasoning": true}
+	if !maps.Equal(groq.CatalogCapabilities, want) {
+		t.Errorf("groq catalog_capabilities = %v, want %v", groq.CatalogCapabilities, want)
+	}
+	want = map[string]bool{"tools": false, "vision": true, "reasoning": false}
+	if got := get("/api/models/nebius/m/override").CatalogCapabilities; !maps.Equal(got, want) {
+		t.Errorf("nebius catalog_capabilities = %v, want %v", got, want)
+	}
+	if got := get("/api/models/groq/unknown/override").CatalogCapabilities; got != nil {
+		t.Errorf("a model the catalog lacks reports catalog_capabilities %v", got)
 	}
 }
 

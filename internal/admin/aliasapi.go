@@ -105,6 +105,16 @@ type overrideBody struct {
 	ContextWindow *int                     `json:"context_window,omitempty"`
 }
 
+// overrideView is the GET shape: the override plus the catalog's own
+// capabilities for this (provider, model). The stored capabilities are three
+// plain bools, so an editor that changes one has to fill in the other two, and
+// the model list folds providers together and cannot say what this one
+// serves. PUT refuses the extra field as unknown.
+type overrideView struct {
+	overrideBody
+	CatalogCapabilities *store.ModelCapabilities `json:"catalog_capabilities,omitempty"`
+}
+
 // validSurfaces is the closed surface vocabulary an override may name.
 var validSurfaces = map[string]bool{
 	string(ir.SurfaceLLM): true, string(ir.SurfaceEmbedding): true,
@@ -120,19 +130,38 @@ func (s *Server) handleGetOverride(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
+	view := overrideView{CatalogCapabilities: s.catalogCapabilities(providerID, modelID)}
 	for _, o := range rows {
 		if o.ProviderID == providerID && o.ModelID == modelID {
-			writeJSON(w, http.StatusOK, overrideBody{
+			view.overrideBody = overrideBody{
 				Surfaces: o.Surfaces, Capabilities: o.Capabilities,
 				ContextWindow: o.ContextWindow,
-			})
-			return
+			}
+			break
 		}
 	}
 	// An absent override is the ordinary state of most catalog rows, so it
-	// is an empty body rather than a 404: browsers log every 404 as an
-	// error, and the console opens this for any model an operator inspects.
-	writeJSON(w, http.StatusOK, overrideBody{})
+	// is a body without override fields rather than a 404: browsers log
+	// every 404 as an error, and the console opens this for any model an
+	// operator inspects.
+	writeJSON(w, http.StatusOK, view)
+}
+
+// catalogCapabilities is what the merged catalog holds for one (provider,
+// model), or nil when it holds nothing. Under a capabilities override it is
+// the override itself, since the override wins the merge.
+func (s *Server) catalogCapabilities(providerID, modelID string) *store.ModelCapabilities {
+	if s.deps.Catalog == nil {
+		return nil
+	}
+	m, ok := s.deps.Catalog.Snapshot().Lookup(providerID, modelID)
+	if !ok {
+		return nil
+	}
+	return &store.ModelCapabilities{
+		Tools: m.Capabilities.Tools, Vision: m.Capabilities.Vision,
+		Reasoning: m.Capabilities.Reasoning,
+	}
 }
 
 func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {

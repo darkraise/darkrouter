@@ -335,6 +335,12 @@ export type ModelOverride = {
   context_window?: number
 }
 
+/** GET only. `catalog_capabilities` is what the merged catalog holds for this
+ *  one provider, absent when the catalog does not list the model there. */
+export type ModelOverrideView = ModelOverride & {
+  catalog_capabilities?: ModelCapabilities
+}
+
 // --- health ---
 
 export type BreakerEntry = {

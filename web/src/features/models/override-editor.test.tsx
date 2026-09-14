@@ -82,7 +82,7 @@ describe("the override editor", () => {
     })
   })
 
-  it("sends a full patch for a genuinely new override, with nothing to merge over", async () => {
+  it("sends no capabilities for a genuinely new override that did not touch them", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
       if ((init as RequestInit)?.method === "PUT") {
         return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
@@ -97,12 +97,77 @@ describe("the override editor", () => {
       const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
       expect(put).toBeDefined()
       const body = JSON.parse((put?.[1] as RequestInit).body as string)
-      expect(body).toEqual({
-        context_window: 32000,
-        capabilities: { tools: false, vision: false, reasoning: false },
-        surfaces: [],
-      })
+      expect(body).toEqual({ context_window: 32000, surfaces: [] })
     })
+  })
+})
+
+describe("the override editor's capabilities without an override", () => {
+  // The stored override is three plain bools that replace what the catalog
+  // holds, so any capabilities the editor sends are written as corrections.
+  function catalogOnly() {
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      if ((init as RequestInit)?.method === "PUT") {
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+      }
+      return new Response(
+        JSON.stringify({ catalog_capabilities: { tools: true, vision: false, reasoning: true } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    return fetchMock
+  }
+
+  function putBody(fetchMock: ReturnType<typeof catalogOnly>) {
+    const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
+    expect(put).toBeDefined()
+    return JSON.parse((put?.[1] as RequestInit).body as string)
+  }
+
+  it("shows what the catalog holds and says nothing about the override", async () => {
+    catalogOnly()
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByRole("switch", { name: /tools/i })).toBeChecked())
+    expect(screen.getByRole("switch", { name: /vision/i })).not.toBeChecked()
+    expect(screen.getByRole("switch", { name: /reasoning/i })).toBeChecked()
+    expect(screen.queryByText(/overridden/i)).not.toBeInTheDocument()
+  })
+
+  it("leaves capabilities out when only the context window changed", async () => {
+    const fetchMock = catalogOnly()
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByRole("switch", { name: /tools/i })).toBeChecked())
+    await userEvent.type(screen.getByLabelText(/context window/i), "32000")
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(putBody(fetchMock)).toEqual({ context_window: 32000, surfaces: [] }))
+  })
+
+  it("carries the catalog's values for the capabilities left untouched", async () => {
+    const fetchMock = catalogOnly()
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    const vision = screen.getByRole("switch", { name: /vision/i })
+    await waitFor(() => expect(screen.getByRole("switch", { name: /tools/i })).toBeChecked())
+    await userEvent.click(vision)
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() =>
+      expect(putBody(fetchMock)).toEqual({
+        capabilities: { tools: true, vision: true, reasoning: true },
+        surfaces: [],
+      }),
+    )
+  })
+
+  it("sends nothing for a capability switched off and back on", async () => {
+    const fetchMock = catalogOnly()
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    const tools = screen.getByRole("switch", { name: /tools/i })
+    await waitFor(() => expect(tools).toBeChecked())
+    await userEvent.click(tools)
+    await userEvent.click(tools)
+    await userEvent.type(screen.getByLabelText(/context window/i), "32000")
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(putBody(fetchMock)).toEqual({ context_window: 32000, surfaces: [] }))
   })
 })
 
