@@ -49,6 +49,24 @@ describe("providerState", () => {
     )
   })
 
+  it("does not call a provider healthy when every credential is switched off", () => {
+    // The router drops disabled credentials, so none of these can be sent to.
+    expect(providerState(provider({ credentials: [cred({ enabled: false })] }))).toBe(
+      "degraded",
+    )
+    expect(
+      providerState(provider({ credentials: [cred(), cred({ id: "k2", enabled: false })] })),
+    ).toBe("healthy")
+  })
+
+  it("ignores a disabled credential's cooldown", () => {
+    expect(
+      providerState(
+        provider({ credentials: [cred(), cred({ id: "k2", enabled: false, cooling: true })] }),
+      ),
+    ).toBe("healthy")
+  })
+
   it("is healthy only when enabled, credentialled and cool", () => {
     expect(providerState(provider())).toBe("healthy")
   })
