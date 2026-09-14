@@ -635,6 +635,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			Path: path, Issued: true}
 	}
 
+	resp.Body = &idleBody{ReadCloser: resp.Body, ac: ac}
 	cw := NewCommitWriter(w)
 	var aerr *ir.Error
 	switch {

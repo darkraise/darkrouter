@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -106,6 +107,8 @@ type AttemptCtx struct {
 	// kept so a failed body read is classified by what cancelled it, exactly
 	// as a failed send is.
 	inbound, upstream context.Context
+	// idleArmed records that idle has replaced the pre-commit deadline.
+	idleArmed bool
 	// healthDone guards the one breaker signal an attempt may emit. The first
 	// caller wins: a surface reporting a pre-commit fault beats the loop's
 	// deferred record on the way out, and a success reported once the body
@@ -147,8 +150,28 @@ func (ac *AttemptCtx) resetIdle() {
 		return
 	}
 	if d := ac.Cfg.Policy.Timeout.Idle; d > 0 {
+		ac.idleArmed = true
 		ac.Timer.Reset(d)
 	}
+}
+
+// idleBody renews the idle bound on every read that returns bytes, so idle
+// limits a gap in the transfer rather than the transfer. A surface that reads
+// a whole body, or copies audio through, would otherwise be cut once idle had
+// passed since its headers however steadily the bytes were arriving. Before
+// idle is armed a read changes nothing: until then the pre-commit deadline
+// bounds the attempt, and a trickle of events must not stretch it.
+type idleBody struct {
+	io.ReadCloser
+	ac *AttemptCtx
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 && b.ac.idleArmed {
+		b.ac.resetIdle()
+	}
+	return n, err
 }
 
 // served marks this attempt as the one that answered: the record names its
