@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -75,10 +76,8 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 	if err := l.get(ctx, p, base+"/foundation-models", &models); err != nil {
 		return nil, err
 	}
-	var profiles struct {
-		Summaries []profileSummary `json:"inferenceProfileSummaries"`
-	}
-	if err := l.get(ctx, p, base+"/inference-profiles", &profiles); err != nil {
+	summaries, err := l.profiles(ctx, p, base)
+	if err != nil {
 		return nil, err
 	}
 
@@ -87,8 +86,8 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 	// id returns a 400 telling the operator to use a profile, which is a worse
 	// error than the model simply not being offered.
 	covered := map[string]bool{}
-	out := make([]catalog.Discovered, 0, len(profiles.Summaries)+len(models.ModelSummaries))
-	for _, pr := range profiles.Summaries {
+	out := make([]catalog.Discovered, 0, len(summaries)+len(models.ModelSummaries))
+	for _, pr := range summaries {
 		if pr.Status != "" && pr.Status != "ACTIVE" {
 			continue
 		}
@@ -113,6 +112,39 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 		out = append(out, catalog.Discovered{ModelID: m.ModelID})
 	}
 	return out, nil
+}
+
+// profiles reads every page of ListInferenceProfiles. ListFoundationModels has
+// no pagination; this call does, and stopping at the first page drops every
+// profile past it from the catalog.
+func (l *Lister) profiles(ctx context.Context, p catalog.Probe, base string) ([]profileSummary, error) {
+	var (
+		out  []profileSummary
+		seen = map[string]bool{}
+		next string
+	)
+	for {
+		q := url.Values{"maxResults": {"1000"}}
+		if next != "" {
+			q.Set("nextToken", next)
+		}
+		var page struct {
+			Summaries []profileSummary `json:"inferenceProfileSummaries"`
+			NextToken string           `json:"nextToken"`
+		}
+		if err := l.get(ctx, p, base+"/inference-profiles?"+q.Encode(), &page); err != nil {
+			return nil, err
+		}
+		out = append(out, page.Summaries...)
+		if page.NextToken == "" {
+			return out, nil
+		}
+		if seen[page.NextToken] {
+			return nil, errors.New("bedrock inference-profile listing repeated a page token")
+		}
+		seen[page.NextToken] = true
+		next = page.NextToken
+	}
 }
 
 func (l *Lister) get(ctx context.Context, p catalog.Probe, url string, into any) error {
