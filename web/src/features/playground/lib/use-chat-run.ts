@@ -99,7 +99,7 @@ export function useChatRun(
   // Bumped by anything that replaces the transcript, so a run that is still
   // waiting on its trace cannot write into the state that succeeded it.
   // stop() deliberately does not bump: a stopped run keeps its half answer
-  // and still reports it.
+  // on screen. Either way the run still reports its turn.
   const generation = useRef(0)
 
   // A functional update, and it has to be: a stream appends many times inside
@@ -274,7 +274,12 @@ export function useChatRun(
     // into the conversation, which is re-rendered as an empty bubble every
     // time it is reopened. A run that finished on its own with an empty
     // answer is still kept -- that is the provider's answer, not an absence.
-    if (!superseded() && (answer !== "" || (!failed && !aborted))) {
+    //
+    // A superseded run reports too. The transcript that replaced it is
+    // another thread's, which is why the generation guards every write into
+    // visible state above; the exchange itself was sent from this one, and
+    // dropping it here loses it from the thread that paid for it.
+    if (answer !== "" || (!failed && !aborted)) {
       onTurn?.({ prompt, answer, requestId: liveRequestId })
     }
   }

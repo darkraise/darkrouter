@@ -114,31 +114,45 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // The create is memoized on its own promise rather than on the id it
   // resolves to: two exchanges completing while the first create is still in
   // flight would both read an empty conversationRef and make two
-  // conversations for one thread.
-  const creating = useRef<Promise<PlaygroundConversation> | null>(null)
+  // conversations for one thread. Keyed by selection, because a thread left
+  // mid-answer still creates its conversation after the next thread has
+  // started, and that create is not the next thread's.
+  const creating = useRef(new Map<number, Promise<PlaygroundConversation>>())
   // Changes whenever the operator chooses which conversation owns the
   // screen. A create may still finish after that choice; it should persist
   // the completed turn, but it must not move the screen back to the thread it
   // created.
   const selectionGeneration = useRef(0)
+  // The same count as of the render a send starts from, which is the thread
+  // its turn belongs to however far the ref has moved on by the time it ends.
+  const [selection, setSelection] = useState(0)
 
-  async function persistTurn(turn: CompletedTurn, ownerId: string) {
+  async function persistTurn(
+    turn: CompletedTurn,
+    owner: { id: string; selection: number; title: string; config: PlaygroundConfig },
+  ) {
     try {
       // Ownership is captured by the render that starts the request. Reading
       // conversationRef here would file a slow answer under whichever thread
       // the operator selected while it was still streaming.
-      let id = ownerId
+      let id = owner.id
       if (id === "") {
-        if (creating.current === null) {
-          creating.current = create.mutateAsync({
-            title: titleRef.current === UNTITLED ? titleFromPrompt(turn.prompt) : titleRef.current,
-            config: configRef.current,
+        let pending = creating.current.get(owner.selection)
+        if (pending === undefined) {
+          // The refs carry a rename made while the answer streamed, but once
+          // another thread has been chosen they hold that thread's title and
+          // settings instead.
+          const onScreen = selectionGeneration.current === owner.selection
+          const title = onScreen ? titleRef.current : owner.title
+          pending = create.mutateAsync({
+            title: title === UNTITLED ? titleFromPrompt(turn.prompt) : title,
+            config: onScreen ? configRef.current : owner.config,
           })
+          creating.current.set(owner.selection, pending)
         }
-        const createGeneration = selectionGeneration.current
-        const made = await creating.current
+        const made = await pending
         id = made.id
-        if (selectionGeneration.current === createGeneration) {
+        if (selectionGeneration.current === owner.selection) {
           conversationRef.current = id
           setActiveId(id)
           // Marked loaded at creation, so the read below does not fetch the row
@@ -184,11 +198,15 @@ export function ChatMode({ active = true }: { active?: boolean }) {
       // saved turn must not take the transcript on screen down with it.
       // Cleared so a failed create does not make every later send await the
       // same rejected promise.
-      creating.current = null
+      creating.current.delete(owner.selection)
     }
   }
 
-  const run = useChatRun(config, setMetrics, (turn) => void persistTurn(turn, activeId))
+  const run = useChatRun(
+    config,
+    setMetrics,
+    (turn) => void persistTurn(turn, { id: activeId, selection, title, config }),
+  )
 
   useEffect(() => {
     if (!active) run.stop()
@@ -257,13 +275,13 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   function startNew() {
     selectionGeneration.current += 1
+    setSelection(selectionGeneration.current)
     // Seeded from the conversation being left rather than from the defaults:
     // the model an operator has been working with is almost always the one
     // they want next, and every value it carries is on screen in the dialog
     // rather than inherited invisibly. Cancel takes none of it.
     setSettingsSeed(config)
     conversationRef.current = ""
-    creating.current = null
     setActiveId("")
     setLoadedId("")
     setTitle(UNTITLED)
@@ -291,6 +309,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   function select(id: string) {
     if (id === activeId) return
     selectionGeneration.current += 1
+    setSelection(selectionGeneration.current)
     conversationRef.current = id
     setActiveId(id)
   }

@@ -347,11 +347,11 @@ describe("running one chat turn", () => {
     expect(result.current.error).toBe("")
   })
   it("does not let a superseded run write into the transcript that replaced it", async () => {
-    // traceWhenWritten takes no signal, so a run whose stream has ended sits
-    // in a wait of up to a second and a half. Reopening a conversation in that
-    // window used to stamp the old run's route, metrics and turn onto the new
-    // one -- which, once Chat mode persists from onTurn, writes one
-    // conversation's turn into another.
+    // A run whose stream has ended can sit in traceWhenWritten's wait of up to
+    // a second and a half. Reopening a conversation in that window used to
+    // stamp the old run's route and metrics onto the new one. The turn itself
+    // is still reported: it was sent from the thread that was left, and the
+    // caller files it under the owner it captured when the send began.
     yields(frame("old answer"))
     let releaseTrace: (v: unknown) => void = () => {}
     traceMock.mockImplementation(
@@ -377,7 +377,7 @@ describe("running one chat turn", () => {
 
     expect(result.current.messages).toEqual([{ role: "user", content: "from last week" }])
     expect(result.current.routes).toEqual({})
-    expect(turns).toEqual([])
+    expect(turns).toEqual([{ prompt: "hi", answer: "old answer", requestId: "01TRACE" }])
     expect(metrics).toHaveLength(metricsAfterLoad)
   })
 
