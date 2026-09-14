@@ -239,20 +239,30 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - id: meta
+      # The only tag pushed by the build step below: an immutable sha tag
+      # nothing pulls by name (compose.prod.yml tracks latest or a version
+      # tag), so a scan failure after push just abandons this digest instead
+      # of exposing it under a reachable tag.
+      - id: candidate
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
-          # latest tracks master; a v-tag also publishes its own semver tags; and
-          # every build gets an immutable sha tag, which is what a rollback pins
-          # to when "latest" has already moved.
+          tags: type=sha,format=short
+
+      # latest, the semver tags and the major.minor tag -- computed now so the
+      # build step can embed correct OCI labels, but not applied to the image
+      # until the promotion step below runs, which only happens once Trivy
+      # has passed.
+      - id: release
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.version != '' }}
             type=raw,value=${{ needs.version.outputs.major_minor }},enable=${{ needs.version.outputs.version != '' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
 
       # linux/amd64 only: the deployment target is an LXC container on a Proxmox
       # host, which is x86_64. Adding linux/arm64 here means QEMU emulation for
@@ -278,15 +288,15 @@ jobs:
           # image is built without it. An operator who wants it builds
           # locally with WITH_AUGGIE=1, which is the Dockerfile's default.
           build-args: |
-            VERSION=${{ needs.version.outputs.version || steps.meta.outputs.version }}
+            VERSION=${{ needs.version.outputs.version || steps.release.outputs.version }}
             WITH_AUGGIE=0
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.candidate.outputs.tags }}
+          labels: ${{ steps.release.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Scan what was actually pushed, by digest, so the report describes the
-      # bytes a deployment will pull rather than a local rebuild of them.
+      # Scan the candidate that was just pushed, by digest, so the report
+      # describes the exact bytes the promotion step below would publish.
       - name: Trivy scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -295,6 +305,23 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+      # Adds the release tags to the digest Trivy just cleared, rather than
+      # rebuilding: imagetools copies the existing manifest list -- SBOM and
+      # provenance attestations included -- so what is published under
+      # latest/the version tags is byte-identical to what was scanned.
+      - name: Promote the scanned image to its release tags
+        if: steps.release.outputs.tags != ''
+        env:
+          TAGS: ${{ steps.release.outputs.tags }}
+          SOURCE: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && args+=(-t "$tag")
+          done <<<"$TAGS"
+          docker buildx imagetools create "${args[@]}" "$SOURCE"
 
   # The tag is created only after the image is in the registry, so a release
   # never points at a version nobody can pull. GITHUB_TOKEN pushes deliberately
