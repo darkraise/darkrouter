@@ -11,6 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -108,6 +109,9 @@ type AttemptCtx struct {
 	// kept so a failed body read is classified by what cancelled it, exactly
 	// as a failed send is.
 	inbound, upstream context.Context
+	// authorize signs a request to this attempt's credential, for a surface
+	// that sends more than the one request the loop sent.
+	authorize auth.Authorizer
 	// idleArmed records that idle has replaced the pre-commit deadline.
 	idleArmed bool
 	// healthDone guards the one breaker signal an attempt may emit. The first

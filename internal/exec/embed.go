@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -18,6 +19,12 @@ import (
 type embedOp struct {
 	d   edge.EmbeddingDialect
 	req *ir.EmbeddingRequest
+
+	// The current attempt's context, target and sub-batch sizes, set by Build.
+	// Attempts run one at a time, so each Build replaces the last attempt's.
+	ctx     context.Context
+	tgt     *adapter.Target
+	batches []int
 }
 
 func (o *embedOp) Dialect() string { return o.d.Name() }
@@ -37,7 +44,33 @@ func (o *embedOp) Build(ctx context.Context, tgt *adapter.Target, ad adapter.Ada
 		// sending a chat body to an embedding endpoint.
 		return nil, nil, fmt.Errorf("adapter %s does not serve embeddings", ad.Kind())
 	}
-	return em.BuildEmbedding(ctx, tgt, o.req)
+	o.ctx, o.tgt, o.batches = ctx, tgt, nil
+	if b, ok := ad.(adapter.EmbeddingBatcher); ok {
+		o.batches = b.EmbeddingBatches(tgt, o.req)
+	}
+	if len(o.batches) == 0 {
+		o.batches = []int{o.req.InputCount()}
+	}
+	return em.BuildEmbedding(ctx, tgt, o.batch(0))
+}
+
+// batch is the request carrying sub-batch i's inputs.
+func (o *embedOp) batch(i int) *ir.EmbeddingRequest {
+	if len(o.batches) == 1 {
+		return o.req
+	}
+	start := 0
+	for _, n := range o.batches[:i] {
+		start += n
+	}
+	end := start + o.batches[i]
+	sub := *o.req
+	if len(o.req.Tokens) > 0 {
+		sub.Tokens = o.req.Tokens[start:end]
+	} else {
+		sub.Input = o.req.Input[start:end]
+	}
+	return &sub
 }
 
 func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) (adapter.Outcome, *ir.Error) {
@@ -49,15 +82,28 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 		}
 	}
 	ac.resetIdle()
-	out, err := em.ParseEmbedding(resp)
-	if err == nil && len(out.Embeddings) != o.req.InputCount() {
-		// Vectors answer inputs by position, so a short or long batch cannot
-		// be matched back to the inputs it was meant to embed.
-		err = fmt.Errorf("embedding response carried %d vectors for %d inputs",
-			len(out.Embeddings), o.req.InputCount())
-	}
+	out, err := o.parse(em, resp, 0)
 	if err != nil {
 		return failedParse(ac, resp, err)
+	}
+	// Nothing is written until every sub-batch has answered, so a failure
+	// part-way through still fails over rather than serving half the vectors.
+	for i := 1; i < len(o.batches); i++ {
+		sub, outcome, aerr := o.fetch(em, ac, i)
+		if aerr != nil {
+			return outcome, aerr
+		}
+		offset := len(out.Embeddings)
+		for _, e := range sub.Embeddings {
+			e.Index += offset
+			out.Embeddings = append(out.Embeddings, e)
+		}
+		out.Usage.InputTokens += sub.Usage.InputTokens
+	}
+	if len(o.batches) > 1 {
+		if err := adapter.ValidateEmbeddings(out.Embeddings); err != nil {
+			return failedParse(ac, resp, err)
+		}
 	}
 
 	// Spec §8. The comparison is against the first candidate the router
@@ -91,6 +137,78 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteEmbedding(cw, out)
 	return adapter.OutcomeSuccess, nil
+}
+
+// parse reads sub-batch i's response.
+func (o *embedOp) parse(em adapter.Embedder, resp *http.Response, i int) (*ir.EmbeddingResponse, error) {
+	out, err := em.ParseEmbedding(resp)
+	if err != nil {
+		return nil, err
+	}
+	// Vectors answer inputs by position, so a short or long batch cannot be
+	// matched back to the inputs it was meant to embed.
+	if len(out.Embeddings) != o.batches[i] {
+		return nil, fmt.Errorf("embedding response carried %d vectors for %d inputs",
+			len(out.Embeddings), o.batches[i])
+	}
+	return out, nil
+}
+
+// fetch sends sub-batch i on the attempt's credential and reads its vectors. A
+// failure is classified as the loop classifies its own send, so a rejected
+// credential or a rate limit on a later sub-batch steps the chain the same
+// way it would on the first.
+func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.EmbeddingResponse, adapter.Outcome, *ir.Error) {
+	fail := func(outcome adapter.Outcome, resp *http.Response, err error, ie *ir.Error) (*ir.EmbeddingResponse, adapter.Outcome, *ir.Error) {
+		if last := len(ac.Rec.Attempts) - 1; last >= 0 {
+			ac.Rec.Attempts[last].Outcome = string(outcome)
+			ac.Rec.Attempts[last].Error = err.Error()
+		}
+		ac.recordFailure(outcome, resp, err)
+		return nil, outcome, ie
+	}
+	hr, _, err := em.BuildEmbedding(o.ctx, o.tgt, o.batch(i))
+	if err == nil {
+		err = makeReplayable(hr)
+	}
+	if err != nil {
+		err = fmt.Errorf("render embedding batch %d of %d: %w", i+1, len(o.batches), err)
+		return fail(adapter.OutcomeFatal, nil, err, errorFor(adapter.OutcomeFatal, err))
+	}
+	if err := applyAuthorizer(o.ctx, hr, ac.authorize); err != nil {
+		return fail(adapter.OutcomeRetryableCredential, nil, err,
+			&ir.Error{Type: ir.ErrAuthentication, Message: msgCredentialUnavailable})
+	}
+	// Each sub-batch waits for its own first byte, which the idle bound set
+	// for the previous body would otherwise have to cover.
+	ac.resetIdle()
+	resp, doErr := ac.Exec.client.Do(hr)
+	ac.resp = resp
+	outcome := ac.Exec.classify(ac.Adapter, ac.inbound, ac.upstream, resp, doErr)
+	if outcome != adapter.OutcomeSuccess {
+		cause := doErr
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodyBytes))
+			resp.Body.Close()
+			if cause == nil {
+				cause = fmt.Errorf("embedding batch %d of %d: upstream returned %s", i+1, len(o.batches), resp.Status)
+			}
+		}
+		ie := errorFor(outcome, cause)
+		if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+			// The loop reads a rate limit off the error type once Respond has
+			// returned, to step to the next credential as a 429 would.
+			ie = &ir.Error{Type: ir.ErrRateLimit, Message: cause.Error()}
+		}
+		return fail(outcome, resp, cause, ie)
+	}
+	resp.Body = &idleBody{ReadCloser: resp.Body, ac: ac}
+	sub, err := o.parse(em, resp, i)
+	if err != nil {
+		outcome, ie := failedParse(ac, resp, err)
+		return nil, outcome, ie
+	}
+	return sub, adapter.OutcomeSuccess, nil
 }
 
 func (o *embedOp) WriteError(w http.ResponseWriter, e *ir.Error) error {
