@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -170,11 +171,15 @@ func (s *Server) credentialView(providerID string, c store.Credential) credentia
 // per-credential rather than per-triple because the settings screen shows one
 // row per credential and "some of its models are cooling" is not a state a
 // checkbox can render.
+//
+// It reads a frozen view rather than calling Available, which claims the
+// half-open probe: a page view never records an outcome, so a claim taken here
+// would shut the credential to every request.
 func (s *Server) cooling(providerID, keyID string) bool {
 	if s.deps.Breaker == nil {
 		return false
 	}
-	return !s.deps.Breaker.Available(healthKey(providerID, keyID, ""))
+	return !s.deps.Breaker.SnapshotAvailability(time.Now()).Available(healthKey(providerID, keyID, ""))
 }
 
 type createProviderBody struct {

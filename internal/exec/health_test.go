@@ -160,3 +160,28 @@ func TestAHealthy200StillResetsTheLadder(t *testing.T) {
 		t.Fatal("a healthy 200 did not reset the failure count")
 	}
 }
+
+// A candidate whose kind has no registered adapter is skipped before any
+// attempt, so nothing records for it. Checking health first would claim the
+// credential's probe on the way past and never give it back.
+func TestANoAdapterSkipDoesNotClaimTheProbe(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream must not be called for an unknown kind")
+	}))
+	defer up.Close()
+
+	fleet := oneKeyFleet()
+	fleet[0].Kind = "martian"
+	var rec captureLogger
+	e, b := breakerExecutor(t, up, fleet, Deps{Log: &rec}, nil)
+
+	b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	time.Sleep(40 * time.Millisecond)
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+	if skips := rec.only(t).Skips; len(skips) != 1 || !strings.HasSuffix(skips[0], ":no_adapter") {
+		t.Fatalf("skips = %v, want one no_adapter skip", skips)
+	}
+	if !b.Available(groqKey) {
+		t.Fatal("the no_adapter skip left the credential's probe claimed")
+	}
+}

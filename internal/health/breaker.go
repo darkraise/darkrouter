@@ -144,24 +144,38 @@ func (b *Breaker) Available(k Key) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// The credential-level entry gates every model the credential serves, so it
-	// is checked first and independently.
-	if k.Model != "" {
-		if !b.availableLocked(Key{ProviderID: k.ProviderID, KeyID: k.KeyID}) {
-			return false
-		}
+	if k.Model == "" {
+		ok, _ := b.availableLocked(k)
+		return ok
 	}
-	return b.availableLocked(k)
+
+	// The credential-level entry gates every model the credential serves, so it
+	// is checked first. Its claim is given back if the model rejects: no attempt
+	// follows a false, so no Record would ever release it.
+	ck := Key{ProviderID: k.ProviderID, KeyID: k.KeyID}
+	ok, claimed := b.availableLocked(ck)
+	if !ok {
+		return false
+	}
+	if ok, _ := b.availableLocked(k); !ok {
+		if claimed {
+			b.m[ck].probing = false
+		}
+		return false
+	}
+	return true
 }
 
-func (b *Breaker) availableLocked(k Key) bool {
-	st, ok := b.m[k]
-	if !ok || st.coolingUntil.IsZero() {
-		return true
+// availableLocked reports whether k may be attempted, and whether this call
+// claimed its half-open probe.
+func (b *Breaker) availableLocked(k Key) (ok, claimed bool) {
+	st, found := b.m[k]
+	if !found || st.coolingUntil.IsZero() {
+		return true, false
 	}
 	now := b.now()
 	if now.Before(st.coolingUntil) {
-		return false
+		return false, false
 	}
 
 	// Expired.
@@ -170,13 +184,13 @@ func (b *Breaker) availableLocked(k Key) bool {
 		st.coolingUntil = time.Time{}
 		st.retryAfterOnly = false
 		b.dirty = true
-		return true
+		return true, false
 	}
 	if st.probing {
-		return false
+		return false, false
 	}
 	st.probing = true
-	return true
+	return true, true
 }
 
 // Record applies one outcome. It is the only place breaker state changes, so
