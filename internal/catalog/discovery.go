@@ -441,7 +441,12 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 	if pr.Lister != nil {
 		// A kind whose model list does not come from one GET. Bedrock needs
 		// two signed calls against the control-plane host.
-		return pr.Lister.List(ctx, pr)
+		//
+		// The client's timeout does not reach a lister's own client, and the
+		// sweep waits on every probe, so the bound travels on the context.
+		lctx, cancel := context.WithTimeout(ctx, d.opts.Timeout)
+		defer cancel()
+		return pr.Lister.List(lctx, pr)
 	}
 	var out []Discovered
 	seen := map[string]bool{}

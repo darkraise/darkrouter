@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/catalog"
 )
@@ -23,7 +24,10 @@ type Lister struct{ client *http.Client }
 
 func NewLister(c *http.Client) *Lister {
 	if c == nil {
-		c = http.DefaultClient
+		// Matches discovery's default probe timeout. http.DefaultClient has
+		// none, and a control plane that accepts a request and never answers
+		// would otherwise hold its caller forever.
+		c = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &Lister{client: c}
 }
