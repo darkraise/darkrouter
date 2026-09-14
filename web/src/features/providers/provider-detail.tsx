@@ -17,8 +17,8 @@ import { useApiMutation } from "../../lib/mutations"
 import {
   keys,
   useDiscoveryHealth,
-  useModels,
   usePresets,
+  useProviderModels,
   useProviderHealth,
   useProviders,
   useUsage,
@@ -282,7 +282,7 @@ export function ProviderDetail() {
   // they exist. The condition is read off the response itself, so the fast
   // poll stops the moment the first model arrives rather than running for as
   // long as the page is open.
-  const catalog = useModels({
+  const catalog = useProviderModels(id, {
     refetchInterval: (query) => {
       const served = (query.state.data?.models ?? []).some((m) => m.providers.includes(id))
       return awaitingModels(providers.data?.providers ?? [], id) && !served

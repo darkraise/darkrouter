@@ -191,6 +191,24 @@ export function useModels(extra?: Extra<CatalogResponse>) {
   })
 }
 
+/**
+ * The catalogue as one provider serves it. The unnarrowed list folds every
+ * provider's row for a model into one and keeps the first provider's price and
+ * capabilities, which is the wrong answer on any one provider's own page.
+ * Under `models`, so everything that invalidates the catalogue reaches it too.
+ */
+export function useProviderModels(provider: string, extra?: Extra<CatalogResponse>) {
+  return useQuery({
+    queryKey: [...keys.models, "provider", provider],
+    queryFn: ({ signal }) =>
+      api.get<CatalogResponse>(`/api/models?provider=${encodeURIComponent(provider)}`, {
+        signal,
+      }),
+    refetchInterval: POLL.slow,
+    ...extra,
+  })
+}
+
 export function useAliases(extra?: Extra<Aliases>) {
   return useQuery({
     queryKey: keys.aliases,
