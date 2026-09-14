@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -689,6 +690,60 @@ func TestOptingInClearsTheVeto(t *testing.T) {
 	}
 	if rules.Curated == nil || !rules.Curated("sanctioned") {
 		t.Error("the opt-in must leave the curated rule intact")
+	}
+}
+
+type fakeAuthResolver struct {
+	header string
+}
+
+func (f fakeAuthResolver) For(context.Context, auth.Target, auth.Credential) (auth.Authorizer, error) {
+	return func(_ context.Context, r *http.Request) error {
+		r.Header.Set("Authorization", f.header)
+		return nil
+	}, nil
+}
+
+func TestSweepAuthorizesAnOAuthListing(t *testing.T) {
+	// anthropic-oauth lists through the generic GET. Static auth writes
+	// nothing for the oauth style, so an authorizer that is resolved but never
+	// run sends the listing unauthenticated, and the 401 cools a working
+	// subscription credential on every sweep.
+	var got atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Store(r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "Bearer oauth-access" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"claude-x"}],"has_more":false}`))
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "sub")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "sub", Kind: "anthropic", Preset: "anthropic-oauth", BaseURL: srv.URL + "/v1",
+		Credentials: []provider.Credential{{ID: "k", Secret: `{"access_token":"t"}`, Enabled: true}},
+	}}}
+	h := &fakeHealth{}
+	NewDiscoverer(db, src, NewStore(db, src), h, DiscoveryOptions{
+		Auth: fakeAuthResolver{header: "Bearer oauth-access"},
+	}).SweepOnce(context.Background())
+
+	if v := got.Load(); v != "Bearer oauth-access" {
+		t.Errorf("listing sent Authorization %v, want the authorizer's header", v)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.signals) != 0 {
+		t.Errorf("recorded %+v against a credential the authorizer made valid", h.signals)
+	}
+	rows, err := db.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ModelID != "claude-x" {
+		t.Errorf("rows = %+v, want the listed model", rows)
 	}
 }
 
