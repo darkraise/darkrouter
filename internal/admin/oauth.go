@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -199,7 +200,9 @@ func (s *Server) completeOAuth(ctx context.Context, code, state, sessionID strin
 	if err != nil {
 		return "", "", "", err
 	}
-	s.reloadProviders(context.WithoutCancel(ctx))
+	if err := s.reloadProviders(context.WithoutCancel(ctx)); err != nil {
+		return "", "", "", err
+	}
 	return credID, label, tok.Account, nil
 }
 
@@ -209,6 +212,8 @@ func statusForOAuth(err error) int {
 	switch {
 	case err == nil:
 		return http.StatusOK
+	case errors.Is(err, errRoutingNotUpdated):
+		return http.StatusInternalServerError
 	case strings.Contains(err.Error(), "token endpoint"):
 		return http.StatusBadGateway
 	}
