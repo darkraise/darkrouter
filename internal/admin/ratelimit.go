@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"container/list"
 	"math"
 	"net"
 	"sync"
@@ -18,9 +19,11 @@ const (
 	// a flood from many addresses would otherwise be a CPU denial of service
 	// long before any bucket empties.
 	loginConcurrency = 4
-	// limiterMaxBuckets bounds the address map. Past it, full buckets are
-	// dropped; an address that has not tried recently costs nothing to
-	// recreate.
+	// limiterMaxBuckets bounds the address map. Past it, the address seen
+	// least recently is dropped: one that has not tried recently costs little
+	// to recreate, and an address can only be pushed out by this many others
+	// arriving after it — a sender with that many addresses already has that
+	// many buckets.
 	limiterMaxBuckets = 4096
 )
 
@@ -34,10 +37,14 @@ type loginLimiter struct {
 	now   func() time.Time
 
 	mu      sync.Mutex
-	buckets map[string]*bucket
+	buckets map[string]*list.Element
+	// recency orders the buckets most recently seen first, so making room is
+	// one removal rather than a scan of every address under the lock.
+	recency *list.List
 }
 
 type bucket struct {
+	addr   string
 	tokens float64
 	last   time.Time
 }
@@ -47,7 +54,8 @@ func newLoginLimiter(rate, burst float64, concurrency int) *loginLimiter {
 		rate: rate, burst: burst,
 		sem:     make(chan struct{}, concurrency),
 		now:     time.Now,
-		buckets: map[string]*bucket{},
+		buckets: map[string]*list.Element{},
+		recency: list.New(),
 	}
 }
 
@@ -58,14 +66,19 @@ func (l *loginLimiter) take(addr string) (ok bool, retryAfter time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	b, found := l.buckets[addr]
-	if !found {
+	el, found := l.buckets[addr]
+	if found {
+		l.recency.MoveToFront(el)
+	} else {
 		if len(l.buckets) >= limiterMaxBuckets {
-			l.evictFull(now)
+			oldest := l.recency.Back()
+			l.recency.Remove(oldest)
+			delete(l.buckets, oldest.Value.(*bucket).addr)
 		}
-		b = &bucket{tokens: l.burst, last: now}
-		l.buckets[addr] = b
+		el = l.recency.PushFront(&bucket{addr: addr, tokens: l.burst, last: now})
+		l.buckets[addr] = el
 	}
+	b := el.Value.(*bucket)
 	b.tokens = math.Min(l.burst, b.tokens+now.Sub(b.last).Seconds()*l.rate)
 	b.last = now
 	if b.tokens < 1 {
@@ -74,16 +87,6 @@ func (l *loginLimiter) take(addr string) (ok bool, retryAfter time.Duration) {
 	}
 	b.tokens--
 	return true, 0
-}
-
-// evictFull drops every bucket that has refilled completely. Called with the
-// lock held.
-func (l *loginLimiter) evictFull(now time.Time) {
-	for addr, b := range l.buckets {
-		if b.tokens+now.Sub(b.last).Seconds()*l.rate >= l.burst {
-			delete(l.buckets, addr)
-		}
-	}
 }
 
 // acquire claims one of the global verification slots without waiting. The
