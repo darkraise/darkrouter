@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -168,6 +169,34 @@ func TestWriteStreamReassemblesAFunctionCall(t *testing.T) {
 	args, ok := call["args"].(map[string]any)
 	if !ok || args["x"].(float64) != 1 {
 		t.Errorf("args = %#v; fragments must be reassembled into one object", call["args"])
+	}
+}
+
+func TestWriteStreamEndsATruncatedFunctionCallAsValidJSON(t *testing.T) {
+	cases := []struct {
+		stop ir.StopReason
+		want string
+	}{
+		{ir.StopMaxTokens, "MAX_TOKENS"},
+		{ir.StopToolUse, "MALFORMED_FUNCTION_CALL"},
+	}
+	for _, tc := range cases {
+		got := arrayChunks(t, []ir.StreamEvent{
+			{Type: ir.EventMessageStart, ID: "r", Model: "m"},
+			{Type: ir.EventBlockStart, Index: 0, Delta: &ir.Delta{
+				Type: ir.BlockToolUse, ToolID: "call_a", ToolName: "weather"}},
+			{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{
+				Type: ir.BlockToolUse, ToolInput: `{"city":`}},
+			{Type: ir.EventMessageStop, StopReason: tc.stop},
+		}, nil)
+		last := got[len(got)-1]["candidates"].([]any)[0].(map[string]any)
+		if last["finishReason"] != tc.want {
+			t.Errorf("stop %s: final chunk = %v, want finishReason %s", tc.stop, last, tc.want)
+		}
+		if strings.Contains(fmt.Sprint(got), "functionCall") {
+			t.Errorf("stop %s: chunks = %v; a call with unparseable args must not reach the client",
+				tc.stop, got)
+		}
 	}
 }
 
