@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -38,31 +37,36 @@ const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 // empty and always performs the exchange, which puts the decision here where
 // spec §4.2 asks for it — and where a test can reach it.
 type gcpSource struct {
-	mu     sync.Mutex
-	newSrc func() oauth2.TokenSource
+	mu     waitMutex
+	newSrc func(context.Context) oauth2.TokenSource
 	tok    *oauth2.Token
 	delta  time.Duration
 	now    func() time.Time
 }
 
 func (g *gcpSource) Token(ctx context.Context) (string, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
+	if err := g.mu.lock(ctx); err != nil {
+		return "", err
+	}
 	if g.tok != nil && g.tok.AccessToken != "" {
 		if g.tok.Expiry.IsZero() || g.now().Add(g.delta).Before(g.tok.Expiry) {
-			return g.tok.AccessToken, nil
+			tok := g.tok.AccessToken
+			g.mu.unlock()
+			return tok, nil
 		}
 	}
-	tok, err := g.newSrc().Token()
-	if err != nil {
-		// The wrapper's message names the exchange; oauth2's own error carries
-		// the endpoint's response body, which is the useful half. Neither
-		// carries the key.
-		return "", fmt.Errorf("service-account token exchange failed: %w", err)
-	}
-	g.tok = tok
-	return tok.AccessToken, nil
+	return detach(ctx, func(ctx context.Context) (string, error) {
+		defer g.mu.unlock()
+		tok, err := g.newSrc(ctx).Token()
+		if err != nil {
+			// The wrapper's message names the exchange; oauth2's own error
+			// carries the endpoint's response body, which is the useful half.
+			// Neither carries the key.
+			return "", fmt.Errorf("service-account token exchange failed: %w", err)
+		}
+		g.tok = tok
+		return tok.AccessToken, nil
+	})
 }
 
 // gcpSA resolves a service-account credential.
@@ -85,15 +89,18 @@ func (m *Manager) gcpSA(ctx context.Context, t Target, c Credential) (Authorizer
 	m.mu.Lock()
 	src, ok := m.gcp[key]
 	if !ok {
-		// WithoutCancel: the context handed to For is a request's, and a source
-		// built from it would stop working the moment that request finished —
-		// every later refresh failing with "context canceled" on a credential
-		// that is perfectly fine.
-		srcCtx := context.WithoutCancel(ctx)
+		// The JWT exchange posts through whatever client the context names and
+		// ignores the context otherwise, so the client's own timeout is the
+		// only bound it has. Unnamed, oauth2 falls back to http.DefaultClient,
+		// which has none.
+		client := boundedClient(m.deps.HTTP)
 		src = &gcpSource{
-			newSrc: func() oauth2.TokenSource { return cfg.TokenSource(srcCtx) },
-			delta:  DefaultRefreshDelta,
-			now:    time.Now,
+			mu: newWaitMutex(),
+			newSrc: func(ctx context.Context) oauth2.TokenSource {
+				return cfg.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, client))
+			},
+			delta: DefaultRefreshDelta,
+			now:   time.Now,
 		}
 		m.gcp[key] = src
 	}
@@ -107,6 +114,19 @@ func (m *Manager) gcpSA(ctx context.Context, t Target, c Credential) (Authorizer
 		r.Header.Set("Authorization", "Bearer "+tok)
 		return nil
 	}, nil
+}
+
+// boundedClient is c with a timeout, or the bounded fallback when c is nil.
+func boundedClient(c *http.Client) *http.Client {
+	if c == nil {
+		return tokenClient
+	}
+	if c.Timeout > 0 {
+		return c
+	}
+	bounded := *c
+	bounded.Timeout = tokenTimeout
+	return &bounded
 }
 
 // fingerprint keys the cache on the credential's content as well as its id, so
