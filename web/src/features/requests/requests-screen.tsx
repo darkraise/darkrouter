@@ -54,6 +54,20 @@ export function newerCount(firstPage: RequestRow[], heldNewestId: string): numbe
   return i === -1 ? firstPage.length : i
 }
 
+/** `next` with anything already in `existing` dropped, by id.
+ *
+ * A page fetched from a cursor minted against one snapshot of `held` can
+ * still overlap it when the log moved between the two -- the frozen page and
+ * the cursor it ends on come from different polls whenever a newer request
+ * lands before Load more is first clicked. Dropping the overlap here is a
+ * second line of defence behind pinning that cursor to the frozen page: it
+ * also covers a retention sweep or any other way the same id could reappear.
+ */
+export function dedupeAppend(existing: RequestRow[], next: RequestRow[]): RequestRow[] {
+  const seen = new Set(existing.map((r) => r.id))
+  return next.filter((r) => !seen.has(r.id))
+}
+
 /** Distinct values for a combobox, drawn from what the log actually holds. */
 /** What a filter offers: the values on this page, then everything else the
  *  gateway knows, each once. Page values lead because they are the ones with
@@ -98,13 +112,26 @@ export function RequestsScreen() {
   // Pages accumulate: the operator is scrolling a log, and a "next page" that
   // swapped the table would lose their place and make the cursor pointless.
   const [older, setOlder] = useState<RequestRow[]>([])
-  const [cursor, setCursor] = useState<string | null>(null)
+  // undefined: no page has been fetched past the frozen first one, so paging
+  // follows that first page's own cursor (held.nextCursor) rather than
+  // whatever the live, still-polling `first` query holds by the time Load
+  // more is clicked. null is that first page's cursor once fetched and found
+  // to carry no further page; a string is a page fetched with another one
+  // after it. Collapsing "not yet paged" and "exhausted" into one null, as a
+  // plain `cursor ?? first.data?.next_cursor` fallback does, is what let the
+  // exhausted state fall back to the first page's cursor forever.
+  const [cursor, setCursor] = useState<string | null | undefined>(undefined)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
-  // The first page the reader is currently looking at, frozen. `null` means
-  // "not yet loaded" — distinct from an empty result set, which would
-  // otherwise look identical and re-freeze forever on every poll.
-  const [held, setHeld] = useState<RequestRow[] | null>(null)
+  // The first page the reader is currently looking at, frozen together with
+  // the cursor it ends on. `null` means "not yet loaded" — distinct from an
+  // empty result set, which would otherwise look identical and re-freeze
+  // forever on every poll. Freezing the cursor alongside the rows is what
+  // keeps the first Load more paging from the boundary those rows actually
+  // end at, rather than from wherever a live poll has since moved it.
+  const [held, setHeld] = useState<{ requests: RequestRow[]; nextCursor: string | null } | null>(
+    null,
+  )
 
   const first = useRequests({ ...apiFilters(filters), limit: "50" })
   // The filter vocabularies. Cheap: all three are already cached by the
@@ -132,17 +159,21 @@ export function RequestsScreen() {
   if (filterKey !== pagedUnder) {
     setPagedUnder(filterKey)
     setOlder([])
-    setCursor(null)
+    setCursor(undefined)
     setHeld(null)
     setLoadingMore(false)
     setLoadMoreError(null)
-  } else if (first.data && (held === null || held.length === 0) && held !== first.data.requests) {
+  } else if (
+    first.data &&
+    (held === null || held.requests.length === 0) &&
+    held?.requests !== first.data.requests
+  ) {
     // An empty first load must keep re-freezing on every poll, same as
     // `null`: freezing `[]` once would leave the very first row that ever
     // arrives uncounted and undisplayed until something else forced a reload.
     // Each poll brings a new array, which is what stops this repeating
     // against the one already held.
-    setHeld(first.data.requests)
+    setHeld({ requests: first.data.requests, nextCursor: first.data.next_cursor ?? null })
   }
 
   useEffect(() => {
@@ -173,7 +204,10 @@ export function RequestsScreen() {
   }
 
   async function loadMore() {
-    const from = cursor ?? first.data?.next_cursor
+    // Before the first page is fetched, page from where the frozen first
+    // page ends -- not from `first.data?.next_cursor`, which keeps moving as
+    // the live query polls and can by now sit past rows `held` never showed.
+    const from = cursor === undefined ? held?.nextCursor : cursor
     if (!from || loadingMore) return
     const requestedUnder = filterKey
     setLoadingMore(true)
@@ -183,7 +217,7 @@ export function RequestsScreen() {
         `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
       )
       if (latestFilterKey.current !== requestedUnder) return
-      setOlder((p) => [...p, ...page.requests])
+      setOlder((p) => [...p, ...dedupeAppend([...(held?.requests ?? []), ...p], page.requests)])
       setCursor(page.next_cursor ?? null)
     } catch (err) {
       if (latestFilterKey.current !== requestedUnder) return
@@ -208,12 +242,12 @@ export function RequestsScreen() {
     void navigate({ to: "/requests", search: true })
   }
 
-  const pageRows = [...(held ?? []), ...older]
+  const pageRows = [...(held?.requests ?? []), ...older]
   const rows = pageRows.map(facetRow)
   // navigate is stable for the router's life, so the columns build once.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const columns = useMemo(() => buildColumns(openTrace), [])
-  const more = cursor ?? first.data?.next_cursor
+  const more = cursor === undefined ? held?.nextCursor : cursor
   const filtered = Object.values(filters).some((v) => v !== "")
 
   // The page's own values first — those are the ones with traffic behind them
@@ -230,7 +264,7 @@ export function RequestsScreen() {
     optionsFrom(pageRows, "alias"),
     aliases.data ? Object.keys(aliases.data) : [],
   )
-  const newer = newerCount(first.data?.requests ?? [], held?.[0]?.id ?? "")
+  const newer = newerCount(first.data?.requests ?? [], held?.requests?.[0]?.id ?? "")
 
   return (
     <>
@@ -330,7 +364,14 @@ export function RequestsScreen() {
           </Button>
         )}
         {newer > 0 && (
-          <Button variant="secondary" size="sm" onClick={() => first.data && setHeld(first.data.requests)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              first.data &&
+              setHeld({ requests: first.data.requests, nextCursor: first.data.next_cursor ?? null })
+            }
+          >
             {newer} newer
           </Button>
         )}

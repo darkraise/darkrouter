@@ -133,6 +133,25 @@ describe("a requests screen opened while empty", () => {
   })
 })
 
+describe("dedupeAppend", () => {
+  it("drops a row already displayed, by id", async () => {
+    const { dedupeAppend } = await import("./requests-screen")
+    // row() defaults ts_ms to Date.now(), so r0 is built once and reused --
+    // two separate calls for "the same" row would not be reference-equal
+    // and would make the comparison below flaky.
+    const r0 = row({ id: "r0" })
+    expect(
+      dedupeAppend([row({ id: "r1" })], [row({ id: "r1", model: "dup" }), r0]),
+    ).toEqual([r0])
+  })
+
+  it("keeps everything when nothing overlaps", async () => {
+    const { dedupeAppend } = await import("./requests-screen")
+    const r0 = row({ id: "r0" })
+    expect(dedupeAppend([row({ id: "r1" })], [r0])).toEqual([r0])
+  })
+})
+
 describe("what a filter offers", () => {
   it("puts the page's own values first, then everything else known", async () => {
     // A menu built from the loaded rows can only offer what is already on
@@ -313,5 +332,61 @@ describe("loading older requests", () => {
     // Given a beat to arrive; nothing should happen.
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.queryByText("stale-model")).toBeNull()
+  })
+
+  it("stops offering Load more once the last page arrives", async () => {
+    // The handler omits next_cursor on a short page. Falling back to the
+    // first page's cursor whenever the paging state reads as "none yet"
+    // cannot tell that apart from "exhausted" -- both used to be null.
+    let olderCalls = 0
+    mockByPath((url) => {
+      if (!url.includes("cursor=")) return json({ requests: [row({ id: "r1" })], next_cursor: "c1" })
+      olderCalls++
+      return json({ requests: [row({ id: "r0" })] })
+    })
+    await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(screen.queryByRole("button", { name: /load more/i })).toBeNull())
+
+    // Nothing left to click, and the one page that was fetched stays fetched
+    // once: a poll of the first page must not resurrect the button.
+    expect(olderCalls).toBe(1)
+  })
+
+  it("does not repeat rows when newer requests arrived after the first page froze", async () => {
+    // `held` freezes the first successful page; a background poll can still
+    // land before Load more is clicked, with a newer top row and a cursor
+    // that now sits one row lower than the one the frozen page ends on.
+    // Load more has to fetch from the cursor the displayed rows end at, not
+    // from whatever the live query holds by the time it is clicked.
+    let firstCalls = 0
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      if (!url.includes("cursor=")) {
+        firstCalls++
+        if (firstCalls === 1) {
+          return json({ requests: [row({ id: "r2" }), row({ id: "r1" })], next_cursor: "c-r1" })
+        }
+        return json({
+          requests: [row({ id: "r3" }), row({ id: "r2" }), row({ id: "r1" })],
+          next_cursor: "c-r2",
+        })
+      }
+      if (url.includes("cursor=c-r1"))
+        return json({ requests: [row({ id: "r0", model: "correct-page" })] })
+      // A stale cursor from the later poll re-fetches from one row higher
+      // and would repeat r1 under a name that gives it away.
+      return json({ requests: [row({ id: "r1", model: "REPEATED" })] })
+    })
+    const { client } = await renderAt("/requests")
+    await screen.findByRole("button", { name: /load more/i })
+
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await waitFor(() => expect(firstCalls).toBe(2))
+
+    await userEvent.click(screen.getByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(screen.getByText("correct-page")).toBeInTheDocument())
+    expect(screen.queryByText("REPEATED")).toBeNull()
   })
 })
