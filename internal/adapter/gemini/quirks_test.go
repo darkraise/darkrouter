@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
@@ -250,29 +252,44 @@ func TestParseStreamRemembersACallAcrossChunks(t *testing.T) {
 	}
 }
 
+// Anthropic's event model has no delta carrying thinking text and a signature
+// together, so its writer keeps only one of the two from a combined delta.
+// Gemini puts both on one part; the parser splits them the way Anthropic
+// streams them, text first.
 func TestParseStreamKeepsThoughtTextNextToItsSignature(t *testing.T) {
 	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true,"thoughtSignature":"sig-1"},{"text":"No.","thoughtSignature":"sig-2"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var thought, text ir.Delta
+	var thoughts []ir.Delta
+	var text ir.Delta
 	for _, ev := range evs {
 		if ev.Type != ir.EventContentDelta {
 			continue
 		}
 		switch ev.Delta.Type {
 		case ir.BlockThinking:
-			thought = *ev.Delta
+			thoughts = append(thoughts, *ev.Delta)
 		case ir.BlockText:
 			text = *ev.Delta
 		}
 	}
-	if thought.Thinking != "weighing" || thought.Signature != "sig-1" {
-		t.Fatalf("thought delta = %+v; the text must not be lost to the signature", thought)
+	if len(thoughts) != 2 || thoughts[0].Thinking != "weighing" || thoughts[0].Signature != "" ||
+		thoughts[1].Thinking != "" || thoughts[1].Signature != "sig-1" {
+		t.Fatalf("thought deltas = %+v; want the text, then the signature alone", thoughts)
 	}
 	if text.Text != "No." || text.Signature != "sig-2" {
 		t.Fatalf("text delta = %+v", text)
+	}
+
+	rec := httptest.NewRecorder()
+	if err := anthropicedge.WriteStream(rec, ParseStream(strings.NewReader(body), 1<<20)); err != nil {
+		t.Fatal(err)
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"thinking":"weighing"`) || !strings.Contains(out, `"signature":"sig-1"`) {
+		t.Errorf("an Anthropic client lost the thought text or its signature:\n%s", out)
 	}
 }
 
