@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -294,9 +296,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// misconfiguration the operator can fix, so it is recorded rather than
 	// skipped in silence.
 	if az, aerr := d.authorizerFor(ctx, p, cred); aerr != nil {
-		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, aerr.Error()); rerr != nil {
-			slog.Error("discovery: recording failure failed", "provider", p.ID, "err", rerr)
-		}
+		d.recordFailure(ctx, p.ID, now, aerr, cred.Secret, pr.APIKey)
 		return
 	} else {
 		pr.Authorize = az
@@ -309,9 +309,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 			// Shutdown is not a provider failure.
 			return
 		}
-		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, err.Error()); rerr != nil {
-			slog.Error("discovery: recording failure failed", "provider", p.ID, "err", rerr)
-		}
+		d.recordFailure(ctx, p.ID, now, err, cred.Secret, pr.APIKey)
 		return
 	}
 
@@ -338,6 +336,26 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 
 	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, dropped, now); err != nil {
 		slog.Error("discovery: recording success failed", "provider", p.ID, "err", err)
+	}
+}
+
+// recordFailure stores a failed probe's cause with the credential removed. The
+// row is plaintext while the credential is stored encrypted, and a transport
+// error quotes the request URL, where a query-param key sits escaped.
+func (d *Discoverer) recordFailure(ctx context.Context, providerID string, at time.Time,
+	cause error, secrets ...string) {
+
+	msg := cause.Error()
+	for _, s := range secrets {
+		if s == "" {
+			continue
+		}
+		for _, form := range []string{url.QueryEscape(s), url.PathEscape(s), s} {
+			msg = strings.ReplaceAll(msg, form, "[redacted]")
+		}
+	}
+	if err := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), providerID, at, msg); err != nil {
+		slog.Error("discovery: recording failure failed", "provider", providerID, "err", err)
 	}
 }
 
