@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -229,5 +230,18 @@ func TestAnOversizedBodyIsTypedAsPayloadTooLarge(t *testing.T) {
 	var ie *ir.Error
 	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
 		t.Errorf("err = %#v, want an *ir.Error of type %q", err, ir.ErrPayloadTooLarge)
+	}
+}
+
+// A text source carries the document itself, not base64. The IR carries
+// base64, and every other target wraps Media.Data as base64, so text passed
+// through verbatim reaches them as corrupt bytes.
+func TestParseRequestEncodesATextDocumentSource(t *testing.T) {
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[{"role":"user","content":[
+		{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hello, world"}},
+		{"type":"text","text":"summarise"}]}]}`, nil)
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "text/plain" || m.Data != base64.StdEncoding.EncodeToString([]byte("hello, world")) {
+		t.Errorf("media = %+v, want the text base64-encoded", m)
 	}
 }
