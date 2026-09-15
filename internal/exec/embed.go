@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -160,7 +161,15 @@ func (o *embedOp) parse(em adapter.Embedder, resp *http.Response, i int) (*ir.Em
 // credential or a rate limit on a later sub-batch steps the chain the same
 // way it would on the first.
 func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.EmbeddingResponse, adapter.Outcome, *ir.Error) {
+	// The attempt row was written when the first sub-batch's headers arrived.
+	// Its latency is moved on as each later one answers, so it spans them all.
+	spanLatency := func() {
+		if last := len(ac.Rec.Attempts) - 1; last >= 0 {
+			ac.Rec.Attempts[last].LatencyMs = time.Since(ac.sent).Milliseconds()
+		}
+	}
 	fail := func(outcome adapter.Outcome, resp *http.Response, err error, ie *ir.Error) (*ir.EmbeddingResponse, adapter.Outcome, *ir.Error) {
+		spanLatency()
 		if last := len(ac.Rec.Attempts) - 1; last >= 0 {
 			ac.Rec.Attempts[last].Outcome = string(outcome)
 			ac.Rec.Attempts[last].Error = err.Error()
@@ -180,10 +189,9 @@ func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.Embeddi
 		return fail(adapter.OutcomeRetryableCredential, nil, err,
 			&ir.Error{Type: ir.ErrAuthentication, Message: msgCredentialUnavailable})
 	}
-	// Each sub-batch waits for its own first byte, which the idle bound set
-	// for the previous body would otherwise have to cover.
-	ac.resetIdle()
+	ac.resetSend()
 	resp, doErr := ac.Exec.client.Do(hr)
+	spanLatency()
 	doErr = redact.Error(doErr, ac.secret)
 	ac.resp = resp
 	outcome := ac.Exec.classify(ac.Adapter, ac.inbound, ac.upstream, resp, doErr)
@@ -204,6 +212,7 @@ func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.Embeddi
 		}
 		return fail(outcome, resp, cause, ie)
 	}
+	ac.resetIdle()
 	resp.Body = &idleBody{ReadCloser: resp.Body, ac: ac}
 	sub, err := o.parse(em, resp, i)
 	if err != nil {

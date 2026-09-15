@@ -485,7 +485,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		cancel(errDarkrouterTimeout)
 	})
 	defer timer.Stop()
-	ac.Timer, ac.deadline = timer, bud.deadline
+	ac.Timer, ac.bud = timer, bud
 	ac.inbound, ac.upstream = r.Context(), ctx
 
 	path := PathIR
@@ -600,7 +600,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
 
-	attemptStart := time.Now()
+	ac.sent = time.Now()
 	resp, doErr := e.client.Do(hr)
 	// A query-param key is in the URL a transport error quotes, and this text
 	// goes to the attempt row and to the client.
@@ -629,7 +629,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	if resp != nil {
 		statusCode = resp.StatusCode
 	}
-	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(attemptStart), path)
+	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(ac.sent), path)
 
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {
