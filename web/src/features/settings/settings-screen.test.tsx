@@ -752,6 +752,25 @@ describe("the settings form", () => {
       expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
     )
   })
+
+  it("clears the Save bar and shows the stored spelling after a save", async () => {
+    stubSettingsFetch({
+      configAfterSave: () => ({ ...cfg(), values: { ...cfg().values, "log.retention": "96h0m0s" } }),
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    expect(box).toHaveValue("72h")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+    )
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
+  })
 })
 
 describe("the sessions list", () => {
