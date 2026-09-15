@@ -259,6 +259,11 @@ func TestForgetStopsAnUnpersistedRotationServing(t *testing.T) {
 		t.Fatalf("rotation: %v", err)
 	}
 
+	// An operator's disable leaves the sealed secret as it was, so the
+	// rotation's compare-and-swap still matches once writes succeed.
+	tokens.mu.Lock()
+	tokens.disabled["cred-1"] = "disabled by an operator"
+	tokens.mu.Unlock()
 	m.Forget("cred-1")
 	r := blank(t)
 	if err := az(context.Background(), r); err == nil {
@@ -287,9 +292,10 @@ func TestForgetStopsAnUnpersistedRotationServing(t *testing.T) {
 	}
 }
 
-// The same unsaved rotation, but the operator replaced the secret. Once the
-// database answers, the write finds the row moved on and the replacement
-// serves: the rotation descends from a secret the operator discarded.
+// The same unsaved rotation, but the operator replaced the secret. While the
+// write keeps failing the rotation must not serve, and once the database
+// answers the write finds the row moved on and the replacement serves: the
+// rotation descends from a secret the operator discarded.
 func TestForgetAfterAReplacementDropsAnUnpersistedRotation(t *testing.T) {
 	_, srv := newAuthServer(t)
 	tokens := newMemTokens()
@@ -297,7 +303,7 @@ func TestForgetAfterAReplacementDropsAnUnpersistedRotation(t *testing.T) {
 	az := oauthAz(t, m, expiring(t, -time.Minute))
 
 	tokens.mu.Lock()
-	tokens.failWrites = 1
+	tokens.failWrites = 1000
 	tokens.mu.Unlock()
 	if err := az(context.Background(), blank(t)); err != nil {
 		t.Fatalf("rotation: %v", err)
@@ -306,6 +312,15 @@ func TestForgetAfterAReplacementDropsAnUnpersistedRotation(t *testing.T) {
 	tokens.seed("cred-1", replacementSecret(t))
 	m.Forget("cred-1")
 	r := blank(t)
+	if err := az(context.Background(), r); err == nil {
+		t.Errorf("the rotation of a replaced secret authorized with %q before its write settled",
+			r.Header.Get("Authorization"))
+	}
+
+	tokens.mu.Lock()
+	tokens.failWrites = 0
+	tokens.mu.Unlock()
+	r = blank(t)
 	if err := az(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
