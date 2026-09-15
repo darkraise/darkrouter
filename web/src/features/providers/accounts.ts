@@ -13,6 +13,9 @@ export type AddResult = {
   added: number
   failed: AddFailure[]
   rejected: AddFailure[]
+  /** Refused by the provider but stored disabled rather than deleted, because
+   *  the secret is one the operator cannot download again. */
+  disabled: AddFailure[]
   /** The accounts that were not stored and why, so the operator can fix and
    *  resend them without resending the ones that were. */
   retry: (AddFailure & { account: ParsedAccount })[]
@@ -29,6 +32,13 @@ type CreatedCredential = {
   routing_updated?: boolean
   warning?: string
 }
+
+/** Styles whose secret the provider hands over once: AWS shows a secret access
+ *  key only when it is created, and a Google service-account key file
+ *  downloads once. A refusal is also weaker evidence for them, since both
+ *  providers document a delay before a new key works. Deleting one could
+ *  destroy the only copy of a key that was about to start working. */
+const SECRET_SHOWN_ONCE = new Set(["sigv4", "gcp-sa"])
 
 /** Where a run has got to. `done` counts accounts finished, so it is the
  *  index of the one named — the bar and the sentence never disagree. */
@@ -71,8 +81,10 @@ export function addAccountsLabel(n: number): string {
  *
  * Verification is add-then-probe-then-remove rather than probe-then-add: the
  * gateway can only reach a provider through a stored credential, so a key has
- * to exist for a moment to be testable. A key that fails is deleted again, so
- * what survives is what works.
+ * to exist for a moment to be testable. A key the provider refuses is deleted
+ * again, so what survives is what works — except a secret that cannot be
+ * downloaded again, which is disabled instead and left for the operator to
+ * delete.
  */
 export async function addCredentials(
   providerId: string,
@@ -82,6 +94,7 @@ export async function addCredentials(
 ): Promise<AddResult> {
   const failed: AddFailure[] = []
   const rejected: AddFailure[] = []
+  const disabled: AddFailure[] = []
   const retry: AddResult["retry"] = []
   let added = 0
   let routingNotUpdated: string | undefined
@@ -129,16 +142,34 @@ export async function addCredentials(
         })
         continue
       }
-      // The provider answered and refused it. Keeping it would leave a key
-      // that fails every request it is ever chosen for.
+      // The provider answered and refused it. Keeping it enabled would leave a
+      // key that fails every request it is ever chosen for.
+      const keep = SECRET_SHOWN_ONCE.has(probe.auth_style ?? "")
+      const path = `/api/providers/${providerId}/keys/${created.id}`
       try {
-        await api.del(`/api/providers/${providerId}/keys/${created.id}`)
+        if (keep) await api.patch(path, { enabled: false })
+        else await api.del(path)
       } catch (err) {
-        // Deleted, but still in the gateway's routing until it reloads.
-        if (!committedButNotRouted(err)) throw err
+        if (!committedButNotRouted(err)) {
+          // Still stored and still enabled: counted as added, because it is.
+          added++
+          failed.push({
+            label: item.label,
+            error: `refused by the provider, but ${keep ? "disabling" : "deleting"} it failed, so it is still in use: ${
+              err instanceof Error ? err.message : "request failed"
+            }`,
+          })
+          continue
+        }
+        // Written, but the gateway still routes with what it had until it
+        // reloads.
         routingNotUpdated = (err as Error).message
       }
       const refusal = { label: item.label, error: probe.error || "the provider refused it" }
+      if (keep) {
+        disabled.push(refusal)
+        continue
+      }
       rejected.push(refusal)
       retry.push({ ...refusal, account: item })
     } catch (err) {
@@ -152,7 +183,7 @@ export async function addCredentials(
       })
     }
   }
-  return { added, failed, rejected, retry, routingNotUpdated }
+  return { added, failed, rejected, disabled, retry, routingNotUpdated }
 }
 
 /**
@@ -179,8 +210,8 @@ export function retryDraft(
 }
 
 export function reportAdded(result: AddResult) {
-  const { added, failed, rejected, routingNotUpdated } = result
-  if (failed.length === 0 && rejected.length === 0) {
+  const { added, failed, rejected, disabled, routingNotUpdated } = result
+  if (failed.length === 0 && rejected.length === 0 && disabled.length === 0) {
     const done = added === 1 ? "Credential added" : `${added} credentials added`
     if (routingNotUpdated) toast.warning(`${done}, but not yet in use: ${routingNotUpdated}`)
     else toast.success(done)
@@ -191,12 +222,20 @@ export function reportAdded(result: AddResult) {
   // without its reason leaves them guessing at the fix.
   const names = (list: AddFailure[]) => list.map((f) => `${f.label}: ${f.error}`).join("; ")
   const routing = routingNotUpdated ? `. Routing not updated: ${routingNotUpdated}` : ""
-  if (added === 0) {
+  if (added === 0 && disabled.length === 0) {
     toast.error(`No credential kept. ${names([...rejected, ...failed])}${routing}`)
     return
   }
-  const parts = [`${added} added`]
+  const parts = added > 0 ? [`${added} added`] : []
   if (rejected.length > 0) parts.push(`${rejected.length} refused (${names(rejected)})`)
+  if (disabled.length > 0) parts.push(`${disabled.length} disabled (${names(disabled)})`)
   if (failed.length > 0) parts.push(`${failed.length} failed (${names(failed)})`)
-  toast.warning(parts.join(", ") + routing)
+  const it = disabled.length === 1 ? "it" : "them"
+  const why =
+    disabled.length > 0
+      ? `. Disabled rather than deleted: the provider refused ${it}, but this kind of secret ` +
+        `cannot be downloaded again, and a new one can be refused until it propagates. ` +
+        `Delete ${it} once you have confirmed ${disabled.length === 1 ? "it is" : "they are"} bad`
+      : ""
+  toast.warning(parts.join(", ") + why + routing)
 }
