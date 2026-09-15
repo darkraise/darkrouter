@@ -78,10 +78,11 @@ type PendingExchange = {
   userSeq: number | null
 }
 
-/** A network failure or a server fault can pass on a later try; a refusal
- *  answers the same way every time. */
+/** A network failure, a server fault, a timeout or a rate limit can pass on a
+ *  later try; any other refusal answers the same way every time. */
 function mayPassOnRetry(err: unknown): boolean {
-  return !(err instanceof ApiError) || err.status >= 500
+  if (!(err instanceof ApiError)) return true
+  return err.status >= 500 || err.status === 408 || err.status === 429
 }
 
 export function ChatMode({ active = true }: { active?: boolean }) {

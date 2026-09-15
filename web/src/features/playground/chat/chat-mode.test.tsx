@@ -317,6 +317,26 @@ describe("Chat mode", () => {
     expect(posts).toEqual(["user:first", "assistant:an answer", "assistant:an answer"])
   })
 
+  it.each([408, 429])("holds an exchange refused with %i for another try", async (status) => {
+    let failing = true
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && failing) throw new ApiError(status, "try again later")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    failing = false
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+    expect(posts).toEqual(["user:first", "assistant:an answer", "assistant:an answer"])
+  })
+
   it("reopens a conversation with its system prompt intact", async () => {
     mounted()
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
