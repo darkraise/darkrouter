@@ -189,6 +189,32 @@ func TestForwardStreamCopiesTheUnreadRemainderAfterAPostCommitOverflow(t *testin
 	}
 }
 
+func TestForwardStreamReportsARawTailThatWasCut(t *testing.T) {
+	// The raw copy is the rest of a committed response, and a connection
+	// that dies inside it fails that response exactly as it would have before
+	// the overflow. Reporting success would reset the breaker for a provider
+	// that cut the client off.
+	cw, ac := forwardFixture(t)
+	ac.Cfg.Server.SSE.MaxLineBytes = 16
+
+	first := "data: c-first\n\ndata: " + strings.Repeat("x", 40)
+	second := strings.Repeat("y", 30)
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(&flakyBody{r: &chunkedBody{chunks: []string{first, second}},
+			err: errors.New("connection reset")}),
+	}
+
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, noStreamError{}, false)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the cut reported against the provider", out, ierr)
+	}
+	if got, want := recorderBody(cw), first+second; got != want {
+		t.Errorf("client did not receive the bytes that did arrive\n got: %q\nwant: %q", got, want)
+	}
+}
+
 // flakyBody reads through to r, then reports err instead of io.EOF — a
 // connection that dies mid-stream rather than closing cleanly.
 type flakyBody struct {

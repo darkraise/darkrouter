@@ -144,8 +144,15 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					_, _ = cw.Write(tail)
 				}
 				recordWarning("scanner error after commit, forwarding raw: " + serr.Error())
-				_, _ = io.Copy(cw, resp.Body)
 				cw.Flush()
+				// A cut here is not rendered as an error event: past the
+				// overflow there is no event boundary to put one on.
+				if _, err := copyFlushing(cw, resp.Body); err != nil {
+					return ac.failedAfterCommit(err)
+				}
+				if werr := cw.Err(); werr != nil {
+					return ac.clientFailed(werr)
+				}
 				return adapter.OutcomeSuccess, nil
 			}
 		}
