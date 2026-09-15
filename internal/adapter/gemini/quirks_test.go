@@ -162,6 +162,12 @@ func TestThinkingConfigFollowsEachModelsLevels(t *testing.T) {
 		{"gemini-2.5-pro", ir.Reasoning{Disabled: true}, nil, float64(128), true},
 		{"gemini-1.5-pro", ir.Reasoning{Disabled: true}, nil, nil, false},
 		{"gemini-2.0-pro-exp-02-05", ir.Reasoning{Disabled: true}, nil, nil, false},
+
+		// Google documents thinking for the 2.5 and 3 generations only, so an
+		// older model is sent no thinking config and the client is told.
+		{"gemini-1.5-pro", ir.Reasoning{Budget: 64}, nil, nil, true},
+		{"gemini-1.5-flash-002", ir.Reasoning{Effort: "high"}, nil, nil, true},
+		{"gemini-2.0-flash", ir.Reasoning{Effort: "low"}, nil, nil, true},
 	}
 	for _, c := range cases {
 		r := c.reasoning

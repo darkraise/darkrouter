@@ -167,8 +167,9 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 			cfg["responseMimeType"] = "application/json"
 		}
 	}
-	if tc, w := thinkingConfig(t.Model, req.Reasoning); tc != nil {
-		warns = append(warns, w...)
+	tc, tw := thinkingConfig(t.Model, req.Reasoning)
+	warns = append(warns, tw...)
+	if tc != nil {
 		cfg["thinkingConfig"] = tc
 	}
 	if len(cfg) > 0 {
@@ -257,7 +258,8 @@ func budgetCap(model string) int {
 
 // Budget floors, also per family and also rejected rather than clamped. Pro
 // has no off switch at all: its floor is the closest it comes to off. An
-// unrecognized id gets no floor, so a client's own budget goes through.
+// unrecognized id gets no floor, so a client's own budget goes through. Only
+// a thinking generation reaches this: 1.x and 2.0 Pro take no budget at all.
 const (
 	budgetFloorPro       = 128
 	budgetFloorFlashLite = 512
@@ -402,6 +404,12 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 			return map[string]any{"thinkingBudget": budgetFloorPro}, cannotDisable
 		}
 		return map[string]any{"thinkingBudget": 0}, nil
+	}
+	if nonThinking(model) {
+		return nil, []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model has no thinking; reasoning dropped",
+		}}
 	}
 	cap := budgetCap(model)
 	if isGemini3(model) {
