@@ -44,12 +44,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// they do for gemini and anthropic.
 	sysBlocks, sysWarns := xlate.CollectSystemBlocks(req, targetName)
 	warns = append(warns, sysWarns...)
-	marks := &cacheMarks{hourTTL: hourCacheModel(t.Model)}
-	sys, sw := renderSystem(sysBlocks, marks)
-	warns = append(warns, sw...)
-	if len(sys) > 0 {
-		body["system"] = sys
-	}
+	marks := &cacheMarks{hourTTL: hourCacheModel(t.Model), toolPoints: isAnthropicModel(t.Model)}
 
 	// Converse forwards all of this to Claude's native request, so the shapes
 	// a generation refuses, and the controls Anthropic rejects while thinking
@@ -58,8 +53,14 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	shape := claudeShapeOf(t)
 	// Tools come before thinking, which depends on the tool choice actually
 	// sent: none when every tool was dropped, auto when the model refused a
-	// forced one.
-	tc, toolWarns := toolConfig(req, shape)
+	// forced one. They also come before system, the order cache markers are
+	// placed in.
+	tc, toolWarns := toolConfig(req, shape, marks)
+	sys, sw := renderSystem(sysBlocks, marks)
+	warns = append(warns, sw...)
+	if len(sys) > 0 {
+		body["system"] = sys
+	}
 	extra, extraWarns := additionalFields(t, req, sendsForcedChoice(tc))
 	thinking := shape.thinkingAlwaysOn || thinkingEnabled(extra)
 
@@ -161,6 +162,9 @@ type cacheMarks struct {
 	used     int
 	hourTTL  bool
 	sentFive bool
+	// toolPoints is whether the model takes a cachePoint in tools. AWS lists
+	// tools among the checkpoint fields for Claude models only.
+	toolPoints bool
 }
 
 // point is Converse's spelling of a cache breakpoint: a block of its own placed
@@ -424,7 +428,7 @@ func inferenceConfig(req *ir.Request, shape claudeShape, thinking bool) (map[str
 	return cfg, warns
 }
 
-func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warning) {
+func toolConfig(req *ir.Request, shape claudeShape, marks *cacheMarks) (map[string]any, []ir.Warning) {
 	if len(req.Tools) == 0 {
 		return nil, nil
 	}
@@ -467,6 +471,13 @@ func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warnin
 				"inputSchema": map[string]any{"json": schema},
 			},
 		})
+		if raw, ok := t.Extra["cache_control"]; ok {
+			cp, w := toolCachePoint(raw, marks)
+			warns = append(warns, w...)
+			if cp != nil {
+				tools = append(tools, cp)
+			}
+		}
 	}
 	if len(tools) == 0 {
 		if forcedToolChoice(req.ToolChoice) {
@@ -499,6 +510,20 @@ func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warnin
 		// honest rendering; the model may still call a tool.
 	}
 	return cfg, warns
+}
+
+// toolCachePoint renders a tool's cache_control as the cachePoint that follows
+// it in tools, closing every tool declared before it.
+func toolCachePoint(raw json.RawMessage, marks *cacheMarks) (map[string]any, []ir.Warning) {
+	reason := "this model takes no cache checkpoint in tools on Bedrock; the marker was dropped"
+	var cc ir.CacheControl
+	if marks.toolPoints {
+		if json.Unmarshal(raw, &cc) == nil {
+			return marks.point(&cc)
+		}
+		reason = "the marker is not a cache_control object; it was dropped"
+	}
+	return nil, []ir.Warning{{Field: "tools[].cache_control", Target: targetName, Reason: reason}}
 }
 
 // renderMessages maps IR turns to Converse turns, merging consecutive
