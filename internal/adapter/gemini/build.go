@@ -81,6 +81,13 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 	if err != nil {
 		return nil, warns, err
 	}
+	if isGemini3(t.Model) && signCurrentTurn(contents) {
+		warns = append(warns, ir.Warning{
+			Field: "messages[].tool_calls", Target: targetName,
+			Reason: "a function call in the current turn had no Gemini thought signature; " +
+				"sent with Google's validator placeholder, which can degrade the model's reasoning",
+		})
+	}
 	body["contents"] = contents
 
 	sys, w := xlate.CollectSystem(req, targetName)
