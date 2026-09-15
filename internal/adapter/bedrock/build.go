@@ -44,7 +44,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// they do for gemini and anthropic.
 	sysBlocks, sysWarns := xlate.CollectSystemBlocks(req, targetName)
 	warns = append(warns, sysWarns...)
-	marks := &cacheMarks{}
+	marks := &cacheMarks{hourTTL: hourCacheModel(t.Model)}
 	sys, sw := renderSystem(sysBlocks, marks)
 	warns = append(warns, sw...)
 	if len(sys) > 0 {
@@ -152,10 +152,23 @@ func renderSystem(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warn
 // cacheMarks tracks the four-breakpoint limit across a whole request. Converse
 // forwards the markers to the model, which rejects a fifth with a message that
 // does not name the surplus one, so it is dropped here and named.
-type cacheMarks struct{ used int }
+//
+// It also tracks the TTL rules. Only the models hourCacheModel names take a
+// ttl at all, and AWS requires every one-hour entry to precede every
+// five-minute one, in the order Converse processes them: tools, system,
+// messages. Markers are placed here in that same order.
+type cacheMarks struct {
+	used     int
+	hourTTL  bool
+	sentFive bool
+}
 
 // point is Converse's spelling of a cache breakpoint: a block of its own placed
 // after the content it closes, rather than an attribute on that content.
+//
+// A five-minute marker is sent without a ttl. Five minutes is the default, and
+// a model without the ttl field in its cache-point contract, such as Nova,
+// accepts the omitted form.
 func (c *cacheMarks) point(cc *ir.CacheControl) (map[string]any, []ir.Warning) {
 	if c.used >= xlate.MaxCacheBreakpoints {
 		return nil, []ir.Warning{{
@@ -165,12 +178,56 @@ func (c *cacheMarks) point(cc *ir.CacheControl) (map[string]any, []ir.Warning) {
 	}
 	c.used++
 	cp := map[string]any{"type": "default"}
-	// Omitted, the TTL is the default five minutes, so a one-hour marker
-	// without it silently caches for a twelfth of the time asked.
-	if cc.TTL == "5m" || cc.TTL == "1h" {
-		cp["ttl"] = cc.TTL
+	var warns []ir.Warning
+	switch {
+	case cc.TTL != "1h":
+		c.sentFive = true
+	case !c.hourTTL:
+		c.sentFive = true
+		warns = append(warns, ir.Warning{
+			Field: "cache_control", Target: targetName,
+			Reason: "this model has no one-hour cache TTL on Bedrock; cached for the default five minutes",
+		})
+	case c.sentFive:
+		warns = append(warns, ir.Warning{
+			Field: "cache_control", Target: targetName,
+			Reason: "a one-hour cache entry must precede every five-minute one; cached for five minutes",
+		})
+	default:
+		cp["ttl"] = "1h"
 	}
-	return map[string]any{"cachePoint": cp}, nil
+	return map[string]any{"cachePoint": cp}, warns
+}
+
+// hourCacheModels are the Claude families AWS documents the one-hour cache TTL
+// for (Bedrock user guide, "Supported models, Regions, and explicit caching
+// limits"), keyed by what follows "anthropic.claude-" in a model id. Claude
+// 3.7 Sonnet and 3.5 Sonnet v2 are listed with five minutes only; every other
+// publisher documents no ttl.
+var hourCacheModels = []string{
+	"fable-5", "mythos-",
+	"opus-5", "opus-4-8", "opus-4-7", "opus-4-6", "opus-4-5",
+	"sonnet-5", "sonnet-4-6", "sonnet-4-5",
+	"haiku-4-5",
+}
+
+// hourCacheModel reports whether a Bedrock model id names a model that takes a
+// one-hour cache TTL. An id that does not name its model, such as an
+// application inference profile ARN, is not assumed to: the one-hour marker
+// degrades to five minutes rather than failing the request.
+func hourCacheModel(model string) bool {
+	m := strings.ToLower(model)
+	i := strings.Index(m, "anthropic.claude-")
+	if i < 0 {
+		return false
+	}
+	family := m[i+len("anthropic.claude-"):]
+	for _, p := range hourCacheModels {
+		if strings.HasPrefix(family, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isAnthropicModel reports whether a Bedrock model id names a Claude model.
