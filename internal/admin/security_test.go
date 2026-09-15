@@ -89,6 +89,10 @@ func TestTheAssetDirectoryIsNotListed(t *testing.T) {
 
 func TestLoginIsRateLimitedPerAddress(t *testing.T) {
 	s, _ := testServer(t)
+	// Frozen: ten bcrypt checks take long enough under the race detector for
+	// the bucket to refill one token before the eleventh attempt.
+	frozen := time.Now()
+	s.logins.now = func() time.Time { return frozen }
 	attempt := func(addr string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"password":"wrong"}`))
