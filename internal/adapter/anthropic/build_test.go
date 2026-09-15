@@ -289,6 +289,52 @@ func TestBuildRequestDropsThinkingForAForcedToolChoice(t *testing.T) {
 	}
 }
 
+// A choice among no tools means nothing to send, and cannot conflict with
+// thinking.
+func TestToolChoiceIsOmittedWhenNoToolWasRendered(t *testing.T) {
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
+		Messages:   []ir.Message{userMsg("hi")},
+		Tools:      []ir.Tool{{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}}},
+		ToolChoice: &ir.ToolChoice{Mode: "any"},
+		Reasoning:  &ir.Reasoning{Budget: 2048},
+	})
+	if tc, ok := body["tool_choice"]; ok {
+		t.Errorf("tool_choice = %v with no tools declared", tc)
+	}
+	if th, _ := body["thinking"].(map[string]any); th["type"] != "enabled" {
+		t.Errorf("thinking = %v; no tool is forced when none is declared", body["thinking"])
+	}
+	if !hasWarning(warns, "tool_choice") || hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %+v", warns)
+	}
+
+	_, body, _ = built(t, &ir.Request{
+		Messages:          []ir.Message{userMsg("hi")},
+		ParallelToolCalls: new(bool),
+	})
+	if tc, ok := body["tool_choice"]; ok {
+		t.Errorf("tool_choice = %v with no tools declared", tc)
+	}
+}
+
+func TestManualThinkingSurvivesAForcedChoiceDowngradedToAuto(t *testing.T) {
+	_, body, warns := builtWith(t, "claude-x", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true, NoForcedToolChoice: true}, &ir.Request{
+		Messages:   []ir.Message{userMsg("hi")},
+		Tools:      []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: &ir.ToolChoice{Mode: "any"},
+		Reasoning:  &ir.Reasoning{Budget: 2048},
+	})
+	if tc, _ := body["tool_choice"].(map[string]any); tc["type"] != "auto" {
+		t.Errorf("tool_choice = %v", body["tool_choice"])
+	}
+	if th, _ := body["thinking"].(map[string]any); th["type"] != "enabled" {
+		t.Errorf("thinking = %v; the choice sent was auto", body["thinking"])
+	}
+	if hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
 func TestBuildRequestDropsAPrefillWhenThinkingIsOn(t *testing.T) {
 	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages: []ir.Message{
