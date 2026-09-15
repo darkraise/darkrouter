@@ -57,9 +57,13 @@ func (d *deadlineWriter) Write(p []byte) (int, error) {
 
 // Flush is implemented directly because streaming callers assert
 // http.Flusher on the writer they are handed.
-func (d *deadlineWriter) Flush() {
+func (d *deadlineWriter) Flush() { _ = d.FlushError() }
+
+// FlushError is what http.ResponseController looks for, so a caller that asks
+// can tell a flush that failed from one that did not.
+func (d *deadlineWriter) FlushError() error {
 	d.extend()
-	_ = d.rc.Flush()
+	return d.rc.Flush()
 }
 
 func (d *deadlineWriter) Unwrap() http.ResponseWriter { return d.ResponseWriter }

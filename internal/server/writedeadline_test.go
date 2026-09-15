@@ -50,6 +50,48 @@ func TestAClientThatStopsReadingReleasesTheHandler(t *testing.T) {
 	}
 }
 
+// A small event waits in the response buffer until it is flushed, so the flush
+// is the write that blocks on a client that stopped reading. Its failure has
+// to reach the handler, which otherwise cannot tell the client from the
+// provider when the response ends.
+func TestAFailedFlushReachesTheHandler(t *testing.T) {
+	flushErr := make(chan error, 1)
+	h := writeDeadlines(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		event := bytes.Repeat([]byte("x"), 512)
+		for range 1 << 20 {
+			if _, err := w.Write(event); err != nil {
+				break
+			}
+			if err := rc.Flush(); err != nil {
+				flushErr <- err
+				return
+			}
+		}
+		flushErr <- nil
+	}), idleOf(testIdle))
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprint(conn, "GET / HTTP/1.1\r\nHost: test\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-flushErr:
+		if err == nil {
+			t.Fatal("every flush to a client that stopped reading reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the handler was still blocked writing to a client that stopped reading")
+	}
+}
+
 // deadlineRecorder is a response writer with a connection-shaped deadline, so a
 // test can see whether a handler's writes are bounded.
 type deadlineRecorder struct {

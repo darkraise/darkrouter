@@ -170,6 +170,9 @@ func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
 				return total, fmt.Errorf("%w: %w", errClientWrite, werr)
 			}
 			dst.Flush()
+			if ferr := dst.Err(); ferr != nil {
+				return total, fmt.Errorf("%w: %w", errClientWrite, ferr)
+			}
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
