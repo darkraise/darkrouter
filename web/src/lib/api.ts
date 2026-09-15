@@ -48,6 +48,19 @@ export function committedButNotRouted(err: unknown): boolean {
   )
 }
 
+/** Runs a write, resolving with the server's reason when it committed but did
+ *  not reach routing, and undefined when it fully applied. Anything else still
+ *  rejects. */
+export async function routingNotUpdated(write: Promise<unknown>): Promise<string | undefined> {
+  try {
+    await write
+    return undefined
+  } catch (err) {
+    if (committedButNotRouted(err)) return (err as Error).message
+    throw err
+  }
+}
+
 /** A failure the next attempt might not repeat: the network dropped, or the
  *  server answered 5xx. A 4xx is the server's verdict on the request itself
  *  and comes back identical however often it is retried. */

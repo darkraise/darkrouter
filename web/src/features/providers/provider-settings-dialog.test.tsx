@@ -1,6 +1,8 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { toast } from "darkraise-ui"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { describe, it, expect } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import {
   ProviderSettingsDialog,
   draftOf,
@@ -136,5 +138,38 @@ describe("settingsPatch base URL", () => {
     // write anyway. Refusing to send it keeps a slip from becoming a 400.
     const p = provider()
     expect(settingsPatch(draft(p, { baseUrl: "   " }), p)).toEqual({})
+  })
+})
+
+describe("saving settings the gateway did not load", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it("closes on a saved note rather than reporting a failure", async () => {
+    // A 500 carrying routing_updated:false committed. Left open on an error,
+    // the dialog invites a second save of a change that already happened.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ error: "the change was saved, but the gateway could not load it", routing_updated: false }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    )
+    const warning = vi.spyOn(toast, "warning")
+    const error = vi.spyOn(toast, "error")
+    const onOpenChange = vi.fn()
+    mount(<ProviderSettingsDialog provider={provider()} open onOpenChange={onOpenChange} />)
+
+    await userEvent.clear(screen.getByLabelText("Priority"))
+    await userEvent.type(screen.getByLabelText("Priority"), "20")
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/saved, but the gateway could not load it/))
+    expect(error).not.toHaveBeenCalled()
   })
 })
