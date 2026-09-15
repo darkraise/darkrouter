@@ -171,8 +171,15 @@ func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.Embeddi
 	fail := func(outcome adapter.Outcome, resp *http.Response, err error, ie *ir.Error) (*ir.EmbeddingResponse, adapter.Outcome, *ir.Error) {
 		spanLatency()
 		if last := len(ac.Rec.Attempts) - 1; last >= 0 {
-			ac.Rec.Attempts[last].Outcome = string(outcome)
-			ac.Rec.Attempts[last].Error = err.Error()
+			a := &ac.Rec.Attempts[last]
+			a.Outcome = string(outcome)
+			a.Error = err.Error()
+			// A sub-batch that got no answer records no status, as a first
+			// send that got none does.
+			a.StatusCode = 0
+			if resp != nil {
+				a.StatusCode = resp.StatusCode
+			}
 		}
 		ac.recordFailure(outcome, resp, err)
 		return nil, outcome, ie
