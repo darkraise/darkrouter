@@ -18,10 +18,10 @@ import type { Provider } from "../../lib/api-types"
 /**
  * The touched half of a provider's settings.
  *
- * Region and project are pointer fields on the backend
- * (`store.ProviderPatch.Region` / `.Project`): a key present with value ""
- * means "set this to empty", not "leave alone". `GET /api/providers` never
- * returns either field, so the inputs start with nothing to prefill — null
+ * Region, project and location are pointer fields on the backend
+ * (`store.ProviderPatch.Region` / `.Project` / `.Location`): a key present with
+ * value "" means "set this to empty", not "leave alone". `GET /api/providers`
+ * returns none of them, so the inputs start with nothing to prefill — null
  * distinguishes "never touched" from "touched and cleared", which "" alone
  * cannot.
  *
@@ -35,6 +35,7 @@ export type SettingsDraft = {
   freeModelsOnly: boolean
   region: string | null
   project: string | null
+  location: string | null
 }
 
 export function draftOf(p: Provider): SettingsDraft {
@@ -44,6 +45,7 @@ export function draftOf(p: Provider): SettingsDraft {
     freeModelsOnly: p.free_models_only,
     region: null,
     project: null,
+    location: null,
   }
 }
 
@@ -69,6 +71,7 @@ export function settingsPatch(draft: SettingsDraft, p: Provider): Record<string,
   if (draft.freeModelsOnly !== p.free_models_only) patch.free_models_only = draft.freeModelsOnly
   if (draft.region !== null) patch.region = draft.region
   if (draft.project !== null) patch.project = draft.project
+  if (draft.location !== null) patch.location = draft.location
   return patch
 }
 
@@ -200,6 +203,18 @@ export function ProviderSettingsDialog({
                 id="provider-project"
                 value={draft.project ?? ""}
                 onChange={(e) => setDraft({ ...draft, project: e.target.value })}
+                placeholder="unset"
+                className="w-40"
+              />
+            </div>
+            {/* Fills a location the provider was created without. The backend
+                refuses moving one that is set. */}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="provider-location">Location</Label>
+              <Input
+                id="provider-location"
+                value={draft.location ?? ""}
+                onChange={(e) => setDraft({ ...draft, location: e.target.value })}
                 placeholder="unset"
                 className="w-40"
               />

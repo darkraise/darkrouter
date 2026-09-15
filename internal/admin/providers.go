@@ -246,9 +246,9 @@ type createProviderBody struct {
 	// a second call could land: an opt-in that arrived after it would miss the
 	// import it was meant to widen.
 	AllowUnsanctionedFree bool `json:"allow_unsanctioned_free"`
-	// Location is set at creation only: changing it moves every catalogued
-	// model to a different endpoint, which is a new provider rather than an
-	// edit to this one.
+	// Location is set at creation, and a patch can only fill a missing one:
+	// changing it moves every catalogued model to a different endpoint, which
+	// is a new provider rather than an edit to this one.
 	Location string `json:"location"`
 }
 
@@ -337,7 +337,7 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Name == nil && patch.BaseURL == nil && patch.Priority == nil &&
 		patch.Enabled == nil && patch.Region == nil && patch.Project == nil &&
-		patch.FreeModelsOnly == nil && patch.AllowUnsanctionedFree == nil {
+		patch.Location == nil && patch.FreeModelsOnly == nil && patch.AllowUnsanctionedFree == nil {
 		// An empty patch is a client bug, not a no-op to absorb: it means the
 		// UI sent a form it did not fill in.
 		writeError(w, http.StatusBadRequest, "the patch names no fields")
@@ -363,12 +363,18 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	if patch.Project != nil {
 		next.Project = *patch.Project
 	}
+	if patch.Location != nil {
+		if current.Location != "" && *patch.Location != current.Location {
+			writeError(w, http.StatusBadRequest,
+				"location is set at creation; a provider in another location is a new provider")
+			return
+		}
+		next.Location = *patch.Location
+	}
 	validate := s.validateProviderRow
-	if patch.BaseURL == nil && patch.Region == nil && patch.Project == nil {
-		// A row can predate a stricter endpoint rule, and no patch field can
-		// bring every such row up to it — there is no location to patch — so
-		// checking an endpoint the patch leaves alone would refuse even
-		// disabling the row.
+	if patch.BaseURL == nil && patch.Region == nil && patch.Project == nil && patch.Location == nil {
+		// A row can predate a stricter endpoint rule, so checking an endpoint
+		// the patch leaves alone would refuse even disabling the row.
 		validate = s.validateProviderFields
 	}
 	if err := validate(next); err != nil {
