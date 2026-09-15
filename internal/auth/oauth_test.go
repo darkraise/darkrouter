@@ -406,6 +406,9 @@ func TestARefusalStatusWithNoJSONBodyIsTransient(t *testing.T) {
 		"400 html":  {http.StatusBadRequest, `<html><body>Request blocked</body></html>`},
 		"401 html":  {http.StatusUnauthorized, `<html><body>Unauthorized</body></html>`},
 		"401 empty": {http.StatusUnauthorized, ``},
+		// Valid JSON, but no vendor refuses with a bare null.
+		"400 null": {http.StatusBadRequest, `null`},
+		"401 null": {http.StatusUnauthorized, ` null `},
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, srv := newAuthServer(t)
