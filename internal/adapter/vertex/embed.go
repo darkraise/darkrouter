@@ -122,22 +122,39 @@ const (
 	maxEmbeddingTokens = 20000
 )
 
+// maxInputTokens is the per-text limit of the models Vertex documents at 2,048
+// tokens. With autoTruncate off a longer text is rejected on its own, so no
+// text in a batch that can succeed costs more.
+const maxInputTokens = 2048
+
+var cappedInputModels = []string{
+	"text-embedding-004", "text-embedding-005", "text-multilingual-embedding-002",
+	"textembedding-gecko",
+}
+
 // EmbeddingBatches splits a request to fit one :predict call each.
 //
-// Tokens are bounded by bytes because Darkrouter has no tokenizer for Google's
-// embedding models. A subword tokenizer with byte fallback emits at most one
-// token per UTF-8 byte plus a leading marker, so the bound over-splits rather
-// than under-splits: over-splitting costs a request, under-splitting the batch.
+// Darkrouter has no tokenizer for Google's embedding models, so tokens are
+// estimated high: over-splitting costs a request, under-splitting the batch.
 func (a *Adapter) EmbeddingBatches(t *adapter.Target, req *ir.EmbeddingRequest) []int {
 	limit := maxEmbeddingInputs
 	if strings.Contains(t.Model, "gemini-embedding-001") {
 		// This model takes a single input text per request.
 		limit = 1
 	}
+	perText := 0
+	for _, m := range cappedInputModels {
+		if strings.Contains(t.Model, m) {
+			perText = maxInputTokens
+		}
+	}
 	var out []int
 	n, tokens := 0, 0
 	for _, text := range req.Input {
-		cost := len(text) + 1
+		cost := estimateTokens(text)
+		if perText > 0 && cost > perText {
+			cost = perText
+		}
 		if n > 0 && (n == limit || tokens+cost > maxEmbeddingTokens) {
 			out = append(out, n)
 			n, tokens = 0, 0
@@ -149,6 +166,51 @@ func (a *Adapter) EmbeddingBatches(t *adapter.Target, req *ir.EmbeddingRequest) 
 		out = append(out, n)
 	}
 	return out
+}
+
+// maxWordLetters is the longest letter run still read as a word. A longer run
+// is more likely an encoded blob or identifier than prose.
+const maxWordLetters = 20
+
+// estimateTokens over-counts a text's tokens.
+//
+// Google documents about four characters per token. A word — a run of ASCII
+// letters no longer than maxWordLetters holding a vowel — and the single space
+// before it are counted at two characters per token, a 2x margin on that ratio.
+// Everything a subword tokenizer may split a token per byte — digits,
+// punctuation, runs of whitespace, vowel-less or long letter runs, and
+// non-ASCII text through byte fallback — is counted at one token per UTF-8
+// byte. One more covers a leading marker.
+func estimateTokens(text string) int {
+	var (
+		prose, dense int
+		run, space   int
+		vowel        bool
+	)
+	endRun := func() {
+		if run > 0 && run <= maxWordLetters && vowel {
+			prose += run + space
+		} else {
+			dense += run + space
+		}
+		run, space, vowel = 0, 0, false
+	}
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		switch {
+		case 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z':
+			run++
+			vowel = vowel || strings.IndexByte("aeiouyAEIOUY", c) >= 0
+		case c == ' ' && (i == 0 || text[i-1] != ' ') && (i+1 == len(text) || text[i+1] != ' '):
+			endRun()
+			space = 1
+		default:
+			endRun()
+			dense++
+		}
+	}
+	endRun()
+	return (prose+1)/2 + dense + 1
 }
 
 var (
