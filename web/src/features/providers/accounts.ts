@@ -97,6 +97,8 @@ export async function addCredentials(
   const disabled: AddFailure[] = []
   const retry: AddResult["retry"] = []
   let added = 0
+  // Every write reloads the whole provider set, so only the last one says
+  // whether routing is current: a clean reload after a failed one loads both.
   let routingNotUpdated: string | undefined
 
   const items = draftAccounts(draft, needsAccount)
@@ -113,9 +115,10 @@ export async function addCredentials(
       retry.push({ ...failure, account: item })
       continue
     }
-    if (created.routing_updated === false) {
-      routingNotUpdated = created.warning || "the gateway did not load the new credential"
-    }
+    routingNotUpdated =
+      created.routing_updated === false
+        ? created.warning || "the gateway did not load the new credential"
+        : undefined
 
     if (!draft.verifyKeys) {
       added++
@@ -149,6 +152,7 @@ export async function addCredentials(
       try {
         if (keep) await api.patch(path, { enabled: false })
         else await api.del(path)
+        routingNotUpdated = undefined
       } catch (err) {
         if (!committedButNotRouted(err)) {
           // Still stored and still enabled: counted as added, because it is.
