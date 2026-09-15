@@ -103,12 +103,15 @@ const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
  * changes for two different reasons -- the window resizing, and the filters
  * above wrapping to another line and pushing the table down.
  */
-function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
+function useListMetrics(
+  ref: RefObject<HTMLDivElement | null>,
+  data: readonly unknown[],
+): {
   height: number
   rowHeight: number
 } {
   const [height, setHeight] = useState(MIN_LIST_HEIGHT)
-  const rowHeight = useRowHeight(ref)
+  const rowHeight = useRowHeight(ref, data)
 
   const measure = useCallback(() => {
     const el = ref.current
@@ -475,7 +478,6 @@ export function ProvidersScreen() {
   const [localPreset, setLocalPreset] = useState<Preset | null>(null)
   const [keylessPreset, setKeylessPreset] = useState<Preset | null>(null)
   const tableRef = useRef<HTMLDivElement | null>(null)
-  const { height: listHeight, rowHeight } = useListMetrics(tableRef)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
   const [addPreset, setAddPreset] = useState<Preset | null>(null)
@@ -542,6 +544,7 @@ export function ProvidersScreen() {
     () => listRows(rows, healthRows, share, discoveryRows),
     [rows, healthRows, share, discoveryRows],
   )
+  const { height: listHeight, rowHeight } = useListMetrics(tableRef, [list])
   // Counted over everything the other filters leave, not over the whole
   // catalogue: a chip reading 40 beside a list of 6 would be counting rows
   // the screen is not showing.

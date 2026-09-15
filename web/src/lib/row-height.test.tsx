@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { render, screen, act } from "@testing-library/react"
-import { useRef } from "react"
+import { useRef, type CSSProperties } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MIN_ROW_HEIGHT, useRowHeight } from "./row-height"
 
@@ -54,6 +54,42 @@ function stubHeights(byTestId: Record<string, number>) {
   })
 }
 
+/** A table pinned the way the screens pin theirs: every row held to at least
+ *  the measured height through --row-h on the container. */
+function PinnedTable({ rows, tick = 0 }: { rows: string[]; tick?: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const rowHeight = useRowHeight(ref, [rows])
+  return (
+    <div ref={ref} data-tick={tick} style={{ "--row-h": `${rowHeight}px` } as CSSProperties}>
+      <output>{rowHeight}</output>
+      <table>
+        <tbody>
+          {rows.map((kind, i) => (
+            <tr key={i} data-testid={kind}>
+              <td>{kind}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** Natural heights by test id, held to the pin in force as CSS would hold
+ *  them: a row is never shorter than --row-h, only taller. */
+function stubPinnedHeights(natural: Record<string, number>) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const own = natural[this.dataset.testid ?? ""] ?? 0
+    const pin = parseFloat(
+      this.closest<HTMLElement>("[style]")?.style.getPropertyValue("--row-h") ?? "",
+    )
+    const h = Number.isNaN(pin) ? own : Math.max(own, pin)
+    return { height: h, width: 0, top: 0, left: 0, bottom: h, right: 0, x: 0, y: 0, toJSON() {} }
+  })
+}
+
 afterEach(() => vi.restoreAllMocks())
 
 describe("useRowHeight", () => {
@@ -91,6 +127,43 @@ describe("useRowHeight", () => {
     })
     expect(screen.getByRole("status")).toHaveTextContent("40")
     document.documentElement.removeAttribute("data-density")
+  })
+
+  it("comes back down when the tall row leaves the data", () => {
+    // The pin is a floor, so measured under it every remaining row reports
+    // the tall row's height and nothing short of an axis change let it go.
+    stubPinnedHeights({ tall: 80, short: 40 })
+    const { rerender } = render(<PinnedTable rows={["tall", "short"]} />)
+    expect(screen.getByRole("status")).toHaveTextContent("80")
+
+    rerender(<PinnedTable rows={["short", "short"]} />)
+    expect(screen.getByRole("status")).toHaveTextContent("40")
+  })
+
+  it("holds the pin while the data is unchanged", () => {
+    // A windowed table swaps rows as it scrolls without its data changing. A
+    // pin that followed the rows on screen would re-space the window under
+    // the reader's scroll.
+    const natural = { tall: 80, short: 40 }
+    stubPinnedHeights(natural)
+    const rows = ["tall", "short"]
+    const { rerender } = render(<PinnedTable rows={rows} />)
+    expect(screen.getByRole("status")).toHaveTextContent("80")
+
+    natural.tall = 40
+    rerender(<PinnedTable rows={rows} tick={1} />)
+    expect(screen.getByRole("status")).toHaveTextContent("80")
+  })
+
+  it("puts the pin back after measuring without it", () => {
+    // New data that measures the same height re-renders nothing, so React
+    // never rewrites the style and a released pin would stay released.
+    stubPinnedHeights({ tall: 80, short: 40 })
+    const { container, rerender } = render(<PinnedTable rows={["tall", "short"]} />)
+    rerender(<PinnedTable rows={["tall"]} />)
+    expect(screen.getByRole("status")).toHaveTextContent("80")
+    const pinned = container.querySelector<HTMLElement>("[style]")
+    expect(pinned?.style.getPropertyValue("--row-h")).toBe("80px")
   })
 })
 
