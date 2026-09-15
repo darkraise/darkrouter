@@ -78,8 +78,86 @@ describe("addCredentials when the gateway did not load the change", () => {
     const result = await addCredentials("groq", draft, false)
 
     expect(result.added).toBe(1)
-    expect(result.failed.map((f) => f.error)).toEqual(["kept unverified: database is locked"])
+    expect(result.failed.map((f) => f.error)).toEqual([
+      "refused by the provider, but deleting it failed, so it is still in use: database is locked",
+    ])
     expect(result.routingNotUpdated).toBeUndefined()
+  })
+})
+
+describe("addCredentials when the provider refuses a secret that cannot be downloaded again", () => {
+  const refused = (auth_style: string) =>
+    json({ ok: false, probe: "signature", latency_ms: 1, error: "403 InvalidSignatureException", rejected: true, auth_style })
+  const methods = (fetchMock: ReturnType<typeof stubFetch>) =>
+    fetchMock.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method ?? "GET"} ${String(url)}`)
+
+  for (const style of ["sigv4", "gcp-sa"]) {
+    it(`disables a refused ${style} key rather than deleting it`, async () => {
+      const fetchMock = stubFetch((url, method) => {
+        if (url.endsWith("/keys") && method === "POST") return json({ id: "cred-1", label: "work" }, 201)
+        if (url.includes("/test")) return refused(style)
+        if (method === "PATCH") return json({ id: "cred-1", enabled: false })
+      })
+
+      const result = await addCredentials("bedrock", draft, false)
+
+      const calls = methods(fetchMock)
+      expect(calls.some((c) => c.startsWith("DELETE"))).toBe(false)
+      const patch = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PATCH")
+      expect(String(patch?.[0])).toMatch(/\/api\/providers\/bedrock\/keys\/cred-1$/)
+      expect(JSON.parse(String((patch?.[1] as RequestInit).body))).toEqual({ enabled: false })
+      expect(result.disabled.map((d) => d.label)).toEqual(["work"])
+      expect(result.rejected).toEqual([])
+      expect(result.added).toBe(0)
+      // Stored, so sending it again would store it twice.
+      expect(result.retry).toEqual([])
+    })
+  }
+
+  it("still deletes a refused key the operator can copy again", async () => {
+    const fetchMock = stubFetch((url, method) => {
+      if (url.endsWith("/keys") && method === "POST") return json({ id: "cred-1", label: "work" }, 201)
+      if (url.includes("/test")) return refused("bearer")
+      if (method === "DELETE") return new Response(null, { status: 204 })
+    })
+
+    const result = await addCredentials("groq", draft, false)
+
+    const calls = methods(fetchMock)
+    expect(calls.some((c) => c.startsWith("DELETE"))).toBe(true)
+    expect(calls.some((c) => c.startsWith("PATCH"))).toBe(false)
+    expect(result.rejected.map((r) => r.label)).toEqual(["work"])
+    expect(result.disabled).toEqual([])
+  })
+
+  it("counts a disable that committed but was not routed as disabled", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/keys") && method === "POST") return json({ id: "cred-1", label: "work" }, 201)
+      if (url.includes("/test")) return refused("sigv4")
+      if (method === "PATCH") return json({ error: ROUTING, routing_updated: false }, 500)
+    })
+
+    const result = await addCredentials("bedrock", draft, false)
+
+    expect(result.disabled.map((d) => d.label)).toEqual(["work"])
+    expect(result.failed).toEqual([])
+    expect(result.added).toBe(0)
+    expect(result.routingNotUpdated).toBe(ROUTING)
+  })
+
+  it("reports a refused key whose disable did not happen as still in use", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/keys") && method === "POST") return json({ id: "cred-1", label: "work" }, 201)
+      if (url.includes("/test")) return refused("gcp-sa")
+      if (method === "PATCH") return json({ error: "database is locked" }, 500)
+    })
+
+    const result = await addCredentials("vertex", draft, false)
+
+    expect(result.disabled).toEqual([])
+    expect(result.added).toBe(1)
+    expect(result.failed.map((f) => f.label)).toEqual(["work"])
+    expect(result.failed[0].error).toContain("database is locked")
   })
 })
 
@@ -123,9 +201,49 @@ describe("reportAdded", () => {
     const success = vi.spyOn(toast, "success")
     const warning = vi.spyOn(toast, "warning")
 
-    reportAdded({ added: 1, failed: [], rejected: [], retry: [], routingNotUpdated: ROUTING })
+    reportAdded({ added: 1, failed: [], rejected: [], disabled: [], retry: [], routingNotUpdated: ROUTING })
 
     expect(success).not.toHaveBeenCalled()
     expect(warning).toHaveBeenCalledWith(expect.stringContaining(ROUTING))
+  })
+
+  it("says a refused key was disabled, not deleted, and is still stored", () => {
+    const error = vi.spyOn(toast, "error")
+    const warning = vi.spyOn(toast, "warning")
+
+    reportAdded({
+      added: 0,
+      failed: [],
+      rejected: [],
+      disabled: [{ label: "work", error: "403 InvalidSignatureException" }],
+      retry: [],
+    })
+
+    expect(error).not.toHaveBeenCalled()
+    const message = String(warning.mock.calls[0]?.[0])
+    expect(message).not.toMatch(/No credential kept/)
+    expect(message).toMatch(/disabled/i)
+    expect(message).toContain("work: 403 InvalidSignatureException")
+    expect(message).toMatch(/delete it/i)
+  })
+
+  it("names disabled keys beside added and refused ones", () => {
+    const warning = vi.spyOn(toast, "warning")
+
+    reportAdded({
+      added: 1,
+      failed: [],
+      rejected: [{ label: "old", error: "401" }],
+      disabled: [
+        { label: "a", error: "refused" },
+        { label: "b", error: "refused" },
+      ],
+      retry: [],
+    })
+
+    const message = String(warning.mock.calls[0]?.[0])
+    expect(message).toContain("1 added")
+    expect(message).toContain("1 refused (old: 401)")
+    expect(message).toMatch(/2 disabled/)
   })
 })

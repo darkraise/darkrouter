@@ -396,6 +396,9 @@ export type ProbeResult = {
   /** Set on a failure when the provider refused the credential itself, as
    *  opposed to a check that could not complete. */
   rejected?: boolean
+  /** The style the probe authenticated with, the preset's where the provider
+   *  names none. Sent on a failure. */
+  auth_style?: string
 }
 
 // --- playground ---
