@@ -65,12 +65,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// A read failure degrades the label to "default" rather than failing the
 	// screen: an operator who cannot see their settings at all is worse off
 	// than one seeing a source annotation that is too modest.
-	var stored map[string]bool
-	if s.deps.DB != nil {
-		var err error
-		if stored, err = store.StoredConfigKeys(r.Context(), s.deps.DB); err != nil {
-			slog.Warn("config view could not read which settings are stored", "err", err)
-		}
+	stored, err := store.StoredConfigKeys(r.Context(), s.deps.DB)
+	if err != nil {
+		slog.Warn("config view could not read which settings are stored", "err", err)
 	}
 
 	// Values and fields both come from the registry, so a key added there is on
@@ -190,7 +187,7 @@ type policyWrite struct {
 }
 
 func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Config == nil || s.deps.DB == nil {
+	if s.deps.Config == nil {
 		writeError(w, http.StatusServiceUnavailable, "no configuration store")
 		return
 	}
