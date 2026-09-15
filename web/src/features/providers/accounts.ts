@@ -1,6 +1,11 @@
 import { toast } from "darkraise-ui"
 import { api, committedButNotRouted } from "../../lib/api"
-import { type AccountDraft, type ParsedAccount, draftAccounts } from "./account-fields"
+import {
+  type AccountDraft,
+  type ParsedAccount,
+  draftAccounts,
+  parseBulkLines,
+} from "./account-fields"
 import type { ProbeResult } from "../../lib/api-types"
 
 export type AddFailure = { label: string; error: string }
@@ -161,10 +166,14 @@ export function retryDraft(
   needsAccount: boolean,
 ): AccountDraft {
   if (draft.mode === "single") return draft
-  const bulk = retry
-    .map(({ account: a }) =>
-      needsAccount ? `${a.label}|${a.account_id ?? ""}|${a.secret}` : `${a.label}|${a.secret}`,
-    )
+  // The operator's own lines rather than lines rebuilt from what they parsed
+  // to: a rebuilt line names every auto-named key, and a label prefix holding
+  // a pipe would split differently when it is read back. Parsing drops
+  // duplicate secrets, so a secret identifies its line.
+  const failed = new Set(retry.map((r) => r.account.secret))
+  const bulk = parseBulkLines(draft.bulk, draft.label.trim() || "key", needsAccount)
+    .filter((l) => failed.has(l.account.secret))
+    .map((l) => l.line)
     .join("\n")
   return { ...draft, bulk }
 }
