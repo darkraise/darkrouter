@@ -156,12 +156,13 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 	if rf := req.ResponseFormat; rf != nil {
 		switch rf.Type {
 		case "json_schema":
-			// The IR schema is JSON Schema. responseSchema takes Gemini's
-			// OpenAPI subset, which rejects $defs, $ref and
-			// additionalProperties; responseJsonSchema takes JSON Schema.
-			// Either is ignored outright without the MIME type.
+			// responseSchema takes Gemini's OpenAPI subset, which rejects
+			// $defs, $ref and additionalProperties; responseJsonSchema takes
+			// JSON Schema, whose type names are lowercase. Each schema goes to
+			// the field its own form belongs in. Either is ignored outright
+			// without the MIME type.
 			cfg["responseMimeType"] = "application/json"
-			cfg["responseJsonSchema"] = rf.Schema
+			cfg[schemaField(rf.SchemaDialect, "responseSchema", "responseJsonSchema")] = rf.Schema
 		case "json_object":
 			cfg["responseMimeType"] = "application/json"
 		}
@@ -174,6 +175,13 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 		body["generationConfig"] = cfg
 	}
 	return body, warns, nil
+}
+
+func schemaField(dialect, openAPIField, jsonSchemaField string) string {
+	if dialect == ir.SchemaOpenAPI {
+		return openAPIField
+	}
+	return jsonSchemaField
 }
 
 // renderTools declares the client's functions in one tools entry and each
@@ -212,14 +220,15 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 				Reason: "no equivalent on a function declaration; the field was dropped",
 			})
 		}
-		schema := tool.Schema
+		schema, dialect := tool.Schema, tool.SchemaDialect
 		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object"}`)
+			schema, dialect = json.RawMessage(`{"type":"object"}`), ""
 		}
-		// parametersJsonSchema, not parameters, for the same reason as
-		// responseJsonSchema.
+		// parameters or parametersJsonSchema by the schema's form, for the
+		// same reason as responseSchema and responseJsonSchema.
 		decls = append(decls, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parametersJsonSchema": schema,
+			"name": tool.Name, "description": tool.Description,
+			schemaField(dialect, "parameters", "parametersJsonSchema"): schema,
 		})
 	}
 	if len(decls) > 0 {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
@@ -269,6 +270,73 @@ func TestBuildRequestDeclaresBuiltInToolsSeparately(t *testing.T) {
 	}})
 	if tools := only["tools"].([]any); len(tools) != 1 {
 		t.Fatalf("tools = %v; no empty functionDeclarations entry", tools)
+	}
+}
+
+// A Gemini client's responseSchema and function parameters are Google's
+// OpenAPI subset — uppercase types, nullable — which is not JSON Schema, so
+// they go back out in the fields that take that subset. What the client sent
+// as JSON Schema goes back out as JSON Schema.
+func TestGeminiClientSchemasKeepTheirOwnFields(t *testing.T) {
+	const openAPI = `{"type":"OBJECT","properties":{"city":{"type":"STRING","nullable":true}},"required":["city"]}`
+	const jsonSchema = `{"type":"object","properties":{"q":{"type":"string"}},"additionalProperties":false}`
+	parse := func(body string) *ir.Request {
+		t.Helper()
+		r := httptest.NewRequest("POST", "/v1beta/models/m:generateContent", strings.NewReader(body))
+		r.SetPathValue("model", "m:generateContent")
+		req, _, err := geminiedge.ParseRequest(r, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	raw := func(v any) string {
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
+	canon := func(s string) string {
+		var v any
+		_ = json.Unmarshal([]byte(s), &v)
+		return raw(v)
+	}
+
+	req := parse(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"tools":[{"functionDeclarations":[
+			{"name":"lookup","description":"d","parameters":` + openAPI + `},
+			{"name":"search","description":"d","parametersJsonSchema":` + jsonSchema + `}]}],
+		"generationConfig":{"responseMimeType":"application/json","responseSchema":` + openAPI + `}}`)
+	body, _ := builtFor(t, "gemini-2.5-flash", req)
+	cfg := body["generationConfig"].(map[string]any)
+	if got := raw(cfg["responseSchema"]); got != canon(openAPI) {
+		t.Errorf("responseSchema = %s, want the client's %s", got, openAPI)
+	}
+	if v, ok := cfg["responseJsonSchema"]; ok {
+		t.Errorf("responseJsonSchema = %v; an OpenAPI-subset schema is not JSON Schema", v)
+	}
+	decls := body["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	lookup, search := decls[0].(map[string]any), decls[1].(map[string]any)
+	if got := raw(lookup["parameters"]); got != canon(openAPI) {
+		t.Errorf("lookup = %v, want parameters %s", lookup, openAPI)
+	}
+	if _, ok := lookup["parametersJsonSchema"]; ok {
+		t.Errorf("lookup = %v; an OpenAPI-subset schema is not JSON Schema", lookup)
+	}
+	if got := raw(search["parametersJsonSchema"]); got != canon(jsonSchema) {
+		t.Errorf("search = %v, want parametersJsonSchema %s", search, jsonSchema)
+	}
+	if _, ok := search["parameters"]; ok {
+		t.Errorf("search = %v", search)
+	}
+
+	req = parse(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"generationConfig":{"responseMimeType":"application/json","responseJsonSchema":` + jsonSchema + `}}`)
+	body, _ = builtFor(t, "gemini-2.5-flash", req)
+	cfg = body["generationConfig"].(map[string]any)
+	if got := raw(cfg["responseJsonSchema"]); got != canon(jsonSchema) {
+		t.Errorf("responseJsonSchema = %s, want %s", got, jsonSchema)
+	}
+	if v, ok := cfg["responseSchema"]; ok {
+		t.Errorf("responseSchema = %v", v)
 	}
 }
 

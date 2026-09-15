@@ -228,10 +228,19 @@ type Message struct {
 	Content []ContentBlock
 }
 
+// SchemaOpenAPI marks a schema written in Gemini's OpenAPI 3.0 subset —
+// uppercase type names, nullable — which a Gemini client sends in
+// responseSchema and a function declaration's parameters. An unmarked schema
+// is JSON Schema. Gemini takes the two in different fields, and neither field
+// is documented to accept the other form.
+const SchemaOpenAPI = "openapi"
+
 type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+	// SchemaDialect is SchemaOpenAPI or empty for JSON Schema.
+	SchemaDialect string `json:",omitempty"`
 
 	// Extra carries tool fields the IR has no slot for, keyed by their wire
 	// name: OpenAI's strict flag on a function, or the body of a provider
@@ -271,6 +280,8 @@ type Reasoning struct {
 type ResponseFormat struct {
 	Type   string // "json_schema" | "json_object"
 	Schema json.RawMessage
+	// SchemaDialect is SchemaOpenAPI or empty for JSON Schema.
+	SchemaDialect string `json:",omitempty"`
 	// Name and Strict travel with a json_schema format. Strict is a pointer
 	// because OpenAI's strict mode changes what schemas are accepted, so a
 	// client that did not ask for it must not be given it.
