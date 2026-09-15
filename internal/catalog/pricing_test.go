@@ -112,3 +112,14 @@ func TestCostMicrosIsTheFourFieldForm(t *testing.T) {
 		t.Fatalf("CostMicros = %v, Cost = %v; the two forms must agree", a, b)
 	}
 }
+
+func TestWeakerPicksTheLessTrustedGrade(t *testing.T) {
+	order := []Grade{GradeGuessed, GradeIndexed, GradeDeclared, GradeMeasured}
+	for i, a := range order {
+		for j, b := range order {
+			if got, want := weaker(a, b), order[min(i, j)]; got != want {
+				t.Errorf("weaker(%q, %q) = %q, want %q", a, b, got, want)
+			}
+		}
+	}
+}

@@ -61,11 +61,23 @@ func (p Pricing) GradeFor(t Tokens) Grade {
 }
 
 func weaker(a, b Grade) Grade {
-	rank := map[Grade]int{GradeMeasured: 3, GradeDeclared: 2, GradeIndexed: 1, GradeGuessed: 0}
-	if rank[b] < rank[a] {
+	if gradeRank(b) < gradeRank(a) {
 		return b
 	}
 	return a
+}
+
+func gradeRank(g Grade) int {
+	switch g {
+	case GradeMeasured:
+		return 3
+	case GradeDeclared:
+		return 2
+	case GradeIndexed:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // CostMicros is Cost for a caller holding only the four classic counts.
