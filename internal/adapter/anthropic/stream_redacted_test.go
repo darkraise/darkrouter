@@ -22,7 +22,7 @@ func TestRedactedThinkingKeepsItsDataThroughTheWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := evs[2]
-	if start.Delta == nil || start.Delta.Thinking != "EmwKAhgBEgy3va3pzix" {
+	if start.Delta == nil || string(start.Delta.Extra["data"]) != `"EmwKAhgBEgy3va3pzix"` {
 		t.Errorf("block start = %+v, want the redacted payload carried", start.Delta)
 	}
 

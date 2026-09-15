@@ -54,10 +54,10 @@ func blockStart(raw json.RawMessage) *ir.Delta {
 	case "thinking":
 		d.Type = ir.BlockThinking
 	case "redacted_thinking":
-		// The payload arrives whole here and never in a delta. It rides in
-		// Thinking, as Bedrock's redacted deltas do, and the wire fields go
-		// along so the Anthropic writer re-emits the block as it arrived.
-		d.Type, d.Thinking = ir.BlockRedactedThinking, b.Data
+		// The payload arrives whole here and never in a delta, so the wire
+		// fields must ride along: they are what the Anthropic writer re-emits,
+		// data included.
+		d.Type = ir.BlockRedactedThinking
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(raw, &fields) == nil {
 			d.Extra = fields
