@@ -1,7 +1,7 @@
 import { useId, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronUp, Plus } from "lucide-react"
-import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+import { Banner, Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, useAliasesForEditing, useModels, usePolicy, useProviders } from "../../lib/queries"
@@ -166,6 +166,56 @@ function reorderRows(rows: DraftRow[], from: number, to: number): DraftRow[] {
   ).map((id) => ({ id, value: valueById.get(id) ?? "" }))
 }
 
+function cleanRows(rows: DraftRow[] | undefined): string[] | undefined {
+  return rows?.map((r) => r.value.trim()).filter(Boolean)
+}
+
+/** Absent and empty are different chains: one is not in the map at all. */
+function sameChain(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return a.length === b.length && a.every((t, i) => t === b[i])
+}
+
+/**
+ * Moves a draft from the saved map it was seeded from onto a newer one.
+ *
+ * A chain the operator has not touched -- its rows still spell exactly what
+ * `base` held -- takes whatever `incoming` holds, and disappears if `incoming`
+ * dropped it. A touched chain, including one the operator removed or added,
+ * is kept as it is. Touched is judged on the raw rows rather than the cleaned
+ * ones, so a blank row just added counts as an edit and survives.
+ *
+ * `conflicts` names the touched chains `incoming` also changed. That includes
+ * the operator's own save coming back, which the caller filters out.
+ */
+function rebaseDraft(
+  draft: Record<string, DraftRow[]>,
+  base: Aliases,
+  incoming: Aliases,
+  makeId: (name: string, index: number) => string,
+): { draft: Record<string, DraftRow[]>; conflicts: string[] } {
+  const next: Record<string, DraftRow[]> = {}
+  const conflicts: string[] = []
+  const names = new Set([...Object.keys(draft), ...Object.keys(incoming), ...Object.keys(base)])
+  for (const name of names) {
+    const rows = draft[name]
+    const theirs = incoming[name]
+    if (sameChain(rows?.map((r) => r.value), base[name])) {
+      if (theirs === undefined) continue
+      next[name] =
+        rows && sameChain(rows.map((r) => r.value), theirs)
+          ? rows
+          : theirs.map((value, index) => ({ id: makeId(name, index), value }))
+      continue
+    }
+    if (rows) next[name] = rows
+    if (!sameChain(base[name], theirs)) {
+      conflicts.push(name)
+    }
+  }
+  return { draft: next, conflicts }
+}
+
 const EMPTY_CONTEXT: ChainContext = { providers: [], models: [] }
 
 /** What PUT /api/aliases answers -- the same shape every commitConfig write
@@ -216,21 +266,24 @@ export function AliasEditor({
     toDraftRows(aliases, seedId),
   )
   // What the draft was seeded from. `PUT /api/aliases` replaces the whole map
-  // rather than merging, so a draft that never notices an alias added
-  // elsewhere will delete it on the next Save and report success. Adopting
-  // chains the draft has never seen keeps the write additive without
-  // discarding whatever is being typed.
+  // rather than merging, so every chain in the draft is written on Save --
+  // including ones the operator never opened. A refetch therefore rebases the
+  // draft instead of only adopting new names: an untouched chain holding a
+  // stale copy would overwrite another admin's edit under a fresh If-Match.
   const [seededFrom, setSeededFrom] = useState(aliases)
+  const [overwrites, setOverwrites] = useState<string[]>([])
   if (aliases !== seededFrom) {
+    const rebased = rebaseDraft(draft, seededFrom, aliases, seedId)
     setSeededFrom(aliases)
-    setDraft((d) => {
-      const next = { ...d }
-      for (const [name, targets] of Object.entries(aliases)) {
-        if (!(name in next))
-          next[name] = targets.map((value, index) => ({ id: seedId(name, index), value }))
-      }
-      return next
-    })
+    setDraft(rebased.draft)
+    // Kept only while the draft still differs from the server. A chain the
+    // server now holds exactly as drafted is the operator's own save coming
+    // back, or an overwrite already made -- nothing is left to warn about.
+    setOverwrites((prev) =>
+      [...new Set([...prev, ...rebased.conflicts])]
+        .filter((name) => !sameChain(cleanRows(rebased.draft[name]), aliases[name]))
+        .sort(),
+    )
   }
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
@@ -262,6 +315,7 @@ export function AliasEditor({
     success: "Aliases saved",
     // The catalogue too: its alias column is read from the same map.
     invalidates: [keys.aliases, keys.config, keys.models],
+    onSuccess: () => setOverwrites([]),
   })
 
   // Trimmed and stripped of in-progress blanks: what would actually be sent,
@@ -313,6 +367,18 @@ export function AliasEditor({
             : `${names.length} ${names.length === 1 ? "chain" : "chains"}`}
         </span>
       </div>
+
+      {overwrites.length > 0 && (
+        <Banner variant="warning" role="alert" className="mb-3">
+          <p className="text-sm font-medium">
+            Changed elsewhere since you started editing:{" "}
+            <span className="font-mono">{overwrites.join(", ")}</span>
+          </p>
+          <p className="mt-1 text-sm">
+            Your version is kept. Saving replaces the other change; Revert takes it instead.
+          </p>
+        </Banner>
+      )}
 
       {names.length === 0 && (
         <EmptyState
@@ -538,6 +604,7 @@ export function AliasEditor({
             variant="ghost"
             onClick={() => {
               setDraft(toDraftRows(aliases, seedId))
+              setOverwrites([])
               setEditing(null)
             }}
           >
