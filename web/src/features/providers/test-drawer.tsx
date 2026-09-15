@@ -279,13 +279,18 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   }
 
   // In the transcript too: the conversation is where an operator is looking,
-  // and a turn that simply never arrives reads as a hang.
-  function failOpenTurn(reason: string) {
+  // and a turn that simply never arrives reads as a hang. A partial reply is
+  // kept on screen but marked failed, so the next message does not send it
+  // to the model as an answer it gave. A stop keeps its partial reply as one.
+  function failOpenTurn(reason: string, partial: "fail" | "keep" = "fail") {
     setMessages((prev) => {
       const next = prev.slice()
       const last = next[next.length - 1]
-      if (last && last.role === "assistant" && last.content === "") {
+      if (!last || last.role !== "assistant" || last.failed) return prev
+      if (last.content === "") {
         next[next.length - 1] = { ...last, content: reason, failed: true }
+      } else if (partial === "fail") {
+        next[next.length - 1] = { ...last, content: `${last.content}\n\n${reason}`, failed: true }
       }
       return next
     })
@@ -361,7 +366,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     const stopped = () => {
       say("info", `stopped at ${at()}`)
       setVerdict({ kind: "stopped" })
-      failOpenTurn("Stopped before the provider answered")
+      failOpenTurn("Stopped before the provider answered", "keep")
     }
 
     let firstToken = 0
