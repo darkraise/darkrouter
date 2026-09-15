@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "darkraise-ui"
 import {
   AddAccountsDialog,
   filterPresets,
@@ -469,6 +470,40 @@ describe("the wizard opened from an unconfigured preset", () => {
     expect(creates).toHaveLength(1)
   })
 
+  it("writes a free-models change made before retrying keys on the row it created", async () => {
+    // The provider list still predates the created row, so there is no
+    // provider to compare the box against -- only what the create sent.
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    const inner = fetchMock.getMockImplementation()!
+    let keyPosts = 0
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys") && keyPosts++ === 0) {
+        return new Response(JSON.stringify({ error: "database is locked" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    mount(
+      <AddAccountsDialog open onOpenChange={() => {}} preset={preset({ id: "groq", name: "Groq" })} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() => expect(keyPosts).toBe(2))
+    const patches = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/providers/groq" && (init as RequestInit)?.method === "PATCH",
+    )
+    expect(patches.map(([, init]) => JSON.parse((init as RequestInit).body as string))).toEqual([
+      { free_models_only: true },
+    ])
+  })
+
   it("asks a Bedrock provider it creates for its region, and sends it", async () => {
     const bedrock = preset({ id: "bedrock", name: "Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4" })
     const fetchMock = stub([bedrock])
@@ -638,6 +673,37 @@ describe("the wizard opened from a provider", () => {
         free_models_only: true,
       })
     })
+  })
+
+  it("adds the keys when the setting saved but did not reach routing", async () => {
+    // That 500 is a committed write: stopping there would abandon the keys
+    // over a change that happened.
+    const warning = vi.spyOn(toast, "warning")
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) =>
+      (init as RequestInit)?.method === "PATCH"
+        ? new Response(
+            JSON.stringify({ error: "the change was saved, but the gateway could not load it", routing_updated: false }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          )
+        : inner(url, init),
+    )
+    const onDone = vi.fn()
+    mount(
+      <AddAccountsDialog open onOpenChange={() => {}} onDone={onDone} provider={provider("groq", [cred("k1")])} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
+    await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("groq"))
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url) === "/api/providers/groq/keys"),
+    ).toBe(true)
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/saved, but the gateway could not load it/))
+    warning.mockRestore()
   })
 
   it("leaves the setting alone when the box was not touched", async () => {
