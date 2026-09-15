@@ -45,3 +45,38 @@ func TestAFailedListingDoesNotRecordAQueryParamKey(t *testing.T) {
 		}
 	}
 }
+
+// Removing a key by replacing its text everywhere rewrites whatever else
+// shares that text. A short key is still kept out of the row, by dropping the
+// query string it travelled in, while the rest of the message stays readable.
+func TestAShortQueryParamKeyDoesNotMangleTheRecordedError(t *testing.T) {
+	const secret = "models"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "p")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "p", Kind: "openaicompat", BaseURL: srv.URL + "/v1", AuthStyle: "query-param",
+		Credentials: []provider.Credential{{ID: "k", Secret: secret, Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	states, err := db.DiscoveryStates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := states["p"].LastError
+	if !strings.Contains(got, srv.URL+"/v1/models") {
+		t.Errorf("last_error %q no longer names the listing URL", got)
+	}
+	if strings.Contains(got, "key=") {
+		t.Errorf("last_error %q carries the query string the key was sent in", got)
+	}
+}

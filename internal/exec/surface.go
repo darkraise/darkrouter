@@ -113,6 +113,9 @@ type AttemptCtx struct {
 	// authorize signs a request to this attempt's credential, for a surface
 	// that sends more than the one request the loop sent.
 	authorize auth.Authorizer
+	// secret is this attempt's credential, so a failed send's text can be
+	// cleared of it before anyone reads it.
+	secret string
 	// idleArmed records that idle has replaced the pre-commit deadline.
 	idleArmed bool
 	// healthDone guards the one breaker signal an attempt may emit. The first
