@@ -175,6 +175,14 @@ describe("settingRow", () => {
       expect(SETTINGS[field]?.name, field).not.toBe(field)
     }
   })
+
+  it("says the shutdown grace is cut short by the container's 30s stop", () => {
+    // The grace reloads from this screen, the container's stop period does
+    // not, and raising one without the other gets the drain killed.
+    const description = SETTINGS["server.shutdown_grace"]?.description
+    expect(description).toMatch(/30s/)
+    expect(description).toMatch(/25s/)
+  })
 })
 
 describe("displayOf", () => {
