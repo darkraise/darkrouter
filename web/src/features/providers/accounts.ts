@@ -1,5 +1,5 @@
 import { toast } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, committedButNotRouted } from "../../lib/api"
 import { type AccountDraft, type ParsedAccount, draftAccounts } from "./account-fields"
 import type { ProbeResult } from "../../lib/api-types"
 
@@ -11,6 +11,18 @@ export type AddResult = {
   /** The accounts that were not stored and why, so the operator can fix and
    *  resend them without resending the ones that were. */
   retry: (AddFailure & { account: ParsedAccount })[]
+  /** Set when a write committed but the gateway could not load it, so it is
+   *  still routing with what it had before this run. The server's own words. */
+  routingNotUpdated?: string
+}
+
+/** What POST /keys answers once the credential is stored. */
+type CreatedCredential = {
+  id: string
+  label: string
+  /** False when the key is stored but the gateway did not load it. */
+  routing_updated?: boolean
+  warning?: string
 }
 
 /** Where a run has got to. `done` counts accounts finished, so it is the
@@ -67,20 +79,24 @@ export async function addCredentials(
   const rejected: AddFailure[] = []
   const retry: AddResult["retry"] = []
   let added = 0
+  let routingNotUpdated: string | undefined
 
   const items = draftAccounts(draft, needsAccount)
   for (const [done, item] of items.entries()) {
     const report = (step: AddProgress["step"]) =>
       onProgress?.({ done, total: items.length, label: item.label, step })
     report("adding")
-    let created: { id: string }
+    let created: CreatedCredential
     try {
-      created = await api.post<{ id: string }>(`/api/providers/${providerId}/keys`, item)
+      created = await api.post<CreatedCredential>(`/api/providers/${providerId}/keys`, item)
     } catch (err) {
       const failure = { label: item.label, error: err instanceof Error ? err.message : "failed" }
       failed.push(failure)
       retry.push({ ...failure, account: item })
       continue
+    }
+    if (created.routing_updated === false) {
+      routingNotUpdated = created.warning || "the gateway did not load the new credential"
     }
 
     if (!draft.verifyKeys) {
@@ -110,7 +126,13 @@ export async function addCredentials(
       }
       // The provider answered and refused it. Keeping it would leave a key
       // that fails every request it is ever chosen for.
-      await api.del(`/api/providers/${providerId}/keys/${created.id}`)
+      try {
+        await api.del(`/api/providers/${providerId}/keys/${created.id}`)
+      } catch (err) {
+        // Deleted, but still in the gateway's routing until it reloads.
+        if (!committedButNotRouted(err)) throw err
+        routingNotUpdated = (err as Error).message
+      }
       const refusal = { label: item.label, error: probe.error || "the provider refused it" }
       rejected.push(refusal)
       retry.push({ ...refusal, account: item })
@@ -125,7 +147,7 @@ export async function addCredentials(
       })
     }
   }
-  return { added, failed, rejected, retry }
+  return { added, failed, rejected, retry, routingNotUpdated }
 }
 
 /**
@@ -148,21 +170,24 @@ export function retryDraft(
 }
 
 export function reportAdded(result: AddResult) {
-  const { added, failed, rejected } = result
+  const { added, failed, rejected, routingNotUpdated } = result
   if (failed.length === 0 && rejected.length === 0) {
-    toast.success(added === 1 ? "Credential added" : `${added} credentials added`)
+    const done = added === 1 ? "Credential added" : `${added} credentials added`
+    if (routingNotUpdated) toast.warning(`${done}, but not yet in use: ${routingNotUpdated}`)
+    else toast.success(done)
     return
   }
   // Naming the ones that did not make it, and why, because "18 of 20" without
   // saying which two leaves the operator to diff the list by hand, and a name
   // without its reason leaves them guessing at the fix.
   const names = (list: AddFailure[]) => list.map((f) => `${f.label}: ${f.error}`).join("; ")
+  const routing = routingNotUpdated ? `. Routing not updated: ${routingNotUpdated}` : ""
   if (added === 0) {
-    toast.error(`No credential kept. ${names([...rejected, ...failed])}`)
+    toast.error(`No credential kept. ${names([...rejected, ...failed])}${routing}`)
     return
   }
   const parts = [`${added} added`]
   if (rejected.length > 0) parts.push(`${rejected.length} refused (${names(rejected)})`)
   if (failed.length > 0) parts.push(`${failed.length} failed (${names(failed)})`)
-  toast.warning(parts.join(", "))
+  toast.warning(parts.join(", ") + routing)
 }
