@@ -362,6 +362,13 @@ func withUnquotedCacheRates(p Pricing, row store.ModelRow, lower ...Pricing) Pri
 			p.CacheWriteMicrosPerMTok, p.CacheWriteSource = c.CacheWriteMicrosPerMTok, c.Source
 		}
 	}
+	// Still unquoted, the rate costs its tokens at zero, which no one stated.
+	if !row.CacheReadKnown && p.CacheReadSource == "" {
+		p.CacheReadSource = SourceInferred
+	}
+	if !row.CacheWriteKnown && p.CacheWriteSource == "" {
+		p.CacheWriteSource = SourceInferred
+	}
 	return p
 }
 

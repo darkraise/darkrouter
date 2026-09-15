@@ -152,7 +152,8 @@ type Pricing struct {
 
 	// CacheReadSource and CacheWriteSource name the directory a cache rate was
 	// filled from when Source's record did not quote it, and are empty when
-	// the rate is Source's own. Held here rather than in a column because the
+	// the rate is Source's own. SourceInferred marks a rate nothing quoted,
+	// whose zero is a guess. Held here rather than in a column because the
 	// merge is the only place a rate is filled: a stored cache rate is always
 	// the row's own.
 	CacheReadSource  Source
