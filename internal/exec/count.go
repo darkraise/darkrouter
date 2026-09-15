@@ -15,6 +15,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 	"github.com/darkraise/darkrouter/internal/tokenize"
@@ -170,6 +171,8 @@ func (e *Executor) countOnce(ctx context.Context, req *ir.Request, c router.Cand
 	}
 
 	resp, doErr := e.client.Do(hr)
+	// A query-param key is in the URL a transport error quotes.
+	doErr = redact.Error(doErr, secretOf(p, c.KeyID, styleOf(p)))
 	outcome = e.classify(ad, ctx, ctx, resp, doErr)
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {
