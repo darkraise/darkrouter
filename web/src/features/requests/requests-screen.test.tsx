@@ -400,6 +400,20 @@ describe("a requests list that fails to load", () => {
     expect(screen.queryByText(/point a client at the proxy/i)).not.toBeInTheDocument()
   })
 
+  it("notes a failed refresh over an empty log", async () => {
+    let calls = 0
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      return calls++ === 0 ? json({ requests: [] }) : json({ error: "log unavailable" }, 500)
+    })
+    const { client } = await renderAt("/requests")
+    await screen.findByText(/point a client at the proxy/i)
+
+    await client.refetchQueries({ queryKey: ["requests"] })
+    expect(await screen.findByText(/last refresh failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/point a client at the proxy/i)).toBeInTheDocument()
+  })
+
   it("offers to try again", async () => {
     let fail = true
     mockByPath(() =>
