@@ -385,6 +385,9 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 		switch action {
 		case actionFinish:
 			rec.Status = "success"
+			if res.ClientGone {
+				rec.Status = "cancelled"
+			}
 			return
 		case actionReturn:
 			if res.Outcome == adapter.OutcomeClientCancelled {
@@ -425,6 +428,9 @@ type attemptResult struct {
 	Err       *ir.Error
 	Path      string
 	Committed bool
+	// ClientGone reports a committed response the client hung up on. The
+	// chain still ends as a success, but the client did not receive it all.
+	ClientGone bool
 	// Issued reports that a request went to the provider. An attempt that
 	// failed before that point — no credential, nothing to render — consumed
 	// no upstream quota and does not count against policy.retry.max_attempts.
@@ -664,7 +670,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	// keeps its success, because it did serve, but the breaker hears the
 	// failure and the request row carries it. A client that hung up gets
 	// neither: the provider did nothing wrong and the response was not an
-	// error.
+	// error. Its row says cancelled instead, as a hang-up before commit does.
 	if cw.Committed() && outcome != adapter.OutcomeSuccess {
 		var cause error
 		if aerr != nil {
@@ -682,7 +688,8 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			}
 		}
 		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
-			Path: path, Committed: true, Issued: true}
+			Path: path, Committed: true, Issued: true,
+			ClientGone: outcome == adapter.OutcomeClientCancelled}
 	}
 	if outcome == adapter.OutcomeRetryableProvider && aerr != nil {
 		// An in-body rate limit steps to the next credential as a 429 would.
