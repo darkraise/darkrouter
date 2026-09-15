@@ -227,6 +227,41 @@ func TestLogRecordsTheGradeBehindTheServedPrice(t *testing.T) {
 	}
 }
 
+// A listing quoted input and output, and the cache-read rate was filled from
+// models.dev. A request whose cost includes cached tokens rests partly on
+// that index, so it must not reach the spend total as measured.
+func TestLogGradesACostByTheCacheRateItUsed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cacheRead int64
+		want      string
+	}{
+		{name: "no cached tokens", want: "measured"},
+		{name: "cached tokens", cacheRead: 1_000_000, want: "indexed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &captureLogger{}
+			e := &Executor{deps: Deps{Log: cap, Catalog: catalogOf(catalog.Model{
+				ProviderID: "groq", ModelID: "m",
+				Pricing: catalog.Pricing{
+					InputMicrosPerMTok: 1_000_000, CacheReadMicrosPerMTok: 100_000,
+					Known: true, Source: catalog.SourceDiscovered,
+					CacheReadSource: catalog.SourceModelsDev,
+				},
+			})}}
+
+			e.log(&store.RequestRecord{
+				FinalProviderID: "groq", FinalModel: "m",
+				TokensIn: 1_000_000, CacheReadTokens: tc.cacheRead,
+			})
+
+			if rec := cap.only(t); rec.PriceGrade != tc.want {
+				t.Fatalf("PriceGrade = %q, want %q", rec.PriceGrade, tc.want)
+			}
+		})
+	}
+}
+
 func TestLogLeavesTheGradeEmptyForAnUnpricedModel(t *testing.T) {
 	// A grade with no cost behind it would mark a total that this request
 	// contributed nothing to.

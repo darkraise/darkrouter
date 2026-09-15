@@ -149,6 +149,14 @@ type Pricing struct {
 	// rate really did arrive from that provider's own endpoint, and the
 	// provider still did not set it.
 	Resold bool
+
+	// CacheReadSource and CacheWriteSource name the directory a cache rate was
+	// filled from when Source's record did not quote it, and are empty when
+	// the rate is Source's own. Held here rather than in a column because the
+	// merge is the only place a rate is filled: a stored cache rate is always
+	// the row's own.
+	CacheReadSource  Source
+	CacheWriteSource Source
 }
 
 // Grade is how far this price may be trusted. It is Source's grade, capped at
