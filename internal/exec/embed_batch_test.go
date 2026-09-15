@@ -140,6 +140,23 @@ func TestAFailedEmbeddingSubBatchFailsTheAttempt(t *testing.T) {
 	}
 }
 
+// The attempt row names the status that failed the attempt. The first
+// sub-batch's 200 describes a response that was never served.
+func TestAFailedEmbeddingSubBatchRecordsItsStatus(t *testing.T) {
+	var calls [][]string
+	up := httptest.NewServer(letterUpstream(&calls, 2))
+	defer up.Close()
+
+	e, rec := batchingExecutor(t, up.URL, 2, nil)
+	if w := embedFive(e); w.Code == http.StatusOK {
+		t.Fatalf("status = 200 after a failed sub-batch: %s", w.Body.String())
+	}
+	got := rec.only(t)
+	if len(got.Attempts) != 1 || got.Attempts[0].StatusCode != http.StatusInternalServerError {
+		t.Errorf("attempts = %+v; want the failing sub-batch's 500", got.Attempts)
+	}
+}
+
 // delayed holds every response back for d before its headers go out.
 func delayed(d time.Duration, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
