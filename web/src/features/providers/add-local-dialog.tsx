@@ -37,10 +37,12 @@ import { addLocalRuntime, testLocalRuntime, type LocalOutcome } from "./local-ad
 const CONTAINER_HOST = "host.docker.internal"
 
 function outcomeMessage(o: LocalOutcome): string {
-  if (!o.ok) return o.error
-  return o.modelCount === undefined
-    ? "The endpoint answered."
-    : `The endpoint answered with ${o.modelCount} models.`
+  const message = !o.ok
+    ? o.error
+    : o.modelCount === undefined
+      ? "The endpoint answered."
+      : `The endpoint answered with ${o.modelCount} models.`
+  return o.leftBehind ? `${message} ${o.leftBehind}` : message
 }
 
 /**

@@ -1,3 +1,4 @@
+import { committedButNotRouted } from "../../lib/api"
 import type { ProbeResult } from "../../lib/api-types"
 
 /** The slice of the api client this needs, so the orchestration can be tested
@@ -22,8 +23,11 @@ export type LocalOutcome =
       /** Set when a write committed but the gateway could not load it, so it
        *  is still routing without this runtime. The server's own words. */
       routingNotUpdated?: string
+      /** Set when removing the row afterwards did not leave things as they
+       *  were, so the operator knows what is still there. */
+      leftBehind?: string
     }
-  | { ok: false; error: string }
+  | { ok: false; error: string; leftBehind?: string }
 
 /** What a create answers once the row is stored. */
 type Created = { routing_updated?: boolean; warning?: string }
@@ -76,13 +80,23 @@ async function probe(api: ProviderApi, id: string): Promise<LocalOutcome> {
     : { ok: false, error: result.error ?? "the provider did not answer" }
 }
 
-async function remove(api: ProviderApi, id: string): Promise<void> {
+/** Removes the row, answering what is left behind if that did not fully
+ *  work. Never throws: a failed rollback must not replace the reason the
+ *  caller is rolling back, which is the fact the operator needs. */
+async function remove(api: ProviderApi, id: string): Promise<string | undefined> {
   try {
     await api.del(`/api/providers/${id}`)
-  } catch {
-    // A failed rollback must not replace the reason the caller is rolling
-    // back, which is the fact the operator needs.
+    return undefined
+  } catch (err) {
+    if (committedButNotRouted(err)) {
+      return `${id} was removed, but the gateway is still routing to it until it reloads: ${messageOf(err)}`
+    }
+    return `${id} is still configured; removing it failed: ${messageOf(err)}`
   }
+}
+
+function withLeftBehind(outcome: LocalOutcome, leftBehind: string | undefined): LocalOutcome {
+  return leftBehind ? { ...outcome, leftBehind } : outcome
 }
 
 /**
@@ -107,8 +121,7 @@ export async function testLocalRuntime(api: ProviderApi, d: LocalDraft): Promise
   } catch (err) {
     outcome = { ok: false, error: messageOf(err) }
   }
-  await remove(api, d.presetId)
-  return outcome
+  return withLeftBehind(outcome, await remove(api, d.presetId))
 }
 
 /**
@@ -135,8 +148,7 @@ export async function addLocalRuntime(api: ProviderApi, d: LocalDraft): Promise<
   // The delete cascades to the credential, so a rolled-back add leaves no
   // orphaned key behind.
   if (!outcome.ok) {
-    await remove(api, d.presetId)
-    return outcome
+    return withLeftBehind(outcome, await remove(api, d.presetId))
   }
   return routingNotUpdated ? { ...outcome, routingNotUpdated } : outcome
 }
