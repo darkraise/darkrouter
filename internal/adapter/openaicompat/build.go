@@ -190,7 +190,7 @@ func renderResponseFormat(rf *ir.ResponseFormat) map[string]any {
 		if name == "" {
 			name = "response"
 		}
-		schema := map[string]any{"name": name, "schema": rf.Schema}
+		schema := map[string]any{"name": name, "schema": xlate.JSONSchema(rf.Schema, rf.SchemaDialect)}
 		if rf.Strict != nil && *rf.Strict {
 			schema["strict"] = true
 		}
@@ -225,7 +225,7 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 		fn := map[string]any{
 			"name":        t.Name,
 			"description": t.Description,
-			"parameters":  t.Schema,
+			"parameters":  xlate.JSONSchema(t.Schema, t.SchemaDialect),
 		}
 		// strict is the one extra an OpenAI function defines. Anything else
 		// came from another dialect, such as Anthropic's cache_control, and
