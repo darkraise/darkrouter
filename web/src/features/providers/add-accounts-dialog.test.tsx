@@ -433,6 +433,42 @@ describe("the wizard opened from an unconfigured preset", () => {
     })
   })
 
+  it("does not create the provider again when retrying keys it could not add", async () => {
+    // The provider list still predates the row this run created, which is
+    // what it looks like until the refetch lands. A second POST would 409 and
+    // abandon the keys the retry was for.
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    const inner = fetchMock.getMockImplementation()!
+    let keyPosts = 0
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys") && keyPosts++ === 0) {
+        return new Response(JSON.stringify({ error: "database is locked" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        preset={preset({ id: "groq", name: "Groq" })}
+      />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() => expect(keyPosts).toBe(2))
+    const creates = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+    )
+    expect(creates).toHaveLength(1)
+  })
+
   it("asks a Bedrock provider it creates for its region, and sends it", async () => {
     const bedrock = preset({ id: "bedrock", name: "Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4" })
     const fetchMock = stub([bedrock])
