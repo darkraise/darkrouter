@@ -435,9 +435,26 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		//
 		// The client's timeout does not reach a lister's own client, and the
 		// sweep waits on every probe, so the bound travels on the context.
-		lctx, cancel := context.WithTimeout(ctx, d.opts.Timeout)
-		defer cancel()
-		return pr.Lister.List(lctx, pr)
+		// It bounds each call rather than the listing: the lister signs once
+		// per call, so every signature restarts the clock, and a listing of
+		// many profile pages is not failed for being long.
+		lctx, cancel := context.WithCancelCause(ctx)
+		defer cancel(nil)
+		expire := func() { cancel(context.DeadlineExceeded) }
+		timer := time.AfterFunc(d.opts.Timeout, expire)
+		defer timer.Stop()
+		lpr := pr
+		if pr.Authorize != nil {
+			lpr.Authorize = func(ctx context.Context, req *http.Request) error {
+				timer.Reset(d.opts.Timeout)
+				return pr.Authorize(ctx, req)
+			}
+		}
+		models, err := pr.Lister.List(lctx, lpr)
+		if err != nil && context.Cause(lctx) == context.DeadlineExceeded && ctx.Err() == nil {
+			return nil, fmt.Errorf("a listing call did not finish within %s: %w", d.opts.Timeout, err)
+		}
+		return models, err
 	}
 	var out []Discovered
 	seen := map[string]bool{}
